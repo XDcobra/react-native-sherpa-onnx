@@ -172,6 +172,24 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       files[@"tokenizer"] = p;
       paths[@"tokenizer"] = p;
     }
+    if (!detect.patchEmbedPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.patchEmbedPath.c_str()];
+      files[@"patch_embed"] = p;
+      paths[@"patch_embed"] = p;
+    }
+    if (!detect.patchEmbedDataPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.patchEmbedDataPath.c_str()];
+      files[@"patch_embed_data"] = p;
+      paths[@"patch_embed_data"] = p;
+    }
+    if (!detect.posEmbedPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.posEmbedPath.c_str()];
+      files[@"pos_embed"] = p;
+      paths[@"pos_embed"] = p;
+    }
     NSMutableArray *sources = [NSMutableArray array];
     for (const auto &src : detect.detectionSources) {
       [sources addObject:[NSString stringWithUTF8String:src.c_str()] ?: @""];
@@ -252,9 +270,10 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
         if (modelType.length == 0 || [modelType isEqualToString:@"auto"] ||
             (!([modelType isEqualToString:@"ppocr"] ||
                [modelType isEqualToString:@"doctr"] ||
-               [modelType isEqualToString:@"doc_vlm"]))) {
+               [modelType isEqualToString:@"doc_vlm"] ||
+               [modelType isEqualToString:@"nemotron_parse"]))) {
           reject(kOcrInvalidArg,
-                 @"custom init requires a concrete modelType (ppocr|doctr|doc_vlm)",
+                 @"custom init requires a concrete modelType (ppocr|doctr|doc_vlm|nemotron_parse)",
                  nil);
           return;
         }
@@ -353,6 +372,9 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
         opts.path_decoder = take(@"decoder");
         opts.path_decoder_data = take(@"decoder_data");
         opts.path_tokenizer = take(@"tokenizer");
+        opts.path_patch_embed = take(@"patch_embed");
+        opts.path_patch_embed_data = take(@"patch_embed_data");
+        opts.path_pos_embed = take(@"pos_embed");
       }
       engine.Load(modelType ? [modelType UTF8String] : "auto",
                   [modelDir UTF8String], opts);
@@ -466,10 +488,12 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
         @"spanCount" : @(static_cast<NSInteger>(spans.size())),
         @"doctags" : [NSString stringWithUTF8String:outcome.result.doctags_utf8.c_str()]
             ?: @"",
+        @"raw" : [NSString stringWithUTF8String:outcome.result.raw_utf8.c_str()]
+            ?: @"",
         @"markdown" :
             [NSString stringWithUTF8String:outcome.result.markdown_utf8.c_str()] ?: @"",
       } mutableCopy];
-      if (outcome.family == "doc_vlm") {
+      if (sherpa_onnx::ocr::IsOcrVlmFamily(outcome.family)) {
         payload[@"stopReason"] =
             [NSString stringWithUTF8String:outcome.result.stop_reason.c_str()] ?: @"";
         payload[@"complete"] = @(outcome.result.complete);

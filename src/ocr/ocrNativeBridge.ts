@@ -18,6 +18,7 @@ const OCR_MODEL_TYPE_ALIASES: Readonly<Record<string, OcrModelType>> = {
   'doc-vlm': 'doc_vlm',
   'granite-docling': 'doc_vlm',
   'docling': 'doc_vlm',
+  'nemotron-parse': 'nemotron_parse',
 };
 
 function canonicalOcrModelType(raw: string): string {
@@ -27,6 +28,7 @@ function canonicalOcrModelType(raw: string): string {
 function appendOcrScalarBridgeFields(options: {
   provider?: string;
   numThreads?: number;
+  maxNewTokens?: number;
   ppocr?: OcrPpocrOptions;
   doctr?: OcrDoctrOptions;
   docVlm?: OcrDocVlmOptions;
@@ -34,13 +36,12 @@ function appendOcrScalarBridgeFields(options: {
   OcrInitBridgeOptions,
   'initMode' | 'modelDir' | 'modelPaths' | 'modelType'
 > {
-  const maxNewTokens = options.docVlm?.maxNewTokens;
+  const maxNewTokens = options.maxNewTokens ?? options.docVlm?.maxNewTokens;
   if (maxNewTokens !== undefined) {
     if (!Number.isInteger(maxNewTokens) || maxNewTokens < 0) {
-      throw Object.assign(
-        new Error('docVlm.maxNewTokens must be an integer >= 0'),
-        { code: OcrErrorCode.INVALID_ARGUMENT }
-      );
+      throw Object.assign(new Error('maxNewTokens must be an integer >= 0'), {
+        code: OcrErrorCode.INVALID_ARGUMENT,
+      });
     }
   }
   const detUnclipRatio =

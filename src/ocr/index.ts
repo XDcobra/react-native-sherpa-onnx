@@ -1,7 +1,8 @@
 /**
  * Offline OCR — public API for react-native-sherpa-onnx/ocr.
  *
- * ImageBuffer → TextBuffer (+ TextSpatialSpans). Backends: ppocr, doctr, doc_vlm.
+ * ImageBuffer → TextBuffer (+ TextSpatialSpans). Backends: ppocr, doctr,
+ * doc_vlm, nemotron_parse.
  */
 
 import {
@@ -247,6 +248,13 @@ export async function detectOcrModel(
     pathFromRaw(pathsRaw.decoder_data) ?? pathFromRaw(filesRaw.decoder_data);
   const tokenizer =
     pathFromRaw(pathsRaw.tokenizer) ?? pathFromRaw(filesRaw.tokenizer);
+  const patchEmbed =
+    pathFromRaw(pathsRaw.patch_embed) ?? pathFromRaw(filesRaw.patch_embed);
+  const patchEmbedData =
+    pathFromRaw(pathsRaw.patch_embed_data) ??
+    pathFromRaw(filesRaw.patch_embed_data);
+  const posEmbed =
+    pathFromRaw(pathsRaw.pos_embed) ?? pathFromRaw(filesRaw.pos_embed);
 
   const paths =
     det ||
@@ -260,7 +268,10 @@ export async function detectOcrModel(
     embedTokensData ||
     decoder ||
     decoderData ||
-    tokenizer
+    tokenizer ||
+    patchEmbed ||
+    patchEmbedData ||
+    posEmbed
       ? {
           ...(det ? { det } : {}),
           ...(rec ? { rec } : {}),
@@ -276,6 +287,9 @@ export async function detectOcrModel(
           ...(decoder ? { decoder } : {}),
           ...(decoderData ? { decoder_data: decoderData } : {}),
           ...(tokenizer ? { tokenizer } : {}),
+          ...(patchEmbed ? { patch_embed: patchEmbed } : {}),
+          ...(patchEmbedData ? { patch_embed_data: patchEmbedData } : {}),
+          ...(posEmbed ? { pos_embed: posEmbed } : {}),
         }
       : undefined;
 
@@ -297,7 +311,12 @@ function readRecognizeResult(
   raw: OcrRecognizeNativeResult
 ): OcrRecognizeResult {
   const family = raw?.family;
-  if (family !== 'ppocr' && family !== 'doctr' && family !== 'doc_vlm') {
+  if (
+    family !== 'ppocr' &&
+    family !== 'doctr' &&
+    family !== 'doc_vlm' &&
+    family !== 'nemotron_parse'
+  ) {
     throw Object.assign(new Error('OCR recognize result missing family'), {
       code: OcrErrorCode.INTERNAL_ERROR,
     });
@@ -307,19 +326,29 @@ function readRecognizeResult(
       code: OcrErrorCode.INTERNAL_ERROR,
     });
   }
-  if (family === 'doc_vlm') {
-    if (typeof raw.doctags !== 'string' || typeof raw.markdown !== 'string') {
+  if (family === 'doc_vlm' || family === 'nemotron_parse') {
+    const markup = typeof raw.raw === 'string' ? raw.raw : undefined;
+    if (family === 'nemotron_parse' && markup === undefined) {
+      throw Object.assign(new Error('OCR recognize result missing extras'), {
+        code: OcrErrorCode.INTERNAL_ERROR,
+      });
+    }
+    const rawText =
+      markup ?? (typeof raw.doctags === 'string' ? raw.doctags : undefined);
+    if (typeof rawText !== 'string' || typeof raw.markdown !== 'string') {
       throw Object.assign(new Error('OCR recognize result missing extras'), {
         code: OcrErrorCode.INTERNAL_ERROR,
       });
     }
     const stopReason = raw.stopReason;
-    if (
-      stopReason !== 'doctag_end' &&
-      stopReason !== 'eos' &&
-      stopReason !== 'max_new_tokens' &&
-      stopReason !== 'invalid_sequence'
-    ) {
+    const graniteStops =
+      stopReason === 'doctag_end' ||
+      stopReason === 'eos' ||
+      stopReason === 'max_new_tokens' ||
+      stopReason === 'invalid_sequence';
+    const nemotronStops =
+      stopReason === 'eos' || stopReason === 'max_new_tokens';
+    if (family === 'doc_vlm' ? !graniteStops : !nemotronStops) {
       throw Object.assign(new Error('OCR recognize result missing extras'), {
         code: OcrErrorCode.INTERNAL_ERROR,
       });
@@ -329,16 +358,27 @@ function readRecognizeResult(
         code: OcrErrorCode.INTERNAL_ERROR,
       });
     }
+    if (family === 'nemotron_parse') {
+      return {
+        family,
+        spanCount: raw.spanCount,
+        raw: rawText,
+        markdown: raw.markdown,
+        complete: raw.complete,
+        stopReason: stopReason as 'eos' | 'max_new_tokens',
+      };
+    }
+    const doctags = typeof raw.doctags === 'string' ? raw.doctags : rawText;
     return {
       family,
       spanCount: raw.spanCount,
-      doctags: raw.doctags,
+      raw: rawText,
+      doctags,
       markdown: raw.markdown,
       complete: raw.complete,
       stopReason: stopReason as OcrDocVlmStopReason,
     };
   }
-  // ppocr / doctr: DocTags are unsupported — omit fields (ignore native "").
   return { family, spanCount: raw.spanCount };
 }
 

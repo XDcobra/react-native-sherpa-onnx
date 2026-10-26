@@ -78,11 +78,12 @@ class SherpaOnnxOcrHelper(
 
       if (core.initMode == "custom") {
         if (modelType == "auto" ||
-          (modelType != "ppocr" && modelType != "doctr" && modelType != "doc_vlm")
+          (modelType != "ppocr" && modelType != "doctr" &&
+            modelType != "doc_vlm" && modelType != "nemotron_parse")
         ) {
           promise.reject(
             OcrErrorCodes.INVALID_ARGUMENT,
-            "custom init requires a concrete modelType (ppocr|doctr|doc_vlm)",
+            "custom init requires a concrete modelType (ppocr|doctr|doc_vlm|nemotron_parse)",
           )
           return
         }
@@ -293,16 +294,21 @@ class SherpaOnnxOcrHelper(
         return
       }
       val doctags = raw["doctags"] as? String
+      val markup = raw["raw"] as? String
       val markdown = raw["markdown"] as? String
       val stopReason = raw["stopReason"] as? String
       val complete = raw["complete"] as? Boolean
-      if (doctags == null || markdown == null ||
-          (family == "doc_vlm" && (stopReason.isNullOrBlank() || complete == null))) {
+      val isVlm = family == "doc_vlm" || family == "nemotron_parse"
+      val rawText = markup ?: if (family == "doc_vlm") doctags else null
+      if (markdown == null ||
+          (isVlm && (rawText == null || stopReason.isNullOrBlank() || complete == null)) ||
+          (family == "doc_vlm" && doctags == null)
+      ) {
         Log.e(
           TAG,
-          "recognize extras missing family=$family doctags=${doctags != null} " +
-            "markdown=${markdown != null} stopReason=${stopReason ?: "null"} " +
-            "complete=$complete",
+          "recognize extras missing family=$family raw=${rawText != null} " +
+            "doctags=${doctags != null} markdown=${markdown != null} " +
+            "stopReason=${stopReason ?: "null"} complete=$complete",
         )
         promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
         return
@@ -326,14 +332,15 @@ class SherpaOnnxOcrHelper(
 
       Log.i(
         TAG,
-        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length} doctagsLen=${doctags.length} markdownLen=${markdown.length}",
+        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length} rawLen=${(rawText ?: "").length} markdownLen=${markdown.length}",
       )
       val result = Arguments.createMap()
       result.putString("family", family)
       result.putInt("spanCount", spans.size)
-      result.putString("doctags", doctags)
+      result.putString("doctags", doctags ?: "")
+      result.putString("raw", rawText ?: "")
       result.putString("markdown", markdown)
-      if (family == "doc_vlm" && stopReason != null && complete != null) {
+      if (isVlm && stopReason != null && complete != null) {
         result.putString("stopReason", stopReason)
         result.putBoolean("complete", complete)
       }

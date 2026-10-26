@@ -511,6 +511,7 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
   OcrResult result;
   result.doctags_utf8 = tokenizer_.Decode(generated_ids);
   LstripAsciiWs(result.doctags_utf8);
+  result.raw_utf8 = result.doctags_utf8;
   DocTagsParse parsed = ParseDocTags(result.doctags_utf8, frame.width, frame.height, frame.frame_index);
   result.text_utf8 = std::move(parsed.text_utf8);
   result.markdown_utf8 = std::move(parsed.markdown_utf8);

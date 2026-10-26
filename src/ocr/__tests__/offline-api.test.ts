@@ -342,20 +342,24 @@ describe('ocr offline API', () => {
     expect(isOcrModelType('ppocr')).toBe(true);
     expect(isOcrModelType('doctr')).toBe(true);
     expect(isOcrModelType('doc_vlm')).toBe(true);
+    expect(isOcrModelType('nemotron_parse')).toBe(true);
     expect(isOcrModelType('auto')).toBe(true);
     expect(isOcrModelType('tessaract')).toBe(false);
     expect(isOcrModelType('docvlm')).toBe(false);
     expect(isOcrModelType('doc-vlm')).toBe(false);
     expect(isOcrModelType('granite-docling')).toBe(false);
     expect(isOcrModelType('docling')).toBe(false);
+    expect(isOcrModelType('nemotron-parse')).toBe(false);
+    expect(isOcrModelType('nemotron')).toBe(false);
   });
 
   it('OCR_MODEL_TYPES contains all expected entries', () => {
     expect(OCR_MODEL_TYPES).toContain('ppocr');
     expect(OCR_MODEL_TYPES).toContain('doctr');
     expect(OCR_MODEL_TYPES).toContain('doc_vlm');
+    expect(OCR_MODEL_TYPES).toContain('nemotron_parse');
     expect(OCR_MODEL_TYPES).toContain('auto');
-    expect(OCR_MODEL_TYPES).toHaveLength(4);
+    expect(OCR_MODEL_TYPES).toHaveLength(5);
     expect(OCR_MODEL_TYPES[OCR_MODEL_TYPES.length - 1]).toBe('auto');
   });
 
@@ -463,6 +467,7 @@ describe('ocr offline API', () => {
       family: 'doc_vlm',
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
+      raw: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
       complete: true,
       stopReason: 'doctag_end',
@@ -471,7 +476,7 @@ describe('ocr offline API', () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
-      docVlm: { maxNewTokens: 512 },
+      maxNewTokens: 512,
     });
 
     expect(mockNative.initializeOcr).toHaveBeenCalledWith(
@@ -501,6 +506,7 @@ describe('ocr offline API', () => {
     expect(page).toEqual({
       family: 'doc_vlm',
       spanCount: 3,
+      raw: '<doctag><text>Hi</text></doctag>',
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
       complete: true,
@@ -549,7 +555,7 @@ describe('ocr offline API', () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
-      docVlm: { maxNewTokens: 512 },
+      maxNewTokens: 512,
     });
     expect(mockNative.initializeOcr).toHaveBeenCalledWith(
       expect.stringMatching(/^ocr_/),
@@ -561,7 +567,7 @@ describe('ocr offline API', () => {
     await ocr.destroy();
   });
 
-  it('createOCR doc_vlm omits maxNewTokens when docVlm is absent', async () => {
+  it('createOCR doc_vlm omits maxNewTokens when maxNewTokens is absent', async () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
@@ -577,7 +583,7 @@ describe('ocr offline API', () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
       modelType: 'doc_vlm',
-      docVlm: { maxNewTokens: 0 },
+      maxNewTokens: 0,
     });
     expect(mockNative.initializeOcr).toHaveBeenCalledWith(
       expect.stringMatching(/^ocr_/),
@@ -608,7 +614,7 @@ describe('ocr offline API', () => {
         createOCR({
           modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
           modelType: 'doc_vlm',
-          docVlm: { maxNewTokens },
+          maxNewTokens,
         })
       ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
       expect(mockNative.initializeOcr).not.toHaveBeenCalled();
@@ -678,11 +684,87 @@ describe('ocr offline API', () => {
     expect(page).toEqual({
       family: 'doc_vlm',
       spanCount: 3,
+      raw: '<doctag><text>Hi</text></doctag>',
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
       complete: true,
       stopReason: 'doctag_end',
     });
+    await ocr.destroy();
+  });
+
+  it('createOCR rewrites nemotron-parse alias before native init', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/nemotron-3.5-parse-int8' },
+      modelType: 'nemotron-parse',
+    } as unknown as OcrInitializeOptions);
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({ modelType: 'nemotron_parse' })
+    );
+    await ocr.destroy();
+  });
+
+  it('createOCR nemotron_parse + recognize returns raw extras', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_nemotron_rt',
+      modelType: 'nemotron_parse',
+    });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'nemotron_parse',
+      spanCount: 1,
+      raw: '<x_0.1><y_0.2>Hello<x_0.8><y_0.7><class_Text>',
+      markdown: 'Hello',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/nemotron-3.5-parse-int8' },
+      modelType: 'nemotron_parse',
+      maxNewTokens: 64,
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelType: 'nemotron_parse',
+        maxNewTokens: 64,
+      })
+    );
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    );
+    expect(page).toEqual({
+      family: 'nemotron_parse',
+      spanCount: 1,
+      raw: '<x_0.1><y_0.2>Hello<x_0.8><y_0.7><class_Text>',
+      markdown: 'Hello',
+      complete: true,
+      stopReason: 'eos',
+    });
+    expect(page).not.toHaveProperty('doctags');
+    await ocr.destroy();
+  });
+
+  it('recognize rejects nemotron_parse when raw is missing', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'nemotron_parse',
+      spanCount: 0,
+      doctags: '<x_0><y_0>Hi<x_1><y_1><class_Text>',
+      markdown: 'Hi',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/nemotron-3.5-parse-int8' },
+      modelType: 'nemotron_parse',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
     await ocr.destroy();
   });
 

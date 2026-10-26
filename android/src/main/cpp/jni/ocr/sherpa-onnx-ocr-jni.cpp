@@ -137,6 +137,9 @@ void ApplyPathOverrides(JNIEnv* env, jobject pathOverrides,
   opts.path_decoder = readKey("decoder");
   opts.path_decoder_data = readKey("decoder_data");
   opts.path_tokenizer = readKey("tokenizer");
+  opts.path_patch_embed = readKey("patch_embed");
+  opts.path_patch_embed_data = readKey("patch_embed_data");
+  opts.path_pos_embed = readKey("pos_embed");
   env->DeleteLocalRef(mapClass);
 }
 
@@ -262,6 +265,16 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     if (!detect.tokenizerPath.empty()) {
       PutString(env, pathsMap, pathsPut, "tokenizer", detect.tokenizerPath);
     }
+    if (!detect.patchEmbedPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "patch_embed", detect.patchEmbedPath);
+    }
+    if (!detect.patchEmbedDataPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "patch_embed_data",
+                detect.patchEmbedDataPath);
+    }
+    if (!detect.posEmbedPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "pos_embed", detect.posEmbedPath);
+    }
     jstring key = env->NewStringUTF("paths");
     if (key) {
       env->CallObjectMethod(map, put, key, pathsMap);
@@ -311,6 +324,16 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     }
     if (!detect.tokenizerPath.empty()) {
       PutString(env, filesMap, filesPut, "tokenizer", detect.tokenizerPath);
+    }
+    if (!detect.patchEmbedPath.empty()) {
+      PutString(env, filesMap, filesPut, "patch_embed", detect.patchEmbedPath);
+    }
+    if (!detect.patchEmbedDataPath.empty()) {
+      PutString(env, filesMap, filesPut, "patch_embed_data",
+                detect.patchEmbedDataPath);
+    }
+    if (!detect.posEmbedPath.empty()) {
+      PutString(env, filesMap, filesPut, "pos_embed", detect.posEmbedPath);
     }
     jstring key = env->NewStringUTF("files");
     if (key) {
@@ -475,8 +498,9 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   PutString(env, map, put, "family", outcome.family);
   PutString(env, map, put, "text", outcome.result.text_utf8);
   PutString(env, map, put, "doctags", outcome.result.doctags_utf8);
+  PutString(env, map, put, "raw", outcome.result.raw_utf8);
   PutString(env, map, put, "markdown", outcome.result.markdown_utf8);
-  if (outcome.family == "doc_vlm") {
+  if (sherpa_onnx::ocr::IsOcrVlmFamily(outcome.family)) {
     PutString(env, map, put, "stopReason", outcome.result.stop_reason);
     PutBool(env, map, put, "complete", outcome.result.complete ? JNI_TRUE : JNI_FALSE);
   }

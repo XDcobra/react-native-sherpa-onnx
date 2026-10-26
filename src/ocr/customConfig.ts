@@ -20,7 +20,10 @@ export type OcrCustomPathKey =
   | 'embed_tokens_data'
   | 'decoder'
   | 'decoder_data'
-  | 'tokenizer';
+  | 'tokenizer'
+  | 'patch_embed'
+  | 'patch_embed_data'
+  | 'pos_embed';
 
 export type OcrPpocrCustomConfig = {
   det: FileSource;
@@ -48,10 +51,17 @@ export type OcrDocVlmCustomConfig = {
   manifest: FileSource;
 };
 
+export type OcrNemotronParseCustomConfig = OcrDocVlmCustomConfig & {
+  patch_embed: FileSource;
+  pos_embed: FileSource;
+  patch_embed_data?: FileSource;
+};
+
 export type OcrCustomConfigByModelType = {
   ppocr: OcrPpocrCustomConfig;
   doctr: OcrDoctrCustomConfig;
   doc_vlm: OcrDocVlmCustomConfig;
+  nemotron_parse: OcrNemotronParseCustomConfig;
 };
 
 export type OcrCustomConfig = OcrCustomConfigByModelType[OcrConcreteModelType];

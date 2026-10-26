@@ -310,7 +310,7 @@ export type OcrInitBridgeOptions = {
   detBoxThresh?: number;
   detBoxScoreThresh?: number;
   detUnclipRatio?: number;
-  /** doc_vlm generation cap. Omit → native 0 → backend default 8192. */
+  /** VLM generation cap (`doc_vlm` / `nemotron_parse`). Omit → native 0 → 8192. */
   maxNewTokens?: number;
   quantization?: string;
 };
@@ -318,7 +318,8 @@ export type OcrInitBridgeOptions = {
 export type OcrRecognizeNativeResult = {
   family: string;
   spanCount: number;
-  doctags: string;
+  doctags?: string;
+  raw?: string;
   markdown: string;
   stopReason?: string;
   complete?: boolean;
@@ -356,6 +357,9 @@ export type OcrDetectNativeResult = {
     decoder?: string;
     decoder_data?: string;
     tokenizer?: string;
+    patch_embed?: string;
+    patch_embed_data?: string;
+    pos_embed?: string;
   };
   /** Legacy path map (string values). */
   files?: {
@@ -372,6 +376,9 @@ export type OcrDetectNativeResult = {
     decoder?: string;
     decoder_data?: string;
     tokenizer?: string;
+    patch_embed?: string;
+    patch_embed_data?: string;
+    pos_embed?: string;
   };
   detectionSources?: string[];
   /** Curated / heuristic language rows from native detect. */

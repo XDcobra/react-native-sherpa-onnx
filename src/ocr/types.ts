@@ -9,17 +9,23 @@ import type { OcrDetectModelResult } from '../types/modelDetect';
 import type { OcrCustomConfig } from './customConfig';
 
 /** Public OCR model types. `auto` resolves via layout detect. */
-export type OcrModelType = 'auto' | 'ppocr' | 'doctr' | 'doc_vlm';
+export type OcrModelType =
+  | 'auto'
+  | 'ppocr'
+  | 'doctr'
+  | 'doc_vlm'
+  | 'nemotron_parse';
 export type OcrConcreteModelType = Exclude<OcrModelType, 'auto'>;
 
 /** OCR backend family. Matches `OcrBackend::Family()` after a successful load. */
-export type OcrFamily = 'ppocr' | 'doctr' | 'doc_vlm';
+export type OcrFamily = 'ppocr' | 'doctr' | 'doc_vlm' | 'nemotron_parse';
 
 /** Runtime model-type array + guard (parallel TTS pattern). */
 export const OCR_MODEL_TYPES: readonly OcrModelType[] = [
   'ppocr',
   'doctr',
   'doc_vlm',
+  'nemotron_parse',
   'auto',
 ] as const;
 
@@ -67,18 +73,21 @@ export type OcrDoctrOptions = {
   detUnclipRatio?: number;
 };
 
-/** `doc_vlm` generation options (ignored by ppocr / doctr). */
-export type OcrDocVlmOptions = {
-  /**
-   * Cap on newly generated token ids. Omit or `0` → backend default (8192).
-   * Non-integers and negatives reject with `OCR_INVALID_ARGUMENT` at `createOCR`.
-   */
+/**
+ * Shared VLM generation cap (`doc_vlm` / `nemotron_parse`). Ignored by
+ * ppocr / doctr. Omit or `0` → backend default (8192).
+ */
+export type OcrVlmOptions = {
   maxNewTokens?: number;
 };
+
+/** @deprecated Use {@link OcrVlmOptions} / top-level `maxNewTokens`. */
+export type OcrDocVlmOptions = OcrVlmOptions;
 
 type OcrInitShared = {
   provider?: string;
   numThreads?: number;
+  maxNewTokens?: number;
 };
 
 type OcrInitFolderShared = OcrInitShared & {
@@ -91,7 +100,6 @@ export type OcrInitializeOptionsAuto = OcrInitFolderShared & {
   modelType?: 'auto';
   ppocr?: OcrPpocrOptions;
   doctr?: OcrDoctrOptions;
-  docVlm?: OcrDocVlmOptions;
 };
 
 export type OcrInitializeOptionsPpocr = OcrInitFolderShared & {
@@ -99,7 +107,6 @@ export type OcrInitializeOptionsPpocr = OcrInitFolderShared & {
   modelType: 'ppocr';
   ppocr?: OcrPpocrOptions;
   doctr?: never;
-  docVlm?: never;
 };
 
 export type OcrInitializeOptionsDoctr = OcrInitFolderShared & {
@@ -107,7 +114,6 @@ export type OcrInitializeOptionsDoctr = OcrInitFolderShared & {
   modelType: 'doctr';
   ppocr?: never;
   doctr?: OcrDoctrOptions;
-  docVlm?: never;
 };
 
 export type OcrInitializeOptionsDocVlm = OcrInitFolderShared & {
@@ -115,7 +121,13 @@ export type OcrInitializeOptionsDocVlm = OcrInitFolderShared & {
   modelType: 'doc_vlm';
   ppocr?: never;
   doctr?: never;
-  docVlm?: OcrDocVlmOptions;
+};
+
+export type OcrInitializeOptionsNemotronParse = OcrInitFolderShared & {
+  initMode?: 'auto';
+  modelType: 'nemotron_parse';
+  ppocr?: never;
+  doctr?: never;
 };
 
 export type OcrCustomInitializeOptions = OcrInitShared & {
@@ -126,8 +138,6 @@ export type OcrCustomInitializeOptions = OcrInitShared & {
   ppocr?: OcrPpocrOptions;
   /** Applied when `modelType` is `doctr`. */
   doctr?: OcrDoctrOptions;
-  /** Applied when `modelType` is `doc_vlm`. */
-  docVlm?: OcrDocVlmOptions;
 };
 
 export type OcrInitializeOptions =
@@ -135,6 +145,7 @@ export type OcrInitializeOptions =
   | OcrInitializeOptionsPpocr
   | OcrInitializeOptionsDoctr
   | OcrInitializeOptionsDocVlm
+  | OcrInitializeOptionsNemotronParse
   | OcrCustomInitializeOptions;
 
 export type OcrRecognizeOptions = {
@@ -147,35 +158,43 @@ export type OcrRecognizeOptions = {
   signal?: AbortSignal;
 };
 
-/** Why `doc_vlm` greedy decode stopped. */
-export type OcrDocVlmStopReason =
+/** Why a VLM greedy decode stopped. */
+export type OcrVlmStopReason =
   | 'doctag_end'
   | 'eos'
   | 'max_new_tokens'
   | 'invalid_sequence';
 
+/** @deprecated Use {@link OcrVlmStopReason}. */
+export type OcrDocVlmStopReason = OcrVlmStopReason;
+
+type OcrVlmRecognizeShared = {
+  spanCount: number;
+  /** Family markup stream (DocTags or Nemotron xy/class tags). */
+  raw: string;
+  markdown: string;
+  complete: boolean;
+};
+
 /**
  * Result of `OcrEngine.recognize`. Plain text and spans live on `textOut`.
- * Discriminated on `family`: `doctags` / `markdown` / `complete` /
- * `stopReason` only for `doc_vlm`.
+ * Discriminated on `family`. VLM families share `raw` / `markdown` /
+ * `complete` / `stopReason`. `doc_vlm` also keeps `doctags` (same as `raw`).
  */
 export type OcrRecognizeResult =
   | {
       family: 'ppocr' | 'doctr';
-      /** Spans written to `textOut` after the granularity filter. */
       spanCount: number;
     }
-  | {
+  | (OcrVlmRecognizeShared & {
       family: 'doc_vlm';
-      spanCount: number;
-      /** Raw DocTags (`""` = empty generation). */
       doctags: string;
-      /** Lossy markdown from the DocTags walk (`""` when plain text is empty). */
-      markdown: string;
-      /** `true` only after a generated `</doctag>`. */
-      complete: boolean;
-      stopReason: OcrDocVlmStopReason;
-    };
+      stopReason: OcrVlmStopReason;
+    })
+  | (OcrVlmRecognizeShared & {
+      family: 'nemotron_parse';
+      stopReason: 'eos' | 'max_new_tokens';
+    });
 
 /** @deprecated Use {@link OcrDetectModelResult} from `../types/modelDetect`. */
 export type OcrDetectResult = OcrDetectModelResult;

@@ -79,6 +79,97 @@ describe('OCR customConfig / bridge', () => {
     );
   });
 
+  it('resolveOcrCustomConfigPaths forwards nemotron_parse', async () => {
+    mockResolvePaths.mockResolvedValue({
+      vision_encoder: '/m/vision_encoder.onnx',
+      vision_encoder_data: '/m/vision_encoder.onnx_data',
+      embed_tokens: '/m/embed_tokens.onnx',
+      embed_tokens_data: '/m/embed_tokens.onnx_data',
+      decoder: '/m/decoder_model_merged.onnx',
+      decoder_data: '/m/decoder_model_merged.onnx_data',
+      tokenizer: '/m/tokenizer.json',
+      manifest: '/m/ocr_manifest.json',
+      patch_embed: '/m/patch_embed.onnx',
+      pos_embed: '/m/pos_embed.npy',
+    });
+    await resolveOcrCustomConfigPaths('nemotron_parse', {
+      vision_encoder: { kind: 'fs', path: '/m/vision_encoder.onnx' },
+      vision_encoder_data: { kind: 'fs', path: '/m/vision_encoder.onnx_data' },
+      embed_tokens: { kind: 'fs', path: '/m/embed_tokens.onnx' },
+      embed_tokens_data: { kind: 'fs', path: '/m/embed_tokens.onnx_data' },
+      decoder: { kind: 'fs', path: '/m/decoder_model_merged.onnx' },
+      decoder_data: { kind: 'fs', path: '/m/decoder_model_merged.onnx_data' },
+      tokenizer: { kind: 'fs', path: '/m/tokenizer.json' },
+      manifest: { kind: 'fs', path: '/m/ocr_manifest.json' },
+      patch_embed: { kind: 'fs', path: '/m/patch_embed.onnx' },
+      pos_embed: { kind: 'fs', path: '/m/pos_embed.npy' },
+    });
+    expect(mockResolvePaths).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: 'ocr',
+        modelType: 'nemotron_parse',
+      })
+    );
+  });
+
+  it('buildOcrInitBridgeOptions custom uses nemotron_parse paths + maxNewTokens', async () => {
+    mockResolvePaths.mockResolvedValue({
+      vision_encoder: '/m/vision_encoder.onnx',
+      vision_encoder_data: '/m/vision_encoder.onnx_data',
+      embed_tokens: '/m/embed_tokens.onnx',
+      embed_tokens_data: '/m/embed_tokens.onnx_data',
+      decoder: '/m/decoder_model_merged.onnx',
+      decoder_data: '/m/decoder_model_merged.onnx_data',
+      tokenizer: '/m/tokenizer.json',
+      manifest: '/m/ocr_manifest.json',
+      patch_embed: '/m/patch_embed.onnx',
+      patch_embed_data: '/m/patch_embed.onnx_data',
+      pos_embed: '/m/pos_embed.npy',
+    });
+    const bridge = await buildOcrInitBridgeOptions({
+      initMode: 'custom',
+      modelType: 'nemotron_parse',
+      maxNewTokens: 512,
+      customConfig: {
+        vision_encoder: { kind: 'fs', path: '/m/vision_encoder.onnx' },
+        vision_encoder_data: {
+          kind: 'fs',
+          path: '/m/vision_encoder.onnx_data',
+        },
+        embed_tokens: { kind: 'fs', path: '/m/embed_tokens.onnx' },
+        embed_tokens_data: { kind: 'fs', path: '/m/embed_tokens.onnx_data' },
+        decoder: { kind: 'fs', path: '/m/decoder_model_merged.onnx' },
+        decoder_data: { kind: 'fs', path: '/m/decoder_model_merged.onnx_data' },
+        tokenizer: { kind: 'fs', path: '/m/tokenizer.json' },
+        manifest: { kind: 'fs', path: '/m/ocr_manifest.json' },
+        patch_embed: { kind: 'fs', path: '/m/patch_embed.onnx' },
+        patch_embed_data: { kind: 'fs', path: '/m/patch_embed.onnx_data' },
+        pos_embed: { kind: 'fs', path: '/m/pos_embed.npy' },
+      },
+    });
+    expect(bridge).toEqual(
+      expect.objectContaining({
+        initMode: 'custom',
+        modelType: 'nemotron_parse',
+        maxNewTokens: 512,
+        modelPaths: {
+          vision_encoder: '/m/vision_encoder.onnx',
+          vision_encoder_data: '/m/vision_encoder.onnx_data',
+          embed_tokens: '/m/embed_tokens.onnx',
+          embed_tokens_data: '/m/embed_tokens.onnx_data',
+          decoder: '/m/decoder_model_merged.onnx',
+          decoder_data: '/m/decoder_model_merged.onnx_data',
+          tokenizer: '/m/tokenizer.json',
+          manifest: '/m/ocr_manifest.json',
+          patch_embed: '/m/patch_embed.onnx',
+          patch_embed_data: '/m/patch_embed.onnx_data',
+          pos_embed: '/m/pos_embed.npy',
+        },
+      })
+    );
+    expect(bridge.modelDir).toBeUndefined();
+  });
+
   it('buildOcrInitBridgeOptions custom uses modelPaths', async () => {
     const bridge = await buildOcrInitBridgeOptions({
       initMode: 'custom',
