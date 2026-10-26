@@ -334,6 +334,8 @@ TEST(DocTags, TitleMarkdown) {
       "<doctag><title><loc_0><loc_0><loc_10><loc_10>Hi</title></doctag>", 1000, 240, 0);
   EXPECT_EQ(parsed.markdown_utf8, "# Hi");
   EXPECT_EQ(parsed.text_utf8, "Hi");
+  ASSERT_EQ(parsed.spans.size(), 1u);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
 }
 
 TEST(DocTags, FallbackStripsTags) {
@@ -357,13 +359,53 @@ TEST(DocTags, OtslClosedWithWrapperLocs) {
       1000, 240, 1);
   EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
   ASSERT_EQ(parsed.spans.size(), 1u);
-  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kBlock);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
   EXPECT_EQ(parsed.spans[0].frame_index, 1);
   EXPECT_EQ(parsed.spans[0].utf16_start, 0);
   EXPECT_EQ(parsed.spans[0].utf16_end, 11);
   EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[0], 0.f);
   EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[2], 500.f);
   EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[5], 120.f);
+}
+
+TEST(DocTags, OtslCellLocsEmitLineSpans) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<otsl><fcel><loc_0><loc_0><loc_100><loc_50>A"
+      "<fcel><loc_100><loc_0><loc_200><loc_50>B<nl>"
+      "<fcel><loc_0><loc_50><loc_100><loc_100>C"
+      "<fcel><loc_100><loc_50><loc_200><loc_100>D</otsl>",
+      1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
+  ASSERT_EQ(parsed.spans.size(), 4u);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
+  EXPECT_EQ(parsed.spans[0].utf16_start, 0);
+  EXPECT_EQ(parsed.spans[0].utf16_end, 1);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[0], 0.f);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[2], 200.f);
+  EXPECT_EQ(parsed.spans[1].utf16_start, 4);
+  EXPECT_EQ(parsed.spans[1].utf16_end, 5);
+  EXPECT_FLOAT_EQ(parsed.spans[1].quad.xy[0], 200.f);
+  EXPECT_FLOAT_EQ(parsed.spans[1].quad.xy[2], 400.f);
+  EXPECT_EQ(parsed.spans[2].utf16_start, 6);
+  EXPECT_EQ(parsed.spans[2].utf16_end, 7);
+  EXPECT_EQ(parsed.spans[3].utf16_start, 10);
+  EXPECT_EQ(parsed.spans[3].utf16_end, 11);
+  EXPECT_EQ(parsed.spans[3].level, OcrSpanLevel::kLine);
+}
+
+TEST(DocTags, OtslMixedCellLocsSkipCellsWithoutLoc) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<otsl><loc_0><loc_0><loc_250><loc_250>"
+      "<fcel><loc_0><loc_0><loc_100><loc_50>A<fcel>B<nl>"
+      "<fcel>C<fcel><loc_100><loc_50><loc_200><loc_100>D</otsl>",
+      1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
+  ASSERT_EQ(parsed.spans.size(), 2u);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
+  EXPECT_EQ(parsed.spans[0].utf16_start, 0);
+  EXPECT_EQ(parsed.spans[0].utf16_end, 1);
+  EXPECT_EQ(parsed.spans[1].utf16_start, 10);
+  EXPECT_EQ(parsed.spans[1].utf16_end, 11);
 }
 
 TEST(DocTags, OtslEmptyCellKeepsColumn) {
@@ -436,6 +478,21 @@ TEST(DocTagsPrefix, AcceptsUnclosedOtslPrefix) {
   DocTagsPrefix prefix;
   EXPECT_TRUE(prefix.Feed("<doctag><otsl><fcel>A<fcel>B<nl>"));
   EXPECT_FALSE(prefix.closed_doctag());
+}
+
+TEST(DocTagsPrefix, AcceptsUnclosedOtslCloseThenText) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed(
+      "<doctag><table><otsl><fcel>A<fcel>B<nl><fcel>C<fcel>D</otsl></table>"
+      "<text>After</text></doctag>"));
+  EXPECT_TRUE(prefix.closed_doctag());
+}
+
+TEST(DocTagsPrefix, AcceptsTableCloseWithoutOtslClose) {
+  DocTagsPrefix prefix;
+  EXPECT_TRUE(prefix.Feed(
+      "<doctag><table><otsl><fcel>A<fcel>B</table><text>After</text></doctag>"));
+  EXPECT_TRUE(prefix.closed_doctag());
 }
 
 TEST(OcrResult, ExtrasDefaultEmpty) {

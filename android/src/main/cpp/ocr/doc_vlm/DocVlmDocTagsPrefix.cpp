@@ -58,6 +58,13 @@ bool IsPromptOnlyInner(std::string_view inner) {
          inner == "|end_of_role|" || IsRowColName(inner);
 }
 
+/** OTSL cells are void in DocTags — they are not closed. */
+bool IsOtslVoidTag(const std::string& name) {
+  return name == "fcel" || name == "ched" || name == "rhed" || name == "ecel" ||
+         name == "lcel" || name == "ucel" || name == "xcel" || name == "nl" ||
+         name == "srow";
+}
+
 }  // namespace
 
 bool DocTagsPrefix::Feed(std::string_view piece) {
@@ -121,16 +128,28 @@ bool DocTagsPrefix::ApplyOpen(const std::string& name) {
     stack_.push_back(name);
     return true;
   }
+  if (IsOtslVoidTag(name)) return true;
   stack_.push_back(name);
   return true;
 }
 
 bool DocTagsPrefix::ApplyClose(const std::string& name) {
   if (closed_ || !seen_doctag_ || stack_.empty()) return false;
+  if (IsOtslVoidTag(name)) return true;
   if (name == "doctag") {
     closed_ = true;
     stack_.clear();
     return true;
+  }
+  if (name == "otsl" || name == "table") {
+    for (size_t i = stack_.size(); i > 0; --i) {
+      if (stack_[i - 1] == "doctag") return false;
+      if (stack_[i - 1] == name) {
+        stack_.resize(i - 1);
+        return true;
+      }
+    }
+    return false;
   }
   if (stack_.back() != name) return false;
   stack_.pop_back();

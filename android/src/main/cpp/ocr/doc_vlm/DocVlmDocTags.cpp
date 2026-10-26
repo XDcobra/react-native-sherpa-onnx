@@ -240,12 +240,7 @@ OcrQuad MakeQuad(bool has_loc, const int locs[4], int frame_w, int frame_h) {
   return quad;
 }
 
-OcrSpanLevel LevelFor(const std::string& tag) {
-  if (tag == "title" || tag.rfind("section_header_level_", 0) == 0) {
-    return OcrSpanLevel::kBlock;
-  }
-  return OcrSpanLevel::kLine;
-}
+OcrSpanLevel LevelFor(const std::string&) { return OcrSpanLevel::kLine; }
 
 std::string MarkdownFor(const std::string& tag, const std::string& text) {
   if (tag == "picture") return "[picture]";
@@ -276,15 +271,6 @@ std::string EscapeMdCell(const std::string& cell) {
   return out;
 }
 
-std::string JoinRow(const std::vector<std::string>& row, const char* sep) {
-  std::string out;
-  for (size_t i = 0; i < row.size(); ++i) {
-    if (i > 0) out += sep;
-    out += row[i];
-  }
-  return out;
-}
-
 std::string PadJoinMdRow(const std::vector<std::string>& row, size_t cols) {
   std::string out = "|";
   for (size_t i = 0; i < cols; ++i) {
@@ -295,15 +281,41 @@ std::string PadJoinMdRow(const std::vector<std::string>& row, size_t cols) {
   return out;
 }
 
-struct Item {
+struct TableCell {
   std::string text;
-  bool in_text = false;
-  std::string markdown;
-  bool has_span = false;
+  bool has_loc = false;
+  int locs[4] = {};
+};
+
+struct ItemSpan {
+  int utf16_rel_start = 0;
+  int utf16_rel_end = 0;
   bool has_loc = false;
   int locs[4] = {};
   OcrSpanLevel level = OcrSpanLevel::kLine;
 };
+
+struct Item {
+  std::string text;
+  bool in_text = false;
+  std::string markdown;
+  std::vector<ItemSpan> spans;
+};
+
+void CopyLocs(int dst[4], const int src[4]) {
+  for (int k = 0; k < 4; ++k) dst[k] = src[k];
+}
+
+ItemSpan MakeItemSpan(int utf16_rel_start, int utf16_rel_end, bool has_loc,
+                      const int locs[4], OcrSpanLevel level) {
+  ItemSpan span;
+  span.utf16_rel_start = utf16_rel_start;
+  span.utf16_rel_end = utf16_rel_end;
+  span.has_loc = has_loc;
+  CopyLocs(span.locs, locs);
+  span.level = level;
+  return span;
+}
 
 void SkipMatchingClose(const std::vector<Tok>& toks, size_t& i, const std::string& name) {
   if (i < toks.size() && toks[i].kind == TokKind::Close && toks[i].name == name) {
@@ -330,10 +342,8 @@ void ParseTextLike(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& i
   item.text = text;
   item.in_text = true;
   item.markdown = MarkdownFor(tag, text);
-  item.has_span = true;
-  item.has_loc = has_loc;
-  for (int k = 0; k < 4; ++k) item.locs[k] = locs[k];
-  item.level = LevelFor(tag);
+  item.spans.push_back(MakeItemSpan(0, Utf8ToUtf16Length(text), has_loc, locs,
+                                   LevelFor(tag)));
   items.push_back(std::move(item));
 }
 
@@ -351,47 +361,69 @@ void ParseMedia(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& item
   SkipMatchingClose(toks, i, tag);
   Item item;
   item.markdown = MarkdownFor(tag, "");
-  item.has_span = has_loc;
-  item.has_loc = has_loc;
-  for (int k = 0; k < 4; ++k) item.locs[k] = locs[k];
-  item.level = OcrSpanLevel::kBlock;
+  if (has_loc) {
+    item.spans.push_back(
+        MakeItemSpan(0, 0, true, locs, OcrSpanLevel::kBlock));
+  }
   items.push_back(std::move(item));
 }
 
-void EmitTable(const std::vector<std::vector<std::string>>& rows, bool has_loc,
-               const int locs[4], std::vector<Item>& items) {
+void EmitTable(const std::vector<std::vector<TableCell>>& rows,
+               bool wrapper_has_loc, const int wrapper_locs[4],
+               std::vector<Item>& items) {
   bool any = false;
   size_t cols = 0;
   for (const auto& row : rows) {
     cols = std::max(cols, row.size());
     for (const auto& cell : row) {
-      if (!cell.empty()) any = true;
+      if (!cell.text.empty()) any = true;
     }
   }
   if (!any || cols == 0) return;
 
+  auto row_texts = [](const std::vector<TableCell>& row) {
+    std::vector<std::string> texts;
+    texts.reserve(row.size());
+    for (const auto& cell : row) texts.push_back(cell.text);
+    return texts;
+  };
+
   std::string text;
+  std::vector<ItemSpan> cell_spans;
+  for (size_t r = 0; r < rows.size(); ++r) {
+    if (r > 0) text += "\n";
+    for (size_t c = 0; c < rows[r].size(); ++c) {
+      if (c > 0) text += " | ";
+      const int start = Utf8ToUtf16Length(text);
+      text += rows[r][c].text;
+      const int end = Utf8ToUtf16Length(text);
+      if (rows[r][c].has_loc) {
+        cell_spans.push_back(MakeItemSpan(start, end, true, rows[r][c].locs,
+                                         OcrSpanLevel::kLine));
+      }
+    }
+  }
+
   std::string markdown;
-  const auto& header = rows[0];
+  const auto header = row_texts(rows[0]);
   markdown += PadJoinMdRow(header, cols);
   markdown += "\n|";
   for (size_t c = 0; c < cols; ++c) markdown += " --- |";
-  text += JoinRow(header, " | ");
   for (size_t r = 1; r < rows.size(); ++r) {
-    text += "\n";
-    text += JoinRow(rows[r], " | ");
     markdown += "\n";
-    markdown += PadJoinMdRow(rows[r], cols);
+    markdown += PadJoinMdRow(row_texts(rows[r]), cols);
   }
 
   Item item;
   item.text = text;
   item.in_text = true;
   item.markdown = markdown;
-  item.has_span = has_loc;
-  item.has_loc = has_loc;
-  for (int k = 0; k < 4; ++k) item.locs[k] = locs[k];
-  item.level = OcrSpanLevel::kBlock;
+  if (!cell_spans.empty()) {
+    item.spans = std::move(cell_spans);
+  } else if (wrapper_has_loc) {
+    item.spans.push_back(MakeItemSpan(0, Utf8ToUtf16Length(text), true,
+                                     wrapper_locs, OcrSpanLevel::kLine));
+  }
   items.push_back(std::move(item));
 }
 
@@ -404,8 +436,8 @@ void ParseOtsl(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& items
   }
 
   std::vector<Item> captions;
-  std::vector<std::vector<std::string>> rows;
-  std::vector<std::string> row;
+  std::vector<std::vector<TableCell>> rows;
+  std::vector<TableCell> row;
   auto flush_row = [&]() {
     if (row.empty()) return;
     rows.push_back(row);
@@ -442,6 +474,8 @@ void ParseOtsl(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& items
     if (!IsContentCell(cell)) {
       continue;
     }
+    TableCell parsed_cell;
+    parsed_cell.has_loc = TryTakeLocs(toks, i, parsed_cell.locs);
     const size_t inner_begin = i;
     while (i < toks.size()) {
       const Tok& n = toks[i];
@@ -452,7 +486,8 @@ void ParseOtsl(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& items
       if (n.kind == TokKind::Close && (n.name == "otsl" || n.name == cell)) break;
       ++i;
     }
-    row.push_back(InnerText(toks, inner_begin, i));
+    parsed_cell.text = InnerText(toks, inner_begin, i);
+    row.push_back(std::move(parsed_cell));
     if (i < toks.size() && toks[i].kind == TokKind::Close && toks[i].name == cell) {
       ++i;
     }
@@ -519,23 +554,22 @@ DocTagsParse ParseDocTags(const std::string& doctags, int frame_w, int frame_h,
     parsed.markdown_utf8 += item.markdown;
 
     const int utf16_at = Utf8ToUtf16Length(parsed.text_utf8);
-    int utf16_end = utf16_at;
     if (item.in_text) {
       parsed.text_utf8 += item.text;
-      utf16_end = Utf8ToUtf16Length(parsed.text_utf8);
       ++text_seen;
       if (text_seen < text_count) parsed.text_utf8.push_back('\n');
     }
-    if (!item.has_span) continue;
-    OcrSpan span;
-    span.utf16_start = utf16_at;
-    span.utf16_end = utf16_end;
-    span.quad = MakeQuad(item.has_loc, item.locs, frame_w, frame_h);
-    // Greedy decode does not record logprobs.
-    span.confidence = 1.f;
-    span.frame_index = frame_index;
-    span.level = item.level;
-    parsed.spans.push_back(span);
+    for (const ItemSpan& spec : item.spans) {
+      OcrSpan span;
+      span.utf16_start = utf16_at + spec.utf16_rel_start;
+      span.utf16_end = utf16_at + spec.utf16_rel_end;
+      span.quad = MakeQuad(spec.has_loc, spec.locs, frame_w, frame_h);
+      // Greedy decode does not record logprobs.
+      span.confidence = 1.f;
+      span.frame_index = frame_index;
+      span.level = spec.level;
+      parsed.spans.push_back(span);
+    }
   }
   return parsed;
 }

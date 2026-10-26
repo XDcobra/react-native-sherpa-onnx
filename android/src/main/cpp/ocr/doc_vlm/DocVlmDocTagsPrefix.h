@@ -1,6 +1,7 @@
 /**
  * Incremental DocTags prefix acceptor for greedy decode.
- * Not a document walk — only well-formed prefix + stack.
+ * Not a document walk — well-formed prefix + stack. OTSL cells are void
+ * (unclosed `fcel` / `nl` / …); `</otsl>` / `</table>` pop leftovers.
  */
 #pragma once
 

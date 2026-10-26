@@ -6,7 +6,7 @@
 
 Import path: **`react-native-sherpa-onnx/ocr`**.
 
-Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), and **`doc_vlm`** (Granite Docling: vision encoder + embed + merged decoder + tokenizer + manifest). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm'`. For `doc_vlm`, `markdown` may include GFM tables reconstructed from OTSL cells; raw DocTags stay on `doctags`. `complete` is `true` only after a generated `</doctag>`; hitting `maxNewTokens` or an illegal prefix is not a finished document (`stopReason` says why). Recognize does not invent plaintext by stripping tags.
+Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), and **`doc_vlm`** (Granite Docling: vision encoder + embed + merged decoder + tokenizer + manifest). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm'`. For `doc_vlm`, `markdown` may include GFM tables reconstructed from OTSL cells; raw DocTags stay on `doctags`. `complete` is `true` only after a generated `</doctag>`; hitting `maxNewTokens` or an illegal prefix is not a finished document (`stopReason` says why). Recognize does not invent plaintext by stripping tags. `doc_vlm` writes title and table spatial spans as `line` when the DocTags carry `<loc_*>` (one box per cell when cells have locs, otherwise one box on the `<otsl>` wrapper). `picture` / `chart` stay `block` and drop at the default `granularity: 'line'`. The image overlay draws those spans; it does not parse DocTags.
 
 ---
 
