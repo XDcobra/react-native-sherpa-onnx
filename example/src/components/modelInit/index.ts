@@ -63,6 +63,7 @@ export {
   type AudioTaggingCustomInitFormState,
 } from './AudioTaggingCustomInitForm';
 export {
+  DocVlmInitOptionChips,
   OcrCustomInitForm,
   type OcrCustomInitFormState,
 } from './OcrCustomInitForm';

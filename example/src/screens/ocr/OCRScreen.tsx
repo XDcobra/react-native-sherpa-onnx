@@ -44,6 +44,7 @@ import {
   type TextSpatialSpan,
 } from 'react-native-sherpa-onnx/textbuffer';
 import {
+  DocVlmInitOptionChips,
   InitModeSelector,
   ModelFolderGrid,
   OcrCustomInitForm,
@@ -357,6 +358,11 @@ export default function OCRScreen() {
         const modelSource = await toDetectSource(resolveModelPath(folderId));
         await runDetect(folderId);
 
+        const wantDocVlmOpts = isGranitePack(folderId);
+        const maxLabel =
+          customInitForm.maxNewTokens === 0
+            ? 'default'
+            : String(customInitForm.maxNewTokens);
         const initOptions: OcrInitializeOptions = {
           modelSource,
           modelType: 'auto',
@@ -364,6 +370,9 @@ export default function OCRScreen() {
           numThreads: threads,
           ppocr: { detUnclipRatio },
           doctr: { detUnclipRatio },
+          ...(wantDocVlmOpts
+            ? { docVlm: { maxNewTokens: customInitForm.maxNewTokens } }
+            : {}),
         };
         const ocr = await createOCR(initOptions);
         engineRef.current = ocr;
@@ -371,7 +380,9 @@ export default function OCRScreen() {
         setInitMessage(
           `Ready · instance=${
             ocr.instanceId
-          } · modelType=auto · ${getModelDisplayName(folderId)}`
+          } · modelType=auto · ${getModelDisplayName(folderId)}${
+            wantDocVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''
+          }`
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -415,18 +426,14 @@ export default function OCRScreen() {
             ? `custom:${selectedFolder}`
             : `custom:${customInitForm.modelType}`
         );
+        const maxLabel =
+          customInitForm.maxNewTokens === 0
+            ? 'default'
+            : String(customInitForm.maxNewTokens);
         setInitMessage(
           `Ready · instance=${ocr.instanceId} · custom:${
             customInitForm.modelType
-          }${
-            wantDocVlmOpts
-              ? ` · maxNewTokens=${
-                  customInitForm.maxNewTokens === 0
-                    ? 'default'
-                    : customInitForm.maxNewTokens
-                }`
-              : ''
-          }`
+          }${wantDocVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''}`
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -811,6 +818,15 @@ export default function OCRScreen() {
                   disabled={initBusy || runBusy}
                   emptyMessage="No OCR models found. Use bundled assets, PAD, or Download Manager → OCR."
                 />
+                {selectedFolder && isGranitePack(selectedFolder) ? (
+                  <DocVlmInitOptionChips
+                    maxNewTokens={customInitForm.maxNewTokens}
+                    onChangeMaxNewTokens={(maxNewTokens) =>
+                      setCustomInitForm((prev) => ({ ...prev, maxNewTokens }))
+                    }
+                    disabled={initBusy || runBusy}
+                  />
+                ) : null}
               </>
             ) : (
               <OcrCustomInitForm
@@ -1163,11 +1179,20 @@ export default function OCRScreen() {
                 {resultMeta
                   ? `\nfamily=${resultMeta.family}\nspanCount=${resultMeta.spanCount}`
                   : `\nspanCount=${spans.length}`}
+                {resultMeta?.family === 'doc_vlm'
+                  ? `\ncomplete=${resultMeta.complete}\nstopReason=${resultMeta.stopReason}`
+                  : ''}
                 {lastMs != null ? `\nwall=${lastMs}ms` : ''}
                 {imageInfo
                   ? `\nframe=${imageInfo.width}×${imageInfo.height}`
                   : ''}
               </Text>
+              {resultMeta?.family === 'doc_vlm' && !resultMeta.complete ? (
+                <Text style={styles.sectionHint}>
+                  Incomplete DocTags ({resultMeta.stopReason}). Raw output is
+                  still on the DocTags tab.
+                </Text>
+              ) : null}
             </View>
 
             {imageInfo?.bufferId ? (
