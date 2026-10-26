@@ -157,25 +157,25 @@ describe('buildCatalogHintsMap — OCR', () => {
         category: ModelCategory.Ocr,
         modelType: 'doc_vlm',
         languages: ['en', 'ja', 'ar', 'zh'],
-        quantization: 'unknown',
+        quantization: 'fp32',
         sizeTier: 'unknown',
         isStreaming: false,
       },
     ]);
 
     const hints = await buildCatalogHintsMap(ModelCategory.Ocr, [
-      'docvlm-granite-258m',
+      'docvlm-granite-258m-fp32',
     ]);
 
-    expect(hints.get('docvlm-granite-258m')).toEqual({
+    expect(hints.get('docvlm-granite-258m-fp32')).toEqual({
       modelType: 'doc_vlm',
       languages: ['en', 'ja', 'ar', 'zh'],
-      quantization: 'unknown',
+      quantization: 'fp32',
       sizeTier: 'unknown',
       isStreaming: false,
     });
     expect(mockDetectModelsBatch).toHaveBeenCalledWith([
-      { assetName: 'docvlm-granite-258m' },
+      { assetName: 'docvlm-granite-258m-fp32' },
     ]);
   });
 });

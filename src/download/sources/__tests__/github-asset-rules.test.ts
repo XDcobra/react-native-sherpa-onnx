@@ -208,7 +208,7 @@ describe('github-asset-rules — OCR', () => {
     expect(
       isAssetSupportedForCategory(
         ModelCategory.Ocr,
-        'docvlm-granite-258m.tar.bz2',
+        'docvlm-granite-258m-fp32.tar.bz2',
         'tar.bz2'
       )
     ).toBe(true);

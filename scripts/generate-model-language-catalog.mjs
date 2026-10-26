@@ -415,7 +415,7 @@ function emitCpp(catalog, sttRowsByType, ocrPackLangs) {
   lines.push('        }');
   lines.push('    }');
   lines.push('    static const char* kQuant[] = {');
-  lines.push('        "-int8", "-fp16", "-fp32", "-q4f16", "-q4", "-uint8", "-bnb4", "-quantized"};');
+  lines.push('        "-int8", "-fp16", "-fp32", "-q4f16", "-q8", "-q4", "-uint8", "-bnb4", "-quantized"};');
   lines.push('    for (const char* q : kQuant) {');
   lines.push('        const std::size_t qlen = std::char_traits<char>::length(q);');
   lines.push('        if (stem.size() >= qlen &&');

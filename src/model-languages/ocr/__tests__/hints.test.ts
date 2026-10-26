@@ -127,12 +127,15 @@ describe('doc_vlm pack language hints', () => {
   const graniteHints = ['en', 'ja', 'ar', 'zh'];
 
   it('returns en/ja/ar/zh for the pack and the doc_vlm family', () => {
-    expect(OCR_PACK_ISO6391_HINTS_BY_ID['docvlm-granite-258m']).toEqual(
+    expect(OCR_PACK_ISO6391_HINTS_BY_ID['docvlm-granite-258m-fp32']).toEqual(
+      graniteHints
+    );
+    expect(OCR_PACK_ISO6391_HINTS_BY_ID['docvlm-granite-258m-q8']).toEqual(
       graniteHints
     );
     expect(iso6391HintsForOcrModelType('doc_vlm')).toEqual(graniteHints);
     expect(
-      iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m')
+      iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m-fp32')
     ).toEqual(graniteHints);
     expect(DOC_VLM_ISO6391_HINTS).toEqual(graniteHints);
   });
@@ -154,7 +157,7 @@ describe('doc_vlm pack language hints', () => {
       publicLanguageHintsFromNative({
         domain: ModelCategory.Ocr,
         modelType: 'doc_vlm',
-        modelKey: 'docvlm-granite-258m',
+        modelKey: 'docvlm-granite-258m-fp32',
         rawRows: [
           { iso6391Hint: 'en', id: 'en' },
           { iso6391Hint: 'ja', id: 'ja' },

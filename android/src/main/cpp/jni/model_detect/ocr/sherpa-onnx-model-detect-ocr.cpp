@@ -182,7 +182,7 @@ bool CanDoctrLayout(const std::vector<FileEntry>& files) {
     return !det.empty() && !rec.empty() && !manifest.empty();
 }
 
-/** Granite-docling octet. Exact basenames; no int8/fp16 twin in v1. */
+/** Granite-docling octet. Exact flattened basenames; pack id encodes dtype. */
 bool CanDocVlmLayout(const std::vector<FileEntry>& files) {
     return !FindFileByName(files, "vision_encoder.onnx").empty() &&
            !FindFileByName(files, "vision_encoder.onnx_data").empty() &&

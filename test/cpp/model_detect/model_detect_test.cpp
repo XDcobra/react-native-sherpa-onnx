@@ -989,7 +989,7 @@ TEST(ModelDetectTest, DetectOcrDocVlmTokenizerConfigIsNotTokenizer) {
 
 TEST(ModelDetectTest, DetectOcrDocVlmNameOnly) {
     auto result = sherpaonnx::DetectOcrModelFromFileList(
-        {}, "docvlm-granite-258m", "auto");
+        {}, "docvlm-granite-258m-fp32", "auto");
     EXPECT_FALSE(result.ok);
     EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kDocVlm);
     EXPECT_NE(result.selectedKind, sherpaonnx::OcrModelKind::kDoctr);

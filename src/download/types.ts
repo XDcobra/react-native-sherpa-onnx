@@ -26,7 +26,9 @@ export type QuantizationPreference =
   | 'int4'
   | 'uint8'
   | 'fp32'
-  | 'bf16';
+  | 'bf16'
+  | 'q8'
+  | 'q4f16';
 
 export type Quantization =
   | 'int8'
@@ -36,6 +38,8 @@ export type Quantization =
   | 'uint8'
   | 'fp32'
   | 'bf16'
+  | 'q8'
+  | 'q4f16'
   | 'unknown';
 export type SizeTier = 'tiny' | 'small' | 'medium' | 'large' | 'unknown';
 
