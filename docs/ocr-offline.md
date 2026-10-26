@@ -137,6 +137,17 @@ try {
 | `doc_vlm` | `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` | — |
 | `auto` | Resolves family from pack layout (manifest `family`, then layout heuristics) | — |
 
+Published `doc_vlm` packs (self-contained; pack id is the technique, not a Hub `_quantized` filename):
+
+| ID | Weights | Notes |
+| --- | --- | --- |
+| `docvlm-granite-258m-fp32` | ~1.26 GiB | Canonical. Float KV. |
+| `docvlm-granite-258m-q8` | ~320 MB | Hub `_quantized` triple. Float KV. |
+| `docvlm-granite-258m-fp16` | ~632 MB | Float16 KV. |
+| `docvlm-granite-258m-q4f16` | ~265 MB | Float16 KV + MatMulNBits. |
+
+Each archive includes vision, embed, decoder, tokenizer, and manifest. Detect still looks for the eight flattened names (`vision_encoder.onnx`, …). `ppocrv6-tiny` stays the phone default.
+
 Validate category: **`ocr`**. Detection: [model-detect.md](model-detect.md) · languages: [model-languages.md](model-languages.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 
 ```ts
@@ -381,7 +392,7 @@ import {
   detectOcrModel,
 } from 'react-native-sherpa-onnx/ocr';
 
-const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m');
+const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m-fp32');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source);
 if (!det.success) {

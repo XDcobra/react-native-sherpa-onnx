@@ -169,7 +169,7 @@ const ocrPicker = getPpocrLanguages();
 const doctrPicker = getDoctrLanguages();
 const doctrMobile = iso6391HintsForOcrModelType('doctr', 'doctr-mobile'); // en, fr
 const docVlm = iso6391HintsForOcrModelType('doc_vlm'); // en, ja, ar, zh
-const granite = iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m');
+const granite = iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m-fp32');
 ```
 
 Normalized ISO 639-1 hints by model type — for catalog labels, not runtime validation. OCR detect prefers basename heuristics, then pack CSV, then the family list (`ppocr`, `doctr`, or `doc_vlm`). `en` is the supported language on the granite pack; `ja`, `ar`, and `zh` are experimental. `docVlm` and `granite` are the same four codes today.
