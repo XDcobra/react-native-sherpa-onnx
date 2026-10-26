@@ -61,6 +61,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared OCR core (factory + PpocrBackend + OcrEngine; JNI excluded below).
     "android/src/main/cpp/ocr/**/*.{h,cpp}",
+    # Shared ORT provider attach (sherpa-style CPU fallback).
+    "android/src/main/cpp/ort/**/*.{h,cpp}",
     # Shared PDF text-layer core (JNI excluded below).
     "android/src/main/cpp/pdf/**/*.{h,cpp}",
   ]

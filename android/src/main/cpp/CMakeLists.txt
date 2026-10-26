@@ -97,6 +97,7 @@ endif()
 
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). model_detect: subdirs common/stt/tts/enhancement/alignment; flat #includes via multiple include paths below.
 set(SOURCES
+    ort/ApplyOrtProvider.cpp
     alignment/sherpa_onnx_ctc_alignment.cpp
     alignment/sherpa_onnx_alignment_engine.cpp
     jni/alignment/sherpa-onnx-alignment-jni.cpp

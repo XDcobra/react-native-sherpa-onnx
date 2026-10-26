@@ -236,9 +236,11 @@ add_executable(diarization_core_test
   "${DIARIZATION_CORE_DIR}/sortformer-post-processor.cpp"
   "${DIARIZATION_CORE_DIR}/sortformer-streaming-model.cpp"
   "${DIARIZATION_CORE_DIR}/sherpa-onnx-streaming-diarization-wrapper.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
 )
 target_include_directories(diarization_core_test PRIVATE
   "${DIARIZATION_CORE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding"
   "${_ORT_API_WRAPPER}"
   "${_ORT_HOST_INCLUDE}"
@@ -305,11 +307,14 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   set(ALIGNMENT_CPP "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp")
   add_executable(ctc_alignment_host_test
     "${CMAKE_CURRENT_SOURCE_DIR}/alignment/ctc_alignment_host_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ort/apply_ort_provider_host_test.cpp"
     "${ALIGNMENT_CPP}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(ctc_alignment_host_test PRIVATE
     "${_ORT_API_WRAPPER}"
     "${_ORT_HOST_INCLUDE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/alignment"
   )
   target_link_directories(ctc_alignment_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
@@ -357,8 +362,10 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(ppocr_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${OCR_CPP_ROOT}"
     "${OCR_CPP_ROOT}/doctr"
     "${OCR_CPP_ROOT}/doc_vlm"
@@ -413,8 +420,10 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(doctr_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${OCR_CPP_ROOT}"
     "${OCR_CPP_ROOT}/doctr"
     "${OCR_CPP_ROOT}/doc_vlm"
@@ -458,8 +467,10 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(doc_vlm_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${OCR_CPP_ROOT}"
     "${OCR_CPP_ROOT}/doc_vlm"
     "${OCR_TEST_DIR}"
