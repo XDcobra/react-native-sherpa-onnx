@@ -214,8 +214,8 @@ def copy_tokenizer(out_dir: Path):
 def write_manifest(out_dir: Path, dtype: str):
     manifest = {
         "schema": 1,
-        "family": "doc_vlm",
-        "id": "docvlm-nemotron-3.5-parse-fp32",
+        "family": "nemotron_parse",
+        "id": "nemotron-3.5-parse-fp32",
         "arch": "nemotron_parse",
         "onnx_dtype": dtype,
         "source": {"repo": HF_REPO, "revision": "main"},

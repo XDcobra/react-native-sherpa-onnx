@@ -147,8 +147,8 @@ def copy_sidecars(src_dir: Path, dst_dir: Path) -> None:
 def write_manifest(out_dir: Path, dtype: str, notes: list[str]) -> None:
     manifest = {
         "schema": 1,
-        "family": "doc_vlm",
-        "id": f"docvlm-nemotron-3.5-parse-{dtype}",
+        "family": "nemotron_parse",
+        "id": f"nemotron-3.5-parse-{dtype}",
         "arch": "nemotron_parse",
         "onnx_dtype": dtype,
         "source": {"repo": HF_REPO, "revision": "main"},

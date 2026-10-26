@@ -92,8 +92,8 @@ def write_gitattributes(stage: Path) -> None:
 def write_repo_manifest(stage: Path) -> None:
     payload = {
         "schema": 1,
-        "family": "doc_vlm",
-        "id": "docvlm-nemotron-3.5-parse-onnx",
+        "family": "nemotron_parse",
+        "id": "nemotron-3.5-parse-onnx",
         "arch": "nemotron_parse",
         "source": {"repo": HF_REPO, "revision": "main"},
         "variants": {
