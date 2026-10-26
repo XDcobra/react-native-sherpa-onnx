@@ -13,10 +13,23 @@ namespace ocr {
 namespace doc_vlm {
 namespace {
 
+enum class TokKind { Open, Close, Loc, Text };
+
+struct Tok {
+  TokKind kind = TokKind::Text;
+  std::string name;
+  int loc = 0;
+  std::string text;
+};
+
+bool IsNameChar(char c) {
+  return std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_';
+}
+
 bool IsTextTag(const std::string& tag) {
   static const char* kNames[] = {
-      "text",       "paragraph", "title",       "list_item",
-      "caption",    "footnote",  "formula",     "code",
+      "text",        "paragraph", "title",      "list_item",
+      "caption",     "footnote",  "formula",    "code",
       "page_header", "page_footer"};
   for (const char* name : kNames) {
     if (tag == name) return true;
@@ -30,82 +43,88 @@ bool IsTextTag(const std::string& tag) {
   return false;
 }
 
-bool IsMediaTag(const std::string& tag) {
-  return tag == "picture" || tag == "chart" || tag == "otsl";
+bool IsMediaTag(const std::string& tag) { return tag == "picture" || tag == "chart"; }
+
+bool IsOtslCell(const std::string& tag) {
+  return tag == "fcel" || tag == "ched" || tag == "rhed" || tag == "ecel" ||
+         tag == "lcel" || tag == "ucel" || tag == "xcel" || tag == "nl" || tag == "srow";
 }
 
-bool TryParseLocs(const std::string& s, size_t& pos, int locs[4]) {
-  size_t p = pos;
-  for (int i = 0; i < 4; ++i) {
-    if (p + 6 > s.size() || s.compare(p, 5, "<loc_") != 0) return false;
-    size_t j = p + 5;
-    if (j >= s.size() || !std::isdigit(static_cast<unsigned char>(s[j]))) return false;
-    int value = 0;
-    while (j < s.size() && std::isdigit(static_cast<unsigned char>(s[j]))) {
-      value = value * 10 + (s[j] - '0');
-      ++j;
-    }
-    if (j >= s.size() || s[j] != '>') return false;
-    locs[i] = value;
-    p = j + 1;
-  }
-  pos = p;
-  return true;
+bool IsContentCell(const std::string& tag) {
+  return tag == "fcel" || tag == "ched" || tag == "rhed";
 }
 
-struct Hit {
-  size_t pos = 0;
-  std::string tag;
-  bool media = false;
-  bool has_loc = false;
-  int locs[4] = {};
-  std::string inner;
-};
+bool IsStructuralOpen(const std::string& tag) {
+  return IsTextTag(tag) || IsMediaTag(tag) || tag == "otsl";
+}
 
-void FindTags(const std::string& s, bool media, std::vector<Hit>& hits) {
-  size_t cursor = 0;
-  while (cursor < s.size()) {
-    const size_t lt = s.find('<', cursor);
-    if (lt == std::string::npos) break;
-    if (lt + 1 >= s.size() || s[lt + 1] == '/') {
-      cursor = lt + 1;
+std::vector<Tok> Lex(const std::string& s) {
+  std::vector<Tok> out;
+  std::string pending;
+  auto flush = [&]() {
+    if (pending.empty()) return;
+    Tok tok;
+    tok.kind = TokKind::Text;
+    tok.text = pending;
+    out.push_back(std::move(tok));
+    pending.clear();
+  };
+
+  for (size_t i = 0; i < s.size();) {
+    if (s[i] != '<') {
+      pending.push_back(s[i]);
+      ++i;
       continue;
     }
-    size_t name_end = lt + 1;
-    while (name_end < s.size() && s[name_end] != '>' && s[name_end] != ' ' &&
-           s[name_end] != '\n' && s[name_end] != '\t') {
-      ++name_end;
-    }
-    if (name_end >= s.size() || s[name_end] != '>') {
-      cursor = lt + 1;
+    const size_t gt = s.find('>', i + 1);
+    if (gt == std::string::npos) {
+      pending.push_back(s[i]);
+      ++i;
       continue;
     }
-    const std::string tag = s.substr(lt + 1, name_end - (lt + 1));
-    const bool wanted = media ? IsMediaTag(tag) : IsTextTag(tag);
-    if (!wanted) {
-      cursor = lt + 1;
+    const bool closing = (i + 1 < s.size() && s[i + 1] == '/');
+    size_t name_begin = i + 1 + (closing ? 1 : 0);
+    size_t name_end = name_begin;
+    while (name_end < gt && IsNameChar(s[name_end])) ++name_end;
+    if (name_end == name_begin || name_end != gt) {
+      pending.push_back(s[i]);
+      ++i;
       continue;
     }
-    size_t inner_begin = name_end + 1;
-    bool has_loc = false;
-    int locs[4] = {};
-    if (TryParseLocs(s, inner_begin, locs)) has_loc = true;
-    const std::string close = "</" + tag + ">";
-    const size_t end = s.find(close, inner_begin);
-    if (end == std::string::npos) {
-      cursor = lt + 1;
-      continue;
+    flush();
+    const std::string name = s.substr(name_begin, name_end - name_begin);
+    Tok tok;
+    if (closing) {
+      tok.kind = TokKind::Close;
+      tok.name = name;
+    } else if (name.size() > 4 && name.compare(0, 4, "loc_") == 0) {
+      int value = 0;
+      bool digits = false;
+      for (size_t k = 4; k < name.size(); ++k) {
+        if (!std::isdigit(static_cast<unsigned char>(name[k]))) {
+          digits = false;
+          break;
+        }
+        digits = true;
+        value = value * 10 + (name[k] - '0');
+      }
+      if (digits) {
+        tok.kind = TokKind::Loc;
+        tok.name = name;
+        tok.loc = value;
+      } else {
+        tok.kind = TokKind::Open;
+        tok.name = name;
+      }
+    } else {
+      tok.kind = TokKind::Open;
+      tok.name = name;
     }
-    Hit hit;
-    hit.pos = lt;
-    hit.tag = tag;
-    hit.media = media;
-    hit.has_loc = has_loc;
-    for (int i = 0; i < 4; ++i) hit.locs[i] = locs[i];
-    hit.inner = s.substr(inner_begin, end - inner_begin);
-    hits.push_back(std::move(hit));
-    cursor = end + close.size();
+    out.push_back(std::move(tok));
+    i = gt + 1;
   }
+  flush();
+  return out;
 }
 
 std::string StripTags(const std::string& raw) {
@@ -184,6 +203,26 @@ std::string CollapseWhitespace(const std::string& raw) {
   return TrimAsciiWs(out);
 }
 
+std::string InnerText(const std::vector<Tok>& toks, size_t begin, size_t end) {
+  std::string raw;
+  for (size_t i = begin; i < end && i < toks.size(); ++i) {
+    if (toks[i].kind == TokKind::Text) raw += toks[i].text;
+  }
+  return CleanInner(raw);
+}
+
+bool TryTakeLocs(const std::vector<Tok>& toks, size_t& i, int locs[4]) {
+  if (i + 4 > toks.size()) return false;
+  for (int k = 0; k < 4; ++k) {
+    if (toks[i + static_cast<size_t>(k)].kind != TokKind::Loc) return false;
+  }
+  for (int k = 0; k < 4; ++k) {
+    locs[k] = toks[i + static_cast<size_t>(k)].loc;
+  }
+  i += 4;
+  return true;
+}
+
 int ClampLoc(int loc) {
   if (loc < 0) return 0;
   if (loc > 499) return 499;
@@ -219,19 +258,16 @@ OcrQuad MakeQuad(bool has_loc, const int locs[4], int frame_w, int frame_h) {
   return quad;
 }
 
-OcrSpanLevel LevelFor(const std::string& tag, bool media) {
-  if (media || tag == "title" || tag.rfind("section_header_level_", 0) == 0) {
+OcrSpanLevel LevelFor(const std::string& tag) {
+  if (tag == "title" || tag.rfind("section_header_level_", 0) == 0) {
     return OcrSpanLevel::kBlock;
   }
   return OcrSpanLevel::kLine;
 }
 
-std::string MarkdownFor(const std::string& tag, const std::string& text, bool media) {
-  if (media) {
-    if (tag == "picture") return "[picture]";
-    if (tag == "chart") return "[chart]";
-    return "[table]";
-  }
+std::string MarkdownFor(const std::string& tag, const std::string& text) {
+  if (tag == "picture") return "[picture]";
+  if (tag == "chart") return "[chart]";
   if (tag == "title") return "# " + text;
   if (tag.rfind("section_header_level_", 0) == 0) {
     const int level = tag.back() - '0';
@@ -247,6 +283,36 @@ std::string MarkdownFor(const std::string& tag, const std::string& text, bool me
   return text;
 }
 
+std::string EscapeMdCell(const std::string& cell) {
+  std::string out;
+  out.reserve(cell.size());
+  for (char c : cell) {
+    if (c == '|') out += "\\|";
+    else if (c == '\n' || c == '\r') out.push_back(' ');
+    else out.push_back(c);
+  }
+  return out;
+}
+
+std::string JoinRow(const std::vector<std::string>& row, const char* sep) {
+  std::string out;
+  for (size_t i = 0; i < row.size(); ++i) {
+    if (i > 0) out += sep;
+    out += row[i];
+  }
+  return out;
+}
+
+std::string PadJoinMdRow(const std::vector<std::string>& row, size_t cols) {
+  std::string out = "|";
+  for (size_t i = 0; i < cols; ++i) {
+    out += " ";
+    out += i < row.size() ? EscapeMdCell(row[i]) : "";
+    out += " |";
+  }
+  return out;
+}
+
 struct Item {
   std::string text;
   bool in_text = false;
@@ -257,6 +323,191 @@ struct Item {
   OcrSpanLevel level = OcrSpanLevel::kLine;
 };
 
+void SkipMatchingClose(const std::vector<Tok>& toks, size_t& i, const std::string& name) {
+  if (i < toks.size() && toks[i].kind == TokKind::Close && toks[i].name == name) {
+    ++i;
+  }
+}
+
+void ParseTextLike(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& items) {
+  const std::string tag = toks[i].name;
+  ++i;
+  int locs[4] = {};
+  const bool has_loc = TryTakeLocs(toks, i, locs);
+  const size_t inner_begin = i;
+  while (i < toks.size()) {
+    const Tok& t = toks[i];
+    if (t.kind == TokKind::Close && t.name == tag) break;
+    if (t.kind == TokKind::Open && IsStructuralOpen(t.name) && t.name != tag) break;
+    ++i;
+  }
+  const std::string text = InnerText(toks, inner_begin, i);
+  SkipMatchingClose(toks, i, tag);
+  if (text.empty()) return;
+  Item item;
+  item.text = text;
+  item.in_text = true;
+  item.markdown = MarkdownFor(tag, text);
+  item.has_span = true;
+  item.has_loc = has_loc;
+  for (int k = 0; k < 4; ++k) item.locs[k] = locs[k];
+  item.level = LevelFor(tag);
+  items.push_back(std::move(item));
+}
+
+void ParseMedia(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& items) {
+  const std::string tag = toks[i].name;
+  ++i;
+  int locs[4] = {};
+  const bool has_loc = TryTakeLocs(toks, i, locs);
+  while (i < toks.size()) {
+    const Tok& t = toks[i];
+    if (t.kind == TokKind::Close && t.name == tag) break;
+    if (t.kind == TokKind::Open && IsStructuralOpen(t.name) && t.name != tag) break;
+    ++i;
+  }
+  SkipMatchingClose(toks, i, tag);
+  Item item;
+  item.markdown = MarkdownFor(tag, "");
+  item.has_span = has_loc;
+  item.has_loc = has_loc;
+  for (int k = 0; k < 4; ++k) item.locs[k] = locs[k];
+  item.level = OcrSpanLevel::kBlock;
+  items.push_back(std::move(item));
+}
+
+void EmitTable(const std::vector<std::vector<std::string>>& rows, bool has_loc,
+               const int locs[4], std::vector<Item>& items) {
+  bool any = false;
+  size_t cols = 0;
+  for (const auto& row : rows) {
+    cols = std::max(cols, row.size());
+    for (const auto& cell : row) {
+      if (!cell.empty()) any = true;
+    }
+  }
+  if (!any || cols == 0) return;
+
+  std::string text;
+  std::string markdown;
+  const auto& header = rows[0];
+  markdown += PadJoinMdRow(header, cols);
+  markdown += "\n|";
+  for (size_t c = 0; c < cols; ++c) markdown += " --- |";
+  text += JoinRow(header, " | ");
+  for (size_t r = 1; r < rows.size(); ++r) {
+    text += "\n";
+    text += JoinRow(rows[r], " | ");
+    markdown += "\n";
+    markdown += PadJoinMdRow(rows[r], cols);
+  }
+
+  Item item;
+  item.text = text;
+  item.in_text = true;
+  item.markdown = markdown;
+  item.has_span = has_loc;
+  item.has_loc = has_loc;
+  for (int k = 0; k < 4; ++k) item.locs[k] = locs[k];
+  item.level = OcrSpanLevel::kBlock;
+  items.push_back(std::move(item));
+}
+
+void ParseOtsl(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& items) {
+  int locs[4] = {};
+  bool has_loc = false;
+  if (i < toks.size() && toks[i].kind == TokKind::Open && toks[i].name == "otsl") {
+    ++i;
+    has_loc = TryTakeLocs(toks, i, locs);
+  }
+
+  std::vector<Item> captions;
+  std::vector<std::vector<std::string>> rows;
+  std::vector<std::string> row;
+  auto flush_row = [&]() {
+    if (row.empty()) return;
+    rows.push_back(row);
+    row.clear();
+  };
+
+  while (i < toks.size()) {
+    const Tok& t = toks[i];
+    if (t.kind == TokKind::Close && t.name == "otsl") {
+      ++i;
+      break;
+    }
+    if (t.kind == TokKind::Open && t.name == "caption") {
+      ParseTextLike(toks, i, captions);
+      continue;
+    }
+    if (t.kind == TokKind::Open && IsStructuralOpen(t.name)) {
+      break;
+    }
+    if (t.kind != TokKind::Open || !IsOtslCell(t.name)) {
+      ++i;
+      continue;
+    }
+    const std::string cell = t.name;
+    ++i;
+    if (cell == "nl" || cell == "srow") {
+      flush_row();
+      continue;
+    }
+    if (cell == "ecel") {
+      row.emplace_back();
+      continue;
+    }
+    if (!IsContentCell(cell)) {
+      continue;
+    }
+    const size_t inner_begin = i;
+    while (i < toks.size()) {
+      const Tok& n = toks[i];
+      if (n.kind == TokKind::Open && (IsOtslCell(n.name) || n.name == "caption" ||
+                                      IsStructuralOpen(n.name))) {
+        break;
+      }
+      if (n.kind == TokKind::Close && (n.name == "otsl" || n.name == cell)) break;
+      ++i;
+    }
+    row.push_back(InnerText(toks, inner_begin, i));
+    if (i < toks.size() && toks[i].kind == TokKind::Close && toks[i].name == cell) {
+      ++i;
+    }
+  }
+  flush_row();
+  items.insert(items.end(), captions.begin(), captions.end());
+  EmitTable(rows, has_loc, locs, items);
+}
+
+void Walk(const std::vector<Tok>& toks, std::vector<Item>& items) {
+  size_t i = 0;
+  while (i < toks.size()) {
+    const Tok& t = toks[i];
+    if (t.kind == TokKind::Open && (t.name == "doctag" || t.name == "table")) {
+      ++i;
+      continue;
+    }
+    if (t.kind == TokKind::Close && (t.name == "doctag" || t.name == "table")) {
+      ++i;
+      continue;
+    }
+    if (t.kind == TokKind::Open && IsTextTag(t.name)) {
+      ParseTextLike(toks, i, items);
+      continue;
+    }
+    if (t.kind == TokKind::Open && IsMediaTag(t.name)) {
+      ParseMedia(toks, i, items);
+      continue;
+    }
+    if (t.kind == TokKind::Open && (t.name == "otsl" || IsOtslCell(t.name))) {
+      ParseOtsl(toks, i, items);
+      continue;
+    }
+    ++i;
+  }
+}
+
 }  // namespace
 
 DocTagsParse ParseDocTags(const std::string& doctags, int frame_w, int frame_h,
@@ -265,37 +516,9 @@ DocTagsParse ParseDocTags(const std::string& doctags, int frame_w, int frame_h,
     throw std::invalid_argument("DocVlmDocTags: frame size must be positive");
   }
 
-  std::vector<Hit> hits;
-  FindTags(doctags, false, hits);
-  FindTags(doctags, true, hits);
-  std::sort(hits.begin(), hits.end(),
-            [](const Hit& a, const Hit& b) { return a.pos < b.pos; });
-
+  const std::vector<Tok> toks = Lex(doctags);
   std::vector<Item> items;
-  items.reserve(hits.size());
-  for (const Hit& hit : hits) {
-    if (hit.media) {
-      Item item;
-      item.markdown = MarkdownFor(hit.tag, "", true);
-      item.has_span = hit.has_loc;
-      item.has_loc = hit.has_loc;
-      for (int i = 0; i < 4; ++i) item.locs[i] = hit.locs[i];
-      item.level = OcrSpanLevel::kBlock;
-      items.push_back(std::move(item));
-      continue;
-    }
-    const std::string text = CleanInner(hit.inner);
-    if (text.empty()) continue;
-    Item item;
-    item.text = text;
-    item.in_text = true;
-    item.markdown = MarkdownFor(hit.tag, text, false);
-    item.has_span = true;
-    item.has_loc = hit.has_loc;
-    for (int i = 0; i < 4; ++i) item.locs[i] = hit.locs[i];
-    item.level = LevelFor(hit.tag, false);
-    items.push_back(std::move(item));
-  }
+  Walk(toks, items);
 
   DocTagsParse parsed;
   if (items.empty()) {

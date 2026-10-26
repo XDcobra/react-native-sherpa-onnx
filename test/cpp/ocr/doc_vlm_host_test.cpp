@@ -341,6 +341,61 @@ TEST(DocTags, FallbackStripsTags) {
   EXPECT_FLOAT_EQ(parsed.spans[0].confidence, 1.f);
 }
 
+TEST(DocTags, OtslUnclosedTwoByTwo) {
+  const DocTagsParse parsed =
+      ParseDocTags("<fcel>A<fcel>B<nl><fcel>C<fcel>D", 1000, 240, 0);
+  EXPECT_FALSE(parsed.used_fallback);
+  EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
+  EXPECT_EQ(parsed.markdown_utf8, "| A | B |\n| --- | --- |\n| C | D |");
+  EXPECT_TRUE(parsed.spans.empty());
+}
+
+TEST(DocTags, OtslClosedWithWrapperLocs) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<otsl><loc_0><loc_0><loc_250><loc_250><fcel>A<fcel>B<nl><fcel>C<fcel>D</otsl>",
+      1000, 240, 1);
+  EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
+  ASSERT_EQ(parsed.spans.size(), 1u);
+  EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kBlock);
+  EXPECT_EQ(parsed.spans[0].frame_index, 1);
+  EXPECT_EQ(parsed.spans[0].utf16_start, 0);
+  EXPECT_EQ(parsed.spans[0].utf16_end, 11);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[0], 0.f);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[2], 500.f);
+  EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[5], 120.f);
+}
+
+TEST(DocTags, OtslEmptyCellKeepsColumn) {
+  const DocTagsParse parsed =
+      ParseDocTags("<fcel>A<ecel><fcel>B<nl><fcel>C<fcel>D<fcel>E", 1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "A |  | B\nC | D | E");
+  EXPECT_EQ(parsed.markdown_utf8,
+            "| A |  | B |\n| --- | --- | --- |\n| C | D | E |");
+}
+
+TEST(DocTags, OtslCaptionBeforeTable) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<otsl><caption>Notes</caption><fcel>A<fcel>B<nl><fcel>C<fcel>D</otsl>",
+      1000, 240, 0);
+  EXPECT_EQ(parsed.text_utf8, "Notes\nA | B\nC | D");
+  EXPECT_EQ(parsed.markdown_utf8,
+            "Notes\n| A | B |\n| --- | --- |\n| C | D |");
+}
+
+TEST(DocTags, UnknownTagDoesNotDropNeighbors) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<text>A</text><unknown>x</unknown><text>B</text>", 1000, 240, 0);
+  EXPECT_FALSE(parsed.used_fallback);
+  EXPECT_EQ(parsed.text_utf8, "A\nB");
+}
+
+TEST(DocTags, TruncatedTextIsBestEffort) {
+  const DocTagsParse parsed = ParseDocTags("<text>Hello", 1000, 240, 0);
+  EXPECT_FALSE(parsed.used_fallback);
+  EXPECT_EQ(parsed.text_utf8, "Hello");
+  ASSERT_EQ(parsed.spans.size(), 1u);
+}
+
 TEST(OcrResult, ExtrasDefaultEmpty) {
   OcrResult result;
   EXPECT_TRUE(result.doctags_utf8.empty());
