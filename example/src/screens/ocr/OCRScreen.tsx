@@ -1179,6 +1179,16 @@ export default function OCRScreen() {
                     text={resultTextBufferId}
                     frameIndex={resultFrameIndex}
                     selectedIndex={selectedSpanIndex}
+                    originBoxStyle={{
+                      ocr: {
+                        borderColor: '#007AFF',
+                        backgroundColor: 'rgba(0, 122, 255, 0.28)',
+                      },
+                      textLayer: {
+                        borderColor: '#34C759',
+                        backgroundColor: 'rgba(52, 199, 89, 0.28)',
+                      },
+                    }}
                     onSpanPress={(event) =>
                       setSelectedSpanIndex(
                         selectedSpanIndex === event.index ? null : event.index
@@ -1198,7 +1208,8 @@ export default function OCRScreen() {
                 )}
                 {overlayEnabled && resultTextBufferId && spans.length > 0 ? (
                   <Text style={styles.sectionHint}>
-                    Tap a box to highlight that span in the text below.
+                    Tap a box to highlight that span in the text below. Blue =
+                    ocr, green = textLayer.
                   </Text>
                 ) : null}
               </View>
