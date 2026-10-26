@@ -203,6 +203,13 @@ TEST(CuratedLanguageCatalog, OcrDoctrPackRowsForKnownIds) {
     EXPECT_EQ(dflt.size(), 15u);
 }
 
+TEST(CuratedLanguageCatalog, OcrNemotronParseFamilyRows) {
+    using namespace sherpaonnx::model_language_catalog;
+    const auto& rows = OcrRowsForModelType("nemotron_parse");
+    ASSERT_EQ(rows.size(), 1u);
+    EXPECT_EQ(rows[0].iso6391Hint, "en");
+}
+
 TEST(CuratedLanguageCatalog, OcrDocVlmFamilyRows) {
     using namespace sherpaonnx::model_language_catalog;
     const auto& rows = OcrRowsForModelType("doc_vlm");

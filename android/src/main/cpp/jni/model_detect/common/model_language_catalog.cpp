@@ -44,12 +44,8 @@ const char* AlignmentKindToModelType(AlignmentModelKind kind) {
 }
 
 const char* OcrKindToModelType(OcrModelKind kind) {
-    switch (kind) {
-        case OcrModelKind::kPpocr: return "ppocr";
-        case OcrModelKind::kDoctr: return "doctr";
-        case OcrModelKind::kDocVlm: return "doc_vlm";
-        default: return "";
-    }
+    if (kind == OcrModelKind::kUnknown) return "";
+    return OcrModelKindToLiteral(kind);
 }
 
 std::string InferOcrModelTypeFromKey(const std::string& modelKey) {
@@ -60,6 +56,11 @@ std::string InferOcrModelTypeFromKey(const std::string& modelKey) {
     lower.reserve(modelKey.size());
     for (unsigned char c : modelKey) {
         lower.push_back(static_cast<char>(std::tolower(c)));
+    }
+    if (lower.find("nemotron_parse") != std::string::npos ||
+        lower.find("nemotron-parse") != std::string::npos ||
+        lower.find("nemotron-3.5-parse") != std::string::npos) {
+        return "nemotron_parse";
     }
     if (lower.find("docvlm") != std::string::npos ||
         lower.find("doc-vlm") != std::string::npos ||

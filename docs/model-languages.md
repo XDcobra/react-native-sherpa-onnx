@@ -91,7 +91,7 @@ TTS / alignment / OCR hint helpers (ISO 639-1 strings only; for UI labels — ru
 | --- | --- |
 | `iso6391HintsForTtsModelType(modelType?, modelKey?)` | TTS families |
 | `iso6391HintsForAlignmentModelType(modelType?, modelKey?)` | Alignment — **pack-first** from `scripts/alignment-models/sources.csv` `languages` column (via generator); family fallbacks only for explicit multilingual markers (`multilingual-56`, MMS FA), never bare `xlsr` |
-| `iso6391HintsForOcrModelType(modelType?, modelKey?)` | OCR — **pack-first** from `scripts/ocr-models/sources.csv` `languages`; family fallback `ppocr`, `doctr`, or `doc_vlm`. `auto` and an omitted type still fall back to ppocr hints |
+| `iso6391HintsForOcrModelType(modelType?, modelKey?)` | OCR — **pack-first** from `scripts/ocr-models/sources.csv` `languages`; family fallback `ppocr`, `doctr`, `doc_vlm`, or `nemotron_parse`. `auto` and an omitted type still fall back to ppocr hints |
 
 Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `WAV2VEC2_ALIGNMENT_ISO6391_HINTS`, `PPOCR_LANGUAGES`, `DOCTR_LANGUAGES`, `DOCTR_ISO6391_HINTS`, `DOC_VLM_ISO6391_HINTS`, …) mirror the getters — import when you need the raw array without a function call.
 
@@ -172,7 +172,7 @@ const docVlm = iso6391HintsForOcrModelType('doc_vlm'); // en, ja, ar, zh
 const granite = iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m-fp32');
 ```
 
-Normalized ISO 639-1 hints by model type — for catalog labels, not runtime validation. OCR detect prefers basename heuristics, then pack CSV, then the family list (`ppocr`, `doctr`, or `doc_vlm`). `en` is the supported language on the granite pack; `ja`, `ar`, and `zh` are experimental. `docVlm` and `granite` are the same four codes today.
+Normalized ISO 639-1 hints by model type — for catalog labels, not runtime validation. OCR detect prefers basename heuristics, then pack CSV, then the family list (`ppocr`, `doctr`, `doc_vlm`, or `nemotron_parse`). `en` is the supported language on the granite pack; `ja`, `ar`, and `zh` are experimental. `docVlm` and `granite` are the same four codes today. `nemotron_parse` hints are NVIDIA MOSCAR coverage collapsed to ISO 639-1 (plus `yue`); MOSCAR is synthetic, not a real-document guarantee.
 
 ---
 

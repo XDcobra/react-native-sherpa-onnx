@@ -140,6 +140,35 @@ describe('doc_vlm pack language hints', () => {
     expect(DOC_VLM_ISO6391_HINTS).toEqual(graniteHints);
   });
 
+  it('returns MOSCAR ISO-639-1 hints for nemotron_parse packs and family', () => {
+    const hints = iso6391HintsForOcrModelType('nemotron_parse');
+    expect(hints).toBeDefined();
+    expect(hints![0]).toBe('en');
+    expect(hints).toEqual(
+      expect.arrayContaining([
+        'en',
+        'de',
+        'fr',
+        'zh',
+        'ja',
+        'ko',
+        'ar',
+        'hi',
+        'ru',
+        'ta',
+        'bn',
+        'yue',
+      ])
+    );
+    expect(hints!.length).toBe(124);
+    expect(OCR_PACK_ISO6391_HINTS_BY_ID['nemotron-3.5-parse-int8']).toEqual(
+      hints
+    );
+    expect(OCR_PACK_ISO6391_HINTS_BY_ID['nemotron-3.5-parse-fp16']).toEqual(
+      hints
+    );
+  });
+
   it('keeps doctr, ppocr, and auto family hints', () => {
     expect(iso6391HintsForOcrModelType('doctr')).toEqual([
       ...DOCTR_ISO6391_HINTS,
