@@ -356,9 +356,33 @@ export const styles = StyleSheet.create({
     padding: 12,
     marginTop: 8,
   },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 8,
+  },
+  progressPhase: {
+    flex: 1,
+    fontSize: 13,
+    color: '#334155',
+  },
+  progressPhaseCount: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#007AFF',
+    fontVariant: ['tabular-nums'],
+  },
   progressLabel: {
     fontSize: 13,
     color: '#444',
+    marginBottom: 8,
+  },
+  progressWaitHint: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: '#c00',
     marginBottom: 8,
   },
   progressTrack: {
