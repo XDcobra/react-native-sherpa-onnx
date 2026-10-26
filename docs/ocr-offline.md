@@ -183,6 +183,7 @@ function createOCR(options: OcrInitializeOptions): Promise<OcrEngine>;
 const ocr = await createOCR({
   modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
   modelType: 'auto',
+  provider: 'cpu',
   numThreads: 2,
 });
 ```
@@ -279,7 +280,7 @@ const page = await ocr.recognize(image, textOut, {
 | `OcrConcreteModelType` | Exclude `auto` |
 | `OcrFamily` | Concrete backend family after load |
 | `OcrGranularity` | `'line' \| 'word' \| 'block'` |
-| `OcrInitializeOptions` | Discriminated on `modelType` for option bags |
+| `OcrInitializeOptions` | Discriminated on `modelType` for option bags; shared `provider?`, `numThreads?` |
 | `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrDocVlmOptions` | Family init bags |
 | `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `signal?` |
 | `OcrRecognizeResult` | Discriminated on `family` (`doctags`/`markdown`/`complete`/`stopReason` only for `doc_vlm`) |

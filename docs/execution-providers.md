@@ -37,7 +37,7 @@ Hardware acceleration support for ONNX Runtime: QNN (Qualcomm NPU), NNAPI, XNNPA
 | Provider list | ✅ | `getAvailableProviders()` — compiled ONNX Runtime EPs |
 | SoC detection | ✅ | `getDeviceQnnSoc()` — Android 12+ |
 
-All `get*Support()` methods return the same `AccelerationSupport` shape. Use `provider` in `createSTT()`/`createTTS()` options to select a backend.
+All `get*Support()` methods return the same `AccelerationSupport` shape. Use `provider` in `createSTT()`/`createTTS()`/`createOCR()` options to select a backend.
 
 ---
 
@@ -321,6 +321,9 @@ The monorepo example exposes **Settings** (provider diagnostics) as a developer 
 
 - [STT](stt-offline.md) — `provider` option in `createSTT()`
 - [TTS](tts-offline.md) — `provider` option in `createTTS()`
+- [OCR](ocr-offline.md) — `provider` option in `createOCR()`
+- [Alignment](alignment-offline.md) — `provider` option on accurate `alignTextToAudio`
+- [Diarization streaming](diarization-streaming.md) — `provider` option in `createStreamingDiarization()`
 - [Download Manager](download-manager.md) — QNN model category
 - [Model Setup](model-setup.md) — Model discovery and paths
 
