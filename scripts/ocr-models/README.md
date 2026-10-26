@@ -1,6 +1,7 @@
 # OCR model release assets
 
-Nemotron-3.5-Parse ONNX (FP16 desktop + compact INT8, HF stage not uploaded):
+Nemotron-3.5-Parse ONNX (FP16 desktop + compact INT8) lives on
+`XDcobra/Nemotron-3.5-Parse-ONNX`. Export/quantize tooling:
 `scripts/ocr-models/nemotron-parse/`.
 
 This folder contains a CSV-driven pipeline that builds one `.tar.bz2` archive per
@@ -20,18 +21,18 @@ File: `scripts/ocr-models/sources.csv`
 | Column | Required | Description |
 | --- | --- | --- |
 | `id` | yes | Directory name inside archive and archive base name (`<id>.tar.bz2`) |
-| `family` | yes | `ppocr`, `doctr`, or `doc_vlm` — drives archive layout and which columns apply |
-| `det_url` | ppocr, doctr | Direct URL to detection ONNX → stored as `det.onnx`. Empty for `doc_vlm` |
-| `rec_url` | ppocr, doctr | Direct URL to recognition ONNX → stored as `rec.onnx`. Empty for `doc_vlm` |
-| `cls_url` | ppocr | Orientation classifier ONNX → `cls.onnx` (empty for doctr and `doc_vlm`) |
-| `rec_yml_url` | ppocr | Recognition `inference.yml` → `rec_inference.yml` (must be empty for doctr and `doc_vlm`) |
-| `det_config_url` | doctr | OnnxTR det `config.json` (merged into `ocr_manifest.json`). Empty for `doc_vlm` |
-| `rec_config_url` | doctr | OnnxTR rec `config.json` (vocab + preprocess → `ocr_manifest.json`). Empty for `doc_vlm` |
+| `family` | yes | `ppocr`, `doctr`, `doc_vlm`, or `nemotron_parse` — drives archive layout and which columns apply |
+| `det_url` | ppocr, doctr | Direct URL to detection ONNX → stored as `det.onnx`. Empty for `doc_vlm` / `nemotron_parse` |
+| `rec_url` | ppocr, doctr | Direct URL to recognition ONNX → stored as `rec.onnx`. Empty for `doc_vlm` / `nemotron_parse` |
+| `cls_url` | ppocr | Orientation classifier ONNX → `cls.onnx` (empty for doctr, `doc_vlm`, `nemotron_parse`) |
+| `rec_yml_url` | ppocr | Recognition `inference.yml` → `rec_inference.yml` (must be empty for doctr, `doc_vlm`, `nemotron_parse`) |
+| `det_config_url` | doctr | OnnxTR det `config.json` (merged into `ocr_manifest.json`). Empty for `doc_vlm` / `nemotron_parse` |
+| `rec_config_url` | doctr | OnnxTR rec `config.json` (vocab + preprocess → `ocr_manifest.json`). Empty for `doc_vlm` / `nemotron_parse` |
 | `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE` |
-| `license_type` | yes | SPDX-style label (e.g. `apache-2.0`) |
-| `commercial_use` | yes | `yes` or `no` |
+| `license_type` | yes | SPDX-style label (e.g. `apache-2.0`, `openmdw-1.1`) |
+| `commercial_use` | yes | `yes`, `no`, or `conditional` (OpenMDW / copyleft house convention) |
 | `languages` | no | Comma-separated ISO codes for catalog hints. Empty = not curated. |
-| `hf_repo` | doc_vlm | Hugging Face `owner/name` (no scheme). The script owns the file list and flattens `onnx/` into the pack root. Must be empty for `ppocr` and `doctr` |
+| `hf_repo` | doc_vlm, nemotron_parse | Hugging Face `owner/name` (no scheme). The script owns the file list and flattens one Hub folder into the pack root. Must be empty for `ppocr` and `doctr` |
 
 ## Archive layouts (detect contract)
 
@@ -105,6 +106,41 @@ Packs:
 
 Each archive is self-contained (vision + embed + decoder + tokenizer + manifest). Hub graphs keep suffixed `_data` locations; the packer rewrites them to the eight canonical names via `rewrite_onnx_external_location.py`. Hub `_int8` is not a pack: it has no merged decoder. `en` is the only non-experimental language on the IBM Granite Docling card.
 
+### `nemotron_parse` (Nemotron-3.5-Parse)
+
+Same HF flatten as granite. Hub:
+[`XDcobra/Nemotron-3.5-Parse-ONNX`](https://huggingface.co/XDcobra/Nemotron-3.5-Parse-ONNX).
+One published folder per archive (`onnx/fp16` or `onnx/int8`). Names are already
+canonical, so no external-data rewrite.
+
+```text
+<id>/
+  patch_embed.onnx
+  patch_embed.onnx_data
+  pos_embed.npy
+  vision_encoder.onnx
+  vision_encoder.onnx_data
+  embed_tokens.onnx
+  embed_tokens.onnx_data
+  decoder_model_merged.onnx
+  decoder_model_merged.onnx_data
+  tokenizer.json
+  ocr_manifest.json       # family: "nemotron_parse"
+  LICENSE                 # NVIDIA OpenMDW-1.1 (from the CSV license URL)
+  TOKENIZER_ATTRIBUTION.md  # optional; tokenizer is MIT
+```
+
+| ID | Repo (`hf_repo`) | Hub folder | Languages (hints) |
+| --- | --- | --- | --- |
+| `nemotron-3.5-parse-fp16` | `XDcobra/Nemotron-3.5-Parse-ONNX` | `onnx/fp16` | MOSCAR → 124 ISO codes (`en` first) |
+| `nemotron-3.5-parse-int8` | same | `onnx/int8` (official e5) | same |
+
+Weights: **OpenMDW-1.1**, `commercial_use=conditional` (same house label as Nemotron ASR). Tokenizer is MIT; the NVIDIA `LICENSE` points at `TOKENIZER_ATTRIBUTION.md`. Do not pack Hub `onnx/fp16`+`onnx/int8` as one archive. Q4F16 is not a release pack.
+
+Language hints are NVIDIA MOSCAR coverage (163 language/script entries → unique ISO 639-1 plus `yue`). MOSCAR is synthetic; NVIDIA does not treat it as a real-document guarantee. IndicVisionBench real pages: `bn`, `gu`, `hi`, `kn`, `ml`, `mr`, `or`, `pa`, `ta`, `te`.
+
+CI uses the same **Publish OCR model assets** job as granite (HF download → archive). Set `NEMOTRON_PARSE_EXPORT_ROOT` only to flatten a local export instead of the Hub. Re-export / restage HF with `scripts/ocr-models/nemotron-parse/`.
+
 ### `checksum.txt`
 
 After each non–dry-run publish, the script refreshes release asset **`checksum.txt`**:
@@ -124,7 +160,16 @@ The workflow **Publish OCR model assets** runs `sync_ocr_license_status.js`
 node scripts/ocr-models/build_and_upload.js --dry-run
 node scripts/ocr-models/build_and_upload.js --dry-run --only doctr-mobile
 GITHUB_TOKEN=... node scripts/ocr-models/build_and_upload.js
+GITHUB_TOKEN=... node scripts/ocr-models/build_and_upload.js \
+  --only nemotron-3.5-parse-fp16 --only nemotron-3.5-parse-int8
 ```
+
+Workflow **Publish OCR model assets** (`models-publish-ocr.yml`):
+
+- `dry_run` — pack without upload
+- One job: `ppocr` / `doctr` / `doc_vlm` / `nemotron_parse` (HF downloads)
+- Existing release assets are skipped; only missing ids are built
+- License CSV sync runs after upload (unless dry-run)
 
 ### Download authentication
 

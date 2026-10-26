@@ -32,10 +32,54 @@ const EXPECTED_HEADER = [
   'languages',
   'hf_repo',
 ];
-const VALID_FAMILIES = new Set(['ppocr', 'doctr', 'doc_vlm']);
+const VALID_FAMILIES = new Set(['ppocr', 'doctr', 'doc_vlm', 'nemotron_parse']);
+const NEMOTRON_PARSE_EXPORT_ROOT = path.join(
+  __dirname,
+  '../../build/ocr-models/nemotron-3.5-parse'
+);
+const NEMOTRON_PARSE_VARIANT_DIRS = {
+  fp16: 'onnx-fp16',
+  int8: 'onnx-int8',
+  fp32: 'onnx',
+  q4f16: 'onnx-q4f16',
+};
+const NEMOTRON_PARSE_HUB_FOLDERS = {
+  fp16: 'onnx/fp16',
+  int8: 'onnx/int8',
+};
+const NEMOTRON_PARSE_PACK_FILES = [
+  'patch_embed.onnx',
+  'patch_embed.onnx_data',
+  'pos_embed.npy',
+  'vision_encoder.onnx',
+  'vision_encoder.onnx_data',
+  'embed_tokens.onnx',
+  'embed_tokens.onnx_data',
+  'decoder_model_merged.onnx',
+  'decoder_model_merged.onnx_data',
+  'tokenizer.json',
+  'ocr_manifest.json',
+];
+const NEMOTRON_PARSE_OPTIONAL_ROOT_FILES = ['TOKENIZER_ATTRIBUTION.md'];
 const DOC_VLM_HF_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const GIT_LFS_POINTER_FIRST_LINE = 'version https://git-lfs.github.com/spec/v1';
 const MIB = 1024 * 1024;
+const NEMOTRON_PARSE_MIN_BYTES = {
+  fp16: new Map([
+    ['vision_encoder.onnx_data', 700 * MIB],
+    ['decoder_model_merged.onnx_data', 300 * MIB],
+    ['embed_tokens.onnx_data', 100 * MIB],
+    ['pos_embed.npy', 50 * MIB],
+    ['tokenizer.json', 1 * MIB],
+  ]),
+  int8: new Map([
+    ['vision_encoder.onnx_data', 350 * MIB],
+    ['decoder_model_merged.onnx_data', 150 * MIB],
+    ['embed_tokens.onnx_data', 50 * MIB],
+    ['pos_embed.npy', 20 * MIB],
+    ['tokenizer.json', 1 * MIB],
+  ]),
+};
 /** Hub filename tag is not the pack-id technique (`_quantized` → pack `-q8`). */
 const DOC_VLM_VARIANTS = {
   fp32: {
@@ -98,6 +142,17 @@ const DOC_VLM_SHARED_FILES = [
  * @param {string} modelId
  * @returns {keyof typeof DOC_VLM_VARIANTS}
  */
+function nemotronParseVariantFromId(modelId) {
+  const id = String(modelId ?? '');
+  if (id.endsWith('-q4f16')) return 'q4f16';
+  if (id.endsWith('-fp16')) return 'fp16';
+  if (id.endsWith('-int8')) return 'int8';
+  if (id.endsWith('-fp32')) return 'fp32';
+  throw new Error(
+    `${id}: nemotron_parse id must end with -fp16, -int8, -fp32, or -q4f16`
+  );
+}
+
 function docVlmVariantFromId(modelId) {
   const id = String(modelId ?? '');
   if (id.endsWith('-q4f16')) return 'q4f16';
@@ -178,6 +233,9 @@ Options:
   --only <id>         Build/upload only this model id (repeatable)
   --dry-run           Build archives only, skip release lookup and upload
   -h, --help          Show this help message
+
+Nemotron-Parse packs flatten onnx/fp16 and onnx/int8 from
+XDcobra/Nemotron-3.5-Parse-ONNX (same hf_repo column as granite).
 
 After uploads, writes ${CHECKSUM_ASSET_NAME} (SHA-256 per .tar.bz2, tab-separated) and uploads with --clobber.
 
@@ -386,7 +444,7 @@ async function readSources(csvPath) {
     }
     if (!VALID_FAMILIES.has(family)) {
       throw new Error(
-        `Line ${lineNumber}: family must be "ppocr", "doctr", or "doc_vlm" (got "${row[1]}")`
+        `Line ${lineNumber}: family must be "ppocr", "doctr", "doc_vlm", or "nemotron_parse" (got "${row[1]}")`
       );
     }
     if (family === 'ppocr' || family === 'doctr') {
@@ -459,13 +517,46 @@ async function readSources(csvPath) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Line ${lineNumber}: ${message}`);
       }
+    } else if (family === 'nemotron_parse') {
+      if (
+        detUrl ||
+        recUrl ||
+        clsUrl ||
+        recYmlUrl ||
+        detConfigUrl ||
+        recConfigUrl
+      ) {
+        throw new Error(
+          `Line ${lineNumber}: det_url, rec_url, cls_url, rec_yml_url, det_config_url, and rec_config_url must be empty for nemotron_parse`
+        );
+      }
+      if (!hfRepo) {
+        throw new Error(
+          `Line ${lineNumber}: hf_repo is required for nemotron_parse`
+        );
+      }
+      if (!DOC_VLM_HF_REPO_RE.test(hfRepo)) {
+        throw new Error(
+          `Line ${lineNumber}: hf_repo must be owner/name with no scheme (got "${hfRepo}")`
+        );
+      }
+      try {
+        nemotronParseVariantFromId(modelId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Line ${lineNumber}: ${message}`);
+      }
     }
     if (!licenseType) {
       throw new Error(`Line ${lineNumber}: license_type is required`);
     }
-    if (commercialUse !== 'yes' && commercialUse !== 'no') {
+    if (
+      commercialUse !== 'yes' &&
+      commercialUse !== 'no' &&
+      commercialUse !== 'conditional'
+    ) {
       throw new Error(
-        `Line ${lineNumber}: commercial_use must be "yes" or "no" (got "${row[10]}")`
+        `Line ${lineNumber}: commercial_use must be "yes", "no", or "conditional" (got "${row[10]}")`
       );
     }
     if (seen.has(modelId)) {
@@ -489,6 +580,10 @@ async function readSources(csvPath) {
       hfRepo,
       docVlmVariant:
         family === 'doc_vlm' ? docVlmVariantFromId(modelId) : undefined,
+      nemotronParseVariant:
+        family === 'nemotron_parse'
+          ? nemotronParseVariantFromId(modelId)
+          : undefined,
     });
   }
 
@@ -553,13 +648,13 @@ function headersForDownloadUrl(url) {
   return headers;
 }
 
-async function downloadFile(url, destination) {
+async function downloadFile(url, destination, options = {}) {
   await fsp.mkdir(path.dirname(destination), { recursive: true });
 
   if (url.startsWith('file://')) {
     const sourcePath = fileURLToPath(url);
     await fsp.copyFile(sourcePath, destination);
-    return;
+    return true;
   }
 
   if (typeof fetch !== 'function') {
@@ -570,6 +665,10 @@ async function downloadFile(url, destination) {
     headers: headersForDownloadUrl(url),
     redirect: 'follow',
   });
+
+  if (options.optional && response.status === 404) {
+    return false;
+  }
 
   if (!response.ok) {
     const body = (await response.text()).slice(0, 500);
@@ -590,6 +689,7 @@ async function downloadFile(url, destination) {
     await fsp.rm(destination, { force: true });
     throw error;
   }
+  return true;
 }
 
 function runCommand(command, args, options = {}) {
@@ -1392,6 +1492,90 @@ async function buildDocVlmPack(source, modelDir) {
   console.log(`[manifest] ${source.modelId}: ocr_manifest.json`);
 }
 
+async function copyNemotronParseLocalPack(source, modelDir, variant) {
+  const exportRoot =
+    process.env.NEMOTRON_PARSE_EXPORT_ROOT || NEMOTRON_PARSE_EXPORT_ROOT;
+  const srcDir = path.join(exportRoot, NEMOTRON_PARSE_VARIANT_DIRS[variant]);
+  if (!fs.existsSync(srcDir)) {
+    throw new Error(
+      `${source.modelId}: local export missing at ${srcDir} (NEMOTRON_PARSE_EXPORT_ROOT)`
+    );
+  }
+  for (const name of NEMOTRON_PARSE_PACK_FILES) {
+    const src = path.join(srcDir, name);
+    if (name.endsWith('.onnx_data') && !fs.existsSync(src)) {
+      continue;
+    }
+    if (!fs.existsSync(src)) {
+      throw new Error(`${source.modelId}: missing ${name} in ${srcDir}`);
+    }
+    const dest = path.join(modelDir, name);
+    await fsp.copyFile(src, dest);
+    const size = (await fsp.stat(dest)).size;
+    if (size <= 0) {
+      throw new Error(`${source.modelId}: ${name} is empty`);
+    }
+  }
+  for (const name of NEMOTRON_PARSE_OPTIONAL_ROOT_FILES) {
+    const src = path.join(srcDir, name);
+    if (fs.existsSync(src)) {
+      await fsp.copyFile(src, path.join(modelDir, name));
+    }
+  }
+  console.log(`[flatten] ${source.modelId}: copied from ${srcDir}`);
+}
+
+async function downloadNemotronParseHubPack(source, modelDir, variant) {
+  const hubFolder = NEMOTRON_PARSE_HUB_FOLDERS[variant];
+  if (!hubFolder) {
+    throw new Error(
+      `${source.modelId}: ${variant} is not a published Hub variant (fp16/int8)`
+    );
+  }
+  const minBytes = NEMOTRON_PARSE_MIN_BYTES[variant] || new Map();
+  for (const name of NEMOTRON_PARSE_PACK_FILES) {
+    const destination = path.join(modelDir, name);
+    const url = docVlmFileUrl(source.hfRepo, `${hubFolder}/${name}`);
+    console.log(`[download] ${source.modelId}: ${name} ← ${hubFolder}/${name}`);
+    await downloadFile(url, destination);
+    await assertNotGitLfsPointer(destination);
+    const requiredBytes = minBytes.get(name);
+    const size = requiredBytes
+      ? await assertMinBytes(destination, requiredBytes)
+      : (await fsp.stat(destination)).size;
+    if (size <= 0) {
+      throw new Error(`${source.modelId}: ${name} is empty`);
+    }
+  }
+  for (const name of NEMOTRON_PARSE_OPTIONAL_ROOT_FILES) {
+    const destination = path.join(modelDir, name);
+    const url = docVlmFileUrl(source.hfRepo, name);
+    const downloaded = await downloadFile(url, destination, { optional: true });
+    if (downloaded) {
+      await assertNotGitLfsPointer(destination);
+      console.log(`[download] ${source.modelId}: ${name}`);
+    }
+  }
+  console.log(`[flatten] ${source.modelId}: ${source.hfRepo}/${hubFolder}`);
+}
+
+async function buildNemotronParsePack(source, modelDir) {
+  const variant =
+    source.nemotronParseVariant ?? nemotronParseVariantFromId(source.modelId);
+  if (process.env.NEMOTRON_PARSE_EXPORT_ROOT) {
+    await copyNemotronParseLocalPack(source, modelDir, variant);
+  } else {
+    await downloadNemotronParseHubPack(source, modelDir, variant);
+  }
+  const manifestPath = path.join(modelDir, 'ocr_manifest.json');
+  const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+  if (manifest.family !== 'nemotron_parse') {
+    throw new Error(
+      `${source.modelId}: ocr_manifest.json family must be nemotron_parse (got ${manifest.family})`
+    );
+  }
+}
+
 async function buildArchives(sources, buildDir, distDir) {
   await fsp.mkdir(buildDir, { recursive: true });
   await fsp.mkdir(distDir, { recursive: true });
@@ -1408,6 +1592,8 @@ async function buildArchives(sources, buildDir, distDir) {
       await buildDoctrPack(source, modelDir);
     } else if (source.family === 'doc_vlm') {
       await buildDocVlmPack(source, modelDir);
+    } else if (source.family === 'nemotron_parse') {
+      await buildNemotronParsePack(source, modelDir);
     } else {
       throw new Error(`Unknown family for ${source.modelId}: ${source.family}`);
     }

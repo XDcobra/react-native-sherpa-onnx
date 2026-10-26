@@ -1,7 +1,11 @@
 # Nemotron-3.5-Parse ONNX (desktop)
 
 Local export of [nvidia/Nemotron-3.5-Parse](https://huggingface.co/nvidia/Nemotron-3.5-Parse)
-to ONNX Runtime. FP32 first, then FP16 / INT8 / Q4F16 on that pack. No Hub publish.
+to ONNX Runtime. FP32 first, then FP16 / INT8 / Q4F16 on that pack.
+
+Published Hub: [XDcobra/Nemotron-3.5-Parse-ONNX](https://huggingface.co/XDcobra/Nemotron-3.5-Parse-ONNX)
+(`onnx/fp16`, `onnx/int8`). GitHub release CI downloads those folders; it does
+not re-export.
 
 ## Layout
 
@@ -58,6 +62,10 @@ build/ocr-models/nemotron-3.5-parse/.venv/bin/python \
   scripts/ocr-models/nemotron-parse/test_parity.py \
   --onnx-dir build/ocr-models/nemotron-3.5-parse/onnx-fp16 \
   --profile fp16 --from-refs --fixture hello --stem hello_world
+
+# Local official packs (FP16 + e5 INT8). Does not upload.
+build/ocr-models/nemotron-3.5-parse/.venv/bin/python \
+  scripts/ocr-models/nemotron-parse/prepare_release_packs.py
 
 # Promote e5 → official onnx-int8 and stage the HF repo (does not upload)
 build/ocr-models/nemotron-3.5-parse/.venv/bin/python \
@@ -137,7 +145,7 @@ JSON: `build/ocr-models/nemotron-3.5-parse/refs/size-experiments.json`.
 quality loss beyond the parent decoder. Q4 decoder is what drops the
 `CAMBRIDGE` page header. INT8 decoder keeps it (plus a `#` heading).
 
-### Recommended HF set (not published yet)
+### Recommended HF set (published on XDcobra/Nemotron-3.5-Parse-ONNX)
 
 | Role | Pack | Size | Why |
 |---|---|---|---|
