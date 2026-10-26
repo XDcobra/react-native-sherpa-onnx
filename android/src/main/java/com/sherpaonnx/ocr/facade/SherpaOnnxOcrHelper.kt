@@ -294,13 +294,16 @@ class SherpaOnnxOcrHelper(
       }
       val doctags = raw["doctags"] as? String
       val markdown = raw["markdown"] as? String
-      if (doctags == null || markdown == null) {
-        promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
-        return
-      }
       val stopReason = raw["stopReason"] as? String
       val complete = raw["complete"] as? Boolean
-      if (family == "doc_vlm" && (stopReason.isNullOrBlank() || complete == null)) {
+      if (doctags == null || markdown == null ||
+          (family == "doc_vlm" && (stopReason.isNullOrBlank() || complete == null))) {
+        Log.e(
+          TAG,
+          "recognize extras missing family=$family doctags=${doctags != null} " +
+            "markdown=${markdown != null} stopReason=${stopReason ?: "null"} " +
+            "complete=$complete",
+        )
         promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
         return
       }

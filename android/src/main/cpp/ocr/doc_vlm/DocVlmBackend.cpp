@@ -468,7 +468,8 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
     const std::string piece = tokenizer_.Decode(std::vector<int32_t>{next});
     if (!prefix.Feed(piece)) {
       stop_reason = "invalid_sequence";
-      OCR_LOGI("doc_vlm decode step=%d token=%d", step, next);
+      OCR_LOGI("doc_vlm decode step=%d token=%d prefix_reject piece=%s", step,
+               next, piece.c_str());
       break;
     }
     generated_ids.push_back(next);

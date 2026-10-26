@@ -231,6 +231,13 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
     utf16_cursor += Utf8ToUtf16Length(frame_result.text_utf8);
     appendField(merged.doctags_utf8, frame_result.doctags_utf8);
     appendField(merged.markdown_utf8, frame_result.markdown_utf8);
+    merged.stop_reason = frame_result.stop_reason;
+    merged.complete = frame_result.complete;
+    OCR_LOGI(
+        "recognize extras frame=%d stop=%s complete=%d doctags=%zu markdown=%zu",
+        frame_index, frame_result.stop_reason.c_str(),
+        frame_result.complete ? 1 : 0, frame_result.doctags_utf8.size(),
+        frame_result.markdown_utf8.size());
 
     ++done;
     if (options.progress) {
@@ -242,9 +249,11 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
   out.ok = true;
   out.result = std::move(merged);
   OCR_LOGI(
-      "recognize done buffer=%s spans=%zu textUtf16≈%d doctags=%zu markdown=%zu",
+      "recognize done buffer=%s spans=%zu textUtf16≈%d doctags=%zu markdown=%zu "
+      "stop=%s complete=%d",
       image_buffer_id.c_str(), out.result.spans.size(), utf16_cursor,
-      out.result.doctags_utf8.size(), out.result.markdown_utf8.size());
+      out.result.doctags_utf8.size(), out.result.markdown_utf8.size(),
+      out.result.stop_reason.c_str(), out.result.complete ? 1 : 0);
   return out;
 }
 
