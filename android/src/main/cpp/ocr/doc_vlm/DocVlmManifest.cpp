@@ -283,7 +283,11 @@ DocVlmManifest ParseDocVlmManifestFile(const std::string& manifest_path) {
 
   RequireEq("family", m.family, "doc_vlm");
   RequireEq("arch", m.arch, "idefics3");
-  RequireEq("onnx_dtype", m.onnx_dtype, "fp32");
+  if (m.onnx_dtype != "fp32" && m.onnx_dtype != "q8" && m.onnx_dtype != "fp16" &&
+      m.onnx_dtype != "q4f16") {
+    throw std::runtime_error(
+        "DocVlmManifest: onnx_dtype must be fp32, q8, fp16, or q4f16");
+  }
   RequireEqInt("vision.image_size", m.image_size, 512);
   RequireEqInt("vision.image_seq_len", m.image_seq_len, 64);
   RequireEqInt("text.hidden_size", m.hidden_size, 576);

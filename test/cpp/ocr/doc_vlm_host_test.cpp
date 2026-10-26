@@ -6,8 +6,8 @@
  * DocVlmSmoke.EnHello run only when the pack is present (local unpack or
  * workflow_dispatch); otherwise they skip. Strict golden is opt-in.
  *
- * Pack: DOCVLM_MODEL_DIR, else build/ocr-models/docvlm-granite-258m,
- * else dist/ocr-models/docvlm-granite-258m.
+ * Pack: DOCVLM_MODEL_DIR, else build/ocr-models/docvlm-granite-258m-fp32
+ * (or another granite dtype dir).
  */
 
 #include <gtest/gtest.h>
@@ -44,9 +44,9 @@ constexpr uint64_t kMiB = 1024ull * 1024ull;
 const char* kUnpackHint =
     "docvlm-granite-258m pack not found. Unpack with:\n"
     "mkdir -p build/ocr-models\n"
-    "curl -fsSL -o /tmp/docvlm-granite-258m.tar.bz2 \\\n"
-    "  https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/docvlm-granite-258m.tar.bz2\n"
-    "tar xjf /tmp/docvlm-granite-258m.tar.bz2 -C build/ocr-models";
+    "curl -fsSL -o /tmp/docvlm-granite-258m-fp32.tar.bz2 \\\n"
+    "  https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/docvlm-granite-258m-fp32.tar.bz2\n"
+    "tar xjf /tmp/docvlm-granite-258m-fp32.tar.bz2 -C build/ocr-models";
 
 std::string RepoRelativeFixture(const char* relative_from_test_fixtures) {
   const char* env = std::getenv("TEST_FIXTURES_DIR");
@@ -77,8 +77,14 @@ std::string ResolveDocVlmModelDir() {
     if (env[0] != '\0' && fs::is_directory(env)) return env;
   }
   const char* candidates[] = {
-      "build/ocr-models/docvlm-granite-258m",
-      "dist/ocr-models/docvlm-granite-258m",
+      "build/ocr-models/docvlm-granite-258m-fp32",
+      "dist/ocr-models/docvlm-granite-258m-fp32",
+      "build/ocr-models/docvlm-granite-258m-q8",
+      "dist/ocr-models/docvlm-granite-258m-q8",
+      "build/ocr-models/docvlm-granite-258m-fp16",
+      "dist/ocr-models/docvlm-granite-258m-fp16",
+      "build/ocr-models/docvlm-granite-258m-q4f16",
+      "dist/ocr-models/docvlm-granite-258m-q4f16",
   };
   for (const char* candidate : candidates) {
     if (fs::is_directory(candidate)) return candidate;

@@ -143,6 +143,7 @@ void DocVlmBackend::Release() {
   env_.reset();
   tokenizer_ = DocVlmTokenizer{};
   manifest_ = DocVlmManifest{};
+  kv_float16_ = false;
 }
 
 void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& options) {
@@ -182,6 +183,9 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
       manifest_.image_token_id != kImageTokenId) {
     throw std::runtime_error("DocVlmBackend: special token ids do not match granite-docling");
   }
+  kv_float16_ = manifest_.onnx_dtype == "fp16" || manifest_.onnx_dtype == "q4f16";
+  OCR_LOGI("doc_vlm onnx_dtype=%s kv=%s", manifest_.onnx_dtype.c_str(),
+           kv_float16_ ? "float16" : "float32");
 
   tokenizer_ = DocVlmTokenizer::Load(tokenizer_path);
   if (tokenizer_.TokenId("<|start_of_role|>") != manifest_.bos_token_id ||
@@ -372,14 +376,21 @@ OcrResult DocVlmBackend::Recognize(const OcrFrameView& frame) {
   const int head_dim = manifest_.head_dim;
   const int vocab = manifest_.vocab_size;
 
-  float past_dummy = 0.f;
+  float past_dummy_f32 = 0.f;
+  uint16_t past_dummy_f16 = 0;
   std::vector<Ort::Value> past;
   const int past_slots = layers * 2;
   past.reserve(static_cast<size_t>(past_slots));
   const std::array<int64_t, 4> empty_shape{1, kv_heads, 0, head_dim};
   while (static_cast<int>(past.size()) < past_slots) {
-    past.push_back(Ort::Value::CreateTensor<float>(mem, &past_dummy, 0, empty_shape.data(),
-                                                   empty_shape.size()));
+    if (kv_float16_) {
+      past.push_back(Ort::Value::CreateTensor(
+          mem, static_cast<void*>(&past_dummy_f16), 0, empty_shape.data(),
+          empty_shape.size(), ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16));
+    } else {
+      past.push_back(Ort::Value::CreateTensor<float>(
+          mem, &past_dummy_f32, 0, empty_shape.data(), empty_shape.size()));
+    }
   }
 
   auto run_decoder = [&](std::vector<float>& embed_buf, int64_t seq,
