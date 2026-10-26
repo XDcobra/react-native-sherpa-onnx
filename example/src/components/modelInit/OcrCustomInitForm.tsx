@@ -23,12 +23,13 @@ const OCR_CONCRETE_TYPES: readonly OcrConcreteModelType[] = [
   'ppocr',
   'doctr',
   'doc_vlm',
+  'nemotron_parse',
 ];
 
 export type OcrCustomInitFormState = {
   modelType: OcrConcreteModelType;
   fileSources: Partial<Record<OcrCustomPathKey, FileSource>>;
-  /** 0 → backend default (8192). Ignored unless modelType is doc_vlm. */
+  /** 0 → backend default (8192). Used by VLM families. */
   maxNewTokens: number;
 };
 
@@ -60,8 +61,8 @@ export function DocVlmInitOptionChips({
     <View>
       <Text style={styles.subheading}>maxNewTokens</Text>
       <Text style={styles.hint}>
-        Cap on generated DocTags. 0 uses the backend default (8192). 512 is only
-        enough for short goldens; invoices need a higher cap.
+        Cap on generated VLM tokens. 0 uses the backend default (8192). 512 is
+        only enough for short goldens; full pages need a higher cap.
       </Text>
       <ScrollView
         horizontal
@@ -106,6 +107,9 @@ const PATH_LABELS: Record<OcrCustomPathKey, string> = {
   decoder: 'decoder_model_merged.onnx',
   decoder_data: 'decoder_model_merged.onnx_data',
   tokenizer: 'tokenizer.json',
+  patch_embed: 'patch_embed.onnx',
+  patch_embed_data: 'patch_embed.onnx_data',
+  pos_embed: 'pos_embed.npy',
 };
 
 export function OcrCustomInitForm({
@@ -212,7 +216,7 @@ export function OcrCustomInitForm({
         })}
       </ScrollView>
 
-      {value.modelType === 'doc_vlm' ? (
+      {value.modelType === 'doc_vlm' || value.modelType === 'nemotron_parse' ? (
         <DocVlmInitOptionChips
           maxNewTokens={value.maxNewTokens}
           onChangeMaxNewTokens={setMaxNewTokens}

@@ -33,6 +33,7 @@ function concreteFromDetect(
   if (
     modelType === 'doctr' ||
     modelType === 'doc_vlm' ||
+    modelType === 'nemotron_parse' ||
     modelType === 'ppocr'
   ) {
     return modelType;

@@ -162,7 +162,7 @@ export default function OCRScreen() {
   );
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [spansShowAllPages, setSpansShowAllPages] = useState(false);
-  const [resultTab, setResultTab] = useState<'spans' | 'markdown' | 'doctags'>(
+  const [resultTab, setResultTab] = useState<'spans' | 'markdown' | 'raw'>(
     'spans'
   );
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
@@ -297,7 +297,6 @@ export default function OCRScreen() {
         const modelSource = await toDetectSource(resolveModelPath(folderId));
         await runDetect(folderId);
 
-        const wantDocVlmOpts = isGranitePack(folderId);
         const maxLabel =
           customInitForm.maxNewTokens === 0
             ? 'default'
@@ -309,9 +308,7 @@ export default function OCRScreen() {
           numThreads: threads,
           ppocr: { detUnclipRatio },
           doctr: { detUnclipRatio },
-          ...(wantDocVlmOpts
-            ? { docVlm: { maxNewTokens: customInitForm.maxNewTokens } }
-            : {}),
+          maxNewTokens: customInitForm.maxNewTokens,
         };
         const ocr = await createOCR(initOptions);
         engineRef.current = ocr;
@@ -319,9 +316,9 @@ export default function OCRScreen() {
         setInitMessage(
           `Ready · instance=${
             ocr.instanceId
-          } · modelType=auto · ${getModelDisplayName(folderId)}${
-            wantDocVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''
-          }`
+          } · modelType=auto · ${getModelDisplayName(
+            folderId
+          )} · maxNewTokens=${maxLabel}`
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -342,7 +339,9 @@ export default function OCRScreen() {
         assertOcrCustomConfig(
           customConfig as unknown as Record<string, unknown>
         );
-        const wantDocVlmOpts = customInitForm.modelType === 'doc_vlm';
+        const wantVlmOpts =
+          customInitForm.modelType === 'doc_vlm' ||
+          customInitForm.modelType === 'nemotron_parse';
         const ocr = await createOCR({
           initMode: 'custom',
           modelType: customInitForm.modelType,
@@ -355,9 +354,7 @@ export default function OCRScreen() {
           ...(customInitForm.modelType === 'doctr'
             ? { doctr: { detUnclipRatio } }
             : {}),
-          ...(wantDocVlmOpts
-            ? { docVlm: { maxNewTokens: customInitForm.maxNewTokens } }
-            : {}),
+          ...(wantVlmOpts ? { maxNewTokens: customInitForm.maxNewTokens } : {}),
         });
         engineRef.current = ocr;
         setInitializedFolder(
@@ -372,7 +369,7 @@ export default function OCRScreen() {
         setInitMessage(
           `Ready · instance=${ocr.instanceId} · custom:${
             customInitForm.modelType
-          }${wantDocVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''}`
+          }${wantVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''}`
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -703,16 +700,17 @@ export default function OCRScreen() {
     : spans.filter((span) => span.frameIndex === resultFrameIndex);
   const scopedSpanText = joinSpanTexts(resultText, scopedSpans);
 
-  const docVlmExtras = resultMeta?.family === 'doc_vlm' ? resultMeta : null;
-  const showDocVlmTabs =
-    docVlmExtras != null &&
-    (docVlmExtras.markdown.length > 0 || docVlmExtras.doctags.length > 0);
+  const vlmExtras =
+    resultMeta?.family === 'doc_vlm' || resultMeta?.family === 'nemotron_parse'
+      ? resultMeta
+      : null;
+  const showVlmTabs =
+    vlmExtras != null &&
+    (vlmExtras.markdown.length > 0 || vlmExtras.raw.length > 0);
   const extrasPayload =
-    resultTab === 'doctags'
-      ? docVlmExtras?.doctags ?? ''
-      : docVlmExtras?.markdown ?? '';
+    resultTab === 'raw' ? vlmExtras?.raw ?? '' : vlmExtras?.markdown ?? '';
   const showingExtras =
-    showDocVlmTabs && (resultTab === 'markdown' || resultTab === 'doctags');
+    showVlmTabs && (resultTab === 'markdown' || resultTab === 'raw');
 
   const showPdfPipeline = pdfSelection != null;
   const showRasterStep = pdfExtractStatus === 'noTextLayer';
@@ -1118,7 +1116,9 @@ export default function OCRScreen() {
                 {resultMeta
                   ? `\nfamily=${resultMeta.family}\nspanCount=${resultMeta.spanCount}`
                   : `\nspanCount=${spans.length}`}
-                {resultMeta?.family === 'doc_vlm'
+                {resultMeta &&
+                (resultMeta.family === 'doc_vlm' ||
+                  resultMeta.family === 'nemotron_parse')
                   ? `\ncomplete=${resultMeta.complete}\nstopReason=${resultMeta.stopReason}`
                   : ''}
                 {lastMs != null ? `\nwall=${lastMs}ms` : ''}
@@ -1126,10 +1126,10 @@ export default function OCRScreen() {
                   ? `\nframe=${imageInfo.width}×${imageInfo.height}`
                   : ''}
               </Text>
-              {resultMeta?.family === 'doc_vlm' && !resultMeta.complete ? (
+              {vlmExtras != null && !vlmExtras.complete ? (
                 <Text style={styles.sectionHint}>
-                  Incomplete DocTags ({resultMeta.stopReason}). Raw output is
-                  still on the DocTags tab.
+                  Incomplete generation ({vlmExtras.stopReason}). Raw output is
+                  still on the Raw tab.
                 </Text>
               ) : null}
             </View>
@@ -1230,16 +1230,16 @@ export default function OCRScreen() {
               </View>
             ) : null}
 
-            {spans.length > 0 || resultText.length > 0 || showDocVlmTabs ? (
+            {spans.length > 0 || resultText.length > 0 || showVlmTabs ? (
               <View style={styles.card}>
-                {showDocVlmTabs ? (
+                {showVlmTabs ? (
                   <View style={styles.toggleRow}>
                     <View style={styles.tabRowInline}>
                       {(
                         [
                           ['spans', 'Spans'],
                           ['markdown', 'Markdown'],
-                          ['doctags', 'DocTags'],
+                          ['raw', 'Raw'],
                         ] as const
                       ).map(([id, label]) => (
                         <TouchableOpacity
@@ -1268,7 +1268,7 @@ export default function OCRScreen() {
                   <>
                     <View style={styles.toggleRow}>
                       <Text style={styles.toggleLabel}>
-                        {resultTab === 'doctags' ? 'DocTags' : 'Markdown'}
+                        {resultTab === 'raw' ? 'Raw' : 'Markdown'}
                       </Text>
                       <TouchableOpacity
                         style={styles.copyChip}
@@ -1285,8 +1285,8 @@ export default function OCRScreen() {
                     </View>
                     <Text style={styles.resultText}>
                       {extrasPayload ||
-                        (resultTab === 'doctags'
-                          ? '(empty doctags)'
+                        (resultTab === 'raw'
+                          ? '(empty raw)'
                           : '(empty markdown)')}
                     </Text>
                   </>
