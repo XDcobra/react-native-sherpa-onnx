@@ -70,6 +70,10 @@ build-test/
 # Local venv for one-off ONNX scripts (e.g. tiny model generation)
 .venv-ort-test/
 
+# Python bytecode from OCR / alignment export scripts
+__pycache__/
+*.py[cod]
+
 # Cocoapods
 #
 example/ios/Pods
