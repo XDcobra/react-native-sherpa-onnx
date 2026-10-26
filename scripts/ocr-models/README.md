@@ -1,5 +1,8 @@
 # OCR model release assets
 
+Nemotron-3.5-Parse ONNX (FP16 desktop + compact INT8, HF stage not uploaded):
+`scripts/ocr-models/nemotron-parse/`.
+
 This folder contains a CSV-driven pipeline that builds one `.tar.bz2` archive per
 OCR pack ID and uploads missing archives to the GitHub release tag `ocr-models`.
 
