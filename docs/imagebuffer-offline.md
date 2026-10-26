@@ -367,7 +367,15 @@ import { OfflineImageBufferAnnotatedView } from 'react-native-sherpa-onnx/imageb
   text={textOut}
   frameIndex={0}
   origins={['ocr', 'textLayer']}
+  levels={['line', 'block']}
   selectedIndex={selected}
+  selectedRange={range}
+  boxStyle={{ borderWidth: 2 }}
+  originBoxStyle={{
+    ocr: { borderColor: '#007AFF' },
+    textLayer: { borderColor: '#34C759' },
+  }}
+  selectedBoxStyle={{ borderColor: '#FF3B30' }}
   style={{ width: '100%', height: 280 }}
   onSpanPress={(e) => {
     // e.index, e.utf16Start, e.utf16End, e.origin, e.frameIndex
@@ -383,11 +391,14 @@ import { OfflineImageBufferAnnotatedView } from 'react-native-sherpa-onnx/imageb
 | `text` | Offline text buffer with spatial spans |
 | `frameIndex` | Frame to show (default `0`) |
 | `origins` | `'ocr'` and/or `'textLayer'` (default both) |
-| `selectedIndex` | Controlled highlight |
+| `levels` | `'line'` / `'word'` / `'block'` (default all). `selectedIndex` still refers to the full span slice |
+| `selectedIndex` | Highlight that slice index |
+| `selectedRange` | Also highlight spans whose UTF-16 range overlaps `{ utf16Start, utf16End }` |
+| `boxStyle` / `selectedBoxStyle` / `originBoxStyle` | Visual only. Merge: defaults → `boxStyle` → origin → selected defaults → `selectedBoxStyle`. Position and size stay view-owned |
 | `onSpanPress` | Tap on a box; `quad` is frame pixels |
-| `maxSide` / `resizeMode` / `style` | Forwarded to FrameView |
+| `maxSide` / `resizeMode` / `style` | Forwarded to FrameView. Overlay math follows `resizeMode` (`contain` / `cover` / `stretch`) |
 
-Use `mapTextSpatialSpansToFrame` when drawing your own overlay on `OfflineImageBufferFrameView`.
+Use `mapTextSpatialSpansToFrame` when drawing your own overlay on `OfflineImageBufferFrameView` (labels, rotated quads, a canvas). Styling, level filters, and selection do not need a custom overlay.
 
 ---
 
@@ -430,6 +441,9 @@ import type {
   ImageProgressEvent,
   ImageStorageKind, // 'ram' | 'mmap'
   LiveImageBufferInfo, // reserved
+  OfflineImageBufferAnnotatedViewProps,
+  OfflineImageBufferSpanPressEvent,
+  OfflineImageBufferSpanRange,
   FileSource,
   FileDestination,
   ResolvedFileRef,
@@ -528,7 +542,7 @@ const pages = await rasterizePdfPages(pdfSource, {
 <details>
 <summary>Custom span overlay when AnnotatedView is not enough</summary>
 
-Prefer [`OfflineImageBufferAnnotatedView`](#offlineimagebufferannotatedview) for the default boxes. Use `mapTextSpatialSpansToFrame` when you need your own drawing (labels, colors, rotated quads, a canvas). The mapper returns **frame pixels**; `resizeMode="contain"` still needs a layout scale onto the view.
+Prefer [`OfflineImageBufferAnnotatedView`](#offlineimagebufferannotatedview) for boxes, styling, level filters, and selection. Use `mapTextSpatialSpansToFrame` when you need your own drawing (labels, rotated quads, a canvas). The mapper returns **frame pixels**; you still scale that onto the view for your `resizeMode`.
 
 ```tsx
 import { useEffect, useMemo, useState } from 'react';
@@ -648,9 +662,7 @@ function CustomSpanOverlay({
               width: Math.max(1, box.width * scale),
               height: Math.max(1, box.height * scale),
               borderWidth: 1,
-              // Example customization AnnotatedView does not offer: color by origin.
-              borderColor:
-                row.span.origin === 'textLayer' ? '#34C759' : '#007AFF',
+              borderColor: '#007AFF',
             }}
           />
         );
