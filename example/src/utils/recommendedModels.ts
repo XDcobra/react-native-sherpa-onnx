@@ -41,7 +41,7 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
     // Bundled via example/scripts/model-download-config.json (one pack per family)
     'ppocrv6-tiny',
     'doctr-mobile',
-    'docvlm-granite-258m',
+    'docvlm-granite-258m-fp32',
   ],
 };
 
