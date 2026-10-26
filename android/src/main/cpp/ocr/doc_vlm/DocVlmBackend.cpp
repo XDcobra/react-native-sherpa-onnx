@@ -4,6 +4,7 @@
 #include "DocVlmDocTagsPrefix.h"
 #include "DocVlmImageOps.h"
 #include "DocVlmPrompt.h"
+#include "ort/ApplyOrtProvider.h"
 
 #include <onnxruntime_cxx_api.h>
 
@@ -217,15 +218,12 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
     }
   }
 
-  if (!options_.provider.empty() && options_.provider != "cpu") {
-    OCR_LOGW("doc_vlm provider \"%s\" is not supported; using cpu", options_.provider.c_str());
-  }
-
   env_ = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "sherpa-onnx-ocr-doc-vlm");
   session_options_ = std::make_unique<Ort::SessionOptions>();
   session_options_->SetIntraOpNumThreads(std::max(1, options_.num_threads));
   session_options_->SetInterOpNumThreads(1);
   session_options_->SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_EXTENDED);
+  ApplyOrtProvider(*session_options_, options_.provider);
 
   const auto open_session = [&](const std::string& path, const char* label) {
     const auto t0 = std::chrono::steady_clock::now();

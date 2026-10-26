@@ -83,10 +83,6 @@ struct OcrLoadOptions {
   float det_box_thresh = 0.3f;
   float det_box_score_thresh = 0.5f;
   float det_unclip_ratio = 1.5f;
-  /**
-   * ORT execution provider id (e.g. "cpu"). Empty → cpu.
-   * Unknown providers fall back to cpu with a warning log.
-   */
   std::string provider;
   /**
    * doc_vlm generation cap. 0 → 8192. Ignored by ppocr/doctr.
