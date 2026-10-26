@@ -319,6 +319,8 @@ export type OcrRecognizeNativeResult = {
   spanCount: number;
   doctags: string;
   markdown: string;
+  stopReason?: string;
+  complete?: boolean;
 };
 
 /** `ocrRecognize(..., options)`. */

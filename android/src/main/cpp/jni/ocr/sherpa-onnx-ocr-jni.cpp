@@ -472,6 +472,10 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   PutString(env, map, put, "text", outcome.result.text_utf8);
   PutString(env, map, put, "doctags", outcome.result.doctags_utf8);
   PutString(env, map, put, "markdown", outcome.result.markdown_utf8);
+  if (outcome.family == "doc_vlm") {
+    PutString(env, map, put, "stopReason", outcome.result.stop_reason);
+    PutBool(env, map, put, "complete", outcome.result.complete ? JNI_TRUE : JNI_FALSE);
+  }
 
   jclass arrayListClass = env->FindClass("java/util/ArrayList");
   jmethodID arrayListInit = env->GetMethodID(arrayListClass, "<init>", "()V");

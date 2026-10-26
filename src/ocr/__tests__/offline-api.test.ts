@@ -435,6 +435,8 @@ describe('ocr offline API', () => {
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
+      complete: true,
+      stopReason: 'doctag_end',
     });
 
     const ocr = await createOCR({
@@ -472,6 +474,8 @@ describe('ocr offline API', () => {
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
+      complete: true,
+      stopReason: 'doctag_end',
     });
 
     await ocr.destroy();
@@ -631,6 +635,8 @@ describe('ocr offline API', () => {
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
+      complete: true,
+      stopReason: 'doctag_end',
     });
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
@@ -645,6 +651,8 @@ describe('ocr offline API', () => {
       spanCount: 3,
       doctags: '<doctag><text>Hi</text></doctag>',
       markdown: 'Hi',
+      complete: true,
+      stopReason: 'doctag_end',
     });
     await ocr.destroy();
   });
@@ -657,6 +665,40 @@ describe('ocr offline API', () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
       modelType: 'doc_vlm',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
+    await ocr.destroy();
+  });
+
+  it('recognize rejects when doc_vlm complete or stopReason is missing', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 0,
+      doctags: '<doctag><text>Hi</text></doctag>',
+      markdown: 'Hi',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m' },
+      modelType: 'doc_vlm',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 0,
+      doctags: '<doctag><text>Hi</text></doctag>',
+      markdown: 'Hi',
+      complete: true,
+      stopReason: 'not_a_reason',
     });
     await expect(
       ocr.recognize(

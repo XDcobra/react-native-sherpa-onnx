@@ -451,14 +451,20 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
         reject(kOcrInternal, @"recognize result missing family", nil);
         return;
       }
-      resolve(@{
+      NSMutableDictionary *payload = [@{
         @"family" : [NSString stringWithUTF8String:outcome.family.c_str()] ?: @"",
         @"spanCount" : @(static_cast<NSInteger>(spans.size())),
         @"doctags" : [NSString stringWithUTF8String:outcome.result.doctags_utf8.c_str()]
             ?: @"",
         @"markdown" :
             [NSString stringWithUTF8String:outcome.result.markdown_utf8.c_str()] ?: @"",
-      });
+      } mutableCopy];
+      if (outcome.family == "doc_vlm") {
+        payload[@"stopReason"] =
+            [NSString stringWithUTF8String:outcome.result.stop_reason.c_str()] ?: @"";
+        payload[@"complete"] = @(outcome.result.complete);
+      }
+      resolve(payload);
     } catch (const std::exception &e) {
       reject(kOcrInternal, [NSString stringWithUTF8String:e.what()], nil);
     }

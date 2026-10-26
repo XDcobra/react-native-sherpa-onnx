@@ -30,6 +30,7 @@ import {
 } from '../types/modelDetect';
 import { buildOcrInitBridgeOptions } from './ocrNativeBridge';
 import type {
+  OcrDocVlmStopReason,
   OcrEngine,
   OcrGranularity,
   OcrInitializeOptions,
@@ -307,11 +308,29 @@ function readRecognizeResult(
         code: OcrErrorCode.INTERNAL_ERROR,
       });
     }
+    const stopReason = raw.stopReason;
+    if (
+      stopReason !== 'doctag_end' &&
+      stopReason !== 'eos' &&
+      stopReason !== 'max_new_tokens' &&
+      stopReason !== 'invalid_sequence'
+    ) {
+      throw Object.assign(new Error('OCR recognize result missing extras'), {
+        code: OcrErrorCode.INTERNAL_ERROR,
+      });
+    }
+    if (typeof raw.complete !== 'boolean') {
+      throw Object.assign(new Error('OCR recognize result missing extras'), {
+        code: OcrErrorCode.INTERNAL_ERROR,
+      });
+    }
     return {
       family,
       spanCount: raw.spanCount,
       doctags: raw.doctags,
       markdown: raw.markdown,
+      complete: raw.complete,
+      stopReason: stopReason as OcrDocVlmStopReason,
     };
   }
   // ppocr / doctr: DocTags are unsupported — omit fields (ignore native "").
@@ -389,6 +408,7 @@ export type {
   OcrPpocrOptions,
   OcrDoctrOptions,
   OcrDocVlmOptions,
+  OcrDocVlmStopReason,
   OcrInitializeOptions,
   OcrInitializeOptionsAuto,
   OcrInitializeOptionsPpocr,

@@ -286,6 +286,12 @@ class SherpaOnnxOcrHelper(
         promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
         return
       }
+      val stopReason = raw["stopReason"] as? String
+      val complete = raw["complete"] as? Boolean
+      if (family == "doc_vlm" && (stopReason.isNullOrBlank() || complete == null)) {
+        promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
+        return
+      }
 
       try {
         textEntry.populate(
@@ -312,6 +318,10 @@ class SherpaOnnxOcrHelper(
       result.putInt("spanCount", spans.size)
       result.putString("doctags", doctags)
       result.putString("markdown", markdown)
+      if (family == "doc_vlm" && stopReason != null && complete != null) {
+        result.putString("stopReason", stopReason)
+        result.putBoolean("complete", complete)
+      }
       promise.resolve(result)
     } catch (e: Exception) {
       Log.e(TAG, "ocrRecognize failed", e)
