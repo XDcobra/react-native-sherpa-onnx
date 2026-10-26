@@ -6,7 +6,7 @@
 
 Import path: **`react-native-sherpa-onnx/ocr`**.
 
-Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), **`doc_vlm`** (Granite Docling), and **`nemotron_parse`** (Nemotron-3.5-Parse). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm' | 'nemotron_parse'` (alias `nemotron-parse` only — never bare `nemotron`). VLM families share `raw` + `markdown` + `complete` + `stopReason`. `doc_vlm` also keeps `doctags` (same stream as `raw`). Nemotron `raw` is native `<x_*>/<y_*>/<class_*>` markup, not DocTags. `maxNewTokens` is a shared createOCR field (omit or `0` → 8192). `complete` is `true` after a natural stop (`</doctag>` or EOS). Hitting `maxNewTokens` is not a finished document. The image overlay draws spans; it does not parse markup.
+Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), **`doc_vlm`** (Granite Docling), and **`nemotron_parse`** (Nemotron-3.5-Parse). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm' | 'nemotron_parse'` (alias `nemotron-parse` only — never bare `nemotron`). VLM families share `raw` + `markdown` + `complete` + `stopReason`. `doc_vlm` also keeps `doctags` (same stream as `raw`). `raw` is the native model stream. `markdown` is **GFM we produce** (Granite from DocTags; Nemotron from the tag-stripped body, with LaTeX `tabular` turned into pipe tables). Plain text on `textOut` has no tags, no LaTeX, and no pipes. Nemotron `raw` is `<x_*>/<y_*>/<class_*>` markup, not DocTags. `maxNewTokens` is a shared createOCR field (omit or `0` → 8192). `complete` is `true` after a natural stop (`</doctag>` or EOS). Hitting `maxNewTokens` is not a finished document. The image overlay draws spans; it does not parse markup.
 
 ---
 
@@ -183,7 +183,7 @@ if (page.family === 'nemotron_parse') {
 
 Hardcoded control prompt (no Jinja):
 `</s><s><predict_bbox><predict_classes><output_markdown><predict_text_in_pic>`.
-Decode is greedy + HF repetition penalty 1.1; stop on EOS id `2` (`stopReason: 'eos'`, `complete: true`) or the generation cap (`'max_new_tokens'`, `complete: false`). `markdown` is that stream with bbox/class tags stripped. Overlay boxes come from line spans, not from parsing `raw`.
+Decode is greedy + HF repetition penalty 1.1; stop on EOS id `2` (`stopReason: 'eos'`, `complete: true`) or the generation cap (`'max_new_tokens'`, `complete: false`). `markdown` is GFM: bbox/class tags stripped and LaTeX `tabular` converted to pipe tables. `textOut` is the same body flattened to plaintext. Overlay boxes come from line spans on `textOut`, not from parsing `raw`.
 
 Validate category: **`ocr`**. Detection: [model-detect.md](model-detect.md) · languages: [model-languages.md](model-languages.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 

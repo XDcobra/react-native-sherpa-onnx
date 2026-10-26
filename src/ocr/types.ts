@@ -170,8 +170,9 @@ export type OcrDocVlmStopReason = OcrVlmStopReason;
 
 type OcrVlmRecognizeShared = {
   spanCount: number;
-  /** Family markup stream (DocTags or Nemotron xy/class tags). */
+  /** Native model stream (DocTags, or Nemotron xy/class tags plus body). */
   raw: string;
+  /** GFM we produce: granite from DocTags, Nemotron from native body (`tabular` → pipe tables). */
   markdown: string;
   complete: boolean;
 };
