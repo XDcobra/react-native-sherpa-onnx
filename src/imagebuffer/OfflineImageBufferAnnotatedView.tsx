@@ -13,6 +13,7 @@ import {
   type OfflineTextBufferIdSource,
   type OfflineTextBufferInfo,
   type TextSpatialSpan,
+  type TextSpatialSpanLevel,
   type TextSpatialSpanOrigin,
 } from '../textbuffer';
 import { getOfflineImageBufferFrameInfo } from './getFrameInfo';
@@ -24,6 +25,11 @@ import {
 } from './mapToFrame';
 
 import type { ImageFrameResizeMode, OfflineImageBufferIdSource } from './types';
+
+export type OfflineImageBufferSpanRange = {
+  utf16Start: number;
+  utf16End: number;
+};
 
 export type OfflineImageBufferSpanPressEvent = {
   index: number;
@@ -41,11 +47,41 @@ export type OfflineImageBufferAnnotatedViewProps = {
   text: OfflineTextBufferIdSource;
   frameIndex?: number;
   origins?: MapTextSpatialSpansToFrameOrigin[];
+  /** Default: every level present on the mapped spans. */
+  levels?: TextSpatialSpanLevel[];
   selectedIndex?: number | null;
+  selectedRange?: OfflineImageBufferSpanRange | null;
+  /**
+   * Visual only. Position and size stay view-owned.
+   * Merge: defaults → `boxStyle` → `originBoxStyle[origin]` → selected defaults → `selectedBoxStyle`.
+   */
+  boxStyle?: StyleProp<ViewStyle>;
+  selectedBoxStyle?: StyleProp<ViewStyle>;
+  originBoxStyle?: Partial<
+    Record<MapTextSpatialSpansToFrameOrigin, StyleProp<ViewStyle>>
+  >;
   onSpanPress?: (event: OfflineImageBufferSpanPressEvent) => void;
   maxSide?: number;
   resizeMode?: ImageFrameResizeMode;
   style?: StyleProp<ViewStyle>;
+};
+
+type FrameViewLayout = {
+  scaleX: number;
+  scaleY: number;
+  offsetX: number;
+  offsetY: number;
+};
+
+const BOX_DEFAULT: ViewStyle = {
+  backgroundColor: 'rgba(0, 122, 255, 0.28)',
+  borderColor: '#007AFF',
+  borderWidth: 1.5,
+};
+
+const BOX_SELECTED: ViewStyle = {
+  backgroundColor: 'rgba(255, 59, 48, 0.45)',
+  borderColor: '#FF3B30',
 };
 
 function aabbFromQuad(quad: TextSpatialSpan['quad']): {
@@ -68,6 +104,134 @@ function aabbFromQuad(quad: TextSpatialSpan['quad']): {
   };
 }
 
+function flattenViewStyle(style: StyleProp<ViewStyle> | undefined): ViewStyle {
+  if (style == null || style === false) {
+    return {};
+  }
+  if (typeof StyleSheet.flatten === 'function') {
+    return (StyleSheet.flatten(style) ?? {}) as ViewStyle;
+  }
+  if (Array.isArray(style)) {
+    return Object.assign(
+      {},
+      ...style.map((entry) => flattenViewStyle(entry as StyleProp<ViewStyle>))
+    );
+  }
+  return style as ViewStyle;
+}
+
+const OWNED_BOX_KEYS = [
+  'left',
+  'top',
+  'right',
+  'bottom',
+  'width',
+  'height',
+  'position',
+  'transform',
+] as const;
+
+function stripOwnedBoxGeometry(style: ViewStyle): ViewStyle {
+  const visual = { ...style };
+  for (const key of OWNED_BOX_KEYS) {
+    delete visual[key];
+  }
+  return visual;
+}
+
+/** @internal layout for contain / cover / stretch. Not a public helper. */
+export function computeAnnotatedFrameLayout(
+  layout: { width: number; height: number },
+  frame: { width: number; height: number },
+  resizeMode: ImageFrameResizeMode
+): FrameViewLayout | null {
+  if (
+    layout.width <= 0 ||
+    layout.height <= 0 ||
+    frame.width <= 0 ||
+    frame.height <= 0
+  ) {
+    return null;
+  }
+  if (resizeMode === 'stretch') {
+    return {
+      scaleX: layout.width / frame.width,
+      scaleY: layout.height / frame.height,
+      offsetX: 0,
+      offsetY: 0,
+    };
+  }
+  const scale =
+    resizeMode === 'cover'
+      ? Math.max(layout.width / frame.width, layout.height / frame.height)
+      : Math.min(layout.width / frame.width, layout.height / frame.height);
+  return {
+    scaleX: scale,
+    scaleY: scale,
+    offsetX: (layout.width - frame.width * scale) / 2,
+    offsetY: (layout.height - frame.height * scale) / 2,
+  };
+}
+
+/** @internal */
+export function isAnnotatedSpanSelected(
+  row: Pick<MappedTextSpatialSpan, 'index' | 'span'>,
+  selectedIndex: number | null | undefined,
+  selectedRange: OfflineImageBufferSpanRange | null | undefined
+): boolean {
+  if (selectedIndex != null && row.index === selectedIndex) {
+    return true;
+  }
+  if (
+    selectedRange == null ||
+    !Number.isFinite(selectedRange.utf16Start) ||
+    !Number.isFinite(selectedRange.utf16End) ||
+    selectedRange.utf16End <= selectedRange.utf16Start
+  ) {
+    return false;
+  }
+  return (
+    row.span.utf16Start < selectedRange.utf16End &&
+    row.span.utf16End > selectedRange.utf16Start
+  );
+}
+
+/** @internal */
+export function resolveAnnotatedBoxStyle(
+  origin: TextSpatialSpanOrigin,
+  selected: boolean,
+  boxStyle?: StyleProp<ViewStyle>,
+  selectedBoxStyle?: StyleProp<ViewStyle>,
+  originBoxStyle?: Partial<
+    Record<MapTextSpatialSpansToFrameOrigin, StyleProp<ViewStyle>>
+  >
+): ViewStyle {
+  const originStyle =
+    origin === 'ocr' || origin === 'textLayer'
+      ? originBoxStyle?.[origin]
+      : undefined;
+  return stripOwnedBoxGeometry(
+    flattenViewStyle([
+      BOX_DEFAULT,
+      boxStyle,
+      originStyle,
+      selected ? BOX_SELECTED : null,
+      selected ? selectedBoxStyle : null,
+    ])
+  );
+}
+
+function filterMappedByLevel(
+  mapped: MappedTextSpatialSpan[],
+  levels: TextSpatialSpanLevel[] | undefined
+): MappedTextSpatialSpan[] {
+  if (levels == null) {
+    return mapped;
+  }
+  const allowed = new Set(levels);
+  return mapped.filter((row) => allowed.has(row.span.level));
+}
+
 /**
  * FrameView plus mapped spatial-span boxes (OCR pixels / textLayer user-space).
  * Does not take ownership of `buffer` or `text`.
@@ -77,7 +241,12 @@ export function OfflineImageBufferAnnotatedView({
   text,
   frameIndex = 0,
   origins,
+  levels,
   selectedIndex = null,
+  selectedRange = null,
+  boxStyle,
+  selectedBoxStyle,
+  originBoxStyle,
   onSpanPress,
   maxSide,
   resizeMode = 'contain',
@@ -129,36 +298,20 @@ export function OfflineImageBufferAnnotatedView({
     };
   }, [text]);
 
-  const mapped = React.useMemo(
-    () =>
-      mapTextSpatialSpansToFrame(spans, {
-        frameIndex,
-        frameWidth: frameSize.width,
-        frameHeight: frameSize.height,
-        origins,
-      }),
-    [frameIndex, frameSize.height, frameSize.width, origins, spans]
+  const mapped = React.useMemo(() => {
+    const projected = mapTextSpatialSpansToFrame(spans, {
+      frameIndex,
+      frameWidth: frameSize.width,
+      frameHeight: frameSize.height,
+      origins,
+    });
+    return filterMappedByLevel(projected, levels);
+  }, [frameIndex, frameSize.height, frameSize.width, levels, origins, spans]);
+
+  const viewLayout = React.useMemo(
+    () => computeAnnotatedFrameLayout(layout, frameSize, resizeMode),
+    [frameSize, layout, resizeMode]
   );
-
-  const scale = React.useMemo(() => {
-    if (
-      layout.width <= 0 ||
-      layout.height <= 0 ||
-      frameSize.width <= 0 ||
-      frameSize.height <= 0
-    ) {
-      return 1;
-    }
-    return Math.min(
-      layout.width / frameSize.width,
-      layout.height / frameSize.height
-    );
-  }, [frameSize.height, frameSize.width, layout.height, layout.width]);
-
-  const drawnW = frameSize.width * scale;
-  const drawnH = frameSize.height * scale;
-  const offsetX = (layout.width - drawnW) / 2;
-  const offsetY = (layout.height - drawnH) / 2;
 
   const onLayout = (event: LayoutChangeEvent) => {
     const { width, height } = event.nativeEvent.layout;
@@ -185,11 +338,15 @@ export function OfflineImageBufferAnnotatedView({
         resizeMode={resizeMode}
         style={styles.frame}
       />
-      {layout.width > 0 ? (
+      {viewLayout != null ? (
         <View style={styles.boxLayer} pointerEvents="box-none">
           {mapped.map((row) => {
             const box = aabbFromQuad(row.quad);
-            const selected = selectedIndex === row.index;
+            const selected = isAnnotatedSpanSelected(
+              row,
+              selectedIndex,
+              selectedRange
+            );
             return (
               <TouchableOpacity
                 key={`span-${row.index}`}
@@ -197,15 +354,18 @@ export function OfflineImageBufferAnnotatedView({
                 onPress={() => onPressMapped(row)}
                 style={[
                   styles.box,
+                  resolveAnnotatedBoxStyle(
+                    row.span.origin,
+                    selected,
+                    boxStyle,
+                    selectedBoxStyle,
+                    originBoxStyle
+                  ),
                   {
-                    left: offsetX + box.left * scale,
-                    top: offsetY + box.top * scale,
-                    width: box.width * scale,
-                    height: box.height * scale,
-                    backgroundColor: selected
-                      ? 'rgba(255, 59, 48, 0.45)'
-                      : 'rgba(0, 122, 255, 0.28)',
-                    borderColor: selected ? '#FF3B30' : '#007AFF',
+                    left: viewLayout.offsetX + box.left * viewLayout.scaleX,
+                    top: viewLayout.offsetY + box.top * viewLayout.scaleY,
+                    width: Math.max(1, box.width * viewLayout.scaleX),
+                    height: Math.max(1, box.height * viewLayout.scaleY),
                   },
                 ]}
               />

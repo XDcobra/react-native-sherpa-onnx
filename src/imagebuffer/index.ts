@@ -455,6 +455,7 @@ export {
   OfflineImageBufferAnnotatedView,
   type OfflineImageBufferAnnotatedViewProps,
   type OfflineImageBufferSpanPressEvent,
+  type OfflineImageBufferSpanRange,
 } from './OfflineImageBufferAnnotatedView';
 export {
   mapTextSpatialSpansToFrame,
