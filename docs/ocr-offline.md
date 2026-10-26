@@ -6,7 +6,7 @@
 
 Import path: **`react-native-sherpa-onnx/ocr`**.
 
-Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), and **`doc_vlm`** (Granite Docling: vision encoder + embed + merged decoder + tokenizer + manifest). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm'`. For `doc_vlm`, `markdown` may include GFM tables reconstructed from OTSL cells; raw DocTags stay on `doctags`. `complete` is `true` only after a generated `</doctag>`; hitting `maxNewTokens` or an illegal prefix is not a finished document (`stopReason` says why). Recognize does not invent plaintext by stripping tags. `doc_vlm` writes title and table spatial spans as `line` when the DocTags carry `<loc_*>` (one box per cell when cells have locs, otherwise one box on the `<otsl>` wrapper). `picture` / `chart` stay `block` and drop at the default `granularity: 'line'`. The image overlay draws those spans; it does not parse DocTags.
+Families: **`ppocr`** (PP-OCR Det/Rec/optional Cls), **`doctr`** (OnnxTR Det/Rec/manifest), **`doc_vlm`** (Granite Docling), and **`nemotron_parse`** (Nemotron-3.5-Parse). `modelType: 'auto' | 'ppocr' | 'doctr' | 'doc_vlm' | 'nemotron_parse'` (alias `nemotron-parse` only — never bare `nemotron`). VLM families share `raw` + `markdown` + `complete` + `stopReason`. `doc_vlm` also keeps `doctags` (same stream as `raw`). Nemotron `raw` is native `<x_*>/<y_*>/<class_*>` markup, not DocTags. `maxNewTokens` is a shared createOCR field (omit or `0` → 8192). `complete` is `true` after a natural stop (`</doctag>` or EOS). Hitting `maxNewTokens` is not a finished document. The image overlay draws spans; it does not parse markup.
 
 ---
 
@@ -75,8 +75,8 @@ try {
       )
     : [];
   console.log(text, spans.length, page.spanCount);
-  // if (page.family === 'doc_vlm') {
-  //   console.log(page.complete, page.stopReason, page.doctags, page.markdown);
+  // if (page.family === 'doc_vlm' || page.family === 'nemotron_parse') {
+  //   console.log(page.complete, page.stopReason, page.raw, page.markdown);
   // }
 } finally {
   // Step 6: release buffers + engine
@@ -90,7 +90,8 @@ try {
 | --- | --- |
 | `ppocr` | `createOCR({ modelSource: modelDir, modelType: 'auto', provider: 'cpu', numThreads: 2 })` |
 | `doctr` | `createOCR({ modelSource: modelDir, modelType: 'auto', doctr: { detBoxThresh: 0.15, detBoxScoreThresh: 0.15 } })` |
-| `doc_vlm` | `createOCR({ modelSource: modelDir, modelType: 'doc_vlm', docVlm: { maxNewTokens: 512 } })` |
+| `doc_vlm` | `createOCR({ modelSource: modelDir, modelType: 'doc_vlm', maxNewTokens: 512 })` |
+| `nemotron_parse` | `createOCR({ modelSource: modelDir, modelType: 'nemotron_parse', maxNewTokens: 512 })` |
 
 ### Multi-frame + progress + cancel
 
@@ -135,6 +136,7 @@ try {
 | `ppocr` | `det`, `rec`, `rec_dict` | `cls` |
 | `doctr` | `det`, `rec`, `manifest` | — |
 | `doc_vlm` | `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` | — |
+| `nemotron_parse` | granite octet plus `patch_embed`, `pos_embed` | `patch_embed_data` |
 | `auto` | Resolves family from pack layout (manifest `family`, then layout heuristics) | — |
 
 Published `doc_vlm` packs (self-contained; pack id is the technique, not a Hub `_quantized` filename):
@@ -146,7 +148,42 @@ Published `doc_vlm` packs (self-contained; pack id is the technique, not a Hub `
 | `docvlm-granite-258m-fp16` | ~632 MB | Float16 KV. |
 | `docvlm-granite-258m-q4f16` | ~265 MB | Float16 KV + MatMulNBits. |
 
-Each archive includes vision, embed, decoder, tokenizer, and manifest. `ppocrv6-tiny` stays the phone default.
+Each granite archive includes vision, embed, decoder, tokenizer, and manifest. `ppocrv6-tiny` stays the phone default.
+
+### `nemotron_parse` (Nemotron-3.5-Parse)
+
+New family — not `doc_vlm`. Alias **only** `nemotron-parse` (never bare `nemotron`, which is an STT token). Hub: [`XDcobra/Nemotron-3.5-Parse-ONNX`](https://huggingface.co/XDcobra/Nemotron-3.5-Parse-ONNX). GitHub release ids: `nemotron-3.5-parse-fp16`, `nemotron-3.5-parse-int8`.
+
+**Pack layout** (one quant per folder / `.tar.bz2`, flatten to pack root):
+
+| File | Required |
+| --- | --- |
+| `patch_embed.onnx` (+ optional `.onnx_data`) | yes / data optional |
+| `pos_embed.npy` | yes |
+| `vision_encoder.onnx` + `.onnx_data` | yes |
+| `embed_tokens.onnx` + `.onnx_data` | yes |
+| `decoder_model_merged.onnx` + `.onnx_data` | yes |
+| `tokenizer.json` | yes |
+| `ocr_manifest.json` (`family: "nemotron_parse"`) | yes |
+
+Hub folders `onnx/fp16` and `onnx/int8` flatten to pack ids `nemotron-3.5-parse-fp16` / `nemotron-3.5-parse-int8`. Local export: `build/ocr-models/nemotron-3.5-parse/onnx-{fp16,int8}`. Language hints: NVIDIA MOSCAR (163 language/script entries → 124 ISO codes). MOSCAR is synthetic; IndicVisionBench real pages cover `bn`, `gu`, `hi`, `kn`, `ml`, `mr`, `or`, `pa`, `ta`, `te`.
+
+```ts
+const ocr = await createOCR({
+  modelSource: { kind: 'fs', path: '/data/models/nemotron-3.5-parse-int8' },
+  modelType: 'nemotron_parse',
+  maxNewTokens: 512, // omit or 0 → 8192, then clamp to remaining context
+});
+const page = await ocr.recognize(image, textOut);
+if (page.family === 'nemotron_parse') {
+  // raw is native <x_*>/<y_*>/<class_*> markup — not DocTags.
+  console.log(page.complete, page.stopReason, page.raw, page.markdown);
+}
+```
+
+Hardcoded control prompt (no Jinja):
+`</s><s><predict_bbox><predict_classes><output_markdown><predict_text_in_pic>`.
+Decode is greedy + HF repetition penalty 1.1; stop on EOS id `2` (`stopReason: 'eos'`, `complete: true`) or the generation cap (`'max_new_tokens'`, `complete: false`). `markdown` is that stream with bbox/class tags stripped. Overlay boxes come from line spans, not from parsing `raw`.
 
 Validate category: **`ocr`**. Detection: [model-detect.md](model-detect.md) · languages: [model-languages.md](model-languages.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 
@@ -200,7 +237,7 @@ const ocr = await createOCR({
 });
 ```
 
-Family option bags (`ppocr` / `doctr` / `docVlm`) are constrained by `modelType` on `OcrInitializeOptions`.
+Family option bags (`ppocr` / `doctr`) are constrained by `modelType`. Shared VLM cap is top-level `maxNewTokens`.
 
 `ppocr.detUnclipRatio` / `doctr.detUnclipRatio` (default `1.5`) control DB box expansion after detection — lower values tighten spatial quads around glyphs.
 
@@ -288,15 +325,15 @@ const page = await ocr.recognize(image, textOut, {
 
 | Type | Description |
 | --- | --- |
-| `OcrModelType` | `'auto' \| 'ppocr' \| 'doctr' \| 'doc_vlm'` |
+| `OcrModelType` | `'auto' \| 'ppocr' \| 'doctr' \| 'doc_vlm' \| 'nemotron_parse'` |
 | `OcrConcreteModelType` | Exclude `auto` |
 | `OcrFamily` | Concrete backend family after load |
 | `OcrGranularity` | `'line' \| 'word' \| 'block'` |
-| `OcrInitializeOptions` | Discriminated on `modelType` for option bags; shared `provider?`, `numThreads?` |
-| `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrDocVlmOptions` | Family init bags |
+| `OcrInitializeOptions` | Discriminated on `modelType`; shared `provider?`, `numThreads?`, `maxNewTokens?` |
+| `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrVlmOptions` | Family init bags |
 | `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `signal?` |
-| `OcrRecognizeResult` | Discriminated on `family` (`doctags`/`markdown`/`complete`/`stopReason` only for `doc_vlm`) |
-| `OcrDocVlmStopReason` | `'doctag_end' \| 'eos' \| 'max_new_tokens' \| 'invalid_sequence'` |
+| `OcrRecognizeResult` | Discriminated on `family`. VLM families share `raw`/`markdown`/`complete`/`stopReason`; `doc_vlm` also has `doctags` |
+| `OcrVlmStopReason` | `'doctag_end' \| 'eos' \| 'max_new_tokens' \| 'invalid_sequence'` |
 | `OcrProgress` | `{ done, total, phase }` |
 | `OcrDetectModelResult` | `detectOcrModel` return |
 | `OcrEngine` | `recognize` / `destroy` / `instanceId` |
@@ -322,7 +359,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_MODEL_NOT_FOUND` | Pack / ONNX paths missing at init. |
 | `OCR_NOT_INITIALIZED` | Native engine not ready. |
 | `OCR_INSTANCE_NOT_FOUND` | `instanceId` missing or already **destroyed**. |
-| `OCR_INVALID_ARGUMENT` | Bad options (e.g. invalid frame index, or a non-integer / negative `docVlm.maxNewTokens`). |
+| `OCR_INVALID_ARGUMENT` | Bad options (e.g. invalid frame index, or a non-integer / negative `maxNewTokens`). |
 | `OCR_IMAGE_BUFFER_NOT_FOUND` | Image buffer id missing from registry. |
 | `OCR_IMAGE_BUFFER_EMPTY` | Image buffer has no frames. |
 | `OCR_FRAME_READ_FAILED` | Could not read a requested frame. |
@@ -330,7 +367,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
 | `OCR_CANCELLED` | `AbortSignal` aborted between frames. |
 | `OCR_BUSY` | Concurrent recognize on the same instance. |
-| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for `doc_vlm`, missing `doctags` / `markdown` / `complete` / `stopReason`; and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
+| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for VLM families, missing `raw` / `markdown` / `complete` / `stopReason` (`doc_vlm` also requires `doctags`); and a `createOCR` failure when the decoder Session cannot load `GroupQueryAttention`. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |
 
 ---
@@ -402,11 +439,42 @@ if (!det.success) {
 const ocr = await createOCR({
   modelSource: source,
   modelType: 'doc_vlm',
-  docVlm: { maxNewTokens: 512 },
+  maxNewTokens: 512,
 });
 const page = await ocr.recognize(image, textOut, { granularity: 'line' });
 if (page.family === 'doc_vlm') {
-  console.log(page.complete, page.stopReason, page.doctags, page.markdown);
+  console.log(page.complete, page.stopReason, page.raw, page.markdown);
+}
+await ocr.destroy();
+```
+
+</details>
+
+<details>
+<summary>Local pack, detect, then read native markup (nemotron_parse)</summary>
+
+```ts
+import {
+  createOCR,
+  detectOcrModel,
+} from 'react-native-sherpa-onnx/ocr';
+
+const source = {
+  kind: 'fs' as const,
+  path: '/data/models/nemotron-3.5-parse-int8',
+};
+const det = await detectOcrModel(source, { modelType: 'nemotron_parse' });
+if (!det.success) {
+  throw new Error(det.error ?? 'bad nemotron_parse pack');
+}
+const ocr = await createOCR({
+  modelSource: source,
+  modelType: 'nemotron_parse',
+  maxNewTokens: 512,
+});
+const page = await ocr.recognize(image, textOut, { granularity: 'line' });
+if (page.family === 'nemotron_parse') {
+  console.log(page.complete, page.stopReason, page.raw, page.markdown);
 }
 await ocr.destroy();
 ```
@@ -527,7 +595,7 @@ The monorepo example exposes **Home → Vision → OCR** (`example/src/screens/o
 - [Feature pipelines](feature-pipelines.md#ocr-offline-patterns)
 - [Model setup](model-setup.md)
 - [Model detection](model-detect.md)
-- [Model languages](model-languages.md) (`getPpocrLanguages`, `getDoctrLanguages`, `DOC_VLM_ISO6391_HINTS`, `iso6391HintsForOcrModelType('doc_vlm')`)
+- [Model languages](model-languages.md) (`getPpocrLanguages`, `getDoctrLanguages`, `DOC_VLM_ISO6391_HINTS`, `NEMOTRON_PARSE_ISO6391_HINTS`, `iso6391HintsForOcrModelType`)
 - [Download manager](download-manager.md) (`ModelCategory.Ocr`)
 - [Execution providers](execution-providers.md)
 - [Native diagnostics](native-diagnostics.md)
