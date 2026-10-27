@@ -55,7 +55,7 @@ build_slice() {
     "-DENABLE_CNG=OFF"
     "-DBUILD_SHARED_LIBS=OFF"
     "-DENABLE_OPENSSL=OFF"
-    "-DENABLE_ZLIB=OFF"
+    "-DENABLE_ZLIB=ON"
     "-DENABLE_BZip2=ON"
     "-DENABLE_LIBXML2=OFF"
     "-DENABLE_EXPAT=OFF"
@@ -73,13 +73,29 @@ build_slice() {
     "-DHAVE_LIBXML_XMLREADER_H=OFF"
   )
 
+  local sdk_name="iphoneos"
   if [ "$platform" = "iphoneos" ]; then
     cmake_args+=("-DCMAKE_OSX_SYSROOT=iphoneos")
     cmake_args+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$IOS_MIN_VERSION")
   else
+    sdk_name="iphonesimulator"
     cmake_args+=("-DCMAKE_OSX_SYSROOT=iphonesimulator")
     cmake_args+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=$SIM_MIN_VERSION")
   fi
+
+  # ZIP Deflate needs the SDK zlib (libz.tbd). Pod already links -lz.
+  local sdkroot
+  sdkroot="$(xcrun --sdk "$sdk_name" --show-sdk-path)"
+  local zlib_lib="$sdkroot/usr/lib/libz.tbd"
+  if [ ! -f "$zlib_lib" ]; then
+    zlib_lib="$sdkroot/usr/lib/libz.dylib"
+  fi
+  if [ ! -f "$zlib_lib" ]; then
+    echo "Error: zlib not found in SDK $sdkroot"
+    exit 1
+  fi
+  cmake_args+=("-DZLIB_INCLUDE_DIR=$sdkroot/usr/include")
+  cmake_args+=("-DZLIB_LIBRARY=$zlib_lib")
 
   cd "$tmp_build"
   cmake "$LIBARCHIVE_SRC" "${cmake_args[@]}"

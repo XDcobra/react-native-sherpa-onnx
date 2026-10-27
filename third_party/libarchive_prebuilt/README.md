@@ -3,8 +3,8 @@
 Build libarchive for Android (all ABIs) and publish as GitHub Release zip and Maven AAR (`com.xdcobra.sherpa:libarchive`).
 
 - **Build locally:** `./build_libarchive_android.sh` (requires Android NDK, `ANDROID_NDK_HOME` or `ANDROID_NDK_ROOT`). Output: `android/<abi>/lib/libarchive.so` and `android/include/`.
-- **Release tag:** Set in `ANDROID_RELEASE_TAG` (e.g. `libarchive-android-v3.8.5`). Used by the GitHub workflow and by consumers for the Maven version and release zip.
+- **Release tag:** Set in `ANDROID_RELEASE_TAG` (e.g. `libarchive-android-v3.8.10-1`). Used by the GitHub workflow and by consumers for the Maven version and release zip.
 - **SDK layout:** Gradle (`prebuilt-download.gradle`) normally supplies `jniLibs` and headers; for a fully local tree, copy build output into `android/src/main/jniLibs/<abi>/` and `android/src/main/cpp/include/libarchive` as needed.
 - **CI:** `.github/workflows/build-libarchive-android-release.yml` builds, creates zip + AAR, creates GitHub Release, and publishes to Maven when `MAVEN_REPO_PAT` is set.
 
-Source: `third_party/libarchive` (submodule). Version 3.8.5.
+Source: `third_party/libarchive` (submodule). Version 3.8.10 (prebuilt tag `*-v3.8.10-1`). ZIP/Deflate is enabled (`ENABLE_ZLIB=ON`) so EPUB/CBZ can be opened; RAR/RAR5 is compiled in-tree. The download helper still enables only tar + compression filters.
