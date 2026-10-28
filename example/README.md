@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse), e-document read-aloud (EPUB / FB2 / CBZ / PDF), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -282,12 +282,19 @@ PDF pick still rasterizes for `OfflineImageBufferFrameView` preview (`lazy-lru`)
 
 ## Documents (read aloud)
 
-Home section **Documents (EPUB, PDF, …)** → **Read aloud**. The screen reuses the same TTS detect/init panel as Text-to-Speech (Offline): catalog, auto/custom, `detectTtsModel`, speaker/speed, and the shared TTS engine cache.
+| ![Read aloud 1](../docs/images/example/read_aloud_1.png) | ![Read aloud 2](../docs/images/example/read_aloud_2.png) | ![Read aloud 3](../docs/images/example/read_aloud_3.png) |
+| -------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
 
-Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, plus the digital and scan-only PDFs from `test_pdfs/`.
+Home section **Documents (EPUB, PDF, …)** → **Read aloud**. Extract EPUB/FB2/PDF text (or OCR mixed EPUB / CBZ pages) into an `OfflineTextBuffer`, then speak with the same TTS detect/init panel as Text-to-Speech (Offline): catalog, auto/custom, `detectTtsModel`, speaker/speed, and the shared TTS engine cache. See [docs/document-offline.md](../docs/document-offline.md).
+
+Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/mixed.epub`, `test_edocs/manga.cbz`, plus the digital and scan-only PDFs from `test_pdfs/`.
 
 1. Text EPUB / FB2 → `extractDocumentText` → OfflineTextBuffer (`origin: markup`) → `tts.synthesize` → playback. The current block span is highlighted from playback position.
 2. PDF with a text layer → `extractPdfTextLayer` → same TTS path (`origin: textLayer`).
-3. Scan-only PDF → `ERR_PDF_NO_TEXT_LAYER`. This screen does not rasterize or run OCR; use Vision → OCR.
+3. Scan-only PDF → `ERR_PDF_NO_TEXT_LAYER`. This screen does not rasterize, extract images, or run OCR; use Vision → OCR.
+4. Mixed EPUB (`mixed.epub`) → markup extract succeeds with `imageOnlySections.length === 1` → `extractDocumentImages` → FramePager → optional OCR Recognize. Extracted text shows **markup** / **ocr** origin chips, interleaved by `sectionIndex` in JS (no SDK merge API). Speak uses the concatenated string.
+5. CBZ manga (`manga.cbz`) → `ERR_DOC_NO_TEXT` unlocks the same image + OCR path (no generic extract-failed panel). After Recognize, TTS is OCR-only. The archive is three JPEG pages (cover + two panels) from University of Tsukuba’s CC0 manga [ヒトはそれを『発達障害』と名づけました](https://dac.tsukuba.ac.jp/radd/joint-base/manga/).
 
-Android EPUB/FB2 assets are copied to cache first (`apkAsset` is not seekable for `document/`). See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offline.md](../docs/pdf-offline.md).
+OCR detect/init on this screen is the same panel and engine cache as Vision → OCR. Recognize is a separate button, not automatic.
+
+Android EPUB/FB2/CBZ assets are copied to cache first (`apkAsset` is not seekable for `document/`). See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offline.md](../docs/pdf-offline.md).

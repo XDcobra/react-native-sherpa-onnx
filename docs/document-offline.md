@@ -5,34 +5,54 @@ Two APIs, one buffer type per call:
 1. **`extractDocumentText`** — markup → `OfflineTextBuffer` (`origin: 'markup'`). **Never OCR.**
 2. **`extractDocumentImages`** — image-only sections / CBZ / CBR → `OfflineImageBuffer`.
 
-This module is a source adapter like [`pdf/`](pdf-offline.md). It is not a reader, not a layout engine, and not a third recognize path. Mixed books: the app calls both APIs and concatenates TTS slices itself.
+Source adapter like [`pdf/`](pdf-offline.md): not a reader and not OCR. Recognize stays `createOCR().recognize` on the ImageBuffer. The usual sink is TTS on whatever text the **app** concatenated; any feature that takes an `OfflineTextBuffer` can sit there instead.
 
-libarchive is **default-on** (same flag as archive helpers). Disable → `ERR_DOC_ARCHIVE_DISABLED`. There is no `isLibarchiveEnabled()` and no extra enable flag.
-
-XML uses embedded pugixml (`third_party/pugixml`, v1.16). EPUB XHTML uses lexbor via the same TAG + prebuilt pipeline as libarchive (`third_party/lexbor` v3.0.0, `third_party/lexbor_prebuilt`). No lexbor disable flag.
-
-**Android first.** Log tag `[SherpaOnnx:doc]`.
+libarchive is **default-on**. Disable at build time → `ERR_DOC_ARCHIVE_DISABLED` (no `isLibarchiveEnabled()`). Log tag `[SherpaOnnx:doc]`.
 
 ## Formats
 
-Sniff is by file signature / container, not by extension. Format is returned on the result, not as a public detect API.
+Sniff is by file signature / container, not extension. `format` is on the result (no public detect API). Capability only — dispatch is [Typical pipeline](#typical-pipeline).
 
 | Format | `extractDocumentText` | `extractDocumentImages` |
 |--------|----------------------|-------------------------|
-| EPUB 2 / 3 | Spine XHTML in reading order; `linear="no"` skipped | Only spine items **without** extractable text |
-| FB2 / FB2.ZIP / FBZ | XML in document order (`format: 'fb2'` even inside a zip) | Only sections without accompanying text (`<binary>`) |
+| EPUB 2 / 3 | Spine XHTML, reading order; `linear="no"` skipped | Spine items **without** extractable text |
+| FB2 / FB2.ZIP / FBZ | XML document order (`format: 'fb2'` even inside a zip) | Sections without accompanying text (`<binary>`) |
 | CBZ | `ERR_DOC_NO_TEXT` | ZIP images, natural sort of archive paths |
-| CBR | `ERR_DOC_NO_TEXT` | Same as CBZ; RAR/RAR5 via libarchive. Host tests read committed store-only RAR3 `test/fixtures/document/tiny-comic.cbr` (2 pages) |
+| CBR | `ERR_DOC_NO_TEXT` | Same as CBZ; RAR/RAR5 via libarchive |
 
-Pure text EPUB: text succeeds, `imageOnlySections = []`. Images → `ERR_DOC_NO_IMAGES`.
+Successful text + empty `imageOnlySections` → later images call is `ERR_DOC_NO_IMAGES`. Successful text + `imageOnlySections.length > 0` is a **mixed book**, not an error. Whole-document no markup (CBZ/CBR, scan EPUB) → `ERR_DOC_NO_TEXT`; images still work (undecodable files skipped).
 
-Pure CBZ/CBR / scan EPUB: text → `ERR_DOC_NO_TEXT`. Images succeed (undecodable files are skipped).
+Out of scope: PDF ([`pdf/`](pdf-offline.md)), MOBI/KF8 (later), password-protected / encrypted archives (`ERR_DOC_DRM`), Office, TXT, loose HTML, and other ebook formats (KFX, DjVu, …). Font-only `encryption.xml` is **not** DRM.
 
-Mixed EPUB: text succeeds with `imageOnlySections.length > 0`. Images are **exactly** those sections; frames carry `sectionIndex`.
+## Typical pipeline
 
-Not this module: DRM content, KFX, AZW4, Topaz, DjVu, CHM, Office, TXT, loose HTML, PDF (use [`pdf/`](pdf-offline.md)), MOBI/KF8 (later). Password-protected ZIP/RAR → `ERR_DOC_DRM`.
+The SDK does not sniff-then-dispatch. Start with `extractDocumentText` unless you already know it is a comic. Every branch ends on an `OfflineTextBuffer` (markup, OCR, or app-joined). **Typical goal is TTS** (`createTTS().synthesize`). Because buffers are the pipeline contract, any other feature that takes that TextBuffer works the same way — offline punctuation, alignment, and so on. See [feature-pipelines.md](feature-pipelines.md).
 
-Font-only `encryption.xml` is **not** DRM; content encryption is.
+Example **Read aloud** follows the `document/` branch into TTS; scan-PDF raster lives on Vision → OCR.
+
+```mermaid
+flowchart TD
+  F[FileSource]
+  F -->|EPUB / FB2 / CBZ / CBR| DT["extractDocumentText"]
+  F -->|"PDF — pdf/ not document/"| PT["extractPdfTextLayer"]
+
+  DT -->|"ok, imageOnly empty — hello.epub / hello.fb2"| TTS1["TTS / any TextBuffer feature"]
+  DT -->|"ok + imageOnly — mixed.epub"| DI1["extractDocumentImages"]
+  DI1 --> OCR1["createOCR().recognize"]
+  OCR1 --> JOIN["app: concat markup + OCR by sectionIndex"]
+  DT -.-> JOIN
+  JOIN --> TTS2["TTS / any TextBuffer feature"]
+  DT -->|"ERR_DOC_NO_TEXT — manga.cbz / CBR"| DI2["extractDocumentImages"]
+  DI2 --> OCR2["createOCR().recognize"]
+  OCR2 --> TTS3["TTS / any TextBuffer feature"]
+
+  PT -->|"ok — digital PDF"| TTS4["TTS / any TextBuffer feature"]
+  PT -->|"ERR_PDF_NO_TEXT_LAYER — scan PDF"| RZ["rasterizePdfPages"]
+  RZ --> OCR3["createOCR().recognize"]
+  OCR3 --> TTS5["TTS / any TextBuffer feature"]
+```
+
+`extractDocumentImages` first is valid for a known CBZ/CBR. Pure-text books must not take that shortcut (`ERR_DOC_NO_IMAGES`).
 
 ## Quick start — text
 
@@ -40,19 +60,21 @@ Font-only `encryption.xml` is **not** DRM; content encryption is.
 import { createEmptyOfflineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
 import { extractDocumentText } from 'react-native-sherpa-onnx/document';
 
+// textOut must be empty (populate-once, same ownership as extractPdfTextLayer).
 const textOut = await createEmptyOfflineTextBuffer();
 const result = await extractDocumentText(
   { kind: 'fs', path: '/path/to/book.epub' },
   textOut
 );
-console.log(result.format, result.sectionCount, result.spatialSpanCount);
+// result.buffer === textOut. origin on spans is 'markup'.
+console.log(result.format, result.sectionCount, result.imageOnlySections.length);
+// imageOnlySections.length > 0 → mixed book: also run extractDocumentImages (below).
+// CBZ/CBR throw ERR_DOC_NO_TEXT here — catch and go to images, not a generic failure.
 ```
-
-`textOut` is **required** and must be empty (same ownership as PDF). `result.buffer === textOut`.
 
 ## Quick start — images
 
-```ts
+```tsx
 import {
   getOfflineImageBufferFrameInfo,
   OfflineImageBufferFrameView,
@@ -60,12 +82,14 @@ import {
 } from 'react-native-sherpa-onnx/imagebuffer';
 import { extractDocumentImages } from 'react-native-sherpa-onnx/document';
 
+// Returns a result, not a buffer: images.buffer is the OfflineImageBuffer handle.
 const images = await extractDocumentImages(
   { kind: 'fs', path: '/path/to/book.cbz' },
-  { maxSide: 2048 }
+  { maxSide: 2048 } // longest-edge cap; default 4096, <= 0 disables
 );
+// CBZ/CBR: one frame per decodable page (natural sort). EPUB: only image-only spine items.
 const f0 = await getOfflineImageBufferFrameInfo(images.buffer, 0);
-console.log(f0.width, f0.href, f0.pageNumber);
+console.log(images.format, images.frameCount, f0.href, f0.pageNumber);
 
 <OfflineImageBufferFrameView
   buffer={images.buffer}
@@ -74,24 +98,36 @@ console.log(f0.width, f0.href, f0.pageNumber);
   style={{ width: '100%', height: 240 }}
 />
 
+// Optional: await ocr.recognize(images.buffer, ocrOut); then TTS on OCR text.
 await releaseOfflineImageBuffer(images.buffer);
 ```
 
 ## Mixed books (app, not SDK)
 
+A **mixed book** is an EPUB/FB2 whose spine has flowing XHTML **and** image-only items (scan chapters). Impact:
+
+- `extractDocumentText` **succeeds**. The markup buffer contains only text chapters. Scan chapters are **absent** from that buffer — TTS on markup alone skips them.
+- `imageOnlySections` is the gap list (`sectionIndex` + `href`). That is the signal to also extract images; it is not an error.
+- `extractDocumentImages` returns **exactly those sections**, not every `<img>` in a text chapter (no cover harvest, no decorative art).
+- OCR writes a **second** TextBuffer (`origin: 'ocr'`). The SDK does not merge, interleave, or speak. The app concatenates markup + OCR slices by `sectionIndex`, then TTS that string.
+- There is no `interleaveDocumentText`. AnnotatedView draws `ocr` quads, not `markup` (null quads).
+
 ```ts
-const text = await extractDocumentText(src, textOut);
-if (text.imageOnlySections.length > 0) {
+const markupOut = await createEmptyOfflineTextBuffer();
+const text = await extractDocumentText(src, markupOut);
+
+if (text.imageOnlySections.length === 0) {
+  // Pure text: TTS markupOut. extractDocumentImages would be ERR_DOC_NO_IMAGES.
+} else {
+  // Mixed: markupOut is incomplete for read-aloud until OCR fills the gaps.
   const images = await extractDocumentImages(src);
   const ocrOut = await createEmptyOfflineTextBuffer();
   await ocr.recognize(images.buffer, ocrOut);
-  // TTS: join markup + OCR slices in sectionIndex order in the app
+  // Join markup + OCR blocks by sectionIndex in the app, then createTTS().synthesize(joined).
 }
 ```
 
-No native merge, no `interleaveDocumentText`, no cover harvest, no chapter illustrations from text spine items.
-
-## API
+## API reference
 
 From `react-native-sherpa-onnx/document`.
 
@@ -105,7 +141,7 @@ function extractDocumentText(
 ): Promise<ExtractDocumentTextResult>;
 ```
 
-`source` is `FileSource` (no `fromBytes` in this ship). Options: `signal`, `onProgress`.
+`source` is a seekable `FileSource` (`fs`, `contentUri`, … — no `fromBytes`). Android `apkAsset` is not seekable → `ERR_DOC_OPEN_FAILED`; copy to cache first. Options: `signal`, `onProgress`.
 
 ```ts
 type ExtractDocumentTextResult = {
@@ -124,11 +160,9 @@ type DocumentSectionInfo = {
 };
 ```
 
-`sectionCount` / `sections` are linear spine items only (`linear="yes"` or missing). `imageOnlySections` is a subset.
+`sectionCount` / `sections` are linear spine items (`linear="yes"` or missing). `imageOnlySections` is a subset. Whole document without markup → `ERR_DOC_NO_TEXT`. Mixed EPUB is not an error.
 
-Whole document without markup (CBZ/CBR, scan-only) → `ERR_DOC_NO_TEXT`. Mixed EPUB is **not** an error.
-
-Progress events: `SherpaOnnxDocProgress` `{ done, total, phase }` (`open` / `section` / `entry` / `done`).
+Progress: `SherpaOnnxDocProgress` `{ done, total, phase }` (`open` / `section` / `entry` / `done`).
 
 #### `extractDocumentImages(source, options?)`
 
@@ -154,19 +188,17 @@ type ExtractDocumentImagesResult = {
 
 | Input | Frames |
 |-------|--------|
-| CBZ / CBR | Image files, natural sort, skip `ComicInfo.xml` / thumbs / `.` files; skip undecodable codecs |
+| CBZ / CBR | Image files, natural sort; skip `ComicInfo.xml` / thumbs / `.` files; skip undecodable codecs |
 | EPUB / FB2 image-only sections | Those sections only, order = `sectionIndex` |
 | Pure text document | `ERR_DOC_NO_IMAGES` |
 
-You do **not** have to call text extract first. After a successful text extract with empty `imageOnlySections`, images still return `ERR_DOC_NO_IMAGES`.
+Text extract first is optional. After a successful text extract with empty `imageOnlySections`, images still return `ERR_DOC_NO_IMAGES`. Zero decodable frames after skips → `ERR_DOC_NO_IMAGES`.
 
-CBZ/CBR `pageNumber` is 1-based display index **after** sort. `href` is the archive path. EPUB/FB2 frames use `sectionIndex` + `href`.
-
-Zero decodable frames after skips → `ERR_DOC_NO_IMAGES`.
+CBZ/CBR `pageNumber` is 1-based **after** sort; `href` is the archive path. EPUB/FB2 frames use `sectionIndex` + `href`.
 
 ## Markup spans
 
-One span per block element (`p`, `h1`–`h6`, `li`, `blockquote`, `pre`, `td`). Same `sectionIndex` (+ `href`) on every span of that section.
+One span per block (`p`, `h1`–`h6`, `li`, `blockquote`, `pre`, `td`). Same `sectionIndex` (+ `href`) on every span of that section.
 
 | Field | Content |
 |-------|---------|
@@ -180,21 +212,7 @@ One span per block element (`p`, `h1`–`h6`, `li`, `blockquote`, `pre`, `td`). 
 | `frameIndex` | `0` |
 | `pageNumber` | unused |
 
-Text rules: blocks joined with `\n\n`; `<br>` → `\n`; ruby keeps `rb`, drops `rt`/`rp`; `script` / `style` / `head` / `template` dropped. `alt` / `title` / `aria` do **not** count as text (scan chapters stay image-only). No CSS. Tokens / timestamps stay empty.
-
-## File I/O
-
-Seekable handle required for the whole extract, then closed.
-
-| Source | How |
-|--------|-----|
-| Filesystem path / iOS security-scoped file | `archive_read_open_filename` |
-| Android `contentUri` with `ParcelFileDescriptor` | `archive_read_open_fd` |
-| Stream-only / non-seekable `apkAsset` | `ERR_DOC_OPEN_FAILED` |
-
-No temp zip copy, no full-archive RAM slurp, no `zip_streamable` consolation path. Limits → `ERR_DOC_OPEN_FAILED`: **10 000** entries, **64 MiB** per file, **512 MiB** uncompressed total.
-
-Uncompressed FB2 is the document itself (64 MiB cap), not a zip consolation path.
+Blocks joined with `\n\n`; `<br>` → `\n`; ruby keeps `rb`, drops `rt`/`rp`; `script` / `style` / `head` / `template` dropped. `alt` / `title` / `aria` do **not** count as text (scan chapters stay image-only).
 
 ## Errors
 
@@ -203,24 +221,12 @@ Uncompressed FB2 is the document itself (64 MiB cap), not a zip consolation pa
 | `ERR_DOC_ARCHIVE_DISABLED` | libarchive built out |
 | `ERR_DOC_UNSUPPORTED_FORMAT` | PDF, HTML file, MOBI (this ship), unknown, KFX, … |
 | `ERR_DOC_DRM` | Content encryption / password-protected archive |
-| `ERR_DOC_OPEN_FAILED` | Unreadable, not seekable, zip bomb / limits |
+| `ERR_DOC_OPEN_FAILED` | Unreadable, Android `apkAsset`, or archive over **10 000** entries / **64 MiB** per file / **512 MiB** uncompressed |
 | `ERR_DOC_NO_TEXT` | No markup in the whole document |
 | `ERR_DOC_NO_IMAGES` | No image-only sections / no decodable image |
 | `ERR_DOC_INVALID_ARGUMENT` | Bad source / missing or already populated `textOut` |
 | `ERR_DOC_CANCELLED` | AbortSignal |
 | `ERR_DOC_PARSE_FAILED` | Broken OPF / XHTML / FB2 |
-
-No silent fallbacks. If the I/O contract cannot be met, reject with one of the codes above.
-
-## Display (not a reader)
-
-| Content | Who shows what |
-|---------|----------------|
-| Flowing text | App: `getOfflineTextBufferTextSlice`; TTS cursor over UTF-16 spans |
-| CBZ / CBR / image-only frames | `OfflineImageBufferFrameView`; after OCR `OfflineImageBufferAnnotatedView` (`origin: 'ocr'`) |
-| `origin: 'markup'` | no quad boxes (`mapTextSpatialSpansToFrame` already skips `markup`) |
-
-No `OfflineTextBufferView` in this module. No example screen in this ship.
 
 ## See also
 
@@ -230,3 +236,4 @@ No `OfflineTextBufferView` in this module. No example screen in this ship.
 - [TextBuffer](textbuffer-offline.md)
 - [Feature pipelines](feature-pipelines.md)
 - [Disable libarchive](disable-libarchive.md)
+- Example [Read aloud](../example/README.md#documents-read-aloud)
