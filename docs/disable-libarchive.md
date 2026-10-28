@@ -51,7 +51,7 @@ When libarchive is disabled, the following APIs **in this SDK** are built but re
 | **`cancelExtractTarBz2()`** | Cancels an ongoing `extractTarBz2` operation. When libarchive is disabled, there is no extraction implementation to cancel; calling this is a no-op. |
 | **`extractTarZst(sourcePath, targetPath, force, promise)`** | Extracts a `.tar.zst` or `.zst` archive. Implemented in native code via libarchive; when disabled, the native implementation is not linked and the promise is rejected with an error message. |
 | **`cancelExtractTarZst()`** | Cancels an ongoing `extractTarZst` operation. When libarchive is disabled, there is no extraction implementation to cancel; calling this is a no-op. |
-| **`extractDocumentText` / `extractDocumentImages`** (`react-native-sherpa-onnx/document`) | EPUB, FB2.ZIP/FBZ, CBZ, and CBR all go through libarchive (ZIP/RAR). When disabled, both APIs reject with **`ERR_DOC_ARCHIVE_DISABLED`**, including uncompressed `.fb2` (same gate; no half-path). See [document-offline.md](document-offline.md). |
+| **`extractDocumentText` / `extractDocumentImages`** (`react-native-sherpa-onnx/document`) | EPUB, FB2.ZIP/FBZ, CBZ, and CBR go through libarchive (ZIP/RAR). MOBI/AZW3 does not use zip, but when libarchive is disabled both APIs still reject with **`ERR_DOC_ARCHIVE_DISABLED`** (same gate as uncompressed `.fb2`; no half-path). See [document-offline.md](document-offline.md). |
 
 All extraction helpers are exposed on the **`NativeSherpaOnnx`** spec (e.g. from `react-native-sherpa-onnx`). Progress events for extraction (for example `extractTarBz2Progress` and `extractTarZstProgress`) will not be emitted when extraction is disabled, because extraction never runs.
 

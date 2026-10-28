@@ -257,7 +257,7 @@ Related docs:
 
 ```mermaid
 flowchart LR
-  A[FileSource EPUB/FB2/CBZ] --> B[extractDocumentText]
+  A[FileSource EPUB/FB2/MOBI/CBZ] --> B[extractDocumentText]
   B --> C[OfflineTextBuffer markup]
   A --> D[extractDocumentImages]
   D --> E[OfflineImageBuffer]
@@ -267,12 +267,12 @@ flowchart LR
   G --> H
 ```
 
-`extractDocumentText` never runs OCR. Image-only spine items and CBZ/CBR pages go through `extractDocumentImages`, then the existing `createOCR().recognize` path. Mixed books: the app concatenates markup and OCR slices by `sectionIndex`.
+`extractDocumentText` never runs OCR. Image-only spine items, MOBI `recindex` parts, and CBZ/CBR pages go through `extractDocumentImages`, then the existing `createOCR().recognize` path. Mixed books: the app concatenates markup and OCR slices by `sectionIndex`.
 
 When to use:
-- EPUB/FB2 flowing text for TTS without a reader widget.
+- EPUB/FB2/MOBI flowing text for TTS without a reader widget.
 - Comics (CBZ/CBR) as ImageBuffer frames, then optional OCR.
-- Scan chapters in an otherwise textual EPUB (`imageOnlySections`).
+- Scan chapters in an otherwise textual EPUB or MOBI (`imageOnlySections`).
 
 Related docs:
 - [document-offline.md](document-offline.md)

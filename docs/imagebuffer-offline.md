@@ -25,7 +25,7 @@ Live / streaming ImageBuffer is not implemented yet (types may be reserved). Fil
 | WebP | Same create APIs. **Opt-in libwebp** (default off) — see below. Without enable → `ERR_IMAGE_WEBP_DISABLED`. |
 | HEIC / HEIF | Same create APIs. **Android: API 28+**; older devices → `ERR_IMAGE_FORMAT_UNSUPPORTED`. iOS: ImageIO. |
 | PDF (page raster) | Not via image create APIs — use [`rasterizePdfPages`](pdf-offline.md). Frames may include `pageNumber` / `dpi`. |
-| E-document images | Not via image create APIs — use [`extractDocumentImages`](document-offline.md) (CBZ/CBR pages; EPUB/FB2 image-only sections). Frames may include `sectionIndex` / `href` / `pageNumber`. |
+| E-document images | Not via image create APIs — use [`extractDocumentImages`](document-offline.md) (CBZ/CBR pages; EPUB/FB2/MOBI image-only sections). Frames may include `sectionIndex` / `href` / `pageNumber`. |
 
 Optional **`maxSide`** caps the longest edge after image decode (default **4096**; `<= 0` disables). PDF raster has its own `maxSide` / `dpi` — see [pdf-offline.md](pdf-offline.md).
 

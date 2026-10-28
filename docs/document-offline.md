@@ -19,10 +19,11 @@ Sniff is by file signature / container, not extension. `format` is on the result
 | FB2 / FB2.ZIP / FBZ | XML document order (`format: 'fb2'` even inside a zip) | Sections without accompanying text (`<binary>`) |
 | CBZ | `ERR_DOC_NO_TEXT` | ZIP images, natural sort of archive paths |
 | CBR | `ERR_DOC_NO_TEXT` | Same as CBZ; RAR/RAR5 via libarchive |
+| MOBI / PRC / AZW / AZW3 (KF8), no DRM | PalmDOC / HUFF/CDIC HTML in reading order | Image-only parts (`recindex`), not cover art |
 
 Successful text + empty `imageOnlySections` → later images call is `ERR_DOC_NO_IMAGES`. Successful text + `imageOnlySections.length > 0` is a **mixed book**, not an error. Whole-document no markup (CBZ/CBR, scan EPUB) → `ERR_DOC_NO_TEXT`; images still work (undecodable files skipped).
 
-Out of scope: PDF ([`pdf/`](pdf-offline.md)), MOBI/KF8 (later), password-protected / encrypted archives (`ERR_DOC_DRM`), Office, TXT, loose HTML, and other ebook formats (KFX, DjVu, …). Font-only `encryption.xml` is **not** DRM.
+Out of scope: PDF ([`pdf/`](pdf-offline.md)), KFX / AZW4 / Topaz, DRM Kindle files (`ERR_DOC_DRM`), Office, TXT, loose HTML, DjVu, audio/dictionary MOBI. Font-only EPUB `encryption.xml` is **not** DRM.
 
 ## Typical pipeline
 
@@ -33,11 +34,11 @@ Example **Read aloud** follows the `document/` branch into TTS; scan-PDF raster 
 ```mermaid
 flowchart TD
   F[FileSource]
-  F -->|EPUB / FB2 / CBZ / CBR| DT["extractDocumentText"]
+  F -->|EPUB / FB2 / MOBI / CBZ / CBR| DT["extractDocumentText"]
   F -->|"PDF — pdf/ not document/"| PT["extractPdfTextLayer"]
 
-  DT -->|"ok, imageOnly empty — hello.epub / hello.fb2"| TTS1["TTS / any TextBuffer feature"]
-  DT -->|"ok + imageOnly — mixed.epub"| DI1["extractDocumentImages"]
+  DT -->|"ok, imageOnly empty — hello.epub / hello.fb2 / MOBI"| TTS1["TTS / any TextBuffer feature"]
+  DT -->|"ok + imageOnly — mixed.epub / MOBI scan part"| DI1["extractDocumentImages"]
   DI1 --> OCR1["createOCR().recognize"]
   OCR1 --> JOIN["app: concat markup + OCR by sectionIndex"]
   DT -.-> JOIN
@@ -104,7 +105,7 @@ await releaseOfflineImageBuffer(images.buffer);
 
 ## Mixed books (app, not SDK)
 
-A **mixed book** is an EPUB/FB2 whose spine has flowing XHTML **and** image-only items (scan chapters). Impact:
+A **mixed book** is an EPUB/FB2/MOBI whose spine has flowing markup **and** image-only items (scan chapters). Impact:
 
 - `extractDocumentText` **succeeds**. The markup buffer contains only text chapters. Scan chapters are **absent** from that buffer — TTS on markup alone skips them.
 - `imageOnlySections` is the gap list (`sectionIndex` + `href`). That is the signal to also extract images; it is not an error.
@@ -189,12 +190,12 @@ type ExtractDocumentImagesResult = {
 | Input | Frames |
 |-------|--------|
 | CBZ / CBR | Image files, natural sort; skip `ComicInfo.xml` / thumbs / `.` files; skip undecodable codecs |
-| EPUB / FB2 image-only sections | Those sections only, order = `sectionIndex` |
+| EPUB / FB2 / MOBI image-only sections | Those sections only, order = `sectionIndex` |
 | Pure text document | `ERR_DOC_NO_IMAGES` |
 
 Text extract first is optional. After a successful text extract with empty `imageOnlySections`, images still return `ERR_DOC_NO_IMAGES`. Zero decodable frames after skips → `ERR_DOC_NO_IMAGES`.
 
-CBZ/CBR `pageNumber` is 1-based **after** sort; `href` is the archive path. EPUB/FB2 frames use `sectionIndex` + `href`.
+CBZ/CBR `pageNumber` is 1-based **after** sort; `href` is the archive path. EPUB/FB2 frames use `sectionIndex` + `href`. MOBI image frames use `href` like `recindex:1`.
 
 ## Markup spans
 
@@ -206,7 +207,7 @@ One span per block (`p`, `h1`–`h6`, `li`, `blockquote`, `pre`, `td`). Same `se
 | `level` | `'block'` |
 | `origin` | `'markup'` |
 | `sectionIndex` | Reading order |
-| `href` | EPUB path / FB2 id / archive path when present |
+| `href` | EPUB path / FB2 id / MOBI `part-N` or `recindex:N` / archive path when present |
 | `sourceImageBufferId` | empty |
 | `quad` | Required schema: **null quad** `(0,0,…,0)`. AnnotatedView does not draw `markup` |
 | `frameIndex` | `0` |
@@ -219,14 +220,14 @@ Blocks joined with `\n\n`; `<br>` → `\n`; ruby keeps `rb`, drops `rt`/`rp`; `s
 | Code | When |
 |------|------|
 | `ERR_DOC_ARCHIVE_DISABLED` | libarchive built out |
-| `ERR_DOC_UNSUPPORTED_FORMAT` | PDF, HTML file, MOBI (this ship), unknown, KFX, … |
+| `ERR_DOC_UNSUPPORTED_FORMAT` | PDF, HTML file, KFX / AZW4 / Topaz / audio / dictionary MOBI, unknown |
 | `ERR_DOC_DRM` | Content encryption / password-protected archive |
 | `ERR_DOC_OPEN_FAILED` | Unreadable, Android `apkAsset`, or archive over **10 000** entries / **64 MiB** per file / **512 MiB** uncompressed |
 | `ERR_DOC_NO_TEXT` | No markup in the whole document |
 | `ERR_DOC_NO_IMAGES` | No image-only sections / no decodable image |
 | `ERR_DOC_INVALID_ARGUMENT` | Bad source / missing or already populated `textOut` |
 | `ERR_DOC_CANCELLED` | AbortSignal |
-| `ERR_DOC_PARSE_FAILED` | Broken OPF / XHTML / FB2 |
+| `ERR_DOC_PARSE_FAILED` | Broken OPF / XHTML / FB2 / MOBI |
 
 ## See also
 

@@ -4,7 +4,7 @@ This directory contains **full license texts** for libraries shipped with this m
 
 OCR (PP-OCR spike / `PpocrBackend`) additionally attributes RapidOCR and PaddleOCR under Apache-2.0 — see [`rapidocr-paddleocr.txt`](rapidocr-paddleocr.txt).
 
-E-documents (`react-native-sherpa-onnx/document`) use [pugixml](pugixml.txt) (MIT; submodule `third_party/pugixml`, compiled into `sherpaonnx`) and [lexbor](lexbor.txt) (Apache-2.0; submodule `third_party/lexbor`, consumer prebuilts via `third_party/lexbor_prebuilt`).
+E-documents (`react-native-sherpa-onnx/document`) use [pugixml](pugixml.txt) (MIT; submodule `third_party/pugixml`, compiled into `sherpaonnx`) and [lexbor](lexbor.txt) (Apache-2.0; submodule `third_party/lexbor`, consumer prebuilts via `third_party/lexbor_prebuilt`). MOBI/KF8 decompress and record layout follow algorithms documented in [foliate-js `mobi.js`](https://github.com/johnfactotum/foliate-js/blob/main/mobi.js) (MIT; [foliate-js.txt](foliate-js.txt)). The SDK ships its own C++ port, not that JavaScript file.
 
 ## Prebuilt model release assets (per-model metadata)
 
