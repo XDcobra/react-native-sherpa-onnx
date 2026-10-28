@@ -4,7 +4,6 @@
 #include "DocSniff.h"
 
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -15,132 +14,57 @@
 
 namespace {
 
-// 1×1 PNG (RGB).
-const uint8_t kTinyPng[] = {
-    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-    0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00,
-    0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
-    0x00, 0x00, 0x03, 0x00, 0x01, 0x18, 0xdd, 0x8d, 0xb4, 0x00, 0x00, 0x00,
-    0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
-
-uint32_t Crc32(const uint8_t* data, size_t n) {
-  uint32_t c = 0xffffffffu;
-  for (size_t i = 0; i < n; ++i) {
-    c ^= data[i];
-    for (int k = 0; k < 8; ++k) {
-      c = (c & 1) ? (0xedb88320u ^ (c >> 1)) : (c >> 1);
-    }
-  }
-  return c ^ 0xffffffffu;
+std::string FixturePath(const char* name) {
+#ifndef SHERPA_TEST_SOURCE_DIR
+#define SHERPA_TEST_SOURCE_DIR "."
+#endif
+  return std::string(SHERPA_TEST_SOURCE_DIR) + "/test/fixtures/document/" + name;
 }
 
-void Put16(std::vector<uint8_t>* o, uint16_t v) {
-  o->push_back(static_cast<uint8_t>(v));
-  o->push_back(static_cast<uint8_t>(v >> 8));
-}
-void Put32(std::vector<uint8_t>* o, uint32_t v) {
-  o->push_back(static_cast<uint8_t>(v));
-  o->push_back(static_cast<uint8_t>(v >> 8));
-  o->push_back(static_cast<uint8_t>(v >> 16));
-  o->push_back(static_cast<uint8_t>(v >> 24));
+void RequireFixture(const std::string& path) {
+  ASSERT_EQ(::access(path.c_str(), R_OK), 0) << "missing fixture " << path;
 }
 
-struct ZipEntry {
-  std::string name;
-  std::vector<uint8_t> data;
-};
-
-ZipEntry E(const char* name, const std::string& body) {
-  ZipEntry z;
-  z.name = name;
-  z.data.assign(body.begin(), body.end());
-  return z;
-}
-ZipEntry E(const char* name, const uint8_t* p, size_t n) {
-  ZipEntry z;
-  z.name = name;
-  z.data.assign(p, p + n);
-  return z;
+sherpa_onnx::document::DocumentSource Src(const std::string& path) {
+  sherpa_onnx::document::DocumentSource s;
+  s.path = path;
+  return s;
 }
 
-std::vector<uint8_t> MakeStoreZip(const std::vector<ZipEntry>& entries) {
-  std::vector<uint8_t> out;
-  struct Meta {
-    std::string name;
-    uint32_t crc;
-    uint32_t size;
-    uint32_t local_off;
-  };
-  std::vector<Meta> metas;
-  for (const auto& e : entries) {
-    Meta m;
-    m.name = e.name;
-    m.crc = Crc32(e.data.data(), e.data.size());
-    m.size = static_cast<uint32_t>(e.data.size());
-    m.local_off = static_cast<uint32_t>(out.size());
-    out.insert(out.end(), {'P', 'K', 0x03, 0x04});
-    Put16(&out, 20);
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put32(&out, m.crc);
-    Put32(&out, m.size);
-    Put32(&out, m.size);
-    Put16(&out, static_cast<uint16_t>(m.name.size()));
-    Put16(&out, 0);
-    out.insert(out.end(), m.name.begin(), m.name.end());
-    out.insert(out.end(), e.data.begin(), e.data.end());
-    metas.push_back(std::move(m));
-  }
-  const uint32_t cd_off = static_cast<uint32_t>(out.size());
-  for (const auto& m : metas) {
-    out.insert(out.end(), {'P', 'K', 0x01, 0x02});
-    Put16(&out, 20);
-    Put16(&out, 20);
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put32(&out, m.crc);
-    Put32(&out, m.size);
-    Put32(&out, m.size);
-    Put16(&out, static_cast<uint16_t>(m.name.size()));
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put16(&out, 0);
-    Put32(&out, 0);
-    Put32(&out, m.local_off);
-    out.insert(out.end(), m.name.begin(), m.name.end());
-  }
-  const uint32_t cd_sz = static_cast<uint32_t>(out.size()) - cd_off;
-  out.insert(out.end(), {'P', 'K', 0x05, 0x06});
-  Put16(&out, 0);
-  Put16(&out, 0);
-  Put16(&out, static_cast<uint16_t>(metas.size()));
-  Put16(&out, static_cast<uint16_t>(metas.size()));
-  Put32(&out, cd_sz);
-  Put32(&out, cd_off);
-  Put16(&out, 0);
+std::string WriteTemp(const std::string& suffix, const std::vector<uint8_t>& bytes) {
+  char tmpl[] = "/tmp/sherpa-doc-XXXXXX";
+  const int fd = mkstemp(tmpl);
+  EXPECT_GE(fd, 0);
+  std::string out = std::string(tmpl) + suffix;
+  close(fd);
+  unlink(tmpl);
+  std::ofstream f(out, std::ios::binary);
+  f.write(reinterpret_cast<const char*>(bytes.data()),
+          static_cast<std::streamsize>(bytes.size()));
+  f.close();
   return out;
 }
 
-const std::vector<ZipEntry>& ComicEntries() {
-  static const std::vector<ZipEntry> kEntries = {
-      E("ComicInfo.xml", std::string("<ComicInfo/>")),
-      E("page10.png", kTinyPng, sizeof(kTinyPng)),
-      E("page2.png", kTinyPng, sizeof(kTinyPng)),
-      E(".hidden.png", kTinyPng, sizeof(kTinyPng)),
-  };
-  return kEntries;
+std::vector<uint8_t> ReadAll(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  return std::vector<uint8_t>((std::istreambuf_iterator<char>(in)),
+                             std::istreambuf_iterator<char>());
 }
 
-void ExpectComicNoTextAndSortedPages(const std::string& path,
-                                     const char* format) {
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
+void ExpectNorthWindMarkup(const sherpa_onnx::document::ExtractTextResult& text) {
+  EXPECT_NE(text.text.find("North Wind"), std::string::npos);
+  EXPECT_NE(text.text.find("take off his cloak"), std::string::npos);
+  EXPECT_NE(text.text.find("Pride"), std::string::npos);
+  EXPECT_NE(text.text.find("force and bluster"), std::string::npos);
+  EXPECT_NE(text.text.find("wrapped his cloak tighter"), std::string::npos);
+  EXPECT_NE(text.text.find("the Sun"), std::string::npos);
+  EXPECT_EQ(text.text.find("kan"), std::string::npos);
+  EXPECT_EQ(text.text.find("shouldNotAppear"), std::string::npos);
+  EXPECT_EQ(text.text.find("alert"), std::string::npos);
+}
+
+void ExpectComicNoTextAndSortedPages(const std::string& path, const char* format) {
+  auto src = Src(path);
   auto text = sherpa_onnx::document::ExtractDocumentText(src);
   EXPECT_FALSE(text.ok);
   EXPECT_EQ(text.error_code, "ERR_DOC_NO_TEXT");
@@ -152,120 +76,6 @@ void ExpectComicNoTextAndSortedPages(const std::string& path,
   EXPECT_EQ(images.frames[0].page_number, 1);
   EXPECT_EQ(images.frames[1].href, "page10.png");
   EXPECT_EQ(images.frames[1].page_number, 2);
-}
-
-std::string CommittedCbrPath() {
-#ifndef SHERPA_TEST_SOURCE_DIR
-#define SHERPA_TEST_SOURCE_DIR "."
-#endif
-  return std::string(SHERPA_TEST_SOURCE_DIR) +
-         "/test/fixtures/document/tiny-comic.cbr";
-}
-
-std::string WriteTemp(const std::string& suffix, const std::vector<uint8_t>& bytes) {
-  char path[] = "/tmp/sherpa-doc-XXXXXX";
-  const int fd = mkstemp(path);
-  EXPECT_GE(fd, 0);
-  std::string out = std::string(path) + suffix;
-  close(fd);
-  unlink(path);
-  std::ofstream f(out, std::ios::binary);
-  f.write(reinterpret_cast<const char*>(bytes.data()),
-          static_cast<std::streamsize>(bytes.size()));
-  f.close();
-  return out;
-}
-
-const char* kContainer = R"(<?xml version="1.0"?>
-<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container" version="1.0">
-  <rootfiles>
-    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
-  </rootfiles>
-</container>
-)";
-
-std::string MixedOpf() {
-  return R"(<?xml version="1.0"?>
-<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="id">urn:uuid:test</dc:identifier>
-    <dc:title>Test</dc:title>
-    <dc:language>en</dc:language>
-  </metadata>
-  <manifest>
-    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
-    <item id="skip" href="skip.xhtml" media-type="application/xhtml+xml"/>
-    <item id="scan" href="scan.xhtml" media-type="application/xhtml+xml"/>
-    <item id="img" href="img.png" media-type="image/png"/>
-  </manifest>
-  <spine>
-    <itemref idref="ch1"/>
-    <itemref idref="skip" linear="no"/>
-    <itemref idref="scan"/>
-  </spine>
-</package>
-)";
-}
-
-const char* kCh1 = R"(<?xml version="1.0"?>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<body>
-<p>Hello</p>
-<h1>World</h1>
-<script>alert(1)</script>
-<p>Ruby <ruby><rb>漢</rb><rt>kan</rt></ruby></p>
-</body></html>
-)";
-
-const char* kSkip = R"(<?xml version="1.0"?>
-<html xmlns="http://www.w3.org/1999/xhtml"><body><p>Should not appear</p></body></html>
-)";
-
-const char* kScan = R"(<?xml version="1.0"?>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<body>
-<img src="img.png" alt="photograph of a scanned page" title="scan" aria-label="page"/>
-</body></html>
-)";
-
-std::vector<ZipEntry> MixedEpubEntries() {
-  return {
-      E("mimetype", std::string("application/epub+zip")),
-      E("META-INF/container.xml", kContainer),
-      E("OEBPS/content.opf", MixedOpf()),
-      E("OEBPS/ch1.xhtml", kCh1),
-      E("OEBPS/skip.xhtml", kSkip),
-      E("OEBPS/scan.xhtml", kScan),
-      E("OEBPS/img.png", kTinyPng, sizeof(kTinyPng)),
-  };
-}
-
-std::string Base64(const uint8_t* p, size_t n) {
-  static const char* t =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  std::string o;
-  for (size_t i = 0; i < n; i += 3) {
-    unsigned v = p[i] << 16;
-    if (i + 1 < n) v |= p[i + 1] << 8;
-    if (i + 2 < n) v |= p[i + 2];
-    o.push_back(t[(v >> 18) & 63]);
-    o.push_back(t[(v >> 12) & 63]);
-    o.push_back(i + 1 < n ? t[(v >> 6) & 63] : '=');
-    o.push_back(i + 2 < n ? t[v & 63] : '=');
-  }
-  return o;
-}
-
-std::string Fb2WithImage() {
-  return std::string(R"(<?xml version="1.0"?>
-<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
-  <body>
-    <section id="s1"><p>Alpha</p><p>Beta</p></section>
-    <section id="s2"><image l:href="#pic"/></section>
-  </body>
-  <binary id="pic" content-type="image/png">)") +
-         Base64(kTinyPng, sizeof(kTinyPng)) +
-         "</binary></FictionBook>";
 }
 
 }  // namespace
@@ -298,59 +108,51 @@ TEST(DocHtml, BlocksAndRuby) {
 }
 
 TEST(DocumentExtract, PdfAndHtmlAreUnsupported) {
-  const auto pdf = WriteTemp(".pdf", {'%', 'P', 'D', 'F', '-', '1', '.', '4'});
-  sherpa_onnx::document::DocumentSource src;
-  src.path = pdf;
-  auto t = sherpa_onnx::document::ExtractDocumentText(src);
+  const auto pdf = FixturePath("not-a-book.pdf");
+  const auto html = FixturePath("not-a-book.html");
+  RequireFixture(pdf);
+  RequireFixture(html);
+  auto t = sherpa_onnx::document::ExtractDocumentText(Src(pdf));
 #ifndef HAVE_LIBARCHIVE
   EXPECT_EQ(t.error_code, "ERR_DOC_ARCHIVE_DISABLED");
 #else
   EXPECT_EQ(t.error_code, "ERR_DOC_UNSUPPORTED_FORMAT");
 #endif
-  unlink(pdf.c_str());
-
-  const auto html = WriteTemp(".html", std::vector<uint8_t>(
-      {'<', 'h', 't', 'm', 'l', '>', '<', '/', 'h', 't', 'm', 'l', '>'}));
-  src.path = html;
-  t = sherpa_onnx::document::ExtractDocumentText(src);
+  t = sherpa_onnx::document::ExtractDocumentText(Src(html));
 #ifndef HAVE_LIBARCHIVE
   EXPECT_EQ(t.error_code, "ERR_DOC_ARCHIVE_DISABLED");
 #else
   EXPECT_EQ(t.error_code, "ERR_DOC_UNSUPPORTED_FORMAT");
 #endif
-  unlink(html.c_str());
 }
 
 #ifndef HAVE_LIBARCHIVE
 TEST(DocumentExtract, DisabledWithoutLibarchive) {
-  sherpa_onnx::document::DocumentSource src;
-  src.path = "/tmp/nope.epub";
-  auto t = sherpa_onnx::document::ExtractDocumentText(src);
+  auto t = sherpa_onnx::document::ExtractDocumentText(Src(FixturePath("mixed.epub")));
   EXPECT_FALSE(t.ok);
   EXPECT_EQ(t.error_code, "ERR_DOC_ARCHIVE_DISABLED");
 }
 #else
 
 TEST(DocumentExtract, MixedEpubTextAndImages) {
-  const auto zip = MakeStoreZip(MixedEpubEntries());
-  const auto path = WriteTemp(".epub", zip);
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
-
+  const auto path = FixturePath("mixed.epub");
+  RequireFixture(path);
+  auto src = Src(path);
   auto text = sherpa_onnx::document::ExtractDocumentText(src);
   ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
   EXPECT_EQ(text.format, "epub");
-  ASSERT_EQ(text.sections.size(), 2u);
+  ASSERT_EQ(text.sections.size(), 3u);
   EXPECT_EQ(text.sections[0].kind, "text");
-  EXPECT_EQ(text.sections[1].kind, "image");
+  EXPECT_EQ(text.sections[1].kind, "text");
+  EXPECT_EQ(text.sections[2].kind, "image");
   EXPECT_EQ(text.image_only_sections.size(), 1u);
-  EXPECT_EQ(text.image_only_sections[0].section_index, 1);
-  EXPECT_NE(text.text.find("Hello"), std::string::npos);
-  EXPECT_NE(text.text.find("World"), std::string::npos);
+  EXPECT_EQ(text.image_only_sections[0].section_index, 2);
+  ExpectNorthWindMarkup(text);
+  EXPECT_NE(text.text.find("traveler's wrap"), std::string::npos);
   EXPECT_EQ(text.text.find("Should not appear"), std::string::npos);
   EXPECT_EQ(text.text.find("photograph"), std::string::npos);
-  EXPECT_EQ(text.text.find("alert"), std::string::npos);
-  ASSERT_GE(text.spans.size(), 2u);
+  EXPECT_EQ(text.text.find("flourish"), std::string::npos);
+  ASSERT_GE(text.spans.size(), 4u);
   EXPECT_EQ(text.spans[0].section_index, 0);
   EXPECT_EQ(text.spans[0].level, "block");
 
@@ -358,124 +160,85 @@ TEST(DocumentExtract, MixedEpubTextAndImages) {
   ASSERT_TRUE(images.ok) << images.error_code << " " << images.error_message;
   EXPECT_EQ(images.format, "epub");
   ASSERT_EQ(images.frames.size(), 1u);
-  EXPECT_EQ(images.frames[0].section_index, 1);
+  EXPECT_EQ(images.frames[0].section_index, 2);
   EXPECT_EQ(images.frames[0].rgb.width, 1);
   EXPECT_EQ(images.frames[0].rgb.height, 1);
-  unlink(path.c_str());
 }
 
 TEST(DocumentExtract, TextOnlyEpubNoImages) {
-  std::vector<ZipEntry> entries = {
-      E("mimetype", std::string("application/epub+zip")),
-      E("META-INF/container.xml", kContainer),
-      E("OEBPS/content.opf", R"(<?xml version="1.0"?>
-<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="id" version="3.0">
-  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:identifier id="id">x</dc:identifier><dc:title>t</dc:title><dc:language>en</dc:language>
-  </metadata>
-  <manifest>
-    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
-  </manifest>
-  <spine><itemref idref="ch1"/></spine>
-</package>)"),
-      E("OEBPS/ch1.xhtml", "<html><body><p>Only text</p></body></html>"),
-  };
-  const auto path = WriteTemp(".epub", MakeStoreZip(entries));
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
+  const auto path = FixturePath("text-only.epub");
+  RequireFixture(path);
+  auto src = Src(path);
   auto text = sherpa_onnx::document::ExtractDocumentText(src);
   ASSERT_TRUE(text.ok) << text.error_message;
   EXPECT_TRUE(text.image_only_sections.empty());
   auto images = sherpa_onnx::document::ExtractDocumentImages(src);
   EXPECT_FALSE(images.ok);
   EXPECT_EQ(images.error_code, "ERR_DOC_NO_IMAGES");
-  unlink(path.c_str());
 }
 
 TEST(DocumentExtract, DrmEncryptionXml) {
-  std::vector<ZipEntry> entries = MixedEpubEntries();
-  entries.push_back(E("META-INF/encryption.xml", R"(<?xml version="1.0"?>
-<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-  <EncryptedData xmlns="http://www.w3.org/2001/04/xmlenc#">
-    <EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/>
-    <CipherData><CipherReference URI="OEBPS/ch1.xhtml"/></CipherData>
-  </EncryptedData>
-</encryption>)"));
-  const auto path = WriteTemp(".epub", MakeStoreZip(entries));
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
-  auto text = sherpa_onnx::document::ExtractDocumentText(src);
+  const auto path = FixturePath("drm.epub");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
   EXPECT_FALSE(text.ok);
   EXPECT_EQ(text.error_code, "ERR_DOC_DRM");
-  unlink(path.c_str());
 }
 
 TEST(DocumentExtract, FontOnlyEncryptionIsNotDrm) {
-  std::vector<ZipEntry> entries = MixedEpubEntries();
-  entries.push_back(E("META-INF/encryption.xml", R"(<?xml version="1.0"?>
-<encryption>
-  <EncryptedData>
-    <EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/>
-    <CipherData><CipherReference URI="OEBPS/fonts/Body.otf"/></CipherData>
-  </EncryptedData>
-</encryption>)"));
-  entries.push_back(E("OEBPS/fonts/Body.otf", std::string("not-a-real-font")));
-  const auto path = WriteTemp(".epub", MakeStoreZip(entries));
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
-  auto text = sherpa_onnx::document::ExtractDocumentText(src);
+  const auto path = FixturePath("font-embed.epub");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
   ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
-  unlink(path.c_str());
 }
 
 TEST(DocumentExtract, Fb2UncompressedAndZip) {
-  const auto xml = Fb2WithImage();
-  const auto path = WriteTemp(".fb2", std::vector<uint8_t>(xml.begin(), xml.end()));
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
+  const auto path = FixturePath("north-wind.fb2");
+  RequireFixture(path);
+  auto src = Src(path);
   auto text = sherpa_onnx::document::ExtractDocumentText(src);
   ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
   EXPECT_EQ(text.format, "fb2");
-  ASSERT_EQ(text.sections.size(), 2u);
+  ASSERT_EQ(text.sections.size(), 3u);
   EXPECT_EQ(text.sections[0].kind, "text");
-  EXPECT_EQ(text.sections[1].kind, "image");
-  EXPECT_NE(text.text.find("Alpha"), std::string::npos);
+  EXPECT_EQ(text.sections[1].kind, "text");
+  EXPECT_EQ(text.sections[2].kind, "image");
+  EXPECT_NE(text.text.find("North Wind"), std::string::npos);
+  EXPECT_NE(text.text.find("Pride yields"), std::string::npos);
+  EXPECT_NE(text.text.find("A fable"), std::string::npos);
+  EXPECT_NE(text.text.find("the cloak stayed"), std::string::npos);
+  EXPECT_NE(text.text.find("the cloak fell"), std::string::npos);
+  EXPECT_EQ(text.text.find("VoiceLab"), std::string::npos);
   auto images = sherpa_onnx::document::ExtractDocumentImages(src);
   ASSERT_TRUE(images.ok) << images.error_message;
   ASSERT_EQ(images.frames.size(), 1u);
-  EXPECT_EQ(images.frames[0].section_index, 1);
-  unlink(path.c_str());
+  EXPECT_EQ(images.frames[0].section_index, 2);
 
-  const auto zpath = WriteTemp(".fbz", MakeStoreZip({E("book.fb2", xml)}));
-  src.path = zpath;
-  text = sherpa_onnx::document::ExtractDocumentText(src);
+  const auto zpath = FixturePath("north-wind.fbz");
+  RequireFixture(zpath);
+  text = sherpa_onnx::document::ExtractDocumentText(Src(zpath));
   ASSERT_TRUE(text.ok) << text.error_message;
   EXPECT_EQ(text.format, "fb2");
-  unlink(zpath.c_str());
 }
 
 TEST(DocumentExtract, CbzNaturalSortAndNoText) {
-  const auto path = WriteTemp(".cbz", MakeStoreZip(ComicEntries()));
+  const auto path = FixturePath("comic.cbz");
+  RequireFixture(path);
   ExpectComicNoTextAndSortedPages(path, "cbz");
-  unlink(path.c_str());
 }
 
 TEST(DocumentExtract, CbrRar3NaturalSortAndNoText) {
-  // Committed store-only RAR3 comic. Tests only read it — no RAR writer on CI.
-  const auto path = CommittedCbrPath();
-  ASSERT_EQ(::access(path.c_str(), R_OK), 0) << "missing fixture " << path;
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
-  EXPECT_EQ(sherpa_onnx::document::SniffFormat(src, nullptr, nullptr, nullptr),
+  const auto path = FixturePath("tiny-comic.cbr");
+  RequireFixture(path);
+  EXPECT_EQ(sherpa_onnx::document::SniffFormat(Src(path), nullptr, nullptr, nullptr),
             sherpa_onnx::document::DocFormat::Cbr);
   ExpectComicNoTextAndSortedPages(path, "cbr");
 }
 
 TEST(DocumentExtract, CbrTruncatedIsOpenFailed) {
-  const uint8_t rar3[] = {'R', 'a', 'r', '!', 0x1a, 0x07, 0x00, 0x00};
-  const auto path = WriteTemp(".cbr", std::vector<uint8_t>(rar3, rar3 + sizeof(rar3)));
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
+  const auto path = FixturePath("truncated.cbr");
+  RequireFixture(path);
+  auto src = Src(path);
   EXPECT_EQ(sherpa_onnx::document::SniffFormat(src, nullptr, nullptr, nullptr),
             sherpa_onnx::document::DocFormat::Cbr);
   auto text = sherpa_onnx::document::ExtractDocumentText(src);
@@ -484,18 +247,127 @@ TEST(DocumentExtract, CbrTruncatedIsOpenFailed) {
   auto images = sherpa_onnx::document::ExtractDocumentImages(src);
   EXPECT_FALSE(images.ok);
   EXPECT_EQ(images.error_code, "ERR_DOC_OPEN_FAILED");
-  unlink(path.c_str());
+}
+
+TEST(DocumentExtract, MobiUncompressedText) {
+  const auto path = FixturePath("tiny.mobi");
+  RequireFixture(path);
+  auto src = Src(path);
+  EXPECT_EQ(sherpa_onnx::document::SniffFormat(src, nullptr, nullptr, nullptr),
+            sherpa_onnx::document::DocFormat::Mobi);
+  auto text = sherpa_onnx::document::ExtractDocumentText(src);
+  ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
+  EXPECT_EQ(text.format, "mobi");
+  ASSERT_EQ(text.sections.size(), 3u);
+  EXPECT_EQ(text.sections[0].kind, "text");
+  EXPECT_EQ(text.sections[1].kind, "text");
+  EXPECT_EQ(text.sections[2].kind, "image");
+  ASSERT_EQ(text.image_only_sections.size(), 1u);
+  EXPECT_EQ(text.image_only_sections[0].section_index, 2);
+  ExpectNorthWindMarkup(text);
+  auto images = sherpa_onnx::document::ExtractDocumentImages(src);
+  ASSERT_TRUE(images.ok) << images.error_message;
+  ASSERT_EQ(images.frames.size(), 1u);
+  EXPECT_EQ(images.frames[0].section_index, 2);
+  EXPECT_EQ(images.format, "mobi");
+}
+
+TEST(DocumentExtract, MobiPalmDocCompressionAsciiHtml) {
+  const auto path = FixturePath("palmdoc.mobi");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
+  EXPECT_NE(text.text.find("PalmDOC chapter"), std::string::npos);
+  EXPECT_NE(text.text.find("cloak came off"), std::string::npos);
+}
+
+TEST(DocumentExtract, MobiDrmIsRejected) {
+  const auto path = FixturePath("drm.mobi");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  EXPECT_FALSE(text.ok);
+  EXPECT_EQ(text.error_code, "ERR_DOC_DRM");
+}
+
+TEST(DocumentExtract, MobiAzw4IsUnsupported) {
+  const auto path = FixturePath("print-replica.azw4");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  EXPECT_FALSE(text.ok);
+  EXPECT_EQ(text.error_code, "ERR_DOC_UNSUPPORTED_FORMAT");
+}
+
+TEST(DocumentExtract, MobiAudioIsUnsupported) {
+  const auto path = FixturePath("audio.mobi");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  EXPECT_FALSE(text.ok);
+  EXPECT_EQ(text.error_code, "ERR_DOC_UNSUPPORTED_FORMAT");
+}
+
+TEST(DocumentExtract, MobiDictionaryExthIsUnsupported) {
+  const auto path = FixturePath("dictionary.mobi");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  EXPECT_FALSE(text.ok);
+  EXPECT_EQ(text.error_code, "ERR_DOC_UNSUPPORTED_FORMAT");
+}
+
+TEST(DocumentExtract, MobiKf8FdstSplitsFlows) {
+  const auto path = FixturePath("fdst.azw3");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
+  EXPECT_EQ(text.sections.size(), 2u);
+  EXPECT_NE(text.text.find("Alpha flow"), std::string::npos);
+  EXPECT_NE(text.text.find("first KF8 flow"), std::string::npos);
+  EXPECT_NE(text.text.find("Beta flow"), std::string::npos);
+  EXPECT_NE(text.text.find("FDST boundary"), std::string::npos);
+}
+
+TEST(DocumentExtract, MobiKf8SkelFragReconstructsHtml) {
+  const auto path = FixturePath("kf8-skel.azw3");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
+  EXPECT_NE(text.text.find("KF8 chapter"), std::string::npos);
+  EXPECT_NE(text.text.find("skeleton is hollow"), std::string::npos);
+}
+
+TEST(DocumentExtract, TextReadPalmDoc) {
+  const auto path = FixturePath("palmdoc.pdb");
+  RequireFixture(path);
+  auto src = Src(path);
+  EXPECT_EQ(sherpa_onnx::document::SniffFormat(src, nullptr, nullptr, nullptr),
+            sherpa_onnx::document::DocFormat::Mobi);
+  auto text = sherpa_onnx::document::ExtractDocumentText(src);
+  ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
+  EXPECT_NE(text.text.find("Palm text"), std::string::npos);
+}
+
+TEST(DocumentExtract, CommittedAzw3Kf8Version) {
+  const auto path = FixturePath("tiny.azw3");
+  RequireFixture(path);
+  auto src = Src(path);
+  EXPECT_EQ(sherpa_onnx::document::SniffFormat(src, nullptr, nullptr, nullptr),
+            sherpa_onnx::document::DocFormat::Mobi);
+  auto text = sherpa_onnx::document::ExtractDocumentText(src);
+  ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
+  EXPECT_EQ(text.format, "mobi");
+  ASSERT_EQ(text.sections.size(), 2u);
+  ExpectNorthWindMarkup(text);
+  auto images = sherpa_onnx::document::ExtractDocumentImages(src);
+  EXPECT_FALSE(images.ok);
+  EXPECT_EQ(images.error_code, "ERR_DOC_NO_IMAGES");
 }
 
 TEST(DocumentExtract, GarbageIsUnsupportedOrOpenFailed) {
-  const auto path = WriteTemp(".bin", {0x00, 0x01, 0x02, 0x03, 0xff});
-  sherpa_onnx::document::DocumentSource src;
-  src.path = path;
-  auto t = sherpa_onnx::document::ExtractDocumentText(src);
+  const auto path = FixturePath("garbage.bin");
+  RequireFixture(path);
+  auto t = sherpa_onnx::document::ExtractDocumentText(Src(path));
   EXPECT_FALSE(t.ok);
   EXPECT_TRUE(t.error_code == "ERR_DOC_UNSUPPORTED_FORMAT" ||
               t.error_code == "ERR_DOC_OPEN_FAILED");
-  unlink(path.c_str());
 }
 
 TEST(DocumentExtract, FuzzMalformedInputsDoNotCrash) {
@@ -511,20 +383,18 @@ TEST(DocumentExtract, FuzzMalformedInputsDoNotCrash) {
       b[3] = 0x04;
     }
     const auto path = WriteTemp(".bin", b);
-    sherpa_onnx::document::DocumentSource src;
-    src.path = path;
+    auto src = Src(path);
     auto t = sherpa_onnx::document::ExtractDocumentText(src);
     auto im = sherpa_onnx::document::ExtractDocumentImages(src);
     EXPECT_FALSE(t.ok);
     EXPECT_FALSE(im.ok);
     unlink(path.c_str());
   }
-  auto zip = MakeStoreZip(MixedEpubEntries());
+  auto zip = ReadAll(FixturePath("mixed.epub"));
+  ASSERT_FALSE(zip.empty());
   zip.resize(zip.size() / 3);
   const auto truncated = WriteTemp(".epub", zip);
-  sherpa_onnx::document::DocumentSource src;
-  src.path = truncated;
-  auto t = sherpa_onnx::document::ExtractDocumentText(src);
+  auto t = sherpa_onnx::document::ExtractDocumentText(Src(truncated));
   EXPECT_FALSE(t.ok);
   unlink(truncated.c_str());
 }

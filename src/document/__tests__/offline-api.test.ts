@@ -89,6 +89,22 @@ describe('document offline api', () => {
     );
   });
 
+  it('extractDocumentText maps mobi format', async () => {
+    mockNative.extractDocumentText.mockResolvedValue({
+      format: 'mobi',
+      sectionCount: 1,
+      sections: [{ sectionIndex: 0, href: 'part-0', kind: 'text' }],
+      imageOnlySections: [],
+      spatialSpanCount: 1,
+    });
+    const r = await extractDocumentText(
+      { kind: 'fs', path: '/tmp/a.mobi' },
+      TEXT_OUT
+    );
+    expect(r.format).toBe('mobi');
+    expect(r.sectionCount).toBe(1);
+  });
+
   it('extractDocumentImages returns buffer id', async () => {
     mockNative.extractDocumentImages.mockResolvedValue({
       bufferId: 'img_off_00000000-0000-0000-0000-0000000000aa',

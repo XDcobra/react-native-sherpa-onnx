@@ -1,4 +1,4 @@
-# Host e-document extractor tests (C++ GTest): EPUB/FB2/CBZ/CBR via libarchive.
+# Host e-document extractor tests (C++ GTest): EPUB/FB2/CBZ/CBR/MOBI.
 
 name: Test – Document host (C++)
 
