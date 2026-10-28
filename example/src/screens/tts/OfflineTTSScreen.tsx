@@ -10,11 +10,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  createTTS,
-  detectTtsModel,
-  assertTtsCustomConfig,
-  type TtsCustomConfig,
-  type TTSModelType,
   type TtsSynthesisOptions,
   type TtsSynthesisResult,
   type TtsMatchaModelOptions,
@@ -22,7 +17,6 @@ import {
 } from 'react-native-sherpa-onnx/tts';
 import { shareFile } from 'react-native-sherpa-onnx/fileio';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
-import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
 import {
   createEmptyOfflineAudioBuffer,
   createOfflineAudioBufferFromFile,
@@ -34,24 +28,7 @@ import {
   createOfflineTextBufferFromText,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
-import { getTtsCache, setTtsCache, clearTtsCache } from '../../engineCache';
-import {
-  listDownloadedModels,
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
-import {
-  getAssetPackPath,
-  listAssetModels,
-  listModelsAtPath,
-} from 'react-native-sherpa-onnx/utils';
-import {
-  getAssetModelPath,
-  getFileModelPath,
-  getModelDisplayName,
-  toDetectSource,
-} from '../../modelConfig';
-import { DocumentDirectoryPath, exists } from '@dr.pogodin/react-native-fs';
+import { exists } from '@dr.pogodin/react-native-fs';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import {
@@ -75,21 +52,8 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
-import {
-  InitModeSelector,
-  ModelFolderGrid,
-  TtsCustomInitForm,
-  type ModelInitMode,
-  type TtsCustomInitFormState,
-} from '../../components/modelInit';
-import { fillTtsCustomConfigFromModelFolder } from '../../utils/ttsCustomInitFill';
-
-const PAD_PACK_NAME = 'sherpa_models';
-
-const DEFAULT_TTS_CUSTOM_INIT: TtsCustomInitFormState = {
-  modelType: 'vits',
-  fileSources: {},
-};
+import { TtsModelInitPanel } from '../../components/TtsModelInitPanel';
+import { useTtsModelInit } from '../../hooks/useTtsModelInit';
 
 /** Readable placeholder on gray `synthesisOptionInput` / `textInput` backgrounds. */
 const INPUT_PLACEHOLDER_COLOR = '#8E8E93';
@@ -109,35 +73,25 @@ type ReferenceAudioState = {
 };
 
 export default function OfflineTTSScreen() {
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] = useState<TtsCustomInitFormState>(
-    DEFAULT_TTS_CUSTOM_INIT
+  const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
+    undefined
   );
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-  const [selectedModelForInit, setSelectedModelForInit] = useState<
-    string | null
-  >(null);
-  const [initializedSummary, setInitializedSummary] = useState<string | null>(
-    null
-  );
-  const [padModelIds, setPadModelIds] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
-  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [initResult, setInitResult] = useState<string | null>(null);
-  const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
-    null
-  );
-  const [detectedModels, setDetectedModels] = useState<
-    Array<{ type: TTSModelType; modelDir: string }>
-  >([]);
-  const [selectedModelType, setSelectedModelType] =
-    useState<TTSModelType | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [, setInitializingModel] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const tts = useTtsModelInit({
+    onBeforeInit: () => onBeforeInitRef.current?.(),
+  });
+  const ttsEngineRef = tts.engineRef;
+  const {
+    selectedModelType,
+    currentModelFolder,
+    initializedSummary,
+    modelInfo,
+    speakerId,
+    speed,
+    loading,
+    error,
+    setError,
+    isEngineInitialized,
+  } = tts;
   const [inputText, setInputText] = useState<string>('Hello, world!');
   const [generatedAudio, setGeneratedAudio] = useState<GeneratedResult | null>(
     null
@@ -150,10 +104,6 @@ export default function OfflineTTSScreen() {
     useState<SegmentationControlConfig>({ mode: 'off' });
   const [lastSynthesisResult, setLastSynthesisResult] =
     useState<TtsSynthesisResult | null>(null);
-  const [modelInfo, setModelInfo] = useState<{
-    sampleRate: number;
-    numSpeakers: number;
-  } | null>(null);
   const [savedAudioPath, setSavedAudioPath] = useState<string | null>(null);
   const [savedAudioBufferId, setSavedAudioBufferId] = useState<string | null>(
     null
@@ -164,8 +114,6 @@ export default function OfflineTTSScreen() {
     string | null
   >(null);
 
-  const [speakerId, setSpeakerId] = useState('0');
-  const [speed, setSpeed] = useState('1.0');
   const [silenceScale, setSilenceScale] = useState('');
   const [noiseScale, setNoiseScale] = useState('');
   const [noiseScaleW, setNoiseScaleW] = useState('');
@@ -179,8 +127,6 @@ export default function OfflineTTSScreen() {
     null
   );
 
-  const TTS_NUM_THREADS = 2;
-
   const getDisplayPath = (path: string) => {
     try {
       return decodeURIComponent(path);
@@ -189,7 +135,6 @@ export default function OfflineTTSScreen() {
     }
   };
 
-  const ttsEngineRef = useRef<TtsEngine | null>(null);
   const currentModelFolderRef = useRef<string | null>(null);
   const pcmPlayerRef = useRef<PcmPlayer | null>(null);
   const referenceAudioRef = useRef<ReferenceAudioState | null>(null);
@@ -231,21 +176,6 @@ export default function OfflineTTSScreen() {
     setSelectedOutputDeviceId((prev) =>
       keepValidDeviceSelection(prev, nextOutputDevices)
     );
-  }, []);
-
-  // Load available models on mount
-  useEffect(() => {
-    loadAvailableModels();
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category !== ModelCategory.Tts) return;
-      loadAvailableModels().catch(() => {
-        // ignore refresh errors
-      });
-    });
-    return unsubscribe;
   }, []);
 
   useEffect(() => {
@@ -362,33 +292,9 @@ export default function OfflineTTSScreen() {
     noiseScale,
     noiseScaleW,
     selectedModelType,
+    setError,
+    ttsEngineRef,
   ]);
-
-  // Restore persisted TTS instance when entering the screen (do not release on unmount)
-  useEffect(() => {
-    const cached = getTtsCache();
-    if (cached.engine != null && cached.modelFolder != null) {
-      ttsEngineRef.current = cached.engine;
-      setCurrentModelFolder(
-        cached.modelFolder === 'custom' ? null : cached.modelFolder
-      );
-      setInitializedSummary(
-        cached.modelFolder === 'custom'
-          ? `custom:${cached.selectedModelType ?? 'unknown'}`
-          : getModelDisplayName(cached.modelFolder)
-      );
-      setDetectedModels(cached.detectedModels);
-      setSelectedModelType(cached.selectedModelType);
-      setModelInfo(cached.modelInfo);
-      setInitResult(
-        `Initialized: ${getModelDisplayName(
-          cached.modelFolder
-        )}\nDetected models: ${cached.detectedModels
-          .map((m) => m.type)
-          .join(', ')}`
-      );
-    }
-  }, []);
 
   const stopTtsSavedAudioPlayback = useCallback(() => {
     const player = pcmPlayerRef.current;
@@ -427,6 +333,21 @@ export default function OfflineTTSScreen() {
     setReferenceFileName(null);
     await releaseReferenceAudio(previous);
   }, [releaseReferenceAudio]);
+
+  onBeforeInitRef.current = async () => {
+    setGeneratedAudio(null);
+    setSavedAudioPath(null);
+    setSavedAudioBufferId(null);
+    stopTtsSavedAudioPlayback();
+    setSilenceScale('');
+    setNoiseScale('');
+    setNoiseScaleW('');
+    setLengthScale('');
+    setNumSteps('');
+    setExtraOptions('');
+    setReferenceText('');
+    await clearReferenceAudio();
+  };
 
   // Keep latest offline buffers accessible to the unmount cleanup callback.
   useEffect(() => {
@@ -504,410 +425,7 @@ export default function OfflineTTSScreen() {
         err instanceof Error ? err.message : 'Failed to load reference audio'
       );
     }
-  }, [releaseReferenceAudio]);
-
-  const loadAvailableModels = async () => {
-    setLoadingModels(true);
-    setError(null);
-    try {
-      const assetModels = await listAssetModels();
-      const ttsFolders = assetModels
-        .filter((model) => model.hint === 'tts')
-        .map((model) => model.folder);
-      const downloadedModels = await listDownloadedModels(ModelCategory.Tts);
-      const downloadedFolders = downloadedModels.map((model) => model.id);
-
-      // PAD (Play Asset Delivery) or filesystem models: prefer real PAD path, fallback to DocumentDirectoryPath/models
-      let padFolders: string[] = [];
-      let resolvedPadPath: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${DocumentDirectoryPath}/models`;
-        const padPath = padPathFromNative ?? fallbackPath;
-        const padResults = await listModelsAtPath(padPath);
-        padFolders = (padResults || [])
-          .filter((m) => m.hint === 'tts')
-          .map((m) => m.folder);
-        if (padFolders.length > 0) {
-          resolvedPadPath = padPath;
-        }
-      } catch (e) {
-        console.warn('OfflineTTSScreen: PAD/listModelsAtPath failed', e);
-        padFolders = [];
-      }
-      setPadModelsPath(resolvedPadPath);
-      setPadModelIds(padFolders);
-
-      // Merge: PAD folders, then bundled asset folders (no duplicates)
-      const combined = [
-        ...padFolders,
-        ...ttsFolders.filter((f) => !padFolders.includes(f)),
-        ...downloadedFolders.filter(
-          (f) => !padFolders.includes(f) && !ttsFolders.includes(f)
-        ),
-      ];
-
-      setAvailableModels(combined);
-      setDownloadedModelIds(downloadedFolders);
-
-      if (combined.length === 0) {
-        setError(
-          'No TTS models found. Use bundled assets, downloaded models, or PAD models. See TTS_MODEL_SETUP.md'
-        );
-      }
-    } catch (err) {
-      console.error('OfflineTTSScreen: Failed to load models:', err);
-      setError('Failed to load available models');
-      setAvailableModels([]);
-    } finally {
-      setLoadingModels(false);
-    }
-  };
-
-  const catalogEntries = useMemo(
-    () =>
-      availableModels.map((id) => ({
-        id,
-        label: getModelDisplayName(id),
-      })),
-    [availableModels]
-  );
-
-  const isEngineInitialized =
-    currentModelFolder != null || initializedSummary != null;
-
-  const formatInitError = (err: unknown): string => {
-    if (err instanceof Error) {
-      let message = err.message;
-      if ('code' in err && typeof err.code === 'string') {
-        message = `[${err.code}] ${message}`;
-      }
-      return message;
-    }
-    if (typeof err === 'object' && err !== null) {
-      const errorObj = err as {
-        message?: string;
-        code?: string;
-        userInfo?: { NSLocalizedDescription?: string };
-      };
-      const message =
-        errorObj.message ??
-        errorObj.userInfo?.NSLocalizedDescription ??
-        JSON.stringify(err);
-      return errorObj.code ? `[${errorObj.code}] ${message}` : message;
-    }
-    return 'Unknown error';
-  };
-
-  const resolveTtsModelPath = (modelFolder: string) => {
-    if (padModelIds.includes(modelFolder)) {
-      return padModelsPath
-        ? getFileModelPath(modelFolder, undefined, padModelsPath)
-        : getFileModelPath(modelFolder, ModelCategory.Tts);
-    }
-    if (downloadedModelIds.includes(modelFolder)) {
-      return getFileModelPath(modelFolder, ModelCategory.Tts);
-    }
-    return getAssetModelPath(modelFolder);
-  };
-
-  const handleInitialize = async (modelFolder: string) => {
-    if (!modelFolder) {
-      Alert.alert('Select a model', 'Pick a catalog model folder first.');
-      return;
-    }
-    setLoading(true);
-    setInitializingModel(modelFolder);
-    setError(null);
-    setInitResult(null);
-    setDetectedModels([]);
-    setSelectedModelType(null);
-    setInitializedSummary(null);
-    setModelInfo(null);
-    setGeneratedAudio(null);
-    setSavedAudioPath(null);
-    setSavedAudioBufferId(null);
-    setSpeakerId('0');
-    setSpeed('1.0');
-    setSilenceScale('');
-    setNoiseScale('');
-    setNoiseScaleW('');
-    setLengthScale('');
-    setNumSteps('');
-    setExtraOptions('');
-    setReferenceText('');
-    await clearReferenceAudio();
-    stopTtsSavedAudioPlayback();
-
-    try {
-      const previous = ttsEngineRef.current;
-      if (previous) {
-        await previous.destroy();
-        ttsEngineRef.current = null;
-        clearTtsCache();
-      }
-
-      const modelPath = resolveTtsModelPath(modelFolder);
-
-      let engine: TtsEngine;
-      try {
-        engine = await new Promise((resolve, reject) => {
-          setTimeout(() => {
-            createTTS({
-              modelSource: modelPath,
-              numThreads: TTS_NUM_THREADS,
-              debug: false,
-            })
-              .then(resolve)
-              .catch(reject);
-          }, 50);
-        });
-      } catch (initErr) {
-        console.warn(
-          'Initial createTTS failed, retrying with fewer threads',
-          initErr
-        );
-        engine = await createTTS({
-          modelSource: modelPath,
-          numThreads: 1,
-          debug: false,
-        });
-      }
-
-      const detectResult = await detectTtsModel(
-        await toDetectSource(modelPath)
-      );
-      const normalizedDetected =
-        detectResult.success && detectResult.detectedModels?.length
-          ? detectResult.detectedModels.map((m) => ({
-              ...m,
-              type: m.type as TTSModelType,
-            }))
-          : ([
-              { type: 'vits' as TTSModelType, modelDir: modelFolder },
-            ] as Array<{
-              type: TTSModelType;
-              modelDir: string;
-            }>);
-      const firstType =
-        (detectResult.modelType as TTSModelType) ??
-        normalizedDetected[0]?.type ??
-        null;
-
-      let modelInfoValue: { sampleRate: number; numSpeakers: number } | null =
-        null;
-      try {
-        const info = await engine.getModelInfo();
-        if (
-          info &&
-          typeof info.sampleRate === 'number' &&
-          typeof info.numSpeakers === 'number'
-        ) {
-          modelInfoValue = {
-            sampleRate: info.sampleRate,
-            numSpeakers: info.numSpeakers,
-          };
-        }
-      } catch {
-        // leave modelInfoValue null
-      }
-      ttsEngineRef.current = engine;
-      setDetectedModels(normalizedDetected);
-      setCurrentModelFolder(modelFolder);
-      setSelectedModelType(firstType);
-      setInitializedSummary(getModelDisplayName(modelFolder));
-      setModelInfo(modelInfoValue);
-      setInitResult(
-        `Initialized: ${getModelDisplayName(
-          modelFolder
-        )}\nDetected models: ${normalizedDetected
-          .map((m) => m.type)
-          .join(', ')}`
-      );
-      setTtsCache(
-        engine,
-        modelFolder,
-        normalizedDetected,
-        firstType,
-        modelInfoValue
-      );
-
-      setGeneratedAudio(null);
-    } catch (err) {
-      console.error('TTS Initialization error:', err);
-
-      let errorMessage = 'Unknown error';
-      if (err instanceof Error) {
-        errorMessage = err.message;
-        if ('code' in err) {
-          errorMessage = `[${err.code}] ${errorMessage}`;
-        }
-        if (err.stack) {
-          console.error('Stack trace:', err.stack);
-        }
-      } else if (typeof err === 'object' && err !== null) {
-        const errorObj = err as any;
-        errorMessage =
-          errorObj.message ||
-          errorObj.userInfo?.NSLocalizedDescription ||
-          JSON.stringify(err);
-        if (errorObj.code) {
-          errorMessage = `[${errorObj.code}] ${errorMessage}`;
-        }
-      }
-
-      setError(errorMessage);
-      setInitResult(
-        `Initialization failed: ${errorMessage}\n\nThe error has been reported. We will address it as soon as possible in the next app update.`
-      );
-    } finally {
-      setLoading(false);
-      setInitializingModel(null);
-    }
-  };
-
-  const handleFillFromSelectedModel = async () => {
-    const modelFolder = selectedModelForInit;
-    if (!modelFolder) {
-      Alert.alert('Select a model', 'Pick a catalog model folder first.');
-      return;
-    }
-
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    setError(null);
-    try {
-      const modelPath = resolveTtsModelPath(modelFolder);
-      const fillResult = await fillTtsCustomConfigFromModelFolder(modelPath, {
-        modelTypeOverride: customInitForm.modelType,
-      });
-      setCustomInitForm({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-      });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setCustomFillHint(
-        `Filled from ${getModelDisplayName(modelFolder)} (${
-          fillResult.modelDir
-        }).${missing}`
-      );
-    } catch (err) {
-      setCustomFillHint(null);
-      setError(formatInitError(err));
-    } finally {
-      setCustomFillLoading(false);
-    }
-  };
-
-  const handlePrepareScatteredTest = () => {
-    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
-    setCustomFillHint(
-      'Scattered test: pick each file from different locations, then Initialize.'
-    );
-  };
-
-  const handleInitializeCustom = async () => {
-    setLoading(true);
-    setError(null);
-    setInitResult(null);
-    setDetectedModels([]);
-    setSelectedModelType(null);
-    setInitializedSummary(null);
-    setModelInfo(null);
-    setGeneratedAudio(null);
-    setSavedAudioPath(null);
-    setSavedAudioBufferId(null);
-    stopTtsSavedAudioPlayback();
-
-    try {
-      const previous = ttsEngineRef.current;
-      if (previous) {
-        await previous.destroy();
-        ttsEngineRef.current = null;
-        clearTtsCache();
-      }
-
-      const customConfig = {
-        ...customInitForm.fileSources,
-      } as TtsCustomConfig;
-      assertTtsCustomConfig(customConfig as unknown as Record<string, unknown>);
-
-      let engine: TtsEngine;
-      try {
-        engine = await createTTS({
-          initMode: 'custom',
-          modelType: customInitForm.modelType,
-          customConfig,
-          numThreads: TTS_NUM_THREADS,
-          debug: false,
-        });
-      } catch (initErr) {
-        console.warn(
-          'Custom createTTS failed, retrying with 1 thread',
-          initErr
-        );
-        engine = await createTTS({
-          initMode: 'custom',
-          modelType: customInitForm.modelType,
-          customConfig,
-          numThreads: 1,
-          debug: false,
-        });
-      }
-
-      let modelInfoValue: { sampleRate: number; numSpeakers: number } | null =
-        null;
-      try {
-        const info = await engine.getModelInfo();
-        if (
-          info &&
-          typeof info.sampleRate === 'number' &&
-          typeof info.numSpeakers === 'number'
-        ) {
-          modelInfoValue = {
-            sampleRate: info.sampleRate,
-            numSpeakers: info.numSpeakers,
-          };
-        }
-      } catch {
-        // leave modelInfoValue null
-      }
-
-      const detected = [
-        { type: customInitForm.modelType, modelDir: 'custom' },
-      ] as Array<{ type: TTSModelType; modelDir: string }>;
-
-      ttsEngineRef.current = engine;
-      setCurrentModelFolder(null);
-      setDetectedModels(detected);
-      setSelectedModelType(customInitForm.modelType);
-      setInitializedSummary(`custom:${customInitForm.modelType}`);
-      setModelInfo(modelInfoValue);
-      setInitResult(
-        `Initialized (custom): ${
-          customInitForm.modelType
-        }\nFiles: ${Object.keys(customConfig).join(', ')}`
-      );
-      setTtsCache(
-        engine,
-        'custom',
-        detected,
-        customInitForm.modelType,
-        modelInfoValue
-      );
-    } catch (err) {
-      console.error('TTS custom initialization error:', err);
-      const errorMessage = formatInitError(err);
-      setError(errorMessage);
-      setInitResult(`Custom initialization failed: ${errorMessage}`);
-    } finally {
-      setLoading(false);
-      setInitializingModel(null);
-    }
-  };
+  }, [releaseReferenceAudio, setError]);
 
   const handleGenerate = async () => {
     if (!selectedModelType) {
@@ -1158,19 +676,7 @@ export default function OfflineTTSScreen() {
   const handleFree = async () => {
     try {
       stopTtsSavedAudioPlayback();
-      const engine = ttsEngineRef.current;
-      if (engine) {
-        await engine.destroy();
-        ttsEngineRef.current = null;
-      }
-      clearTtsCache();
-      setCurrentModelFolder(null);
-      setInitializedSummary(null);
-      setSelectedModelForInit(null);
-      setInitResult(null);
-      setDetectedModels([]);
-      setSelectedModelType(null);
-      setModelInfo(null);
+      await tts.releaseEngine();
       setGeneratedAudio(null);
       const buffersToRelease = offlineAudioBuffersRef.current;
       offlineAudioBuffersRef.current = [];
@@ -1181,8 +687,6 @@ export default function OfflineTTSScreen() {
       setSavedAudioPath(null);
       setSavedAudioBufferId(null);
       setLastSynthesisResult(null);
-      setSpeakerId('0');
-      setSpeed('1.0');
       setSilenceScale('');
       setNoiseScale('');
       setNoiseScaleW('');
@@ -1191,7 +695,6 @@ export default function OfflineTTSScreen() {
       setExtraOptions('');
       setReferenceText('');
       await clearReferenceAudio();
-      setError(null);
       Alert.alert('Success', 'TTS model released');
     } catch (err) {
       console.error('Release error:', err);
@@ -1225,199 +728,19 @@ export default function OfflineTTSScreen() {
             </Text>
           </View>
 
-          {/* Section 1: Initialize Model */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>1. Initialize TTS Model</Text>
-            <InitModeSelector
-              value={initMode}
-              onChange={setInitMode}
-              disabled={loading || customFillLoading}
-            />
-            <Text style={styles.sectionDescription}>
-              {initMode === 'auto'
-                ? 'Select a model folder, then tap "Use model" for auto-detection.'
-                : 'Choose model type and pick files (or Fill from a catalog folder), then Initialize.'}
-            </Text>
-
-            {(initializedSummary || selectedModelForInit) && (
-              <View style={styles.currentModelContainer}>
-                <Text style={styles.currentModelText}>
-                  {initializedSummary
-                    ? `Initialized: ${initializedSummary}`
-                    : `Selected: ${
-                        selectedModelForInit
-                          ? getModelDisplayName(selectedModelForInit)
-                          : ''
-                      }`}
-                </Text>
-              </View>
-            )}
-
-            <ModelFolderGrid
-              entries={catalogEntries}
-              selectedId={selectedModelForInit}
-              initializedId={currentModelFolder}
-              onSelect={setSelectedModelForInit}
-              loading={loadingModels}
-              disabled={loading || customFillLoading}
-              emptyMessage="No TTS models found. See TTS_MODEL_SETUP.md"
-            />
-
-            {initMode === 'custom' ? (
-              <TtsCustomInitForm
-                value={customInitForm}
-                onChange={setCustomInitForm}
-                selectedCatalogModelId={selectedModelForInit}
-                onFillFromSelectedModel={handleFillFromSelectedModel}
-                onPrepareScatteredTest={handlePrepareScatteredTest}
-                fillLoading={customFillLoading}
-                disabled={loading}
-                fillHint={customFillHint}
-              />
-            ) : null}
-
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                styles.applyButton,
-                (loading || customFillLoading) && styles.buttonDisabled,
-              ]}
-              onPress={() => {
-                if (initMode === 'custom') {
-                  handleInitializeCustom();
-                  return;
-                }
-                handleInitialize(selectedModelForInit ?? '');
-              }}
-              disabled={
-                loading ||
-                customFillLoading ||
-                (initMode === 'auto'
-                  ? !selectedModelForInit && !currentModelFolder
-                  : false)
-              }
-            >
-              <View style={styles.applyButtonContent}>
-                {loading ? (
-                  <ActivityIndicator
-                    size="small"
-                    color="#FFFFFF"
-                    style={styles.applyButtonSpinner}
-                  />
-                ) : null}
-                <Text style={styles.primaryButtonText}>
-                  {initMode === 'custom' ? 'Initialize custom' : 'Use model'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            {loading && (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <Text style={styles.loadingText}>Initializing model...</Text>
-              </View>
-            )}
-
-            {initResult && (
-              <View style={styles.resultContainer}>
-                <Text style={styles.resultText}>{initResult}</Text>
-              </View>
-            )}
-          </View>
-
-          {/* Section 2: Select Model Type */}
-          {detectedModels.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>2. Select Model Type</Text>
-              {detectedModels.length > 1 ? (
-                <>
-                  <Text style={styles.sectionDescription}>
-                    Multiple model types detected. Select one:
-                  </Text>
-                  <View style={styles.detectedModelsContainer}>
-                    {detectedModels.map((model) => (
-                      <TouchableOpacity
-                        key={model.type}
-                        style={[
-                          styles.detectedModelButton,
-                          selectedModelType === model.type &&
-                            styles.detectedModelButtonActive,
-                        ]}
-                        onPress={() => setSelectedModelType(model.type)}
-                      >
-                        <Text
-                          style={[
-                            styles.detectedModelButtonText,
-                            selectedModelType === model.type &&
-                              styles.detectedModelButtonTextActive,
-                          ]}
-                        >
-                          {model.type}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              ) : (
-                <View style={styles.rowAlignCenter}>
-                  <Ionicons
-                    name="checkmark-circle"
-                    size={16}
-                    color="#34C759"
-                    style={styles.iconInline}
-                  />
-                  <Text style={styles.autoSelectedText}>
-                    Auto-selected: {selectedModelType}
-                  </Text>
-                </View>
-              )}
-            </View>
-          )}
-
-          {/* Section 3: Model Info */}
-          {modelInfo && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Model Information</Text>
-              <View style={styles.infoContainer}>
-                <Text style={styles.infoText}>
-                  Sample Rate: {modelInfo?.sampleRate ?? 0} Hz
-                </Text>
-                <Text style={styles.infoText}>
-                  Speakers: {modelInfo?.numSpeakers ?? 0}
-                </Text>
-              </View>
-            </View>
-          )}
+          <TtsModelInitPanel tts={tts} />
 
           {selectedModelType != null && (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Synthesis options</Text>
-              <Text style={styles.sectionDescription}>
-                Speaker / speed apply to all models. Noise &amp; length scales
-                use updateParams (VITS, Matcha, Kokoro, Kitten). Voice cloning
-                (Pocket / Zipvoice) is supported here via batch Generate; use
-                the streaming TTS screen only for incremental synthesis without
-                cloning.
+              <Text style={styles.sectionTitle}>
+                Advanced synthesis options
               </Text>
-
-              <Text style={styles.inputLabel}>Speaker ID:</Text>
-              <TextInput
-                style={styles.synthesisOptionInput}
-                value={speakerId}
-                onChangeText={setSpeakerId}
-                keyboardType="number-pad"
-                placeholder="0"
-                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-              />
-              <Text style={styles.inputLabel}>Speed:</Text>
-              <TextInput
-                style={styles.synthesisOptionInput}
-                value={speed}
-                onChangeText={setSpeed}
-                keyboardType="decimal-pad"
-                placeholder="1.0"
-                placeholderTextColor={INPUT_PLACEHOLDER_COLOR}
-              />
+              <Text style={styles.sectionDescription}>
+                Noise &amp; length scales use updateParams (VITS, Matcha,
+                Kokoro, Kitten). Voice cloning (Pocket / Zipvoice) is supported
+                here via batch Generate; use the streaming TTS screen only for
+                incremental synthesis without cloning.
+              </Text>
 
               {showNoiseScale && (
                 <>
@@ -1543,7 +866,7 @@ export default function OfflineTTSScreen() {
                       <TouchableOpacity
                         style={styles.cancelStreamButton}
                         onPress={() => {
-                          void clearReferenceAudio();
+                          clearReferenceAudio().catch(() => {});
                         }}
                       >
                         <Text style={styles.generateButtonText}>
@@ -1655,8 +978,8 @@ export default function OfflineTTSScreen() {
                     format="wav"
                     defaultDestinationKind="app"
                     onSaveComplete={handleSaveAudioComplete(generatedAudio)}
-                    onError={(error) => {
-                      Alert.alert('Save failed', error.message);
+                    onError={(saveError) => {
+                      Alert.alert('Save failed', saveError.message);
                     }}
                   />
                 )}
