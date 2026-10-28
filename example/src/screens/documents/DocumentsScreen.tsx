@@ -69,7 +69,13 @@ import {
 } from '../../utils/fileSourceFromUri';
 import { styles } from './DocumentsScreen.styles';
 
-type ExtractStatus = 'idle' | 'ok' | 'noTextLayer' | 'imagesOnly' | 'error';
+type ExtractStatus =
+  | 'idle'
+  | 'ok'
+  | 'noTextLayer'
+  | 'imagesOnly'
+  | 'drm'
+  | 'error';
 type OriginKind = 'markup' | 'ocr' | 'textLayer';
 
 type ReadingBlock = {
@@ -566,6 +572,19 @@ export default function DocumentsScreen() {
           });
           return;
         }
+        const drm =
+          code === DocumentErrorCode.DRM || msg.includes(DocumentErrorCode.DRM);
+        if (drm) {
+          setExtractStatus('drm');
+          setExtractMessage(DocumentErrorCode.DRM);
+          docDebug({
+            phase: 'extract',
+            kind: 'document',
+            branch: 'ERR_DOC_DRM',
+            sourceKind: source.kind,
+          });
+          return;
+        }
         setExtractStatus('error');
         setExtractMessage(msg);
         setTtsError(msg);
@@ -613,6 +632,11 @@ export default function DocumentsScreen() {
           'application/x-cbz',
           'application/zip',
           'com.apple.comicbook-archive',
+          'application/x-mobipocket-ebook',
+          'application/vnd.amazon.ebook',
+          'application/x-mobi8-ebook',
+          'com.amazon.mobi',
+          'com.amazon.azw3',
         ],
         allowMultiSelection: false,
       });
@@ -973,10 +997,10 @@ export default function DocumentsScreen() {
           <Ionicons name="book-outline" size={48} style={styles.icon} />
           <Text style={styles.title}>Read aloud</Text>
           <Text style={styles.subtitle}>
-            Extract EPUB / FB2 markup or a PDF text layer, then speak it with
-            offline TTS. Mixed EPUBs and CBZ comics need an OCR model on this
-            screen too (init, then Recognize). Scan-only PDFs belong on Vision →
-            OCR.
+            Extract EPUB / FB2 / DRM-free MOBI / AZW3 markup or a PDF text
+            layer, then speak it with offline TTS. Mixed EPUBs and CBZ comics
+            need an OCR model on this screen too (init, then Recognize). DRM
+            Kindle files and scan-only PDFs cannot be read here.
           </Text>
         </View>
 
@@ -1000,9 +1024,10 @@ export default function DocumentsScreen() {
           </Text>
           {sourceLabel ? null : (
             <Text style={styles.sectionHint}>
-              Bundled text EPUBs/FB2 and digital PDFs extract text. Mixed EPUB
-              and CBZ unlock images — pick an OCR model below, then Recognize.
-              Scan-only PDFs reject with no text layer (use Vision → OCR).
+              Bundled text EPUB/FB2/MOBI/AZW3 and digital PDFs extract text.
+              Mixed EPUB and CBZ unlock images — pick an OCR model below, then
+              Recognize. DRM MOBI rejects without decrypting. Scan-only PDFs
+              reject with no text layer (use Vision → OCR).
             </Text>
           )}
           <FileSourcePicker
@@ -1013,7 +1038,7 @@ export default function DocumentsScreen() {
                 ?.description ?? null
             }
             exampleListTitle="Choose an example document"
-            ownPickButtonLabel="Pick EPUB, CBZ, FB2, or PDF…"
+            ownPickButtonLabel="Pick EPUB, MOBI, CBZ, FB2, or PDF…"
             onPickOwn={() => {
               handleChooseFile().catch(() => {});
             }}
@@ -1038,6 +1063,17 @@ export default function DocumentsScreen() {
               This PDF has no extractable text layer ({extractMessage}). Only
               OCR can continue — open Vision → OCR, pick the same scan PDF, and
               run recognize. This screen does not extract images from scan PDFs.
+            </Text>
+          </View>
+        ) : null}
+
+        {extractStatus === 'drm' ? (
+          <View style={styles.warnSection}>
+            <Text style={styles.sectionTitle}>DRM protected</Text>
+            <Text style={styles.sectionHint}>
+              This Kindle file is encrypted ({extractMessage}). The SDK does not
+              decrypt DRM. Pick the DRM-free MOBI or AZW3 example, or another
+              unlocked book.
             </Text>
           </View>
         ) : null}

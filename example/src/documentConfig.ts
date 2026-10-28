@@ -3,12 +3,20 @@ import { TEST_PDF_FILES } from './pdfConfig';
 export const TEST_EDOC_FILES = {
   HELLO_EPUB: 'test_edocs/hello.epub',
   HELLO_FB2: 'test_edocs/hello.fb2',
+  HELLO_MOBI: 'test_edocs/hello.mobi',
+  HELLO_AZW3: 'test_edocs/hello.azw3',
+  DRM_MOBI: 'test_edocs/drm.mobi',
   MIXED_EPUB: 'test_edocs/mixed.epub',
   MANGA_CBZ: 'test_edocs/manga.cbz',
 } as const;
 
 export type DocumentExtractKind = 'document' | 'pdf';
-export type DocumentExpect = 'text' | 'noTextLayer' | 'mixed' | 'imagesOnly';
+export type DocumentExpect =
+  | 'text'
+  | 'noTextLayer'
+  | 'mixed'
+  | 'imagesOnly'
+  | 'drm';
 
 export type DocumentFileInfo = {
   id: string;
@@ -35,6 +43,30 @@ export const DOCUMENT_FILES: DocumentFileInfo[] = [
     extract: 'document',
     expect: 'text',
     section: 'E-documents',
+  },
+  {
+    id: TEST_EDOC_FILES.HELLO_MOBI,
+    name: 'Hello — MOBI',
+    description: 'DRM-free MOBI6 → extractDocumentText → TTS',
+    extract: 'document',
+    expect: 'text',
+    section: 'E-documents',
+  },
+  {
+    id: TEST_EDOC_FILES.HELLO_AZW3,
+    name: 'Hello — AZW3',
+    description: 'DRM-free KF8 AZW3 → extractDocumentText → TTS',
+    extract: 'document',
+    expect: 'text',
+    section: 'E-documents',
+  },
+  {
+    id: TEST_EDOC_FILES.DRM_MOBI,
+    name: 'DRM — MOBI',
+    description: 'Kindle encryption type 2 → ERR_DOC_DRM (cannot extract)',
+    extract: 'document',
+    expect: 'drm',
+    section: 'DRM',
   },
   {
     id: TEST_EDOC_FILES.MIXED_EPUB,

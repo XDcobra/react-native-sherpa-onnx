@@ -6,6 +6,9 @@ Self-authored fixtures for the Documents / Read aloud example screen. Markup boo
 |------|----------|
 | `hello.epub` | Two text chapters + `linear="no"` nav; CSS present; `extractDocumentText` |
 | `hello.fb2` | Two FB2 sections (title, epigraph, poem); text-only |
+| `hello.mobi` | DRM-free MOBI6, two North Wind chapters; `extractDocumentText` |
+| `hello.azw3` | Same HTML as `hello.mobi`, KF8 `version = 8`; `extractDocumentText` |
+| `drm.mobi` | Kindle encryption type 2 → `ERR_DOC_DRM` |
 | `mixed.epub` | Two markup chapters (decorative img ignored) + one image-only scan spine item |
 | `manga.cbz` | Cover + 2 manga pages, no markup → `ERR_DOC_NO_TEXT` |
 

@@ -20,7 +20,7 @@ const SECTION_ORDER = [
   'Speech Recognition',
   'Speech Synthesis',
   'Vision',
-  'Documents (EPUB, PDF, …)',
+  'Documents (EPUB, MOBI, PDF, …)',
   'Pipelines & Demos',
   'Alignment & Subtitles',
   'Speech Enhancement',
@@ -91,10 +91,10 @@ const FEATURES: HomeFeature[] = [
   },
   {
     id: 'documents',
-    sectionTitle: 'Documents (EPUB, PDF, …)',
+    sectionTitle: 'Documents (EPUB, MOBI, PDF, …)',
     title: 'Read aloud',
     description:
-      'Extract EPUB/FB2/PDF text, or OCR mixed EPUB/CBZ pages, then speak with offline TTS',
+      'Extract EPUB/FB2/MOBI/PDF text, or OCR mixed EPUB/CBZ pages, then speak with offline TTS',
     icon: 'book-outline',
     screen: 'Documents',
     implemented: true,

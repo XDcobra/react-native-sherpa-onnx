@@ -37,7 +37,7 @@ flowchart TD
   F -->|EPUB / FB2 / MOBI / CBZ / CBR| DT["extractDocumentText"]
   F -->|"PDF — pdf/ not document/"| PT["extractPdfTextLayer"]
 
-  DT -->|"ok, imageOnly empty — hello.epub / hello.fb2 / MOBI"| TTS1["TTS / any TextBuffer feature"]
+  DT -->|"ok, imageOnly empty — hello.epub / hello.fb2 / hello.mobi / hello.azw3"| TTS1["TTS / any TextBuffer feature"]
   DT -->|"ok + imageOnly — mixed.epub / MOBI scan part"| DI1["extractDocumentImages"]
   DI1 --> OCR1["createOCR().recognize"]
   OCR1 --> JOIN["app: concat markup + OCR by sectionIndex"]
