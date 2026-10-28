@@ -82,13 +82,6 @@ jobject SectionList(JNIEnv* env, const std::vector<sherpa_onnx::document::DocSec
   return list;
 }
 
-sherpa_onnx::document::DocumentSource MakeSrc(JNIEnv* env, jstring jpath, jint fd) {
-  sherpa_onnx::document::DocumentSource src;
-  src.path = JstringToStd(env, jpath);
-  src.fd = fd;
-  return src;
-}
-
 void BindProgress(JNIEnv* env, jobject listener,
                   sherpa_onnx::document::ExtractOptions* opt) {
   if (!env || !listener || !opt) return;
@@ -117,7 +110,8 @@ Java_com_sherpaonnx_document_DocumentNative_nativeExtractText(
     JNIEnv* env, jclass, jstring jpath, jint fd, jobject progress) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
-  const auto src = MakeSrc(env, jpath, fd);
+  const auto src =
+      sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd);
   sherpa_onnx::document::ExtractOptions opt;
   BindProgress(env, progress, &opt);
   const auto result = sherpa_onnx::document::ExtractDocumentText(src, opt);
@@ -182,7 +176,8 @@ Java_com_sherpaonnx_document_DocumentNative_nativeExtractImages(
   sherpa_onnx::document::ExtractOptions opt;
   opt.max_side = maxSide;
   BindProgress(env, progress, &opt);
-  const auto src = MakeSrc(env, jpath, fd);
+  const auto src =
+      sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd);
   auto result = sherpa_onnx::document::ExtractDocumentImages(src, opt);
   PutBool(env, map, put, "ok", result.ok ? JNI_TRUE : JNI_FALSE);
   if (!result.error_code.empty()) PutString(env, map, put, "errorCode", result.error_code);

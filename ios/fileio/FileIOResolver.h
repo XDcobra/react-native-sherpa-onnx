@@ -60,6 +60,16 @@ extern NSString * const kFIOErrPathTraversalBlocked;
                                          error:(NSString * _Nullable * _Nullable)errorCode
                                        message:(NSString * _Nullable * _Nullable)errorMessage;
 
+/**
+ * document/ and pdf/: require a seekable filesystem path (no stream copy).
+ * Does not cleanup [handle]; caller still owns it.
+ */
++ (nullable NSString *)seekableFilePathFromHandle:(FileIOReadHandle *)handle
+                                   openFailedCode:(NSString *)openFailedCode
+                                           logTag:(NSString *)logTag
+                                            error:(NSString * _Nullable * _Nullable)errorCode
+                                          message:(NSString * _Nullable * _Nullable)errorMessage;
+
 @end
 
 #endif /* FileIOResolver_h */

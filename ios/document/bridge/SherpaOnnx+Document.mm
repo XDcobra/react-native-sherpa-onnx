@@ -1,5 +1,6 @@
 #import "../../SherpaOnnx.h"
 #import "../../fileio/FileIOResolver.h"
+#import "../../fileio/FileIOSeekable.h"
 #import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 
 #include "DocumentExtractor.h"
@@ -40,23 +41,6 @@ dispatch_queue_t DocQueue() {
   return q;
 }
 
-sherpa_onnx::document::DocumentSource MakeSrc(FileIOReadHandle *handle,
-                                              NSString **errCode,
-                                              NSString **errMsg) {
-  sherpa_onnx::document::DocumentSource src;
-  if (!handle || !handle.isFilePath || handle.filePath.length == 0) {
-    if (errCode) *errCode = @"ERR_DOC_OPEN_FAILED";
-    if (errMsg) {
-      *errMsg = @"ERR_DOC_OPEN_FAILED: source is not seekable (document "
-                @"requires a filesystem path)";
-    }
-    return src;
-  }
-  src.path = [handle.filePath UTF8String];
-  src.fd = -1;
-  return src;
-}
-
 }  // namespace
 
 @implementation SherpaOnnx (Document)
@@ -87,7 +71,8 @@ RCT_EXPORT_METHOD(extractDocumentText : (NSDictionary *)source textOutBufferId :
     }
     NSString *seekErr = nil;
     NSString *seekMsg = nil;
-    const auto src = MakeSrc(handle, &seekErr, &seekMsg);
+    const auto src = SherpaOnnxSeekableSourceFromHandle(
+        handle, @"ERR_DOC_OPEN_FAILED", @"SherpaOnnx:doc", &seekErr, &seekMsg);
     if (src.path.empty()) {
       [handle cleanup];
       reject(seekErr ?: @"ERR_DOC_OPEN_FAILED",
@@ -206,7 +191,8 @@ RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
     }
     NSString *seekErr = nil;
     NSString *seekMsg = nil;
-    const auto src = MakeSrc(handle, &seekErr, &seekMsg);
+    const auto src = SherpaOnnxSeekableSourceFromHandle(
+        handle, @"ERR_DOC_OPEN_FAILED", @"SherpaOnnx:doc", &seekErr, &seekMsg);
     if (src.path.empty()) {
       [handle cleanup];
       reject(seekErr ?: @"ERR_DOC_OPEN_FAILED",

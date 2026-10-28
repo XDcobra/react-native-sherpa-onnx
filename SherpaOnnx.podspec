@@ -67,6 +67,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/pdf/**/*.{h,cpp}",
     # Shared e-document extractor (EPUB/FB2/CBZ/CBR). JNI excluded below.
     "android/src/main/cpp/document/*.{h,hpp,cpp}",
+    # Shared seekable FileSource (document/ + pdf/).
+    "android/src/main/cpp/fileio/**/*.{h,hpp}",
     "third_party/pugixml/src/pugixml.cpp",
     "third_party/pugixml/src/*.hpp",
   ]

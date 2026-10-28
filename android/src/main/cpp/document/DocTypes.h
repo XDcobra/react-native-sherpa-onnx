@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "ImageTypes.h"
+#include "../fileio/SeekableSource.h"
 
 namespace sherpa_onnx {
 namespace document {
@@ -46,10 +47,7 @@ inline const char* FormatName(DocFormat f) {
   }
 }
 
-struct DocumentSource {
-  std::string path;
-  int fd = -1;
-};
+using DocumentSource = fileio::SeekableSource;
 
 struct ExtractOptions {
   int max_side = 4096;

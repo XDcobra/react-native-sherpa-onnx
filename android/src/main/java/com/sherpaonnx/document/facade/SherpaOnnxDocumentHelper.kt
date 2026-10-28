@@ -11,7 +11,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.sherpaonnx.document.DocumentNative
 import com.sherpaonnx.document.NativeDocProgress
 import com.sherpaonnx.fileio.FileIOHelper
-import com.sherpaonnx.fileio.FileIOResolver
+import com.sherpaonnx.fileio.SeekableOpenedSource
 import com.sherpaonnx.image.ImageBufferService
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import com.sherpaonnx.text.pipeline.TextSpatialSpan
@@ -74,7 +74,7 @@ class SherpaOnnxDocumentHelper(
       return
     }
 
-    val opened = openSource(source, promise) ?: return
+    val opened = openSeekable(source, promise) ?: return
     val progress = NativeDocProgress { done, total, phase ->
       emitProgress(done, total, phase)
     }
@@ -134,7 +134,7 @@ class SherpaOnnxDocumentHelper(
     } else {
       4096
     }
-    val opened = openSource(source, promise) ?: return
+    val opened = openSeekable(source, promise) ?: return
     val progress = NativeDocProgress { done, total, phase ->
       emitProgress(done, total, phase)
     }
@@ -159,45 +159,8 @@ class SherpaOnnxDocumentHelper(
     promise.resolve(result)
   }
 
-  private class Opened(
-    val path: String,
-    val fd: Int,
-    private val handle: FileIOResolver.ReadHandle,
-  ) {
-    fun close() = handle.close()
-  }
-
-  private fun openSource(source: ReadableMap, promise: Promise): Opened? {
-    val kind = source.getString("kind")
-    if (kind == "app" && source.getString("base") == "apkAsset") {
-      promise.reject(
-        ERR_OPEN,
-        "$ERR_OPEN: apkAsset is not seekable (document requires a filesystem path or ParcelFileDescriptor)",
-      )
-      return null
-    }
-    val handle =
-      try {
-        fileIO.resolveSource(source)
-      } catch (e: Exception) {
-        promise.reject(ERR_OPEN, "Failed to resolve FileSource: ${e.message}", e)
-        return null
-      }
-    return when (handle) {
-      is FileIOResolver.ReadHandle.FilePath ->
-        Opened(handle.file.absolutePath, -1, handle)
-      is FileIOResolver.ReadHandle.FileDescriptor ->
-        Opened("", handle.pfd.fd, handle)
-      is FileIOResolver.ReadHandle.Stream -> {
-        handle.close()
-        promise.reject(
-          ERR_OPEN,
-          "$ERR_OPEN: source is not seekable (document requires a filesystem path or ParcelFileDescriptor)",
-        )
-        null
-      }
-    }
-  }
+  private fun openSeekable(source: ReadableMap, promise: Promise): SeekableOpenedSource? =
+    fileIO.openSeekableSourceOrReject(source, promise, ERR_OPEN, TAG)
 
   private fun mapSpan(raw: Map<*, *>): TextSpatialSpan? {
     val start = (raw["utf16Start"] as? Number)?.toInt() ?: return null
