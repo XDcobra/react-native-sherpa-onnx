@@ -205,9 +205,11 @@ export function useTtsModelInit(options: UseTtsModelInitOptions = {}) {
     const cached = getTtsCache();
     if (cached.engine != null && cached.modelFolder != null) {
       engineRef.current = cached.engine;
-      setCurrentModelFolder(
-        cached.modelFolder === 'custom' ? null : cached.modelFolder
-      );
+      // Keep the live engine, but do not pre-select a catalog tile. Green
+      // `initializedId` without `selectedModelForInit` made Use model look
+      // enabled while still alerting "Pick a catalog model folder first."
+      setSelectedModelForInit(null);
+      setCurrentModelFolder(null);
       setInitializedSummary(
         cached.modelFolder === 'custom'
           ? `custom:${cached.selectedModelType ?? 'unknown'}`
