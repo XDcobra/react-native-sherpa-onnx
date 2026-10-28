@@ -238,7 +238,46 @@ set(SOURCES
     pdf/PdfPageRasterizer.cpp
     pdf/PdfLazySession.cpp
     jni/pdf/sherpa-onnx-pdf-jni.cpp
+    document/DocumentExtractor.cpp
+    document/DocArchive.cpp
+    document/DocSniff.cpp
+    document/DocHtmlText.cpp
+    document/DocEpub.cpp
+    document/DocFb2.cpp
+    document/DocComic.cpp
+    ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
+    jni/document/sherpa-onnx-document-jni.cpp
 )
+
+# lexbor: prebuilt shared .so (TAG + Gradle download). No in-tree source build.
+set(LEXBOR_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/lexbor_prebuilt/android")
+set(LEXBOR_PREBUILT_LIB "${LEXBOR_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(LEXBOR_PREBUILT_JNI_ABI "${LEXBOR_PREBUILT_BASE}/jni/${ANDROID_ABI}")
+set(LEXBOR_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(LEXBOR_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include")
+set(USE_LEXBOR_PREBUILT OFF)
+if(EXISTS "${LEXBOR_PREBUILT_LIB}/liblexbor.so")
+    set(USE_LEXBOR_PREBUILT ON)
+    set(LEXBOR_LIB_DIR "${LEXBOR_PREBUILT_LIB}")
+elseif(EXISTS "${LEXBOR_PREBUILT_JNI_ABI}/liblexbor.so")
+    set(USE_LEXBOR_PREBUILT ON)
+    set(LEXBOR_LIB_DIR "${LEXBOR_PREBUILT_JNI_ABI}")
+elseif(EXISTS "${LEXBOR_JNILIBS}/liblexbor.so")
+    set(USE_LEXBOR_PREBUILT ON)
+    set(LEXBOR_LIB_DIR "${LEXBOR_JNILIBS}")
+endif()
+if(EXISTS "${LEXBOR_PREBUILT_BASE}/include/lexbor/html/parser.h")
+    set(LEXBOR_INCLUDE_DIR "${LEXBOR_PREBUILT_BASE}/include")
+elseif(EXISTS "${LEXBOR_INCLUDE_CPP}/lexbor/html/parser.h")
+    set(LEXBOR_INCLUDE_DIR "${LEXBOR_INCLUDE_CPP}")
+endif()
+if(NOT USE_LEXBOR_PREBUILT OR NOT LEXBOR_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "lexbor prebuilt not found (liblexbor.so + lexbor/html/parser.h). "
+        "Run a Gradle Android build so prebuilts download, or publish "
+        "third_party/lexbor_prebuilt (see README).")
+endif()
+message(STATUS "lexbor: using prebuilt (libs: ${LEXBOR_LIB_DIR}, include: ${LEXBOR_INCLUDE_DIR})")
 
 if(USE_LIBARCHIVE)
 # libarchive: (1) prebuilt from third_party/libarchive_prebuilt or jniLibs + cpp/include/libarchive (Maven/GitHub), or (2) build from source.
@@ -434,6 +473,8 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doc_vlm
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/nemotron_parse
     ${CMAKE_CURRENT_SOURCE_DIR}/pdf
+    ${CMAKE_CURRENT_SOURCE_DIR}/document
+    ${PROJECT_ROOT}/../third_party/pugixml/src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 if(USE_FFMPEG)
@@ -447,6 +488,9 @@ if(USE_LIBWEBP AND LIBWEBP_INCLUDE_DIR)
 endif()
 if(USE_PDFIUM AND PDFIUM_INCLUDE_DIR)
     target_include_directories(sherpaonnx PRIVATE ${PDFIUM_INCLUDE_DIR})
+endif()
+if(LEXBOR_INCLUDE_DIR)
+    target_include_directories(sherpaonnx PRIVATE ${LEXBOR_INCLUDE_DIR})
 endif()
 # When USE_FFMPEG=OFF, do NOT define HAVE_FFMPEG at all. Then #ifdef HAVE_FFMPEG is false
 # in C++ and the stub (#else) branches are used — no FFmpeg headers needed.
@@ -476,6 +520,9 @@ if(USE_LIBWEBP AND USE_LIBWEBP_PREBUILT AND LIBWEBP_LIB_DIR)
 endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${PDFIUM_LIB_DIR})
+endif()
+if(USE_LEXBOR_PREBUILT AND LEXBOR_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${LEXBOR_LIB_DIR})
 endif()
 if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
@@ -510,7 +557,7 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android jnigraphics)
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

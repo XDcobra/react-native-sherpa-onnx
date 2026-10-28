@@ -1,7 +1,7 @@
 # Host-side C++ tests (Linux/macOS CI): no Android NDK.
 # Layout: model_detect/ — host tests; production sources under android/.../jni/model_detect/{common,stt,tts,enhancement,vad}/; audio_conversion/ — FFmpeg (same sources as Android).
 cmake_minimum_required(VERSION 3.16)
-project(sherpa-onnx-host-cpp-tests LANGUAGES CXX)
+project(sherpa-onnx-host-cpp-tests LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -674,6 +674,62 @@ target_link_libraries(pdf_text_layer_host_test PRIVATE ${PDF_GTEST_LIBS})
 # Default host builds leave HAVE_PDFIUM undefined (disabled stub).
 add_test(NAME pdf_text_layer_host_test COMMAND $<TARGET_FILE:pdf_text_layer_host_test>)
 set_tests_properties(pdf_text_layer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+# Offline e-document extractor (EPUB/FB2/CBZ; libarchive optional)
+set(DOC_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/document")
+set(DOC_IMAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image")
+set(DOC_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+set(LEXBOR_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_TESTS_CPP OFF CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_UTILS OFF CACHE BOOL "" FORCE)
+set(LEXBOR_INSTALL_HEADERS OFF CACHE BOOL "" FORCE)
+if(NOT TARGET lexbor_static)
+  add_subdirectory("${DOC_REPO_ROOT}/third_party/lexbor"
+                   "${CMAKE_CURRENT_BINARY_DIR}/lexbor" EXCLUDE_FROM_ALL)
+endif()
+
+add_executable(document_host_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/document/document_host_test.cpp"
+  "${DOC_CPP_ROOT}/DocumentExtractor.cpp"
+  "${DOC_CPP_ROOT}/DocArchive.cpp"
+  "${DOC_CPP_ROOT}/DocSniff.cpp"
+  "${DOC_CPP_ROOT}/DocHtmlText.cpp"
+  "${DOC_CPP_ROOT}/DocEpub.cpp"
+  "${DOC_CPP_ROOT}/DocFb2.cpp"
+  "${DOC_CPP_ROOT}/DocComic.cpp"
+  "${DOC_REPO_ROOT}/third_party/pugixml/src/pugixml.cpp"
+  "${DOC_IMAGE_ROOT}/decode/ImageDecoder.cpp"
+)
+target_include_directories(document_host_test PRIVATE
+  "${DOC_CPP_ROOT}"
+  "${DOC_REPO_ROOT}/third_party/pugixml/src"
+  "${DOC_REPO_ROOT}/third_party/lexbor/source"
+  "${DOC_IMAGE_ROOT}"
+  "${DOC_IMAGE_ROOT}/decode"
+)
+target_link_libraries(document_host_test PRIVATE ${PDF_GTEST_LIBS} lexbor_static)
+find_path(LIBARCHIVE_INCLUDE_DIR archive.h
+  HINTS /opt/homebrew/opt/libarchive/include /opt/homebrew/include /usr/local/include /usr/include)
+find_library(LIBARCHIVE_LIBRARY archive
+  HINTS /opt/homebrew/opt/libarchive/lib /opt/homebrew/lib /usr/local/lib /usr/lib)
+if(LIBARCHIVE_INCLUDE_DIR AND LIBARCHIVE_LIBRARY)
+  target_include_directories(document_host_test PRIVATE "${LIBARCHIVE_INCLUDE_DIR}")
+  target_link_libraries(document_host_test PRIVATE "${LIBARCHIVE_LIBRARY}")
+  target_compile_definitions(document_host_test PRIVATE
+    HAVE_LIBARCHIVE=1
+    SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "document_host_test: libarchive enabled")
+else()
+  message(STATUS "document_host_test: libarchive not found (disabled-stub cases only)")
+endif()
+add_test(NAME document_host_test COMMAND $<TARGET_FILE:document_host_test>)
+set_tests_properties(document_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 

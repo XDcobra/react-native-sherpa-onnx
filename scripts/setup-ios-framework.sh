@@ -103,6 +103,8 @@ else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBARCHIVE is set. Skipping libarchive framework download.${NC}" >&2
 fi
 
+FRAMEWORK_SLUGS+=(lexbor)
+
 # libwebp is opt-in (default off) — only download when explicitly enabled.
 if [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-false}" = "true" ]; then
   FRAMEWORK_SLUGS+=(libwebp)
@@ -159,6 +161,17 @@ get_framework_config() {
       LIB_SIMULATOR="libarchive.a"
       HEADER_CHECK="Headers/archive.h"
       DISPLAY_NAME="libarchive"
+      ;;
+    lexbor)
+      TAG_FILE="$PROJECT_ROOT/third_party/lexbor_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="lexbor-ios-v"
+      XCFRAMEWORK_NAME="lexbor.xcframework"
+      ZIP_ASSET_NAME="lexbor-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-lexbor"
+      LIB_DEVICE="liblexbor.a"
+      LIB_SIMULATOR="liblexbor.a"
+      HEADER_CHECK="Headers/lexbor/html/parser.h"
+      DISPLAY_NAME="lexbor"
       ;;
     libwebp)
       TAG_FILE="$PROJECT_ROOT/third_party/libwebp_prebuilt/IOS_RELEASE_TAG"

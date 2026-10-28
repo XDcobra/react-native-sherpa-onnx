@@ -10,7 +10,7 @@ if File.exist?(setup_script)
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = pod_root
   unless system("bash", setup_script)
     ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
-    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt, libarchive_prebuilt, libwebp_prebuilt) and network. Run manually: bash #{setup_script}")
+    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt, libarchive_prebuilt, lexbor_prebuilt, libwebp_prebuilt) and network. Run manually: bash #{setup_script}")
   end
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
 end
@@ -65,6 +65,10 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/ort/**/*.{h,cpp}",
     # Shared PDF text-layer core (JNI excluded below).
     "android/src/main/cpp/pdf/**/*.{h,cpp}",
+    # Shared e-document extractor (EPUB/FB2/CBZ/CBR). JNI excluded below.
+    "android/src/main/cpp/document/*.{h,hpp,cpp}",
+    "third_party/pugixml/src/pugixml.cpp",
+    "third_party/pugixml/src/*.hpp",
   ]
   # Exclude vendored framework headers from the compile/copy phases to avoid
   # duplicate PrivateHeaders outputs when CocoaPods builds this pod as framework.
@@ -86,6 +90,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/image/**/*",
     "android/src/main/cpp/jni/ocr/**/*",
     "android/src/main/cpp/jni/pdf/**/*",
+    "android/src/main/cpp/jni/document/**/*",
     # stb is included from ImageDecoder.cpp; do not compile as a separate TU.
     "android/src/main/cpp/image/decode/vendor/**/*"
   ]
@@ -102,6 +107,7 @@ Pod::Spec.new do |s|
 
   ffmpeg_xcframework = File.join(pod_root, "ios", "Frameworks", "FFmpeg.xcframework")
   libarchive_xcframework = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
+  lexbor_xcframework = File.join(pod_root, "ios", "Frameworks", "lexbor.xcframework")
   libwebp_xcframework = File.join(pod_root, "ios", "Frameworks", "libwebp.xcframework")
   pdfium_xcframework = File.join(pod_root, "ios", "Frameworks", "pdfium.xcframework")
 
@@ -116,6 +122,8 @@ Pod::Spec.new do |s|
   if (!disable_libarchive || disable_libarchive == '0' || disable_libarchive == 'false') && File.exist?(libarchive_xcframework)
     has_libarchive = true
   end
+
+  has_lexbor = File.exist?(lexbor_xcframework)
 
   # Opt-in (default off). Require explicit SHERPA_ONNX_ENABLE_LIBWEBP=1 and xcframework present.
   has_libwebp = false
@@ -134,6 +142,7 @@ Pod::Spec.new do |s|
   vendored = ["ios/Frameworks/sherpa_onnx.xcframework"]
   vendored << "ios/Frameworks/FFmpeg.xcframework" if has_ffmpeg
   vendored << "ios/Frameworks/libarchive.xcframework" if has_libarchive
+  vendored << "ios/Frameworks/lexbor.xcframework" if has_lexbor
   vendored << "ios/Frameworks/libwebp.xcframework" if has_libwebp
   vendored << "ios/Frameworks/pdfium.xcframework" if has_pdfium
   
@@ -153,6 +162,12 @@ Pod::Spec.new do |s|
   libarchive_simulator_slice = File.join(libarchive_xcframework_root, "ios-arm64_x86_64-simulator")
   libarchive_device_slice = File.join(libarchive_xcframework_root, "ios-arm64")
 
+  lexbor_xcframework_root = File.join(pod_root, "ios", "Frameworks", "lexbor.xcframework")
+  lexbor_simulator_headers = File.join(lexbor_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
+  lexbor_device_headers = File.join(lexbor_xcframework_root, "ios-arm64", "Headers")
+  lexbor_simulator_slice = File.join(lexbor_xcframework_root, "ios-arm64_x86_64-simulator")
+  lexbor_device_slice = File.join(lexbor_xcframework_root, "ios-arm64")
+
   libwebp_xcframework_root = File.join(pod_root, "ios", "Frameworks", "libwebp.xcframework")
   libwebp_simulator_headers = File.join(libwebp_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
   libwebp_device_headers = File.join(libwebp_xcframework_root, "ios-arm64", "Headers")
@@ -171,6 +186,7 @@ Pod::Spec.new do |s|
   ffmpeg_device_slice = File.join(ffmpeg_xcframework, "ios-arm64")
 
   gcc_defs = '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
+  gcc_defs += ' LEXBOR_STATIC=1' if has_lexbor
   gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
   gcc_defs += ' HAVE_LIBARCHIVE=1' if has_libarchive
   gcc_defs += ' HAVE_LIBWEBP=1' if has_libwebp
@@ -182,6 +198,9 @@ Pod::Spec.new do |s|
   end
   if has_libarchive
     ld_flags_base += ' -larchive'
+  end
+  if has_lexbor
+    ld_flags_base += ' -llexbor'
   end
   if has_libwebp
     ld_flags_base += ' -lwebp'
@@ -224,6 +243,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/ocr/nemotron_parse\"",
     "\"#{pod_root}/android/src/main/cpp\"",
     "\"#{pod_root}/android/src/main/cpp/pdf\"",
+    "\"#{pod_root}/android/src/main/cpp/document\"",
+    "\"#{pod_root}/third_party/pugixml/src\"",
     "\"#{pod_root}/third_party/onnxruntime/include\"",
     "\"#{pod_root}/ios/ocr\"",
     "\"#{pod_root}/ios/ocr/bridge\"",
@@ -257,6 +278,10 @@ Pod::Spec.new do |s|
     header_search_paths << "\"#{libarchive_device_headers}\""
     header_search_paths << "\"#{libarchive_simulator_headers}\""
   end
+  if has_lexbor
+    header_search_paths << "\"#{lexbor_device_headers}\""
+    header_search_paths << "\"#{lexbor_simulator_headers}\""
+  end
   if has_libwebp
     header_search_paths << "\"#{libwebp_device_headers}\""
     header_search_paths << "\"#{libwebp_simulator_headers}\""
@@ -279,6 +304,10 @@ Pod::Spec.new do |s|
   if has_libarchive
     library_search_paths_ios << "\"#{libarchive_device_slice}\""
     library_search_paths_sim << "\"#{libarchive_simulator_slice}\""
+  end
+  if has_lexbor
+    library_search_paths_ios << "\"#{lexbor_device_slice}\""
+    library_search_paths_sim << "\"#{lexbor_simulator_slice}\""
   end
   if has_libwebp
     library_search_paths_ios << "\"#{libwebp_device_slice}\""

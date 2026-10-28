@@ -4,6 +4,8 @@ This directory contains **full license texts** for libraries shipped with this m
 
 OCR (PP-OCR spike / `PpocrBackend`) additionally attributes RapidOCR and PaddleOCR under Apache-2.0 — see [`rapidocr-paddleocr.txt`](rapidocr-paddleocr.txt).
 
+E-documents (`react-native-sherpa-onnx/document`) use [pugixml](pugixml.txt) (MIT; submodule `third_party/pugixml`, compiled into `sherpaonnx`) and [lexbor](lexbor.txt) (Apache-2.0; submodule `third_party/lexbor`, consumer prebuilts via `third_party/lexbor_prebuilt`).
+
 ## Prebuilt model release assets (per-model metadata)
 
 **Model-specific license status** (which release `.tar.bz2` / asset has which `license_type`, `commercial_use`, provenance URL, etc.) is **not** stored here.

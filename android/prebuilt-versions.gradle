@@ -59,6 +59,15 @@ if (!libwebpVersion) {
 project.ext.libwebpVersion = libwebpVersion
 println "[react-native-sherpa-onnx] libwebp version (extracted/used): ${libwebpVersion}"
 
+// lexbor: 1. LEXBOR_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
+def lexborVersion = System.getenv('LEXBOR_VERSION')
+if (!lexborVersion) {
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG'), 'lexbor-android-v')
+  lexborVersion = v ?: (project.hasProperty('lexborVersion') ? project.lexborVersion : '3.0.0')
+}
+project.ext.lexborVersion = lexborVersion
+println "[react-native-sherpa-onnx] lexbor version (extracted/used): ${lexborVersion}"
+
 // pdfium: 1. PDFIUM_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def pdfiumVersion = System.getenv('PDFIUM_VERSION')
 if (!pdfiumVersion) {
