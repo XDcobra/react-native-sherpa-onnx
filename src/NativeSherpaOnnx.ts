@@ -1167,6 +1167,7 @@ export interface Spec extends TurboModule {
   /**
    * Extract digital PDF text layer into an empty OfflineTextBuffer.
    * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   * `options.password` is the user/owner password for standard PDF encryption.
    */
   extractPdfTextLayer(
     source: Object,
@@ -1182,6 +1183,7 @@ export interface Spec extends TurboModule {
   /**
    * Rasterize PDF pages into a new OfflineImageBuffer (RGB8 frames with pageNumber).
    * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   * `options.password` is the user/owner password for standard PDF encryption.
    */
   rasterizePdfPages(
     source: Object,

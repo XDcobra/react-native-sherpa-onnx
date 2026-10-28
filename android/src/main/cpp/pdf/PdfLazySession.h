@@ -31,7 +31,8 @@ class PdfLazySession final : public PdfLazyBackend {
       int dpi,
       int max_side,
       std::string* err_code,
-      std::string* err_message);
+      std::string* err_message,
+      const char* password = nullptr);
 
   int page_count() const override { return page_count_; }
   int dpi() const override { return dpi_; }

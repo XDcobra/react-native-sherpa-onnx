@@ -84,6 +84,19 @@ function assertFileSource(source: FileSource): void {
   }
 }
 
+function readPassword(password: unknown): string | undefined {
+  if (password == null) {
+    return undefined;
+  }
+  if (typeof password !== 'string') {
+    throw Object.assign(
+      new Error(`${PdfErrorCode.INVALID_ARGUMENT}: password must be a string`),
+      { code: PdfErrorCode.INVALID_ARGUMENT }
+    );
+  }
+  return password.length > 0 ? password : undefined;
+}
+
 function buildPagesOption(
   pages: ExtractPdfTextLayerOptions['pages'] | RasterizePdfPagesOptions['pages']
 ): number[] | undefined {
@@ -132,6 +145,8 @@ export async function isPdfiumEnabled(): Promise<boolean> {
  *
  * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
  * on first open (see {@link FileSource} / `apkAsset`).
+ * Encrypted PDFs: pass {@link ExtractPdfTextLayerOptions.password}; missing or
+ * wrong stays `ERR_PDF_ENCRYPTED`.
  */
 export async function extractPdfTextLayer(
   source: FileSource,
@@ -147,10 +162,14 @@ export async function extractPdfTextLayer(
     });
   }
 
-  const nativeOptions: { pages?: number[] } = {};
+  const nativeOptions: { pages?: number[]; password?: string } = {};
   const pages = buildPagesOption(options?.pages);
   if (pages) {
     nativeOptions.pages = pages;
+  }
+  const password = readPassword(options?.password);
+  if (password) {
+    nativeOptions.password = password;
   }
 
   const progressSub = subscribePdfProgress(options?.onProgress);
@@ -188,6 +207,8 @@ export async function extractPdfTextLayer(
  *
  * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
  * on first open (see {@link FileSource} / `apkAsset`).
+ * Encrypted PDFs: pass {@link RasterizePdfPagesOptions.password}; missing or
+ * wrong stays `ERR_PDF_ENCRYPTED`.
  */
 export async function rasterizePdfPages(
   source: FileSource,
@@ -214,6 +235,7 @@ export async function rasterizePdfPages(
     maxSide?: number;
     strategy?: string;
     hotFrames?: number;
+    password?: string;
   } = { strategy };
   const pages = buildPagesOption(options?.pages);
   if (pages) {
@@ -231,6 +253,10 @@ export async function rasterizePdfPages(
   }
   if (strategy === 'lazy-lru' && options?.hotFrames != null) {
     nativeOptions.hotFrames = Math.trunc(options.hotFrames);
+  }
+  const password = readPassword(options?.password);
+  if (password) {
+    nativeOptions.password = password;
   }
 
   const progressSub = subscribePdfProgress(options?.onProgress);

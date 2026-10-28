@@ -28,7 +28,8 @@ std::unique_ptr<PdfLazySession> PdfLazySession::Open(
     int dpi,
     int max_side,
     std::string* err_code,
-    std::string* err_message) {
+    std::string* err_message,
+    const char* password) {
   if (dpi <= 0) {
     if (err_code) *err_code = kErrInvalidArgument;
     if (err_message) *err_message = "dpi must be > 0";
@@ -37,6 +38,7 @@ std::unique_ptr<PdfLazySession> PdfLazySession::Open(
 
 #if !(defined(HAVE_PDFIUM) && HAVE_PDFIUM)
   (void)src;
+  (void)password;
   (void)IsPdfiumCompiledIn();
   if (err_code) *err_code = kErrDisabled;
   if (err_message) {
@@ -51,7 +53,8 @@ std::unique_ptr<PdfLazySession> PdfLazySession::Open(
 
   std::string open_code;
   std::string open_msg;
-  PdfDocument doc = PdfDocument::Open(src, &open_code, &open_msg);
+  PdfDocument doc = PdfDocument::Open(
+      src, &open_code, &open_msg, PdfPasswordOrNull(password));
   if (!doc.ok()) {
     if (err_code) *err_code = open_code.empty() ? kErrOpenFailed : open_code;
     if (err_message) {
@@ -68,8 +71,9 @@ std::unique_ptr<PdfLazySession> PdfLazySession::Open(
   }
 
   PDF_LOGI(
-      "lazy session open pageCount=%d dpi=%d maxSide=%d path=%s fd=%d",
-      page_count, dpi, max_side, src.path.c_str(), src.fd);
+      "lazy session open pageCount=%d dpi=%d maxSide=%d path=%s fd=%d hasPassword=%d",
+      page_count, dpi, max_side, src.path.c_str(), src.fd,
+      PdfPasswordOrNull(password) ? 1 : 0);
   return std::unique_ptr<PdfLazySession>(
       new PdfLazySession(std::move(doc), page_count, dpi, max_side));
 #endif

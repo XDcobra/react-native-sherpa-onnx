@@ -119,7 +119,8 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeExtractTextLayer(
     jclass,
     jstring jpath,
     jint fd,
-    jintArray pagesOrNull) {
+    jintArray pagesOrNull,
+    jstring passwordOrNull) {
   jclass objCls = env->FindClass("java/lang/Object");
   jclass boolCls = env->FindClass("java/lang/Boolean");
   jclass intCls = env->FindClass("java/lang/Integer");
@@ -141,6 +142,7 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeExtractTextLayer(
       env->GetIntArrayRegion(pagesOrNull, 0, pn, opts.pages.data());
     }
   }
+  opts.password = JstringToStd(env, passwordOrNull);
 
   const auto result = sherpa_onnx::pdf::ExtractPdfTextLayer(
       sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd),
@@ -220,7 +222,8 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
     jint dpi,
     jint maxSide,
     jstring strategyOrNull,
-    jint hotFrames) {
+    jint hotFrames,
+    jstring passwordOrNull) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!map) return nullptr;
@@ -238,6 +241,7 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
   }
 
   const int useDpi = dpi > 0 ? dpi : 144;
+  const std::string password = JstringToStd(env, passwordOrNull);
   bool lazy = false;
   if (strategyOrNull != nullptr) {
     const char* raw = env->GetStringUTFChars(strategyOrNull, nullptr);
@@ -251,7 +255,8 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
     std::string err_code;
     std::string err_msg;
     auto session = sherpa_onnx::pdf::PdfLazySession::Open(
-        src, useDpi, maxSide, &err_code, &err_msg);
+        src, useDpi, maxSide, &err_code, &err_msg,
+        sherpa_onnx::pdf::PdfPasswordOrNull(password));
     if (!session) {
       PutBool(env, map, put, "ok", JNI_FALSE);
       PutString(
@@ -292,6 +297,7 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
   opts.dpi = useDpi;
   opts.max_side = maxSide;
   opts.pages = std::move(pages);
+  opts.password = password;
 
   auto raster = sherpa_onnx::pdf::RasterizePdfPages(src, opts);
   if (!raster.ok) {

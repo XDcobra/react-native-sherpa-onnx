@@ -15,6 +15,8 @@ namespace pdf {
 /**
  * RAII wrapper around FPDF_DOCUMENT.
  * Path → FPDF_LoadDocument. Fd → dup + FPDF_LoadCustomDocument (pread).
+ * `password` is the PDF user or owner password (nullptr / empty = none).
+ * Missing or wrong → ERR_PDF_ENCRYPTED. Never log the value.
  * When PDFium is not compiled in, Open* fail with ERR_PDF_PDFIUM_DISABLED.
  */
 class PdfDocument {
@@ -29,16 +31,19 @@ class PdfDocument {
   static PdfDocument Open(
       const PdfSource& src,
       std::string* err_code,
-      std::string* err_message);
+      std::string* err_message,
+      const char* password = nullptr);
   static PdfDocument OpenPath(
       const char* path,
       std::string* err_code,
-      std::string* err_message);
+      std::string* err_message,
+      const char* password = nullptr);
   /** Dup `fd`; never closes the caller's descriptor. */
   static PdfDocument OpenFd(
       int fd,
       std::string* err_code,
-      std::string* err_message);
+      std::string* err_message,
+      const char* password = nullptr);
 
   bool ok() const;
   int page_count() const;

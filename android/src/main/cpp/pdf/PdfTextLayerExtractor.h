@@ -13,6 +13,8 @@ namespace pdf {
 struct ExtractOptions {
   /** Empty = all pages. Otherwise 1-based page indices. */
   std::vector<int> pages;
+  /** User or owner password. Empty = none. */
+  std::string password;
   std::function<bool()> is_cancelled;
   std::function<void(int done, int total, const char* phase)> on_progress;
 };

@@ -20,6 +20,8 @@ struct RasterOptions {
   int dpi = 144;
   /** Longest-edge cap after DPI scale (default 4096). <= 0 disables. */
   int max_side = 4096;
+  /** User or owner password. Empty = none. */
+  std::string password;
   std::function<bool()> is_cancelled;
   std::function<void(int done, int total, const char* phase)> on_progress;
 };

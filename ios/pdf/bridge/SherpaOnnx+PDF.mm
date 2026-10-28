@@ -133,6 +133,10 @@ RCT_EXPORT_METHOD(extractPdfTextLayer : (NSDictionary *)source textOutBufferId :
       }
     }
   }
+  id extractPasswordVal = options[@"password"];
+  if ([extractPasswordVal isKindOfClass:[NSString class]]) {
+    opts.password = [(NSString *)extractPasswordVal UTF8String];
+  }
 
   if ([self respondsToSelector:@selector(sendEventWithName:body:)]) {
     [self sendEventWithName:@"SherpaOnnxPdfProgress"
@@ -269,6 +273,11 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
   if ([hotFramesVal respondsToSelector:@selector(intValue)]) {
     hotFrames = [hotFramesVal intValue];
   }
+  std::string password;
+  id passwordVal = options[@"password"];
+  if ([passwordVal isKindOfClass:[NSString class]]) {
+    password = [(NSString *)passwordVal UTF8String];
+  }
 
   const BOOL lazy = [strategy isEqualToString:@"lazy-lru"];
 
@@ -281,7 +290,8 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
     std::string err_code;
     std::string err_msg;
     auto session = sherpa_onnx::pdf::PdfLazySession::Open(
-        src, dpi, maxSide, &err_code, &err_msg);
+        src, dpi, maxSide, &err_code, &err_msg,
+        sherpa_onnx::pdf::PdfPasswordOrNull(password));
     if (!session) {
       [handle cleanup];
       NSString *code = err_code.empty()
@@ -334,6 +344,7 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
   opts.pages = std::move(pages);
   opts.dpi = dpi;
   opts.max_side = maxSide;
+  opts.password = password;
 
   auto raster = sherpa_onnx::pdf::RasterizePdfPages(src, opts);
   [handle cleanup];

@@ -18,6 +18,7 @@ internal object PdfNative {
     path: String,
     fd: Int,
     pages: IntArray?,
+    password: String?,
   ): Array<Any?>
 
   /**
@@ -34,5 +35,6 @@ internal object PdfNative {
     maxSide: Int,
     strategy: String?,
     hotFrames: Int,
+    password: String?,
   ): HashMap<String, Any>
 }

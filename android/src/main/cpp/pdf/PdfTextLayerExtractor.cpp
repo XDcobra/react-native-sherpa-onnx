@@ -92,7 +92,8 @@ PdfTextLayerResult ExtractWithPdfium(
 
   std::string open_code;
   std::string open_msg;
-  PdfDocument doc = PdfDocument::Open(src, &open_code, &open_msg);
+  PdfDocument doc = PdfDocument::Open(
+      src, &open_code, &open_msg, PdfPasswordOrNull(options.password));
   if (!doc.ok()) {
     result.error_code = open_code.empty() ? kErrOpenFailed : open_code;
     result.error_message = open_msg.empty() ? "Failed to open PDF" : open_msg;

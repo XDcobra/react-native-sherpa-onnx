@@ -88,10 +88,11 @@ class SherpaOnnxPdfHelper(
 
     val opened = openSeekable(source, promise) ?: return
     val pages = readPages(options)
+    val password = readPassword(options)
     emitProgress(0, 1, "extract")
     val raw =
       try {
-        PdfNative.nativeExtractTextLayer(opened.path, opened.fd, pages)
+        PdfNative.nativeExtractTextLayer(opened.path, opened.fd, pages, password)
       } finally {
         opened.close()
       }
@@ -186,6 +187,8 @@ class SherpaOnnxPdfHelper(
         0 // native default 8 for lazy-lru
       }
 
+    val password = readPassword(options)
+
     emitProgress(0, 1, "raster")
     val raw =
       try {
@@ -197,6 +200,7 @@ class SherpaOnnxPdfHelper(
           maxSide,
           strategy,
           hotFrames,
+          password,
         )
       } finally {
         opened.close()
@@ -248,6 +252,14 @@ class SherpaOnnxPdfHelper(
     } catch (e: Exception) {
       Log.w(TAG, "emitProgress failed: ${e.message}")
     }
+  }
+
+  /** Empty string = omit. Never log the value. */
+  private fun readPassword(options: ReadableMap?): String {
+    if (options == null || !options.hasKey("password") || options.isNull("password")) {
+      return ""
+    }
+    return options.getString("password").orEmpty()
   }
 
   private fun readPages(options: ReadableMap?): IntArray? {

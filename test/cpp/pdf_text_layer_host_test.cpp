@@ -101,6 +101,56 @@ TEST(PdfDocumentHost, OpenPathAndFdWhenPdfiumLinked) {
   EXPECT_NE(extracted.text.find("Hello"), std::string::npos);
 }
 
+TEST(PdfDocumentHost, EncryptedPasswordWhenPdfiumLinked) {
+  if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) {
+    GTEST_SKIP() << "PDFium not linked";
+  }
+  const auto path = FixturePath("hello-encrypted.pdf");
+  ASSERT_EQ(::access(path.c_str(), R_OK), 0) << "missing fixture " << path;
+
+  std::string err_code;
+  std::string err_msg;
+  auto missing = sherpa_onnx::pdf::PdfDocument::OpenPath(
+      path.c_str(), &err_code, &err_msg);
+  EXPECT_FALSE(missing.ok());
+  EXPECT_EQ(err_code, sherpa_onnx::pdf::kErrEncrypted);
+
+  err_code.clear();
+  err_msg.clear();
+  auto wrong = sherpa_onnx::pdf::PdfDocument::OpenPath(
+      path.c_str(), &err_code, &err_msg, "nope");
+  EXPECT_FALSE(wrong.ok());
+  EXPECT_EQ(err_code, sherpa_onnx::pdf::kErrEncrypted);
+
+  err_code.clear();
+  err_msg.clear();
+  auto ok_doc = sherpa_onnx::pdf::PdfDocument::OpenPath(
+      path.c_str(), &err_code, &err_msg, "secret");
+  ASSERT_TRUE(ok_doc.ok()) << err_code << " " << err_msg;
+  EXPECT_GE(ok_doc.page_count(), 1);
+
+  const int fd = ::open(path.c_str(), O_RDONLY);
+  ASSERT_GE(fd, 0);
+  err_code.clear();
+  err_msg.clear();
+  auto from_fd = sherpa_onnx::pdf::PdfDocument::OpenFd(
+      fd, &err_code, &err_msg, "secret");
+  ::close(fd);
+  ASSERT_TRUE(from_fd.ok()) << err_code << " " << err_msg;
+
+  sherpa_onnx::pdf::ExtractOptions opts;
+  opts.password = "secret";
+  const auto extracted =
+      sherpa_onnx::pdf::ExtractPdfTextLayer(Src(path), opts);
+  ASSERT_TRUE(extracted.ok) << extracted.error_code << " "
+                            << extracted.error_message;
+  EXPECT_NE(extracted.text.find("Hello"), std::string::npos);
+
+  const auto denied = sherpa_onnx::pdf::ExtractPdfTextLayer(Src(path), {});
+  EXPECT_FALSE(denied.ok);
+  EXPECT_EQ(denied.error_code, sherpa_onnx::pdf::kErrEncrypted);
+}
+
 TEST(PdfDocumentHost, TruncatedAndGarbageOpenFailedWhenPdfiumLinked) {
   if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) {
     GTEST_SKIP() << "PDFium not linked";

@@ -49,7 +49,7 @@ void SetOpenError(
   if (err == FPDF_ERR_PASSWORD) {
     if (err_code) *err_code = kErrEncrypted;
     if (err_message) {
-      *err_message = "PDF is encrypted or password-protected";
+      *err_message = "PDF is encrypted; missing or incorrect password";
     }
     return;
   }
@@ -128,15 +128,17 @@ int PdfDocument::page_count() const {
 PdfDocument PdfDocument::OpenPath(
     const char* path,
     std::string* err_code,
-    std::string* err_message) {
+    std::string* err_message,
+    const char* password) {
   if (!path || path[0] == '\0') {
     if (err_code) *err_code = kErrInvalidArgument;
     if (err_message) *err_message = "PDF path required";
     return PdfDocument();
   }
   EnsurePdfiumInit();
-  PDF_LOGI("OpenPath path=%s", path);
-  FPDF_DOCUMENT doc = FPDF_LoadDocument(path, nullptr);
+  const char* pw = PdfPasswordOrNull(password);
+  PDF_LOGI("OpenPath path=%s hasPassword=%d", path, pw ? 1 : 0);
+  FPDF_DOCUMENT doc = FPDF_LoadDocument(path, pw);
   if (!doc) {
     SetOpenError(FPDF_GetLastError(), err_code, err_message);
     PDF_LOGW("OpenPath failed path=%s", path);
@@ -148,7 +150,8 @@ PdfDocument PdfDocument::OpenPath(
 PdfDocument PdfDocument::OpenFd(
     int fd,
     std::string* err_code,
-    std::string* err_message) {
+    std::string* err_message,
+    const char* password) {
   if (fd < 0) {
     if (err_code) *err_code = kErrInvalidArgument;
     if (err_message) *err_message = "PDF fd required";
@@ -179,10 +182,11 @@ PdfDocument PdfDocument::OpenFd(
   access->access.m_Param = access.get();
 
   EnsurePdfiumInit();
+  const char* pw = PdfPasswordOrNull(password);
   PDF_LOGI(
-      "OpenFd fd=%d dup=%d len=%lld", fd, dupfd,
-      static_cast<long long>(st.st_size));
-  FPDF_DOCUMENT doc = FPDF_LoadCustomDocument(&access->access, nullptr);
+      "OpenFd fd=%d dup=%d len=%lld hasPassword=%d", fd, dupfd,
+      static_cast<long long>(st.st_size), pw ? 1 : 0);
+  FPDF_DOCUMENT doc = FPDF_LoadCustomDocument(&access->access, pw);
   if (!doc) {
     SetOpenError(FPDF_GetLastError(), err_code, err_message);
     PDF_LOGW("OpenFd LoadCustomDocument failed fd=%d", fd);
@@ -194,12 +198,13 @@ PdfDocument PdfDocument::OpenFd(
 PdfDocument PdfDocument::Open(
     const PdfSource& src,
     std::string* err_code,
-    std::string* err_message) {
+    std::string* err_message,
+    const char* password) {
   if (!src.path.empty()) {
-    return OpenPath(src.path.c_str(), err_code, err_message);
+    return OpenPath(src.path.c_str(), err_code, err_message, password);
   }
   if (src.fd >= 0) {
-    return OpenFd(src.fd, err_code, err_message);
+    return OpenFd(src.fd, err_code, err_message, password);
   }
   if (err_code) *err_code = kErrInvalidArgument;
   if (err_message) {
@@ -237,21 +242,24 @@ PdfDocument Disabled(std::string* err_code, std::string* err_message) {
 PdfDocument PdfDocument::OpenPath(
     const char*,
     std::string* err_code,
-    std::string* err_message) {
+    std::string* err_message,
+    const char*) {
   return Disabled(err_code, err_message);
 }
 
 PdfDocument PdfDocument::OpenFd(
     int,
     std::string* err_code,
-    std::string* err_message) {
+    std::string* err_message,
+    const char*) {
   return Disabled(err_code, err_message);
 }
 
 PdfDocument PdfDocument::Open(
     const PdfSource&,
     std::string* err_code,
-    std::string* err_message) {
+    std::string* err_message,
+    const char*) {
   return Disabled(err_code, err_message);
 }
 

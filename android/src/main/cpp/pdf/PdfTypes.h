@@ -21,6 +21,15 @@ inline constexpr const char* kErrInternal = "ERR_PDF_INTERNAL";
 
 using PdfSource = fileio::SeekableSource;
 
+/** Empty / null → PDFium `nullptr` (omit password). Never log the value. */
+inline const char* PdfPasswordOrNull(const char* password) {
+  return (password != nullptr && password[0] != '\0') ? password : nullptr;
+}
+
+inline const char* PdfPasswordOrNull(const std::string& password) {
+  return PdfPasswordOrNull(password.c_str());
+}
+
 struct PdfTextSpan {
   int utf16_start = 0;
   int utf16_end = 0;
