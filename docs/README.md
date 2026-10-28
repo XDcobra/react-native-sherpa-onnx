@@ -112,8 +112,9 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 |-------|-------------|
 | [ocr-offline.md](./ocr-offline.md) | Offline OCR — `createOCR` / `recognize` (ImageBuffer → TextBuffer + spatial spans); family `ppocr` · `doctr` · `doc_vlm` |
 | [pdf-offline.md](./pdf-offline.md) | Offline PDF text-layer extract + page raster → ImageBuffer (opt-in PDFium); OCR stays explicit |
+| [document-offline.md](./document-offline.md) | Offline e-documents (EPUB/FB2 markup → TextBuffer; CBZ/CBR / image-only → ImageBuffer); OCR stays explicit |
 
-> Streaming / live OCR is not yet available. `ocr-offline.md` is the sole OCR surface. PDF is separate (`pdf-offline.md`): text layer and/or rasterize pages, then call OCR explicitly on the ImageBuffer.
+> Streaming / live OCR is not yet available. `ocr-offline.md` is the sole OCR surface. PDF (`pdf-offline.md`) and e-documents (`document-offline.md`) are separate source adapters: extract markup or rasterize/decode images, then call OCR explicitly on the ImageBuffer.
 
 ---
 

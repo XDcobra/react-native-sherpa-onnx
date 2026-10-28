@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Offline image buffers hold one or more image frames for batch OCR and PDF page rasters ([`rasterizePdfPages`](pdf-offline.md)).
+Offline image buffers hold one or more image frames for batch OCR, PDF page rasters ([`rasterizePdfPages`](pdf-offline.md)), and e-document image-only extracts ([`extractDocumentImages`](document-offline.md)).
 
 **Import path:** `react-native-sherpa-onnx/imagebuffer`
 
@@ -25,6 +25,7 @@ Live / streaming ImageBuffer is not implemented yet (types may be reserved). Fil
 | WebP | Same create APIs. **Opt-in libwebp** (default off) — see below. Without enable → `ERR_IMAGE_WEBP_DISABLED`. |
 | HEIC / HEIF | Same create APIs. **Android: API 28+**; older devices → `ERR_IMAGE_FORMAT_UNSUPPORTED`. iOS: ImageIO. |
 | PDF (page raster) | Not via image create APIs — use [`rasterizePdfPages`](pdf-offline.md). Frames may include `pageNumber` / `dpi`. |
+| E-document images | Not via image create APIs — use [`extractDocumentImages`](document-offline.md) (CBZ/CBR pages; EPUB/FB2 image-only sections). Frames may include `sectionIndex` / `href` / `pageNumber`. |
 
 Optional **`maxSide`** caps the longest edge after image decode (default **4096**; `<= 0` disables). PDF raster has its own `maxSide` / `dpi` — see [pdf-offline.md](pdf-offline.md).
 
@@ -472,6 +473,7 @@ import { ImageErrorCode } from 'react-native-sherpa-onnx/imagebuffer';
 
 - [Offline OCR](ocr-offline.md)
 - [Offline PDF](pdf-offline.md)
+- [Offline e-documents](document-offline.md)
 - [File I/O (`FileSource` / `FileDestination`)](fileio.md)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
 - [Pipeline text buffers — offline](textbuffer-offline.md)

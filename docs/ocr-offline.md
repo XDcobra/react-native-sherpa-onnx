@@ -597,6 +597,7 @@ The monorepo example exposes **Home → Vision → OCR** (`example/src/screens/o
 ## See also
 
 - [PDF](pdf-offline.md) (text-layer extract + page raster → ImageBuffer; opt-in PDFium; OCR stays explicit)
+- [E-documents](document-offline.md) (EPUB/FB2 markup → TextBuffer; CBZ/CBR / image-only spine → ImageBuffer; OCR stays explicit)
 - [ImageBuffer offline](imagebuffer-offline.md) (typical **source** of frames)
 - [TextBuffer offline](textbuffer-offline.md) (text + spatial spans)
 - [Feature pipelines](feature-pipelines.md#ocr-offline-patterns)

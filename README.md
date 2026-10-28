@@ -556,6 +556,8 @@ This SDK includes the following open source components:
 
 - [libarchive (BSD License)](/THIRD_PARTY_LICENSES/libarchive.txt): https://github.com/libarchive/libarchive
 - [RapidOCR / PaddleOCR (Apache-2.0)](/THIRD_PARTY_LICENSES/rapidocr-paddleocr.txt): https://github.com/RapidAI/RapidOCR — OCR pre/post conventions used by `PpocrBackend`
+- [pugixml (MIT License)](/THIRD_PARTY_LICENSES/pugixml.txt): https://github.com/zeux/pugixml — EPUB/FB2 XML (`react-native-sherpa-onnx/document`)
+- [lexbor (Apache License 2.0)](/THIRD_PARTY_LICENSES/lexbor.txt): https://github.com/lexbor/lexbor — HTML5 parser for EPUB XHTML (`react-native-sherpa-onnx/document`)
 
 Full license texts are available in the [THIRD_PARTY_LICENSES](/THIRD_PARTY_LICENSES/) directory.
 
