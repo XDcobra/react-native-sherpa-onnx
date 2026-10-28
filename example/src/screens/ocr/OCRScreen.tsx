@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
+  type OcrPaddleocrVlTask,
   type OcrProgress,
   type OcrRecognizeResult,
 } from 'react-native-sherpa-onnx/ocr';
@@ -52,6 +53,7 @@ import { OcrInputPathLegend } from './OcrInputPathLegend';
 import { styles } from './OCRScreen.styles';
 
 type PdfExtractStatus = 'idle' | 'ok' | 'noTextLayer' | 'error';
+type ResultTab = 'spans' | 'markdown' | 'raw';
 
 function utf16Slice(text: string, start: number, end: number): string {
   // TextBuffer offsets are UTF-16 code units; string.slice matches for BMP text.
@@ -110,9 +112,9 @@ export default function OCRScreen() {
   );
   const [resultFrameIndex, setResultFrameIndex] = useState(0);
   const [spansShowAllPages, setSpansShowAllPages] = useState(false);
-  const [resultTab, setResultTab] = useState<'spans' | 'markdown' | 'raw'>(
-    'spans'
-  );
+  const [resultTab, setResultTab] = useState<ResultTab>('spans');
+  const [paddleocrVlTask, setPaddleocrVlTask] =
+    useState<OcrPaddleocrVlTask>('ocr');
   const [lastMs, setLastMs] = useState<number | null>(null);
   const imageWidgetRef = useRef<OfflineImageBufferWidgetHandle>(null);
   const resultTextBufferIdRef = useRef<string | null>(null);
@@ -323,6 +325,9 @@ export default function OCRScreen() {
         onProgress: (p: OcrProgress) => {
           progressBoxRef.current?.apply(p);
         },
+        ...(engineFamily === 'paddleocr_vl'
+          ? { paddleocrVl: { task: paddleocrVlTask } }
+          : {}),
       });
 
       const info = (await getPipelineTextBufferInfo(
@@ -346,7 +351,7 @@ export default function OCRScreen() {
       setResultOrigin('ocr');
       setSpans(spatial);
       setLastMs(Date.now() - t0);
-      setResultTab('spans');
+      setResultTab(spatial.length > 0 ? 'spans' : 'markdown');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await releaseResultTextBuffer();
@@ -360,7 +365,14 @@ export default function OCRScreen() {
       setRunBusy(false);
       progressBoxRef.current?.reset();
     }
-  }, [clearResults, engineRef, imageInfo, releaseResultTextBuffer]);
+  }, [
+    clearResults,
+    engineFamily,
+    engineRef,
+    imageInfo,
+    paddleocrVlTask,
+    releaseResultTextBuffer,
+  ]);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
@@ -388,12 +400,25 @@ export default function OCRScreen() {
   const scopedSpanText = joinSpanTexts(resultText, scopedSpans);
 
   const vlmExtras =
-    resultMeta?.family === 'doc_vlm' || resultMeta?.family === 'nemotron_parse'
+    resultMeta?.family === 'doc_vlm' ||
+    resultMeta?.family === 'nemotron_parse' ||
+    resultMeta?.family === 'paddleocr_vl'
       ? resultMeta
       : null;
   const showVlmTabs =
     vlmExtras != null &&
     (vlmExtras.markdown.length > 0 || vlmExtras.raw.length > 0);
+  const showSpansTab = spans.length > 0;
+  const vlmTabItems: readonly [ResultTab, string][] = showSpansTab
+    ? [
+        ['spans', 'Spans'],
+        ['markdown', 'Markdown'],
+        ['raw', 'Raw'],
+      ]
+    : [
+        ['markdown', 'Markdown'],
+        ['raw', 'Raw'],
+      ];
   const extrasPayload =
     resultTab === 'raw' ? vlmExtras?.raw ?? '' : vlmExtras?.markdown ?? '';
   const showingExtras =
@@ -510,6 +535,35 @@ export default function OCRScreen() {
             <Text style={styles.sectionTitle}>
               {showPdfPipeline ? '4. Recognize' : '3. Recognize'}
             </Text>
+            {engineFamily === 'paddleocr_vl' ? (
+              <>
+                <Text style={styles.sectionHint}>
+                  Task (same loaded session; spotting returns text + boxes)
+                </Text>
+                <View style={styles.chipRow}>
+                  {(['ocr', 'spotting'] as const).map((task) => {
+                    const active = paddleocrVlTask === task;
+                    return (
+                      <TouchableOpacity
+                        key={task}
+                        style={[styles.chip, active && styles.chipActive]}
+                        onPress={() => setPaddleocrVlTask(task)}
+                        disabled={runBusy}
+                      >
+                        <Text
+                          style={[
+                            styles.chipText,
+                            active && styles.chipTextActive,
+                          ]}
+                        >
+                          {task === 'ocr' ? 'OCR' : 'Spotting'}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </>
+            ) : null}
             <View style={styles.actionRow}>
               <TouchableOpacity
                 style={[
@@ -563,7 +617,8 @@ export default function OCRScreen() {
                   : `\nspanCount=${spans.length}`}
                 {resultMeta &&
                 (resultMeta.family === 'doc_vlm' ||
-                  resultMeta.family === 'nemotron_parse')
+                  resultMeta.family === 'nemotron_parse' ||
+                  resultMeta.family === 'paddleocr_vl')
                   ? `\ncomplete=${resultMeta.complete}\nstopReason=${resultMeta.stopReason}`
                   : ''}
                 {lastMs != null ? `\nwall=${lastMs}ms` : ''}
@@ -592,7 +647,7 @@ export default function OCRScreen() {
                     />
                   ) : null}
                 </View>
-                {overlayEnabled && resultTextBufferId ? (
+                {overlayEnabled && resultTextBufferId && spans.length > 0 ? (
                   <OfflineImageBufferAnnotatedView
                     buffer={imageInfo.bufferId}
                     text={resultTextBufferId}
@@ -680,13 +735,7 @@ export default function OCRScreen() {
                 {showVlmTabs ? (
                   <View style={styles.toggleRow}>
                     <View style={styles.tabRowInline}>
-                      {(
-                        [
-                          ['spans', 'Spans'],
-                          ['markdown', 'Markdown'],
-                          ['raw', 'Raw'],
-                        ] as const
-                      ).map(([id, label]) => (
+                      {vlmTabItems.map(([id, label]) => (
                         <TouchableOpacity
                           key={id}
                           style={[
