@@ -702,6 +702,7 @@ add_executable(document_host_test
   "${DOC_CPP_ROOT}/DocEpub.cpp"
   "${DOC_CPP_ROOT}/DocFb2.cpp"
   "${DOC_CPP_ROOT}/DocComic.cpp"
+  "${DOC_CPP_ROOT}/DocMobi.cpp"
   "${DOC_REPO_ROOT}/third_party/pugixml/src/pugixml.cpp"
   "${DOC_IMAGE_ROOT}/decode/ImageDecoder.cpp"
 )

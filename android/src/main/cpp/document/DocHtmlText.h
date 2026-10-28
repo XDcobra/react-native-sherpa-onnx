@@ -20,6 +20,9 @@ HtmlExtract ExtractHtmlText(const uint8_t* data, size_t size);
 /** First img/src or svg image href in document order. Empty if none. */
 std::string FirstImageHref(const uint8_t* data, size_t size);
 
+/** First Kindle `recindex` on an img (1-based resource id as decimal string). */
+std::string FirstImageRecindex(const uint8_t* data, size_t size);
+
 inline bool HtmlIsImageOnly(const HtmlExtract& e) { return IsWsOnly(e.text); }
 
 }  // namespace document

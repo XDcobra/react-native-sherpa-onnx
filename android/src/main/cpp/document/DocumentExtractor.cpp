@@ -4,6 +4,7 @@
 #include "DocComic.h"
 #include "DocEpub.h"
 #include "DocFb2.h"
+#include "DocMobi.h"
 #include "DocSniff.h"
 
 #if defined(__ANDROID__)
@@ -79,11 +80,11 @@ ExtractTextResult ExtractDocumentText(const DocumentSource& src,
     return Fail(err_code.empty() ? kErrUnsupportedFormat : err_code.c_str(),
                 err_msg.empty() ? "Unrecognized document container" : err_msg);
   }
-  if (fmt == DocFormat::Pdf || fmt == DocFormat::Mobi) {
-    return Fail(kErrUnsupportedFormat,
-                fmt == DocFormat::Pdf
-                    ? "PDF is not handled by document/; use pdf/"
-                    : "MOBI is not implemented in this SDK version");
+  if (fmt == DocFormat::Pdf) {
+    return Fail(kErrUnsupportedFormat, "PDF is not handled by document/; use pdf/");
+  }
+  if (fmt == DocFormat::Mobi) {
+    return ExtractMobiText(src, opt);
   }
   if (fmt == DocFormat::Cbz || fmt == DocFormat::Cbr) {
     return Fail(kErrNoText, "Comic archives have no markup text");
@@ -138,11 +139,12 @@ ExtractImagesResult ExtractDocumentImages(const DocumentSource& src,
     return FailImg(err_code.empty() ? kErrUnsupportedFormat : err_code.c_str(),
                    err_msg.empty() ? "Unrecognized document container" : err_msg);
   }
-  if (fmt == DocFormat::Pdf || fmt == DocFormat::Mobi) {
+  if (fmt == DocFormat::Pdf) {
     return FailImg(kErrUnsupportedFormat,
-                   fmt == DocFormat::Pdf
-                       ? "PDF is not handled by document/; use pdf/"
-                       : "MOBI is not implemented in this SDK version");
+                   "PDF is not handled by document/; use pdf/");
+  }
+  if (fmt == DocFormat::Mobi) {
+    return ExtractMobiImages(src, opt);
   }
   if (fmt == DocFormat::Cbz || fmt == DocFormat::Cbr) {
     if (!have_ar) {

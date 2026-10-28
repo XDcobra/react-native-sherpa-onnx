@@ -63,7 +63,7 @@ DocFormat SniffFormat(const DocumentSource& src, ArchiveReader* archive_or_null,
   if (got >= 68 && std::memcmp(prefix + 60, "BOOKMOBI", 8) == 0) {
     return DocFormat::Mobi;
   }
-  if (got >= 8 && std::memcmp(prefix + 60, "TEXtREAd", 8) == 0) {
+  if (got >= 68 && std::memcmp(prefix + 60, "TEXtREAd", 8) == 0) {
     return DocFormat::Mobi;
   }
   // Uncompressed FB2 / XML

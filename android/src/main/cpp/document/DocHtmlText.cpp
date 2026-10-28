@@ -147,6 +147,24 @@ std::string FindImg(lxb_dom_node_t* node) {
   return {};
 }
 
+std::string FindRecindex(lxb_dom_node_t* node) {
+  for (lxb_dom_node_t* n = node; n != nullptr; n = n->next) {
+    if (n->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+      auto* el = lxb_dom_interface_element(n);
+      const lxb_tag_id_t id = lxb_dom_element_tag_id(el);
+      if (id == LXB_TAG_IMG) {
+        std::string s = AttrVal(el, "recindex");
+        if (!s.empty()) return s;
+      }
+    }
+    if (n->first_child) {
+      std::string nested = FindRecindex(n->first_child);
+      if (!nested.empty()) return nested;
+    }
+  }
+  return {};
+}
+
 }  // namespace
 
 std::string FirstImageHref(const uint8_t* data, size_t size) {
@@ -161,6 +179,20 @@ std::string FirstImageHref(const uint8_t* data, size_t size) {
   std::string href = root ? FindImg(root) : std::string();
   lxb_html_document_destroy(doc);
   return href;
+}
+
+std::string FirstImageRecindex(const uint8_t* data, size_t size) {
+  if (!data || size == 0) return {};
+  lxb_html_document_t* doc = lxb_html_document_create();
+  if (!doc) return {};
+  if (lxb_html_document_parse(doc, data, size) != LXB_STATUS_OK) {
+    lxb_html_document_destroy(doc);
+    return {};
+  }
+  lxb_dom_node_t* root = lxb_dom_interface_node(doc);
+  std::string v = root ? FindRecindex(root) : std::string();
+  lxb_html_document_destroy(doc);
+  return v;
 }
 
 }  // namespace document

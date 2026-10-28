@@ -30,7 +30,7 @@ enum class DocFormat {
   Fb2,
   Cbz,
   Cbr,
-  Mobi,  // sniffed; extract not in this ship
+  Mobi,
   Pdf,
 };
 
