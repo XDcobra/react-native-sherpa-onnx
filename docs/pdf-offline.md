@@ -22,7 +22,7 @@ Without enable, both APIs reject with `ERR_PDF_PDFIUM_DISABLED`.
 
 ## FileSource I/O
 
-Same seekable opener as [`document/`](document-offline.md) — see [fileio.md § Seekable sources](fileio.md#seekable-sources-document-and-pdf). `app:apkAsset` is allowed (Android copies the APK zip entry into app cache on first open). Non-seekable streams → `ERR_PDF_OPEN_FAILED`. `extractPdfTextLayer` and `rasterize-all` close the handle when the call returns. **`lazy-lru` keeps the open PDFium document (and the fd / security-scoped URL) until `releaseOfflineImageBuffer`.** Standard PDF encryption: pass `options.password` (user or owner). Missing or wrong → `ERR_PDF_ENCRYPTED`. Not Adobe DRM / FileOpen.
+`source` is a `FileSource` (see [fileio.md](fileio.md)). Android `apkAsset` copies into app cache on first open. A `contentUri` that is only a stream (no ParcelFileDescriptor) → `ERR_PDF_OPEN_FAILED`. `extractPdfTextLayer` and `rasterize-all` close the handle when the call returns. **`lazy-lru` keeps the open PDFium document (and the fd / security-scoped URL) until `releaseOfflineImageBuffer`.** Standard PDF encryption: pass `options.password` (user or owner). Missing or wrong → `ERR_PDF_ENCRYPTED`. Not Adobe DRM / FileOpen.
 
 ## Quick start — text layer
 

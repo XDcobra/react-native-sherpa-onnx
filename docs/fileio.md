@@ -37,24 +37,13 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'a
 | Kind | Android | iOS |
 |------|---------|-----|
 | `fs` | Absolute path | Absolute path |
-| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset` (copied into app cache on first open — APK zip entries are not seekable files); iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
-| `contentUri` | SAF document URI | Rejects |
+| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset` (APK zip entry — native copies to `<cache>/fileio_apkasset/` on first open, then reuses that file); iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
+| `contentUri` | SAF document URI (PFD when the provider allows, otherwise a stream) | Rejects |
 | `contentTree` | SAF tree URI (creates document) | Rejects |
 | `securityScoped` | Rejects | Security-scoped bookmark URL |
 | `pad` | Installed PAD pack path (Android) | Rejects — use [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) on iOS |
 
-## Seekable sources (`document/` and `pdf/`)
-
-[`document/`](document-offline.md) and [`pdf/`](pdf-offline.md) need a **path or Android PFD** after resolve (libarchive / PDFium `pread`). Same `FileSource` as the rest of the SDK.
-
-| Source | What happens |
-|--------|----------------|
-| `fs` path, iOS bundled / security-scoped file | Native reads that path |
-| Android `contentUri` with a ParcelFileDescriptor | Native `dup`s the fd (caller still owns the original) |
-| Android `apkAsset` | Copied into `<cache>/fileio_apkasset/` on first open, then that path is used |
-| Non-seekable stream (`contentUri` without PFD) | `ERR_DOC_OPEN_FAILED` / `ERR_PDF_OPEN_FAILED` |
-
-Choosing `apkAsset` on Android means a cache copy (then cache hit). Prefer `fs` / `app:cache` if you already have a real file.
+`apkAsset` is not a real file inside the APK. Choosing it means a cache copy (then cache hit) for every `FileSource` consumer. Prefer `fs` / `app:cache` if you already materialized the file.
 
 ## Quick start
 

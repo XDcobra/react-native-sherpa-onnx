@@ -142,7 +142,7 @@ function extractDocumentText(
 ): Promise<ExtractDocumentTextResult>;
 ```
 
-`source` is a `FileSource` (path or Android PFD after resolve; see [fileio.md § Seekable sources](fileio.md#seekable-sources-document-and-pdf)). Android `apkAsset` copies into app cache on first open. Streams → `ERR_DOC_OPEN_FAILED`. Options: `signal`, `onProgress`.
+`source` is a `FileSource` (see [fileio.md](fileio.md)). Android `apkAsset` copies into app cache on first open. A `contentUri` that is only a stream (no ParcelFileDescriptor) → `ERR_DOC_OPEN_FAILED`. Options: `signal`, `onProgress`.
 
 ```ts
 type ExtractDocumentTextResult = {
