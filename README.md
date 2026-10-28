@@ -90,8 +90,8 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 ### Vision & documents
 
 - ✅ Offline OCR: [Offline](./docs/ocr-offline.md)
-- ✅ PDF: [Offline](./docs/pdf-offline.md) *(opt-in PDFium)*
-- ✅ E-documents: [Offline](./docs/document-offline.md) *(EPUB, FB2, MOBI, CBZ, CBR)*
+- ✅ PDF: [Offline](./docs/pdf-offline.md)
+- ✅ E-documents: [Offline](./docs/document-offline.md)
 
 ### Pipeline & orchestration
 
@@ -109,6 +109,18 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD & ODR](./docs/model-delivery-pad-odr.md)
 - ✅ Acceleration & diagnostics: [Execution providers](./docs/execution-providers.md) · [Native diagnostics](./docs/native-diagnostics.md) · [Memory planning](./docs/memory-and-models.md)
 - ✅ Build optimization: [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md) · opt-in [PDFium](./docs/pdf-offline.md) · [libwebp](./docs/imagebuffer-offline.md)
+
+### Input & output formats
+
+What you can decode in and write out. Details: [Audio save](./docs/audio-conversion.md) · [Image buffer](./docs/imagebuffer-offline.md) · [PDF](./docs/pdf-offline.md) · [E-documents](./docs/document-offline.md) · [File I/O](./docs/fileio.md).
+
+| | Input | Output |
+| --- | --- | --- |
+| **Audio** | WAV; other containers via FFmpeg (MP3, AAC/M4A, FLAC, Opus, OGG, WebM, MKV, …) | WAV, MP3, FLAC, AAC, M4A, Opus, WebM, MKV, OGG |
+| **Text** | Unicode (UTF-8) | Unicode (UTF-8) |
+| **Images** | JPEG, PNG, BMP, GIF; WebP *(opt-in)*; HEIC/HEIF | JPEG, PNG; WebP *(opt-in)* |
+| **PDF** | PDF *(opt-in PDFium)* | Text layer · page images |
+| **E-documents** | EPUB, FB2, MOBI, CBZ, CBR | Markup text · page/section images |
 
 ## How to start
 
