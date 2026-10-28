@@ -94,7 +94,7 @@ const FEATURES: HomeFeature[] = [
     sectionTitle: 'Documents (EPUB, PDF, …)',
     title: 'Read aloud',
     description:
-      'Extract EPUB/FB2 markup or a PDF text layer, then speak it with offline TTS',
+      'Extract EPUB/FB2/PDF text, or OCR mixed EPUB/CBZ pages, then speak with offline TTS',
     icon: 'book-outline',
     screen: 'Documents',
     implemented: true,

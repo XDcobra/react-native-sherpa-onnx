@@ -3,10 +3,12 @@ import { TEST_PDF_FILES } from './pdfConfig';
 export const TEST_EDOC_FILES = {
   HELLO_EPUB: 'test_edocs/hello.epub',
   HELLO_FB2: 'test_edocs/hello.fb2',
+  MIXED_EPUB: 'test_edocs/mixed.epub',
+  MANGA_CBZ: 'test_edocs/manga.cbz',
 } as const;
 
 export type DocumentExtractKind = 'document' | 'pdf';
-export type DocumentExpect = 'text' | 'noTextLayer';
+export type DocumentExpect = 'text' | 'noTextLayer' | 'mixed' | 'imagesOnly';
 
 export type DocumentFileInfo = {
   id: string;
@@ -33,6 +35,24 @@ export const DOCUMENT_FILES: DocumentFileInfo[] = [
     extract: 'document',
     expect: 'text',
     section: 'E-documents',
+  },
+  {
+    id: TEST_EDOC_FILES.MIXED_EPUB,
+    name: 'Mixed — EPUB',
+    description:
+      'Markup chapter + one image-only spine item → text, then images, then OCR',
+    extract: 'document',
+    expect: 'mixed',
+    section: 'Mixed / comics',
+  },
+  {
+    id: TEST_EDOC_FILES.MANGA_CBZ,
+    name: 'Manga — CBZ',
+    description:
+      'Cover + 2 manga pages, no markup → ERR_DOC_NO_TEXT → images → OCR',
+    extract: 'document',
+    expect: 'imagesOnly',
+    section: 'Mixed / comics',
   },
   {
     id: TEST_PDF_FILES.DIGITAL_HELLO,

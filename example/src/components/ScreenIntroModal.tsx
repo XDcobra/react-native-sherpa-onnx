@@ -131,7 +131,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   Documents: {
     title: 'Read documents aloud',
-    body: 'Extract readable text from a bundled EPUB, FB2, or PDF text layer, then speak it with the same offline TTS detect/init as the TTS screen. Scan-only PDFs have no text layer — use the OCR screen for those.',
+    body: 'Extract readable text from an EPUB, FB2, or PDF text layer, then speak it with the same offline TTS detect/init as the TTS screen. Mixed EPUBs and CBZ comics have image-only pages: select and initialize an OCR model on this screen as well, then tap Recognize. Scan-only PDFs still have no text layer — use Vision → OCR for those.',
   },
 };
 

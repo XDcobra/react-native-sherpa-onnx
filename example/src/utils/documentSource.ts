@@ -8,7 +8,7 @@ import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { fileSourceFromBundledPath } from './fileSourceFromUri';
 
 /**
- * EPUB/FB2 extract rejects Android apkAsset (D19). Copy once to cache and
+ * EPUB/FB2/CBZ extract rejects Android apkAsset (D19). Copy once to cache and
  * return a seekable filesystem source. PDFs keep the bundled FileSource.
  */
 export async function materializeBundledDocumentSource(

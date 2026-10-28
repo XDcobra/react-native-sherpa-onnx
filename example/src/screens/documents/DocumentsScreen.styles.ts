@@ -150,4 +150,73 @@ export const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.5,
   },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  actionButtonFlex: {
+    flex: 1,
+  },
+  errorText: {
+    color: '#b91c1c',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  progressBox: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+  },
+  progressLabel: {
+    fontSize: 13,
+    color: '#334155',
+  },
+  progressTrack: {
+    height: 6,
+    backgroundColor: '#ddd',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    backgroundColor: '#007AFF',
+  },
+  originList: {
+    gap: 10,
+  },
+  originBlock: {
+    gap: 6,
+    paddingLeft: 10,
+    borderLeftWidth: 3,
+  },
+  originBlockMarkup: {
+    borderLeftColor: '#2563EB',
+  },
+  originBlockOcr: {
+    borderLeftColor: '#EA580C',
+  },
+  originChip: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  originChipMarkup: {
+    backgroundColor: '#DBEAFE',
+  },
+  originChipOcr: {
+    backgroundColor: '#FFEDD5',
+  },
+  originChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  originChipTextMarkup: {
+    color: '#1D4ED8',
+  },
+  originChipTextOcr: {
+    color: '#C2410C',
+  },
 });

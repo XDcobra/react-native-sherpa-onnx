@@ -12,9 +12,11 @@ import {
   type ViewStyle,
 } from 'react-native';
 import {
+  OfflineImageBufferAnnotatedView,
   OfflineImageBufferFrameView,
   type OfflineImageBufferIdSource,
 } from 'react-native-sherpa-onnx/imagebuffer';
+import type { OfflineTextBufferIdSource } from 'react-native-sherpa-onnx/textbuffer';
 import { framePagerStyles as s } from './OfflineImageBufferFramePager.styles';
 
 export type OfflineImageBufferFramePagerProps = {
@@ -22,6 +24,11 @@ export type OfflineImageBufferFramePagerProps = {
   frameCount: number;
   /** Display downsample; default 1280. */
   maxSide?: number;
+  /**
+   * When set, draw OCR boxes via AnnotatedView instead of a plain FrameView.
+   * Origins are always `ocr` — Documents does not overlay markup/textLayer here.
+   */
+  text?: OfflineTextBufferIdSource;
   style?: StyleProp<ViewStyle>;
   frameStyle?: StyleProp<ViewStyle>;
 };
@@ -30,6 +37,7 @@ export function OfflineImageBufferFramePager({
   buffer,
   frameCount,
   maxSide = 1280,
+  text,
   style,
   frameStyle,
 }: OfflineImageBufferFramePagerProps) {
@@ -53,13 +61,25 @@ export function OfflineImageBufferFramePager({
 
   return (
     <View style={[s.root, style]}>
-      <OfflineImageBufferFrameView
-        buffer={buffer}
-        frameIndex={frameIndex}
-        maxSide={maxSide}
-        resizeMode="contain"
-        style={[s.frame, frameStyle]}
-      />
+      {text ? (
+        <OfflineImageBufferAnnotatedView
+          buffer={buffer}
+          text={text}
+          frameIndex={frameIndex}
+          origins={['ocr']}
+          maxSide={maxSide}
+          resizeMode="contain"
+          style={[s.frame, frameStyle]}
+        />
+      ) : (
+        <OfflineImageBufferFrameView
+          buffer={buffer}
+          frameIndex={frameIndex}
+          maxSide={maxSide}
+          resizeMode="contain"
+          style={[s.frame, frameStyle]}
+        />
+      )}
       {showChrome ? (
         <View style={s.chrome}>
           <Text style={s.pageLabel}>
