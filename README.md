@@ -12,9 +12,9 @@
 
 </div>
 
-A high-performance React Native TurboModule for on-device speech AI powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
+A high-performance React Native TurboModule for on-device speech and document AI powered by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
 
-**More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Keyword Spotting, Audio Tagging, Speaker Diarization, SID, Spoken Language Identification, Speech Enhancement, Source Separation, Punctuation, and Alignment) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
+**More than a raw C++ wrapper:** Unlike simple 1:1 model bindings that crash on large files or stall the UI thread, this SDK is a complete **native audio, vision & AI orchestration engine**. It brings native-to-native pipeline buffers, memory-mapped I/O, automated segmentation, and cross-stage streaming so you can run heavy offline and streaming models (STT, TTS, VAD, Keyword Spotting, Audio Tagging, Speaker Diarization, SID, Spoken Language Identification, Speech Enhancement, Source Separation, Punctuation, Alignment, OCR, PDF, EPUB and e-documents) reliably even on resource-constrained, low-end mobile devices; not just high-end flagship smartphones.
 
 > **⚠️ SDK 1.0.0 – Breaking changes from 0.4.X  **
 > This project started as a side hobby. In practice I kept hitting the same wall: sherpa-onnx (and other React Native speech libraries) struggle with **long audio on real mobile devices**—OOM crashes, UI stalls, and brittle one-shot pipelines. Fixing that properly meant redesigning the SDK structure and internal architecture from the ground up, which caused a large breaking change. The result is a more stable SDK built for low-end and mid-range phones, with significantly better performance and a cleaner, more consistent public API.
@@ -77,7 +77,6 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Speech Enhancement: [Offline](./docs/enhancement-offline.md) · [Streaming](./docs/enhancement-streaming.md)
 - ✅ Source separation: [Offline](./docs/separation-offline.md) · [Live overload](./docs/separation-live.md)
 - ✅ Punctuation: [Offline](./docs/punctuation-offline.md) · [Streaming](./docs/punctuation-streaming.md)
-- ✅ Offline OCR: [Offline](./docs/ocr-offline.md)
 - ✅ VAD: [Streaming](./docs/vad-streaming.md)
 - ✅ Alignment / timestamps: [Offline](./docs/alignment-offline.md)
 - ✅ Speaker identification: [Offline](./docs/speaker-identification-offline.md) · [Live overload](./docs/speaker-identification-live.md)
@@ -87,6 +86,12 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Keyword spotting (KWS): [Streaming](./docs/kws-streaming.md)
 - ✅ Audio tagging / sound event detection: [Offline](./docs/audio-tagging-offline.md) · [Live overload](./docs/audio-tagging-live.md)
 - ❌ Diacritization: *(Planned for a future release)*
+
+### Vision & documents
+
+- ✅ Offline OCR: [Offline](./docs/ocr-offline.md)
+- ✅ PDF: [Offline](./docs/pdf-offline.md) *(opt-in PDFium)*
+- ✅ E-documents: [Offline](./docs/document-offline.md) *(EPUB, FB2, MOBI, CBZ, CBR)*
 
 ### Pipeline & orchestration
 
@@ -103,11 +108,11 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Model setup & detection: [Model setup](./docs/model-setup.md) · [Model detection & init](./docs/model-detect.md) · [Model languages](./docs/model-languages.md)
 - ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD & ODR](./docs/model-delivery-pad-odr.md)
 - ✅ Acceleration & diagnostics: [Execution providers](./docs/execution-providers.md) · [Native diagnostics](./docs/native-diagnostics.md) · [Memory planning](./docs/memory-and-models.md)
-- ✅ Build optimization: [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md)
+- ✅ Build optimization: [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md) · opt-in [PDFium](./docs/pdf-offline.md) · [libwebp](./docs/imagebuffer-offline.md)
 
 ## How to start
 
-Every feature needs **model files on disk** and a way to point the SDK at them. Read these guides **in order** before diving into STT, TTS, VAD, or any other feature doc:
+Every feature needs **model files on disk** and a way to point the SDK at them. Read these guides **in order** before diving into STT, TTS, VAD, OCR, or any other feature doc:
 
 | Step | Doc | You learn |
 | --- | --- | --- |
@@ -135,7 +140,7 @@ Full doc index: [docs/README.md](./docs/README.md).
 
 **This SDK is built around that constraint.** Pipelines, buffers, and orchestration aim for a **low peak-RAM profile** so you can:
 
-- run **one feature** (STT, TTS, enhancement, punctuation, …) performantly on phones that are not flagships, and  
+- run **one feature** (STT, TTS, OCR, enhancement, punctuation, …) performantly on phones that are not flagships, and  
 - **chain features**—offline batch or live streaming—with **shared buffer contracts** and less duplicate loading than one-off native glue.
 
 **How the wrapper helps (without changing sherpa-onnx physics):**
@@ -143,7 +148,7 @@ Full doc index: [docs/README.md](./docs/README.md).
 | Approach / Capability | Generic / Raw Wrappers | What react-native-sherpa-onnx buys you |
 |---|---|---|
 | **Segmentation engine (Long-form audio)** | ❌ Crashes with OOM on files > 2–3 minutes; monolithic single-pass load | ✅ **Hour-long audio processing:** Offline models run segment-by-segment with a predictable memory ceiling; multi-hour podcasts and meetings run reliably even on modest devices (≤ 2 GB RAM). [Segmentation engine](./docs/segmentation-engine.md) |
-| **Zero-copy pipeline buffers (Bridge performance)** | ❌ Serializes huge base64 strings or Float32 arrays across JS bridge, causing UI thread lag | ✅ **Zero-copy native pipeline buffers:** Audio, text, and segment data stay in C++; only lightweight handle IDs cross the bridge. [Offline audio](./docs/audiobuffer-offline.md) · [Live audio](./docs/audiobuffer-streaming.md) |
+| **Zero-copy pipeline buffers (Bridge performance)** | ❌ Serializes huge base64 strings or Float32 arrays across JS bridge, causing UI thread lag | ✅ **Zero-copy native pipeline buffers:** Audio, text, image, and segment data stay in C++; only lightweight handle IDs cross the bridge. [Offline audio](./docs/audiobuffer-offline.md) · [Live audio](./docs/audiobuffer-streaming.md) · [Image](./docs/imagebuffer-offline.md) |
 | **Pipeline & feature recipes (Native chaining)** | ❌ Audio must round-trip through JS and re-serialize between every model step | ✅ **Native-to-native composite chaining:** Explicit stage lifetimes and direct C++ pipelines (e.g. `Enhancement ➔ STT ➔ Punctuation ➔ Alignment`). [SDK pipeline logic](#sdk-pipeline-logic) · [Feature pipelines](./docs/feature-pipelines.md) |
 | **mmap & file-backed buffers (RAM footprint)** | ❌ Giant memory spikes (1.5–3× entire uncompressed audio file loaded into RAM heap) | ✅ **Kernel memory mapping (`mmap`):** Long offline audio stays on disk; native code reads exact slices on demand, keeping peak RAM flat. [Offline audio buffer](./docs/audiobuffer-offline.md) |
 | **Live ring + optional spool (Streaming & live overload)** | ❌ Unbounded memory growth during extended mic capture or live sessions | ✅ **Bounded ring buffers with disk spooling:** Streaming sessions keep a bounded window in memory; optional spool persists growth without giant memory buffers. [Live audio buffer](./docs/audiobuffer-streaming.md) |
@@ -437,6 +442,42 @@ APIs and initialization: [Offline](./docs/language-identification-offline.md) ·
 
 </details>
 
+<details>
+<summary>OCR models</summary>
+
+Offline OCR runs on decoded [`OfflineImageBuffer`](./docs/imagebuffer-offline.md) frames and writes plain text plus optional spatial spans into an empty [`OfflineTextBuffer`](./docs/textbuffer-offline.md). Detect via `detectOcrModel`; public API is `createOCR` / `recognize`. Phone default: **`ppocrv6-tiny`**.
+
+| Model Type | `modelType` Value | Description | Download |
+| --- | --- | --- | --- |
+| **Auto Detect** | `'auto'` | Resolves family from pack layout / manifest. | n/a |
+| **PP-OCR** | `'ppocr'` | Det / Rec / optional Cls (PP-OCRv6). | [OCR models](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) |
+| **docTR (OnnxTR)** | `'doctr'` | Det / Rec + manifest. | [OCR models](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) |
+| **Granite Docling** | `'doc_vlm'` | Document VLM (`raw` / DocTags / GFM markdown). | [OCR models](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) |
+| **Nemotron Parse** | `'nemotron_parse'` | Document VLM (alias `nemotron-parse` only — never bare `nemotron`). | [OCR models](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) |
+
+APIs, pack layouts, and overlays: [Offline OCR](./docs/ocr-offline.md). PDF pages and e-book images are **source adapters** — extract or rasterize first, then call `recognize` yourself ([PDF](./docs/pdf-offline.md), [e-documents](./docs/document-offline.md)).
+
+</details>
+
+## Vision, documents & image preview
+
+The SDK exposes a public API for native image-buffer previews (`react-native-sherpa-onnx/imagebuffer`) — decoded frames and optional overlay boxes, without sending pixels through JS. You render the UI in your app; the [example app](./example/README.md#ocr-offline) shows ImageBuffer frames, annotated overlays, and mixed-book / comic pages.
+
+<table>
+<tr>
+<td align="center"><img src="./docs/images/example/vision_preview_1.png" alt="ImageBuffer preview" width="180" /></td>
+<td align="center"><img src="./docs/images/example/vision_preview_2.png" alt="Annotated boxes overlay" width="180" /></td>
+<td align="center"><img src="./docs/images/example/vision_preview_3.png" alt="Comics — mixed book markup and OCR" width="180" /></td>
+</tr>
+<tr>
+<td align="center"><sub>ImageBuffer · FrameView</sub></td>
+<td align="center"><sub>Overlay · boxes</sub></td>
+<td align="center"><sub>Comics · mixed book + OCR</sub></td>
+</tr>
+</table>
+
+Full guide: [Image buffer](./docs/imagebuffer-offline.md).
+
 ## Audio visualization
 
 The SDK exposes a public API for native spectrum profiles (`react-native-sherpa-onnx/visualization`) — static `levels` and optional timeline `frames` for previews and animation, without sending PCM through JS. You render the UI in your app; the [example app](./example/README.md#audio-visualization-showcase) shows Static, Heatmap, and pseudo-3D patterns.
@@ -486,10 +527,11 @@ It includes:
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
 - **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, keyword spotting (KWS streaming), audio tagging (offline + live overload), alignment/timestamps, speaker identification (offline + live overload), spoken language identification (offline + live overload), and speaker diarization (offline)
+- **Vision & documents**: offline OCR, PDF, e-documents, ImageBuffer preview
 - **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks
-- Test audio files for different languages
+- Test audio, images, PDFs, and e-documents for those pipelines
 
 For detailed screen-by-screen documentation, see [example/README.md](./example/README.md).
 
@@ -513,6 +555,11 @@ yarn android  # or yarn ios
 <td><img src="./docs/images/example/tts_3.png" alt="Text to speech generation" width="240" /></td>
 <td><img src="./docs/images/example/segmentation_text_2.png" alt="Text to speech generation" width="240" /></td>
 </tr>
+<tr>
+<td><img src="./docs/images/example/ocr_offline_1.png" alt="Offline OCR" width="240" /></td>
+<td><img src="./docs/images/example/read_aloud_3.png" alt="Documents read aloud" width="240" /></td>
+<td><img src="./docs/images/example/ocr_offline_3.png" alt="ImageBuffer annotated preview" width="240" /></td>
+</tr>
 </table>
 </div>
 
@@ -522,7 +569,7 @@ Built something with `react-native-sherpa-onnx`? We'd love to showcase it here.
 
 Real-world apps help others see what the SDK can do beyond the monorepo integration demo — production UX, model delivery choices, and feature combinations we don't cover in `example/`. If you ship (or are building) a React Native app that uses this SDK, consider adding a short entry below.
 
-**What to include:** app name, one-line description, link (App Store / Play Store / website / public repo if applicable), and which SDK features you use (e.g. offline STT, streaming TTS, PAD, separation).
+**What to include:** app name, one-line description, link (App Store / Play Store / website / public repo if applicable), and which SDK features you use (e.g. offline STT, streaming TTS, OCR, PAD, separation).
 
 **How to get listed:** open a pull request that adds your app to this section, or [open an issue](https://github.com/XDcobra/react-native-sherpa-onnx/issues/new) if you prefer maintainers to add it for you.
 
