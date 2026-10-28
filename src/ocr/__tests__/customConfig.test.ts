@@ -170,6 +170,79 @@ describe('OCR customConfig / bridge', () => {
     expect(bridge.modelDir).toBeUndefined();
   });
 
+  it('resolveOcrCustomConfigPaths forwards paddleocr_vl', async () => {
+    mockResolvePaths.mockResolvedValue({
+      vision_encoder: '/m/vision_encoder.onnx',
+      embedding: '/m/embedding.onnx',
+      decoder: '/m/decoder.onnx',
+      tokenizer: '/m/tokenizer.json',
+    });
+    await resolveOcrCustomConfigPaths('paddleocr_vl', {
+      vision_encoder: { kind: 'fs', path: '/m/vision_encoder.onnx' },
+      embedding: { kind: 'fs', path: '/m/embedding.onnx' },
+      decoder: { kind: 'fs', path: '/m/decoder.onnx' },
+      tokenizer: { kind: 'fs', path: '/m/tokenizer.json' },
+    });
+    expect(mockResolvePaths).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: 'ocr',
+        modelType: 'paddleocr_vl',
+      })
+    );
+  });
+
+  it('buildOcrInitBridgeOptions custom uses paddleocr_vl paths + maxNewTokens', async () => {
+    mockResolvePaths.mockResolvedValue({
+      vision_encoder: '/m/vision_encoder.onnx',
+      vision_encoder_data: '/m/vision_encoder.onnx_data',
+      embedding: '/m/embedding.onnx',
+      embedding_data: '/m/embedding.onnx_data',
+      decoder: '/m/decoder.onnx',
+      decoder_data: '/m/decoder.onnx_data',
+      tokenizer: '/m/tokenizer.json',
+      manifest: '/m/ocr_manifest.json',
+    });
+    const bridge = await buildOcrInitBridgeOptions({
+      initMode: 'custom',
+      modelType: 'paddleocr_vl',
+      maxNewTokens: 512,
+      paddleocrVl: { maxPixels: 401408, task: 'spotting' },
+      customConfig: {
+        vision_encoder: { kind: 'fs', path: '/m/vision_encoder.onnx' },
+        vision_encoder_data: {
+          kind: 'fs',
+          path: '/m/vision_encoder.onnx_data',
+        },
+        embedding: { kind: 'fs', path: '/m/embedding.onnx' },
+        embedding_data: { kind: 'fs', path: '/m/embedding.onnx_data' },
+        decoder: { kind: 'fs', path: '/m/decoder.onnx' },
+        decoder_data: { kind: 'fs', path: '/m/decoder.onnx_data' },
+        tokenizer: { kind: 'fs', path: '/m/tokenizer.json' },
+        manifest: { kind: 'fs', path: '/m/ocr_manifest.json' },
+      },
+    });
+    expect(bridge).toEqual(
+      expect.objectContaining({
+        initMode: 'custom',
+        modelType: 'paddleocr_vl',
+        maxNewTokens: 512,
+        maxPixels: 401408,
+        paddleocrVlTask: 'spotting',
+        modelPaths: {
+          vision_encoder: '/m/vision_encoder.onnx',
+          vision_encoder_data: '/m/vision_encoder.onnx_data',
+          embedding: '/m/embedding.onnx',
+          embedding_data: '/m/embedding.onnx_data',
+          decoder: '/m/decoder.onnx',
+          decoder_data: '/m/decoder.onnx_data',
+          tokenizer: '/m/tokenizer.json',
+          manifest: '/m/ocr_manifest.json',
+        },
+      })
+    );
+    expect(bridge.modelDir).toBeUndefined();
+  });
+
   it('buildOcrInitBridgeOptions custom uses modelPaths', async () => {
     const bridge = await buildOcrInitBridgeOptions({
       initMode: 'custom',

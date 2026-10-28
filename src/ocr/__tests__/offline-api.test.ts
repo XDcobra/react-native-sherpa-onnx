@@ -375,6 +375,7 @@ describe('ocr offline API', () => {
     expect(isOcrModelType('doctr')).toBe(true);
     expect(isOcrModelType('doc_vlm')).toBe(true);
     expect(isOcrModelType('nemotron_parse')).toBe(true);
+    expect(isOcrModelType('paddleocr_vl')).toBe(true);
     expect(isOcrModelType('auto')).toBe(true);
     expect(isOcrModelType('tessaract')).toBe(false);
     expect(isOcrModelType('docvlm')).toBe(false);
@@ -383,6 +384,8 @@ describe('ocr offline API', () => {
     expect(isOcrModelType('docling')).toBe(false);
     expect(isOcrModelType('nemotron-parse')).toBe(false);
     expect(isOcrModelType('nemotron')).toBe(false);
+    expect(isOcrModelType('paddleocr-vl')).toBe(false);
+    expect(isOcrModelType('paddleocr')).toBe(false);
   });
 
   it('OCR_MODEL_TYPES contains all expected entries', () => {
@@ -390,8 +393,9 @@ describe('ocr offline API', () => {
     expect(OCR_MODEL_TYPES).toContain('doctr');
     expect(OCR_MODEL_TYPES).toContain('doc_vlm');
     expect(OCR_MODEL_TYPES).toContain('nemotron_parse');
+    expect(OCR_MODEL_TYPES).toContain('paddleocr_vl');
     expect(OCR_MODEL_TYPES).toContain('auto');
-    expect(OCR_MODEL_TYPES).toHaveLength(5);
+    expect(OCR_MODEL_TYPES).toHaveLength(6);
     expect(OCR_MODEL_TYPES[OCR_MODEL_TYPES.length - 1]).toBe('auto');
   });
 
@@ -842,6 +846,287 @@ describe('ocr offline API', () => {
       markdown: 'Hi',
       complete: true,
       stopReason: 'not_a_reason',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INTERNAL_ERROR' });
+    await ocr.destroy();
+  });
+
+  it('createOCR rewrites paddleocr-vl alias before native init', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr-vl',
+    } as unknown as OcrInitializeOptions);
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({ modelType: 'paddleocr_vl' })
+    );
+    await ocr.destroy();
+  });
+
+  it('createOCR paddleocr_vl + recognize returns raw extras', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_paddleocr_vl_rt',
+      modelType: 'paddleocr_vl',
+    });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'paddleocr_vl',
+      spanCount: 0,
+      raw: 'Hello **World**',
+      markdown: 'Hello **World**',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+      maxNewTokens: 64,
+      paddleocrVl: { maxPixels: 401408 },
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelType: 'paddleocr_vl',
+        maxNewTokens: 64,
+        maxPixels: 401408,
+      })
+    );
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    );
+    expect(page).toEqual({
+      family: 'paddleocr_vl',
+      spanCount: 0,
+      raw: 'Hello **World**',
+      markdown: 'Hello **World**',
+      complete: true,
+      stopReason: 'eos',
+    });
+    expect(page).not.toHaveProperty('doctags');
+    await ocr.destroy();
+  });
+
+  it('createOCR paddleocr_vl omits maxPixels when paddleocrVl is absent', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+    });
+    const bridge = mockNative.initializeOcr.mock.calls[0]?.[1] as {
+      maxPixels?: number;
+    };
+    expect(bridge).not.toHaveProperty('maxPixels');
+    await ocr.destroy();
+  });
+
+  it('createOCR paddleocr_vl forwards maxPixels 0', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+      paddleocrVl: { maxPixels: 0 },
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({ maxPixels: 0 })
+    );
+    await ocr.destroy();
+  });
+
+  it('createOCR rejects a non-integer or negative paddleocrVl.maxPixels', async () => {
+    for (const maxPixels of [-1, 1.5, Number.NaN]) {
+      mockNative.initializeOcr.mockClear();
+      await expect(
+        createOCR({
+          modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+          modelType: 'paddleocr_vl',
+          paddleocrVl: { maxPixels },
+        })
+      ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+      expect(mockNative.initializeOcr).not.toHaveBeenCalled();
+    }
+  });
+
+  it('createOCR paddleocr_vl forwards task', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+      paddleocrVl: { task: 'spotting' },
+    });
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({ paddleocrVlTask: 'spotting' })
+    );
+    await ocr.destroy();
+  });
+
+  it('createOCR paddleocr_vl omits paddleocrVlTask when task is absent', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+    });
+    const bridge = mockNative.initializeOcr.mock.calls[0]?.[1] as {
+      paddleocrVlTask?: string;
+    };
+    expect(bridge).not.toHaveProperty('paddleocrVlTask');
+    await ocr.destroy();
+  });
+
+  it('createOCR rejects a paddleocrVl.task other than ocr or spotting', async () => {
+    mockNative.initializeOcr.mockClear();
+    await expect(
+      createOCR({
+        modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+        modelType: 'paddleocr_vl',
+        paddleocrVl: { task: 'table' },
+      } as unknown as OcrInitializeOptions)
+    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+    expect(mockNative.initializeOcr).not.toHaveBeenCalled();
+  });
+
+  it('createOCR rejects paddleocrVl.task on a non-paddleocr_vl family', async () => {
+    mockNative.initializeOcr.mockClear();
+    await expect(
+      createOCR({
+        modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+        modelType: 'ppocr',
+        paddleocrVl: { task: 'ocr' },
+      } as unknown as OcrInitializeOptions)
+    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+    expect(mockNative.initializeOcr).not.toHaveBeenCalled();
+  });
+
+  it('recognize paddleocr_vl forwards task override', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_paddleocr_vl_task',
+      modelType: 'paddleocr_vl',
+    });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'paddleocr_vl',
+      spanCount: 1,
+      raw: 'Hi<|LOC_0|><|LOC_0|><|LOC_1000|><|LOC_0|><|LOC_1000|><|LOC_1000|><|LOC_0|><|LOC_1000|>',
+      markdown: 'Hi',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+    });
+    await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      { paddleocrVl: { task: 'spotting' } }
+    );
+    expect(mockNative.ocrRecognize).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      expect.objectContaining({
+        paddleocrVl: { task: 'spotting' },
+      })
+    );
+    await ocr.destroy();
+  });
+
+  it('recognize paddleocr_vl omits paddleocrVl when recognize options omit it', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_paddleocr_vl_omit',
+      modelType: 'paddleocr_vl',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+      paddleocrVl: { task: 'ocr' },
+    });
+    await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+    );
+    const rec = mockNative.ocrRecognize.mock.calls[0]?.[3] as {
+      paddleocrVl?: { task?: string };
+    };
+    expect(rec).not.toHaveProperty('paddleocrVl');
+    await ocr.destroy();
+  });
+
+  it('recognize rejects a paddleocrVl.task other than ocr or spotting', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_paddleocr_vl_bad_task',
+      modelType: 'paddleocr_vl',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { paddleocrVl: { task: 'chart' } } as unknown as {
+          paddleocrVl: { task: 'ocr' };
+        }
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+    expect(mockNative.ocrRecognize).not.toHaveBeenCalled();
+    await ocr.destroy();
+  });
+
+  it('recognize rejects paddleocrVl on a non-paddleocr_vl family', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+      modelType: 'ppocr',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { paddleocrVl: { task: 'spotting' } }
+      )
+    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+    expect(mockNative.ocrRecognize).not.toHaveBeenCalled();
+    await ocr.destroy();
+  });
+
+  it('createOCR rejects paddleocrVl.maxPixels on a non-paddleocr_vl family', async () => {
+    mockNative.initializeOcr.mockClear();
+    await expect(
+      createOCR({
+        modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+        modelType: 'ppocr',
+        paddleocrVl: { maxPixels: 401408 },
+      } as unknown as OcrInitializeOptions)
+    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+    expect(mockNative.initializeOcr).not.toHaveBeenCalled();
+  });
+
+  it('createOCR rejects maxNewTokens on ppocr', async () => {
+    mockNative.initializeOcr.mockClear();
+    await expect(
+      createOCR({
+        modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+        modelType: 'ppocr',
+        maxNewTokens: 512,
+      } as unknown as OcrInitializeOptions)
+    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+    expect(mockNative.initializeOcr).not.toHaveBeenCalled();
+  });
+
+  it('recognize rejects paddleocr_vl when raw is missing', async () => {
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'paddleocr_vl',
+      spanCount: 0,
+      doctags: 'Hello',
+      markdown: 'Hello',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
     });
     await expect(
       ocr.recognize(
