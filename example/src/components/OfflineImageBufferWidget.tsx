@@ -562,27 +562,30 @@ export const OfflineImageBufferWidget = forwardRef<
       pdfActiveLabel == null &&
       sourceType === 'example' ? (
         <View style={s.root}>
-          <Text style={s.subsectionTitle}>
-            {pdfFiles.length > 0
-              ? 'Choose an example image or PDF'
-              : 'Choose an example image'}
-          </Text>
+          <View style={s.sourceActionRow}>
+            <TouchableOpacity
+              style={[s.backButton, busy && s.buttonDisabled]}
+              onPress={() => {
+                setSourceType(null);
+                setSelectedExampleId(null);
+              }}
+              disabled={busy}
+              accessibilityLabel="Back"
+            >
+              <Ionicons name="chevron-back" size={22} color="#007AFF" />
+            </TouchableOpacity>
+            <Text style={[s.subsectionTitle, s.sourceActionTitle]}>
+              {pdfFiles.length > 0
+                ? 'Choose an example image or PDF'
+                : 'Choose an example image'}
+            </Text>
+          </View>
           <ExampleImageFileList
             imageFiles={exampleFiles}
             selectedId={selectedExampleId}
             onSelect={handleExamplePick}
             disabled={busy}
           />
-          <TouchableOpacity
-            style={s.changeSourceButton}
-            onPress={() => {
-              setSourceType(null);
-              setSelectedExampleId(null);
-            }}
-            disabled={busy}
-          >
-            <Text style={s.changeSourceButtonText}>Change source</Text>
-          </TouchableOpacity>
         </View>
       ) : null}
 
@@ -590,7 +593,15 @@ export const OfflineImageBufferWidget = forwardRef<
       pdfActiveLabel == null &&
       sourceType === 'own' &&
       !loading ? (
-        <View style={s.root}>
+        <View style={s.sourceActionRow}>
+          <TouchableOpacity
+            style={[s.backButton, busy && s.buttonDisabled]}
+            onPress={() => setSourceType(null)}
+            disabled={busy}
+            accessibilityLabel="Back"
+          >
+            <Ionicons name="chevron-back" size={22} color="#007AFF" />
+          </TouchableOpacity>
           <TouchableOpacity
             style={[s.sourceChoiceButton, busy && s.sourceChoiceButtonDisabled]}
             onPress={() => {
@@ -601,13 +612,6 @@ export const OfflineImageBufferWidget = forwardRef<
             <Text style={s.sourceChoiceButtonText}>
               {onPdfSelected ? 'Pick image or PDF…' : 'Pick image…'}
             </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.changeSourceButton}
-            onPress={() => setSourceType(null)}
-            disabled={busy}
-          >
-            <Text style={s.changeSourceButtonText}>Change source</Text>
           </TouchableOpacity>
         </View>
       ) : null}
