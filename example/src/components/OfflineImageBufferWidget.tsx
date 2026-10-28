@@ -468,7 +468,7 @@ export const OfflineImageBufferWidget = forwardRef<
       if (file.kind === 'pdf') {
         await selectPdf({
           label: file.name,
-          source: toImageFileSource(file.id),
+          source: fileSourceFromBundledPath(file.id),
           fixtureId: file.id,
         });
         return;

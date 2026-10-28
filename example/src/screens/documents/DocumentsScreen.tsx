@@ -62,7 +62,6 @@ import {
   type DocumentExtractKind,
   type DocumentFileInfo,
 } from '../../documentConfig';
-import { materializeBundledDocumentSource } from '../../utils/documentSource';
 import {
   fileSourceFromBundledPath,
   toFileSource,
@@ -611,10 +610,7 @@ export default function DocumentsScreen() {
 
   const handleExamplePick = useCallback(
     async (file: DocumentFileInfo) => {
-      const source =
-        file.extract === 'document'
-          ? await materializeBundledDocumentSource(file.id)
-          : fileSourceFromBundledPath(file.id);
+      const source = fileSourceFromBundledPath(file.id);
       await runExtract(source, file.extract, file.name, file.id);
     },
     [runExtract]

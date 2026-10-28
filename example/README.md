@@ -298,4 +298,4 @@ Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/h
 
 OCR detect/init on this screen is the same panel and engine cache as Vision → OCR. Recognize is a separate button, not automatic.
 
-Android EPUB/FB2/CBZ/MOBI assets are copied to cache first (`apkAsset` is not seekable for `document/`). See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offline.md](../docs/pdf-offline.md).
+See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offline.md](../docs/pdf-offline.md). Android bundled assets use `app:apkAsset` (the SDK copies them into app cache on first open).
