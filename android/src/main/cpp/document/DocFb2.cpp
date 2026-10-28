@@ -141,15 +141,15 @@ std::string Fb2InnerText(pugi::xml_node node) {
 
 bool SectionHasText(pugi::xml_node section) {
   for (pugi::xml_node ch : section.children()) {
-    if (XmlNameIs(ch, "section") || XmlNameIs(ch, "image") ||
-        XmlNameIs(ch, "title")) {
+    if (XmlNameIs(ch, "image") || XmlNameIs(ch, "empty-line")) continue;
+    if (XmlNameIs(ch, "section")) {
+      if (SectionHasText(ch)) return true;
       continue;
     }
     if (XmlNameIs(ch, "p") || XmlNameIs(ch, "poem") || XmlNameIs(ch, "cite") ||
         XmlNameIs(ch, "subtitle") || XmlNameIs(ch, "text-author") ||
         XmlNameIs(ch, "epigraph") || XmlNameIs(ch, "annotation") ||
-        XmlNameIs(ch, "empty-line")) {
-      if (XmlNameIs(ch, "empty-line")) continue;
+        XmlNameIs(ch, "title")) {
       if (!IsWsOnly(Fb2InnerText(ch))) return true;
     }
   }
@@ -197,15 +197,19 @@ void AppendFb2Blocks(ExtractTextResult* r, pugi::xml_node section, int idx,
       AppendFb2Blocks(r, ch, idx, href, utf16);
       continue;
     }
-    const bool compound =
-        XmlNameIs(ch, "title") || XmlNameIs(ch, "poem") || XmlNameIs(ch, "cite");
+    const bool compound = XmlNameIs(ch, "title") || XmlNameIs(ch, "poem") ||
+                          XmlNameIs(ch, "cite") || XmlNameIs(ch, "epigraph");
     if (XmlNameIs(ch, "p") || XmlNameIs(ch, "subtitle") ||
         XmlNameIs(ch, "text-author") || XmlNameIs(ch, "v") ||
         XmlNameIs(ch, "cite") || XmlNameIs(ch, "poem") ||
-        XmlNameIs(ch, "title") || XmlNameIs(ch, "annotation")) {
+        XmlNameIs(ch, "title") || XmlNameIs(ch, "annotation") ||
+        XmlNameIs(ch, "epigraph")) {
       if (compound) {
         for (pugi::xml_node p : ch.children()) {
-          if (XmlNameIs(p, "p") || XmlNameIs(p, "v")) flush(Fb2InnerText(p));
+          if (XmlNameIs(p, "p") || XmlNameIs(p, "v") ||
+              XmlNameIs(p, "text-author")) {
+            flush(Fb2InnerText(p));
+          }
         }
       } else {
         flush(Fb2InnerText(ch));
