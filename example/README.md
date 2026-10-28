@@ -292,7 +292,7 @@ Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/m
 1. Text EPUB / FB2 → `extractDocumentText` → OfflineTextBuffer (`origin: markup`) → `tts.synthesize` → playback. The current block span is highlighted from playback position.
 2. PDF with a text layer → `extractPdfTextLayer` → same TTS path (`origin: textLayer`).
 3. Scan-only PDF → `ERR_PDF_NO_TEXT_LAYER`. This screen does not rasterize, extract images, or run OCR; use Vision → OCR.
-4. Mixed EPUB (`mixed.epub`) → markup extract succeeds with `imageOnlySections.length === 1` → `extractDocumentImages` → FramePager → optional OCR Recognize. Extracted text shows **markup** / **ocr** origin chips, interleaved by `sectionIndex` in JS (no SDK merge API). Speak uses the concatenated string.
+4. Mixed EPUB (`mixed.epub`) → two markup chapters plus `imageOnlySections.length === 1` → `extractDocumentImages` → FramePager → optional OCR Recognize. Extracted text shows **markup** / **ocr** origin chips, interleaved by `sectionIndex` in JS (no SDK merge API). Speak uses the concatenated string.
 5. CBZ manga (`manga.cbz`) → `ERR_DOC_NO_TEXT` unlocks the same image + OCR path (no generic extract-failed panel). After Recognize, TTS is OCR-only. The archive is three JPEG pages (cover + two panels) from University of Tsukuba’s CC0 manga [ヒトはそれを『発達障害』と名づけました](https://dac.tsukuba.ac.jp/radd/joint-base/manga/).
 
 OCR detect/init on this screen is the same panel and engine cache as Vision → OCR. Recognize is a separate button, not automatic.
