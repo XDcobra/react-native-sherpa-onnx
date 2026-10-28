@@ -129,6 +129,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Offline OCR demo',
     body: 'Showcase for extractPdfTextLayer and createOCR / recognize over OfflineImageBuffer → OfflineTextBuffer. Switch ppocr, doctr, doc_vlm, or nemotron_parse packs, pick bundled images or PDFs, and inspect text plus spatial boxes (ocr pixels or mapped text-layer quads) on OfflineImageBufferAnnotatedView.',
   },
+  Documents: {
+    title: 'Read documents aloud',
+    body: 'Extract readable text from a bundled EPUB, FB2, or PDF text layer, then speak it with the same offline TTS detect/init as the TTS screen. Scan-only PDFs have no text layer — use the OCR screen for those.',
+  },
 };
 
 const STORAGE_FILE = `${DocumentDirectoryPath}/example-screen-intros.json`;

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description>
+    <title-info>
+      <book-title>Hello</book-title>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <section>
+      <title><p>Hello</p></title>
+      <p>Hello from the VoiceLab example book.</p>
+      <p>This short FB2 has flowing text only, so extractDocumentText can fill an OfflineTextBuffer and offline TTS can read it aloud.</p>
+      <p>There are no images in this file.</p>
+    </section>
+  </body>
+</FictionBook>

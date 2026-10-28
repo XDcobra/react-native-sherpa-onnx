@@ -20,6 +20,7 @@ const SECTION_ORDER = [
   'Speech Recognition',
   'Speech Synthesis',
   'Vision',
+  'Documents (EPUB, PDF, …)',
   'Pipelines & Demos',
   'Alignment & Subtitles',
   'Speech Enhancement',
@@ -86,6 +87,16 @@ const FEATURES: HomeFeature[] = [
       'Image or PDF → extract / recognize → text + spatial boxes (ocr + textLayer) on the page',
     icon: 'scan-outline',
     screen: 'OCR',
+    implemented: true,
+  },
+  {
+    id: 'documents',
+    sectionTitle: 'Documents (EPUB, PDF, …)',
+    title: 'Read aloud',
+    description:
+      'Extract EPUB/FB2 markup or a PDF text layer, then speak it with offline TTS',
+    icon: 'book-outline',
+    screen: 'Documents',
     implemented: true,
   },
   {

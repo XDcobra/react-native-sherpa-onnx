@@ -144,9 +144,11 @@ example/ios/sherpa_models/*
 !example/ios/sherpa_models/test_codec/
 !example/ios/sherpa_models/test_wavs/
 !example/ios/sherpa_models/test_pdfs/
+!example/ios/sherpa_models/test_edocs/
 !example/ios/sherpa_models/test_codec/**
 !example/ios/sherpa_models/test_wavs/**
 !example/ios/sherpa_models/test_pdfs/**
+!example/ios/sherpa_models/test_edocs/**
 example/.model-cache/
 example/models/
 

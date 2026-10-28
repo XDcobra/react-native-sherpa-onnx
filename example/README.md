@@ -41,6 +41,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Codec samples**          | `android/app/src/main/assets/test_codec/`        | `ios/sherpa_models/test_codec/`        |
 | **Test images (OCR)**      | `android/app/src/main/assets/test_images/`       | `ios/sherpa_models/test_images/`       |
 | **Test PDFs (text layer)** | `android/app/src/main/assets/test_pdfs/`         | `ios/sherpa_models/test_pdfs/`         |
+| **Test e-docs (Read aloud)** | `android/app/src/main/assets/test_edocs/`      | `ios/sherpa_models/test_edocs/`        |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 >
@@ -278,3 +279,15 @@ The same screen also picks bundled PDFs from `test_pdfs/` (`digital_hello.pdf` /
 2. On `ERR_PDF_NO_TEXT_LAYER` — unlock `rasterizePdfPages` → `OfflineImageBuffer` → `recognize` like an image.
 
 PDF pick still rasterizes for `OfflineImageBufferFrameView` preview (`lazy-lru`). Results keep the text buffer and draw boxes with [`OfflineImageBufferAnnotatedView`](../docs/imagebuffer-offline.md#offlineimagebufferannotatedview) for both `origin: ocr` (frame pixels) and `origin: textLayer` (PDF user-space mapped onto the frame). A path legend on the screen lists coords and overlay rules. The example opts in PDFium (`sherpaOnnxEnablePdfium=true` / `SHERPA_ONNX_ENABLE_PDFIUM=1`) and libwebp (`sherpaOnnxEnableLibwebp=true` / `SHERPA_ONNX_ENABLE_LIBWEBP=1`); consumer apps keep both SDK defaults off. See [docs/pdf-offline.md](../docs/pdf-offline.md) and [docs/imagebuffer-offline.md](../docs/imagebuffer-offline.md).
+
+## Documents (read aloud)
+
+Home section **Documents (EPUB, PDF, …)** → **Read aloud**. The screen reuses the same TTS detect/init panel as Text-to-Speech (Offline): catalog, auto/custom, `detectTtsModel`, speaker/speed, and the shared TTS engine cache.
+
+Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, plus the digital and scan-only PDFs from `test_pdfs/`.
+
+1. Text EPUB / FB2 → `extractDocumentText` → OfflineTextBuffer (`origin: markup`) → `tts.synthesize` → playback. The current block span is highlighted from playback position.
+2. PDF with a text layer → `extractPdfTextLayer` → same TTS path (`origin: textLayer`).
+3. Scan-only PDF → `ERR_PDF_NO_TEXT_LAYER`. This screen does not rasterize or run OCR; use Vision → OCR.
+
+Android EPUB/FB2 assets are copied to cache first (`apkAsset` is not seekable for `document/`). See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offline.md](../docs/pdf-offline.md).
