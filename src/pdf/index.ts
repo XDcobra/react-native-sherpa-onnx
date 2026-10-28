@@ -75,8 +75,11 @@ function assertFileSource(source: FileSource): void {
     typeof source !== 'object' ||
     typeof source.kind !== 'string'
   ) {
-    throw new Error(
-      `${PdfErrorCode.INVALID_ARGUMENT}: source must be a FileSource`
+    throw Object.assign(
+      new Error(
+        `${PdfErrorCode.INVALID_ARGUMENT}: source must be a FileSource`
+      ),
+      { code: PdfErrorCode.INVALID_ARGUMENT }
     );
   }
 }
@@ -126,6 +129,9 @@ export async function isPdfiumEnabled(): Promise<boolean> {
 /**
  * Extract PDF text layer into an empty OfflineTextBuffer.
  * Spans use `origin: 'textLayer'` with pageNumber / pageWidth / pageHeight.
+ *
+ * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
+ * on first open (see {@link FileSource} / `apkAsset`).
  */
 export async function extractPdfTextLayer(
   source: FileSource,
@@ -179,6 +185,9 @@ export async function extractPdfTextLayer(
  * Rasterize PDF pages into a new OfflineImageBuffer (RGB8).
  * Each frame exposes optional `pageNumber` / `dpi` via getOfflineImageBufferFrameInfo.
  * Does not run OCR — call createOCR().recognize explicitly afterward.
+ *
+ * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
+ * on first open (see {@link FileSource} / `apkAsset`).
  */
 export async function rasterizePdfPages(
   source: FileSource,

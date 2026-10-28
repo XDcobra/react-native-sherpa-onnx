@@ -142,7 +142,7 @@ function extractDocumentText(
 ): Promise<ExtractDocumentTextResult>;
 ```
 
-`source` is a seekable `FileSource` (`fs`, `contentUri`, … — no `fromBytes`). Android `apkAsset` is not seekable → `ERR_DOC_OPEN_FAILED`; copy to cache first. Options: `signal`, `onProgress`.
+`source` is a `FileSource` (path or Android PFD after resolve; see [fileio.md § Seekable sources](fileio.md#seekable-sources-document-and-pdf)). Android `apkAsset` copies into app cache on first open. Streams → `ERR_DOC_OPEN_FAILED`. Options: `signal`, `onProgress`.
 
 ```ts
 type ExtractDocumentTextResult = {
@@ -222,7 +222,7 @@ Blocks joined with `\n\n`; `<br>` → `\n`; ruby keeps `rb`, drops `rt`/`rp`; `s
 | `ERR_DOC_ARCHIVE_DISABLED` | libarchive built out |
 | `ERR_DOC_UNSUPPORTED_FORMAT` | PDF, HTML file, KFX / AZW4 / Topaz / audio / dictionary MOBI, unknown |
 | `ERR_DOC_DRM` | Content encryption / password-protected archive |
-| `ERR_DOC_OPEN_FAILED` | Unreadable, Android `apkAsset`, or archive over **10 000** entries / **64 MiB** per file / **512 MiB** uncompressed |
+| `ERR_DOC_OPEN_FAILED` | Unreadable, non-seekable stream, or archive over **10 000** entries / **64 MiB** per file / **512 MiB** uncompressed |
 | `ERR_DOC_NO_TEXT` | No markup in the whole document |
 | `ERR_DOC_NO_IMAGES` | No image-only sections / no decodable image |
 | `ERR_DOC_INVALID_ARGUMENT` | Bad source / missing or already populated `textOut` |

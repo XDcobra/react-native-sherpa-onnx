@@ -35,9 +35,31 @@ describe('document offline api', () => {
     await expect(
       extractDocumentText(null as never, TEXT_OUT)
     ).rejects.toMatchObject({
+      code: DocumentErrorCode.INVALID_ARGUMENT,
       message: expect.stringContaining(DocumentErrorCode.INVALID_ARGUMENT),
     });
     expect(mockNative.extractDocumentText).not.toHaveBeenCalled();
+  });
+
+  it('forwards apkAsset FileSource to native', async () => {
+    mockNative.extractDocumentText.mockResolvedValue({
+      format: 'epub',
+      sectionCount: 1,
+      sections: [{ sectionIndex: 0, kind: 'text' }],
+      imageOnlySections: [],
+      spatialSpanCount: 0,
+    });
+    const source = {
+      kind: 'app' as const,
+      base: 'apkAsset' as const,
+      path: 'test_edocs/hello.epub',
+    };
+    await extractDocumentText(source, TEXT_OUT);
+    expect(mockNative.extractDocumentText).toHaveBeenCalledWith(
+      source,
+      TEXT_OUT,
+      {}
+    );
   });
 
   it('maps archive-disabled native error', async () => {

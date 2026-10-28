@@ -20,6 +20,10 @@ Prebuilts: [third_party/pdfium_prebuilt/README.md](../third_party/pdfium_prebuil
 
 Without enable, both APIs reject with `ERR_PDF_PDFIUM_DISABLED`.
 
+## FileSource I/O
+
+Same seekable opener as [`document/`](document-offline.md) — see [fileio.md § Seekable sources](fileio.md#seekable-sources-document-and-pdf). `app:apkAsset` is allowed (Android copies the APK zip entry into app cache on first open). Non-seekable streams → `ERR_PDF_OPEN_FAILED`. `extractPdfTextLayer` and `rasterize-all` close the handle when the call returns. **`lazy-lru` keeps the open PDFium document (and the fd / security-scoped URL) until `releaseOfflineImageBuffer`.** Password-protected files stay `ERR_PDF_ENCRYPTED` (no password argument).
+
 ## Quick start — text layer
 
 ```ts
@@ -204,7 +208,7 @@ See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md
 |------|---------|
 | `ERR_PDF_PDFIUM_DISABLED` | Binary built without PDFium |
 | `ERR_PDF_INVALID_ARGUMENT` | Bad source / pages / dpi / populated text buffer |
-| `ERR_PDF_OPEN_FAILED` | Unreadable / corrupt PDF |
+| `ERR_PDF_OPEN_FAILED` | Unreadable / corrupt PDF, or a non-seekable source (stream, PFD with no length) |
 | `ERR_PDF_ENCRYPTED` | Password-protected |
 | `ERR_PDF_NO_TEXT_LAYER` | No extractable text (extract only) |
 | `ERR_PDF_RENDER_FAILED` | Page raster failed |

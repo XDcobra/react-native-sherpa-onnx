@@ -31,6 +31,29 @@ describe('pdf offline api', () => {
     jest.clearAllMocks();
   });
 
+  it('forwards apkAsset FileSource to native', async () => {
+    mockNative.extractPdfTextLayer.mockResolvedValue({
+      pageCount: 1,
+      pagesWithText: 1,
+      utf16Length: 4,
+      spatialSpanCount: 1,
+    });
+    const source = {
+      kind: 'app' as const,
+      base: 'apkAsset' as const,
+      path: 'test_pdfs/a.pdf',
+    };
+    await extractPdfTextLayer(
+      source,
+      'txt_off_00000000-0000-0000-0000-000000000001'
+    );
+    expect(mockNative.extractPdfTextLayer).toHaveBeenCalledWith(
+      source,
+      'txt_off_00000000-0000-0000-0000-000000000001',
+      {}
+    );
+  });
+
   it('isPdfiumEnabled forwards native', async () => {
     mockNative.isPdfiumEnabled.mockResolvedValue(false);
     await expect(isPdfiumEnabled()).resolves.toBe(false);

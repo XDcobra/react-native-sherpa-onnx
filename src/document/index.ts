@@ -59,8 +59,11 @@ function assertFileSource(source: FileSource): void {
     typeof source !== 'object' ||
     typeof source.kind !== 'string'
   ) {
-    throw new Error(
-      `${DocumentErrorCode.INVALID_ARGUMENT}: source must be a FileSource`
+    throw Object.assign(
+      new Error(
+        `${DocumentErrorCode.INVALID_ARGUMENT}: source must be a FileSource`
+      ),
+      { code: DocumentErrorCode.INVALID_ARGUMENT }
     );
   }
 }
@@ -112,6 +115,9 @@ function mapSections(raw: unknown): DocumentSectionInfo[] {
 /**
  * Extract markup text into an empty OfflineTextBuffer (`origin: 'markup'`).
  * Never runs OCR. CBZ/CBR / scan-only documents reject with `ERR_DOC_NO_TEXT`.
+ *
+ * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
+ * on first open (see {@link FileSource} / `apkAsset`).
  */
 export async function extractDocumentText(
   source: FileSource,
@@ -164,6 +170,9 @@ export async function extractDocumentText(
 /**
  * Extract image-only sections (or all CBZ/CBR pages) into a new OfflineImageBuffer.
  * Pure text documents reject with `ERR_DOC_NO_IMAGES`. Does not run OCR.
+ *
+ * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
+ * on first open (see {@link FileSource} / `apkAsset`).
  */
 export async function extractDocumentImages(
   source: FileSource,
