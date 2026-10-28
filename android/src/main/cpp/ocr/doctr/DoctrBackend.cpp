@@ -4,6 +4,7 @@
 #include "DoctrImageOps.h"
 #include "DoctrRecDecode.h"
 #include "OcrOrtEnv.h"
+#include "OcrOrtHelpers.h"
 #include "ort/ApplyOrtProvider.h"
 
 #include <onnxruntime_cxx_api.h>
@@ -93,9 +94,9 @@ void DoctrBackend::Load(const std::string& model_dir, const OcrLoadOptions& opti
   ApplyOrtProvider(*session_options_, options_.provider);
 
   det_session_ =
-      std::make_unique<Ort::Session>(env, det_path.c_str(), *session_options_);
+      OcrCreateOrtSession(env, *session_options_, det_path, "det.onnx", options_.provider);
   rec_session_ =
-      std::make_unique<Ort::Session>(env, rec_path.c_str(), *session_options_);
+      OcrCreateOrtSession(env, *session_options_, rec_path, "rec.onnx", options_.provider);
   det_input_name_ = FirstInputName(*det_session_);
   det_output_name_ = FirstOutputName(*det_session_);
   rec_input_name_ = FirstInputName(*rec_session_);

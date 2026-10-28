@@ -158,6 +158,18 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       files[@"embed_tokens_data"] = p;
       paths[@"embed_tokens_data"] = p;
     }
+    if (!detect.embeddingPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.embeddingPath.c_str()];
+      files[@"embedding"] = p;
+      paths[@"embedding"] = p;
+    }
+    if (!detect.embeddingDataPath.empty()) {
+      NSString *p =
+          [NSString stringWithUTF8String:detect.embeddingDataPath.c_str()];
+      files[@"embedding_data"] = p;
+      paths[@"embedding_data"] = p;
+    }
     if (!detect.decoderPath.empty()) {
       NSString *p = [NSString stringWithUTF8String:detect.decoderPath.c_str()];
       files[@"decoder"] = p;
@@ -274,9 +286,10 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
             (!([modelType isEqualToString:@"ppocr"] ||
                [modelType isEqualToString:@"doctr"] ||
                [modelType isEqualToString:@"doc_vlm"] ||
-               [modelType isEqualToString:@"nemotron_parse"]))) {
+               [modelType isEqualToString:@"nemotron_parse"] ||
+               [modelType isEqualToString:@"paddleocr_vl"]))) {
           reject(kOcrInvalidArg,
-                 @"custom init requires a concrete modelType (ppocr|doctr|doc_vlm|nemotron_parse)",
+                 @"custom init requires a concrete modelType (ppocr|doctr|doc_vlm|nemotron_parse|paddleocr_vl)",
                  nil);
           return;
         }
@@ -341,6 +354,9 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
           options[@"detUnclipRatio"] ? [options[@"detUnclipRatio"] floatValue] : 1.5f;
       int maxNewTokens =
           options[@"maxNewTokens"] ? [options[@"maxNewTokens"] intValue] : 0;
+      int maxPixels =
+          options[@"maxPixels"] ? [options[@"maxPixels"] intValue] : 0;
+      NSString *paddleocrVlTask = options[@"paddleocrVlTask"];
 
       std::string idStr = instanceId ? [instanceId UTF8String] : "";
       auto &engine = OcrEngineRegistry::Instance().Create(idStr);
@@ -352,6 +368,11 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       opts.det_box_score_thresh = detBoxScoreThresh;
       opts.det_unclip_ratio = detUnclipRatio;
       opts.max_new_tokens = maxNewTokens;
+      opts.max_pixels = maxPixels;
+      if ([paddleocrVlTask isKindOfClass:[NSString class]] &&
+          paddleocrVlTask.length > 0) {
+        opts.paddleocr_vl_task = [paddleocrVlTask UTF8String];
+      }
       opts.provider = provider ? [provider UTF8String] : "cpu";
       NSString *quantization = options[@"quantization"];
       if ([quantization isKindOfClass:[NSString class]] && quantization.length > 0) {
@@ -372,6 +393,8 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
         opts.path_vision_encoder_data = take(@"vision_encoder_data");
         opts.path_embed_tokens = take(@"embed_tokens");
         opts.path_embed_tokens_data = take(@"embed_tokens_data");
+        opts.path_embedding = take(@"embedding");
+        opts.path_embedding_data = take(@"embedding_data");
         opts.path_decoder = take(@"decoder");
         opts.path_decoder_data = take(@"decoder_data");
         opts.path_tokenizer = take(@"tokenizer");
@@ -387,6 +410,8 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       });
     } catch (const std::exception &e) {
       reject(kOcrInternal, [NSString stringWithUTF8String:e.what()], nil);
+    } catch (...) {
+      reject(kOcrInternal, @"OCR load failed", nil);
     }
   } @catch (NSException *ex) {
     reject(kOcrInternal, ex.reason, nil);
@@ -436,6 +461,14 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       OcrEngine::RecognizeOptions ropts;
       ropts.granularity = ParseGranularity(granularity);
       ropts.progress_min_interval_ms = progressMinIntervalMs;
+      id paddleocrVlObj = options[@"paddleocrVl"];
+      if ([paddleocrVlObj isKindOfClass:[NSDictionary class]]) {
+        ropts.has_paddleocr_vl = true;
+        NSString *task = ((NSDictionary *)paddleocrVlObj)[@"task"];
+        if ([task isKindOfClass:[NSString class]] && task.length > 0) {
+          ropts.paddleocr_vl_task = [task UTF8String];
+        }
+      }
       id framesObj = options[@"frames"];
       if ([framesObj isKindOfClass:[NSArray class]]) {
         for (id v in (NSArray *)framesObj) {

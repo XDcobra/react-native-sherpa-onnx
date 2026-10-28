@@ -49,6 +49,11 @@ struct OcrRecognizeContext {
   int frame_count = 1;
   /** Minimum ms between emitted ticks. `0` = every Report. */
   int progress_min_interval_ms = kOcrProgressMinIntervalMs;
+  /**
+   * Resolved paddleocr_vl task (`ocr` / `spotting`). Empty → backend default
+   * `ocr`. Other families ignore this.
+   */
+  std::string paddleocr_vl_task;
 
   void Report(std::string_view phase, int done, int total) const;
   void ThrowIfCancelled() const;

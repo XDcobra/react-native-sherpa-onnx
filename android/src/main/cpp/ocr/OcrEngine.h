@@ -30,6 +30,10 @@ class OcrEngine {
     ProgressFn progress;
     CancelFn cancel;
     int progress_min_interval_ms = kOcrProgressMinIntervalMs;
+    /** True when JS passed `paddleocrVl` (even with task omitted). */
+    bool has_paddleocr_vl = false;
+    /** Empty → use load-time `paddleocr_vl_task` (default `ocr`). */
+    std::string paddleocr_vl_task;
   };
 
   struct RecognizeOutcome {

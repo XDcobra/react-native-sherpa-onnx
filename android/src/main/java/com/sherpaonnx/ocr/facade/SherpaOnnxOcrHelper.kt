@@ -86,11 +86,12 @@ class SherpaOnnxOcrHelper(
       if (core.initMode == "custom") {
         if (modelType == "auto" ||
           (modelType != "ppocr" && modelType != "doctr" &&
-            modelType != "doc_vlm" && modelType != "nemotron_parse")
+            modelType != "doc_vlm" && modelType != "nemotron_parse" &&
+            modelType != "paddleocr_vl")
         ) {
           promise.reject(
             OcrErrorCodes.INVALID_ARGUMENT,
-            "custom init requires a concrete modelType (ppocr|doctr|doc_vlm|nemotron_parse)",
+            "custom init requires a concrete modelType (ppocr|doctr|doc_vlm|nemotron_parse|paddleocr_vl)",
           )
           return
         }
@@ -125,6 +126,14 @@ class SherpaOnnxOcrHelper(
         if (options.hasKey("detUnclipRatio")) options.getDouble("detUnclipRatio").toFloat() else 1.5f
       val maxNewTokens =
         if (options.hasKey("maxNewTokens")) options.getDouble("maxNewTokens").toInt() else 0
+      val maxPixels =
+        if (options.hasKey("maxPixels")) options.getDouble("maxPixels").toInt() else 0
+      val paddleocrVlTask =
+        if (options.hasKey("paddleocrVlTask") && !options.isNull("paddleocrVlTask")) {
+          options.getString("paddleocrVlTask")
+        } else {
+          null
+        }
       val quantization =
         if (options.hasKey("quantization") && !options.isNull("quantization")) {
           options.getString("quantization")
@@ -147,8 +156,10 @@ class SherpaOnnxOcrHelper(
           detBoxScoreThresh,
           detUnclipRatio,
           maxNewTokens,
+          maxPixels,
           quantization,
           pathOverrides,
+          paddleocrVlTask,
         )
       } catch (e: Exception) {
         instances.remove(instanceId)
@@ -254,6 +265,15 @@ class SherpaOnnxOcrHelper(
         ?.toInt()
         ?.coerceAtLeast(0)
         ?: 200
+    val paddleocrVl =
+      options
+        ?.takeIf { it.hasKey("paddleocrVl") && !it.isNull("paddleocrVl") }
+        ?.getMap("paddleocrVl")
+    val hasPaddleocrVl = paddleocrVl != null
+    val paddleocrVlTask =
+      paddleocrVl
+        ?.takeIf { it.hasKey("task") && !it.isNull("task") }
+        ?.getString("task")
 
     val gateKey = NativeInstanceGate.keyFor(sentinel)
     if (!NativeInstanceGate.beginUse(gateKey)) {
@@ -279,6 +299,8 @@ class SherpaOnnxOcrHelper(
           granularity,
           operationId.ifEmpty { null },
           progressMinIntervalMs,
+          hasPaddleocrVl,
+          paddleocrVlTask,
         )
           ?: run {
             promise.reject(OcrErrorCodes.RECOGNIZE_FAILED, "nativeRecognize returned null")
@@ -313,11 +335,13 @@ class SherpaOnnxOcrHelper(
       val markdown = raw["markdown"] as? String
       val stopReason = raw["stopReason"] as? String
       val complete = raw["complete"] as? Boolean
-      val isVlm = family == "doc_vlm" || family == "nemotron_parse"
+      val isVlm =
+        family == "doc_vlm" || family == "nemotron_parse" || family == "paddleocr_vl"
       val rawText = markup ?: if (family == "doc_vlm") doctags else null
       if (markdown == null ||
           (isVlm && (rawText == null || stopReason.isNullOrBlank() || complete == null)) ||
-          (family == "doc_vlm" && doctags == null)
+          (family == "doc_vlm" && doctags == null) ||
+          (family == "paddleocr_vl" && markup == null)
       ) {
         Log.e(
           TAG,
@@ -438,6 +462,8 @@ class SherpaOnnxOcrHelper(
       "vision_encoder_data",
       "embed_tokens",
       "embed_tokens_data",
+      "embedding",
+      "embedding_data",
       "decoder",
       "decoder_data",
       "tokenizer",

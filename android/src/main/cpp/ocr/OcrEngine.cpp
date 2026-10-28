@@ -16,6 +16,7 @@
 #include <android/log.h>
 #define OCR_LOGI(...) __android_log_print(ANDROID_LOG_INFO, OCR_LOG_TAG, __VA_ARGS__)
 #define OCR_LOGW(...) __android_log_print(ANDROID_LOG_WARN, OCR_LOG_TAG, __VA_ARGS__)
+#define OCR_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, OCR_LOG_TAG, __VA_ARGS__)
 #else
 #include <cstdio>
 #define OCR_LOGI(...)             \
@@ -25,6 +26,7 @@
     std::fprintf(stderr, "\n");                \
   } while (0)
 #define OCR_LOGW(...) OCR_LOGI(__VA_ARGS__)
+#define OCR_LOGE(...) OCR_LOGI(__VA_ARGS__)
 #endif
 
 namespace sherpa_onnx {
@@ -66,7 +68,8 @@ bool HasCustomOcrPaths(const OcrLoadOptions& options) {
          !options.path_decoder.empty() || !options.path_decoder_data.empty() ||
          !options.path_tokenizer.empty() || !options.path_patch_embed.empty() ||
          !options.path_patch_embed_data.empty() ||
-         !options.path_pos_embed.empty();
+         !options.path_pos_embed.empty() || !options.path_embedding.empty() ||
+         !options.path_embedding_data.empty();
 }
 
 void CopyDetectPaths(OcrLoadOptions& options, const OcrDetectResult& detect) {
@@ -82,6 +85,8 @@ void CopyDetectPaths(OcrLoadOptions& options, const OcrDetectResult& detect) {
   options.path_decoder = detect.decoderPath;
   options.path_decoder_data = detect.decoderDataPath;
   options.path_tokenizer = detect.tokenizerPath;
+  options.path_embedding = detect.embeddingPath;
+  options.path_embedding_data = detect.embeddingDataPath;
   options.path_patch_embed = detect.patchEmbedPath;
   options.path_patch_embed_data = detect.patchEmbedDataPath;
   options.path_pos_embed = detect.posEmbedPath;
@@ -111,12 +116,25 @@ void OcrEngine::Load(const std::string& model_type, const std::string& model_dir
   }
 
   backend_ = CreateOcrBackend(resolved);
-  backend_->Load(model_dir, options_);
-  OCR_LOGI("loaded family=%s provider=%s threads=%d maxSide=%d maxNew=%d dir=%s",
-           backend_->Family(),
-           options_.provider.empty() ? "cpu" : options_.provider.c_str(),
-           options_.num_threads, options_.max_side_len, options_.max_new_tokens,
-           model_dir.c_str());
+  try {
+    backend_->Load(model_dir, options_);
+  } catch (const std::exception& e) {
+    OCR_LOGE("load failed family=%s provider=%s dir=%s: %s", backend_->Family(),
+             options_.provider.empty() ? "cpu" : options_.provider.c_str(),
+             model_dir.c_str(), e.what() ? e.what() : "unknown");
+    backend_.reset();
+    throw;
+  }
+  OCR_LOGI(
+      "loaded family=%s provider=%s threads=%d maxSide=%d maxNew=%d maxPixels=%d "
+      "paddleocr_vl_task=%s dir=%s",
+      backend_->Family(),
+      options_.provider.empty() ? "cpu" : options_.provider.c_str(),
+      options_.num_threads, options_.max_side_len, options_.max_new_tokens,
+      options_.max_pixels,
+      options_.paddleocr_vl_task.empty() ? "ocr"
+                                         : options_.paddleocr_vl_task.c_str(),
+      model_dir.c_str());
 }
 
 const char* OcrEngine::Family() const {
@@ -141,6 +159,19 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
     return out;
   }
   out.family = backend_->Family() ? backend_->Family() : "";
+
+  if (options.has_paddleocr_vl && out.family != "paddleocr_vl") {
+    out.errorCode = "OCR_INVALID_ARGUMENT";
+    out.errorMessage = "paddleocrVl is only valid for paddleocr_vl";
+    return out;
+  }
+  if (!options.paddleocr_vl_task.empty() &&
+      options.paddleocr_vl_task != "ocr" &&
+      options.paddleocr_vl_task != "spotting") {
+    out.errorCode = "OCR_INVALID_ARGUMENT";
+    out.errorMessage = "paddleocrVl.task must be 'ocr' or 'spotting'";
+    return out;
+  }
 
   image::ImageBufferInfo info;
   if (!image::ImageRegistry::Instance().GetInfo(image_buffer_id, info)) {
@@ -213,6 +244,9 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
     ctx.frame_index = frame_index;
     ctx.frame_count = total;
     ctx.progress_min_interval_ms = options.progress_min_interval_ms;
+    ctx.paddleocr_vl_task = options.paddleocr_vl_task.empty()
+                                ? options_.paddleocr_vl_task
+                                : options.paddleocr_vl_task;
 
     OcrResult frame_result;
     try {

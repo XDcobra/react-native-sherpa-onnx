@@ -209,6 +209,7 @@ set(SOURCES
     ocr/OcrEngine.cpp
     ocr/OcrRecognizeContext.cpp
     ocr/OcrOrtEnv.cpp
+    ocr/OcrOrtHelpers.cpp
     ocr/ppocr/PpocrBackend.cpp
     ocr/ppocr/PpocrCtcDecoder.cpp
     ocr/ppocr/PpocrDbPostprocess.cpp
@@ -232,6 +233,12 @@ set(SOURCES
     ocr/nemotron_parse/NemotronParseNavit.cpp
     ocr/nemotron_parse/NemotronParseNpy.cpp
     ocr/nemotron_parse/NemotronParseTokenizer.cpp
+    ocr/paddleocr_vl/PaddleocrVlBackend.cpp
+    ocr/paddleocr_vl/PaddleocrVlImageOps.cpp
+    ocr/paddleocr_vl/PaddleocrVlManifest.cpp
+    ocr/paddleocr_vl/PaddleocrVlMarkup.cpp
+    ocr/paddleocr_vl/PaddleocrVlRope.cpp
+    ocr/paddleocr_vl/PaddleocrVlTokenizer.cpp
     jni/ocr/sherpa-onnx-ocr-jni.cpp
     pdf/PdfDocument.cpp
     pdf/PdfTextLayerExtractor.cpp
@@ -473,6 +480,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doctr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doc_vlm
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/nemotron_parse
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/paddleocr_vl
     ${CMAKE_CURRENT_SOURCE_DIR}/pdf
     ${CMAKE_CURRENT_SOURCE_DIR}/document
     ${PROJECT_ROOT}/../third_party/pugixml/src
@@ -573,4 +581,25 @@ target_compile_options(sherpaonnx PRIVATE
 # https://github.com/XDcobra/react-native-sherpa-onnx/issues/76
 if(ANDROID)
     target_link_options(sherpaonnx PRIVATE "-Wl,-z,max-page-size=16384")
+    # NDK clang already static-links libunwind into a SHARED+exceptions DSO, but
+    # -lpdfium exports _Unwind_Resume so ld binds our EH relocs there instead
+    # (C++ throw → SIGBUS). Force the compiler's libunwind.a into this DSO and
+    # keep it non-exported. NDK 29 clang++ has no -static-libunwind.
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" "--target=${CMAKE_CXX_COMPILER_TARGET}"
+                "-print-file-name=libunwind.a"
+        OUTPUT_VARIABLE _SHERPA_UNWIND_A
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _SHERPA_UNWIND_RC
+    )
+    if(NOT _SHERPA_UNWIND_RC EQUAL 0 OR NOT EXISTS "${_SHERPA_UNWIND_A}")
+        message(FATAL_ERROR
+            "libunwind.a not found via ${CMAKE_CXX_COMPILER} -print-file-name "
+            "(rc=${_SHERPA_UNWIND_RC}, path='${_SHERPA_UNWIND_A}'). "
+            "Required so C++ exceptions do not bind to libpdfium.so.")
+    endif()
+    target_link_libraries(sherpaonnx PRIVATE
+        "-Wl,--whole-archive" "${_SHERPA_UNWIND_A}" "-Wl,--no-whole-archive"
+        "-Wl,--exclude-libs,libunwind.a")
+    message(STATUS "sherpaonnx: static libunwind (${_SHERPA_UNWIND_A})")
 endif()

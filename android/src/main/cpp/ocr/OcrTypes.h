@@ -90,10 +90,19 @@ struct OcrLoadOptions {
   float det_unclip_ratio = 1.5f;
   std::string provider;
   /**
-   * VLM generation cap (`doc_vlm` / `nemotron_parse`). 0 → 8192.
+   * VLM generation cap (`doc_vlm` / `nemotron_parse` / `paddleocr_vl`). 0 → 8192.
    * Ignored by ppocr/doctr.
    */
   int max_new_tokens = 0;
+  /**
+   * paddleocr_vl smart_resize area cap. 0 → 1003520. Ignored by other families.
+   */
+  int max_pixels = 0;
+  /**
+   * paddleocr_vl control-prompt task. Empty or `ocr` → `OCR:`. `spotting` →
+   * `Spotting:`. Ignored by other families.
+   */
+  std::string paddleocr_vl_task;
   std::string quantization;
 
   /**
@@ -109,6 +118,8 @@ struct OcrLoadOptions {
   std::string path_vision_encoder_data;
   std::string path_embed_tokens;
   std::string path_embed_tokens_data;
+  std::string path_embedding;
+  std::string path_embedding_data;
   std::string path_decoder;
   std::string path_decoder_data;
   std::string path_tokenizer;
@@ -124,7 +135,8 @@ enum class OcrGranularity : uint8_t {
 };
 
 inline bool IsOcrVlmFamily(const std::string& family) {
-  return family == "doc_vlm" || family == "nemotron_parse";
+  return family == "doc_vlm" || family == "nemotron_parse" ||
+         family == "paddleocr_vl";
 }
 
 }  // namespace ocr
