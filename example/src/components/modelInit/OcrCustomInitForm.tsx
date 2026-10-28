@@ -42,6 +42,7 @@ type OcrCustomInitFormProps = {
   fillLoading?: boolean;
   disabled?: boolean;
   fillHint?: string | null;
+  showScatteredTest?: boolean;
 };
 
 const MAX_NEW_TOKEN_PRESETS = [0, 512, 2048, 4096, 8192] as const;
@@ -121,6 +122,7 @@ export function OcrCustomInitForm({
   fillLoading = false,
   disabled = false,
   fillHint = null,
+  showScatteredTest = true,
 }: OcrCustomInitFormProps) {
   const [schema, setSchema] = useState<CustomModelPathRequirements>({
     fields: [],
@@ -242,18 +244,20 @@ export function OcrCustomInitForm({
             </Text>
           )}
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.helperButtonSecondary,
-            disabled && styles.helperButtonDisabled,
-          ]}
-          onPress={onPrepareScatteredTest}
-          disabled={disabled || fillLoading}
-        >
-          <Text style={styles.helperButtonSecondaryText}>
-            Scattered test (clear slots)
-          </Text>
-        </TouchableOpacity>
+        {showScatteredTest ? (
+          <TouchableOpacity
+            style={[
+              styles.helperButtonSecondary,
+              disabled && styles.helperButtonDisabled,
+            ]}
+            onPress={onPrepareScatteredTest}
+            disabled={disabled || fillLoading}
+          >
+            <Text style={styles.helperButtonSecondaryText}>
+              Scattered test (clear slots)
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {fillHint ? <Text style={styles.fillHint}>{fillHint}</Text> : null}

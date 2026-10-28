@@ -1,37 +1,16 @@
-import {
-  forwardRef,
-  memo,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
-  Modal,
-  Pressable,
   ScrollView,
   Switch,
   Text,
   TouchableOpacity,
   View,
-  type GestureResponderEvent,
-  type LayoutChangeEvent,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  assertOcrCustomConfig,
-  createOCR,
-  detectOcrModel,
-  type OcrConcreteModelType,
-  type OcrCustomConfig,
-  type OcrEngine,
-  type OcrInitializeOptions,
   type OcrProgress,
   type OcrRecognizeResult,
 } from 'react-native-sherpa-onnx/ocr';
@@ -55,55 +34,24 @@ import {
   type TextSpatialSpan,
 } from 'react-native-sherpa-onnx/textbuffer';
 import {
-  DocVlmInitOptionChips,
-  InitModeSelector,
-  ModelFolderGrid,
-  OcrCustomInitForm,
-  type ModelInitMode,
-  type OcrCustomInitFormState,
-} from '../../components/modelInit';
-import {
   OfflineImageBufferWidget,
   type OfflineImageBufferInfo,
   type OfflineImageBufferWidgetHandle,
   type PdfSourceSelection,
 } from '../../components/OfflineImageBufferWidget';
+import { OcrModelInitPanel } from '../../components/OcrModelInitPanel';
+import {
+  OcrRecognizeProgressBox,
+  type OcrProgressBoxHandle,
+} from '../../components/OcrRecognizeProgressBox';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
-import { useOcrModelCatalog } from '../../hooks/useOcrModelCatalog';
+import { useOcrModelInit } from '../../hooks/useOcrModelInit';
 import { IMAGE_FILES } from '../../imageConfig';
 import { PDF_FILES } from '../../pdfConfig';
-import { getModelDisplayName, toDetectSource } from '../../modelConfig';
-import { useDeviceProviders } from '../../providers/DeviceProvidersContext';
-import { isVlmOcrPack } from '../../utils/ocrModelCatalog';
-import {
-  emptyOcrCustomInitFormState,
-  fillOcrCustomConfigFromModelFolder,
-} from '../../utils/ocrCustomInitFill';
 import { OcrInputPathLegend } from './OcrInputPathLegend';
 import { styles } from './OCRScreen.styles';
 
 type PdfExtractStatus = 'idle' | 'ok' | 'noTextLayer' | 'error';
-
-const MIN_THREADS = 1;
-const MAX_THREADS = 8;
-const MIN_UNCLIP = 1.0;
-const MAX_UNCLIP = 2.5;
-const DEFAULT_UNCLIP = 1.5;
-
-function largeVlmPackWarning(id: string): string | null {
-  const lower = id.toLowerCase();
-  if (lower.includes('docvlm') || lower.includes('granite')) {
-    return 'docvlm-granite-258m is ~420 MiB compressed / ~1.2 GiB unpacked and needs significant RAM. Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?';
-  }
-  if (
-    lower.includes('nemotron-3.5-parse') ||
-    lower.includes('nemotron-parse') ||
-    lower.includes('nemotron_parse')
-  ) {
-    return 'nemotron-3.5-parse INT8 is ~753 MB unpacked (FP16 ~1.44 GB) and needs significant RAM. Continue?';
-  }
-  return null;
-}
 
 function utf16Slice(text: string, start: number, end: number): string {
   // TextBuffer offsets are UTF-16 code units; string.slice matches for BMP text.
@@ -121,169 +69,20 @@ function joinSpanTexts(text: string, list: TextSpatialSpan[]): string {
     .join('\n');
 }
 
-function clampUnclipRatio(value: number): number {
-  const clamped = Math.min(MAX_UNCLIP, Math.max(MIN_UNCLIP, value));
-  return Math.round(clamped * 20) / 20; // 0.05 steps
-}
-
-/** Per-family recognize phases. `total` on progress events is in-phase only. */
-const OCR_PHASES_BY_FAMILY: Record<OcrConcreteModelType, readonly string[]> = {
-  nemotron_parse: [
-    'preprocess',
-    'patch',
-    'vision',
-    'embed',
-    'prefill',
-    'decode',
-    'parse',
-  ],
-  doc_vlm: ['preprocess', 'vision', 'embed', 'prefill', 'decode', 'parse'],
-  ppocr: ['preprocess', 'detect', 'recognize'],
-  doctr: ['preprocess', 'detect', 'recognize'],
-};
-
-function asOcrFamily(
-  value: string | undefined | null
-): OcrConcreteModelType | null {
-  if (
-    value === 'ppocr' ||
-    value === 'doctr' ||
-    value === 'doc_vlm' ||
-    value === 'nemotron_parse'
-  ) {
-    return value;
-  }
-  return null;
-}
-
-/** One-shot Ort::Run phases (0/1). Can sit for many seconds with no bar motion. */
-const LONG_ONESHOT_PHASES = new Set(['vision', 'prefill', 'detect']);
-
-function phaseIndexOf(
-  family: OcrConcreteModelType | null,
-  phase: string
-): { index: number; count: number } | null {
-  if (!family) {
-    return null;
-  }
-  const phases = OCR_PHASES_BY_FAMILY[family];
-  const idx = phases.indexOf(phase);
-  if (idx < 0) {
-    return null;
-  }
-  return { index: idx + 1, count: phases.length };
-}
-
-type OcrProgressBoxHandle = {
-  apply(progress: OcrProgress): void;
-  reset(): void;
-};
-
-const OcrRecognizeProgressBox = memo(
-  forwardRef<OcrProgressBoxHandle, { family: OcrConcreteModelType | null }>(
-    function OcrRecognizeProgressBox({ family }, ref) {
-      const [phase, setPhase] = useState<string | null>(null);
-      const [label, setLabel] = useState<string | null>(null);
-      const [phaseIndex, setPhaseIndex] = useState<number | null>(null);
-      const [phaseCount, setPhaseCount] = useState<number | null>(null);
-      const [percent, setPercent] = useState<number | null>(null);
-
-      const reset = useCallback(() => {
-        setPhase(null);
-        setLabel(null);
-        setPhaseIndex(null);
-        setPhaseCount(null);
-        setPercent(null);
-      }, []);
-
-      const apply = useCallback(
-        (p: OcrProgress) => {
-          const nextPercent =
-            p.total > 0 ? Math.round((100 * p.done) / p.total) : null;
-          const frameBit =
-            p.frameCount > 1 ? `frame ${p.frameIndex + 1}/${p.frameCount}` : '';
-          const inPhaseBit = p.total > 0 ? `${p.done}/${p.total}` : '…';
-          const detail = [frameBit, inPhaseBit]
-            .filter((bit) => bit.length > 0)
-            .join(' · ');
-          const phaseMeta = phaseIndexOf(family, p.phase);
-          setPhase(p.phase);
-          setLabel(detail);
-          setPhaseIndex(phaseMeta?.index ?? null);
-          setPhaseCount(phaseMeta?.count ?? null);
-          setPercent(nextPercent);
-        },
-        [family]
-      );
-
-      useImperativeHandle(ref, () => ({ apply, reset }), [apply, reset]);
-
-      if (!phase) {
-        return null;
-      }
-      const showLongOneshotHint =
-        LONG_ONESHOT_PHASES.has(phase) && percent === 0;
-      return (
-        <View style={styles.progressBox}>
-          <View style={styles.progressHeader}>
-            <Text style={styles.progressPhase} numberOfLines={1}>
-              {phase}
-              {label ? ` · ${label}` : ''}
-            </Text>
-            {phaseIndex != null && phaseCount != null ? (
-              <Text style={styles.progressPhaseCount}>
-                {phaseIndex} / {phaseCount}
-              </Text>
-            ) : null}
-          </View>
-          {showLongOneshotHint ? (
-            <Text style={styles.progressWaitHint}>
-              This step can take a while (single model run, no in-step ticks).
-              The app is not frozen — please wait.
-            </Text>
-          ) : null}
-          {percent != null ? (
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${percent}%` }]} />
-            </View>
-          ) : null}
-        </View>
-      );
-    }
-  )
-);
-OcrRecognizeProgressBox.displayName = 'OcrRecognizeProgressBox';
-
 export default function OCRScreen() {
-  const {
-    entries: catalogEntries,
-    loading: loadingModels,
-    error: catalogError,
-    resolveModelPath,
-  } = useOcrModelCatalog();
-  const { selectableApiIds: providerOptions, status: providerStatus } =
-    useDeviceProviders();
-  const providersLoading =
-    providerStatus === 'loading' || providerStatus === 'idle';
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-  const [initializedFolder, setInitializedFolder] = useState<string | null>(
-    null
-  );
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] = useState<OcrCustomInitFormState>(
-    () => emptyOcrCustomInitFormState()
-  );
-  const [fillLoading, setFillLoading] = useState(false);
-  const [fillHint, setFillHint] = useState<string | null>(null);
-  const [numThreads, setNumThreads] = useState(2);
-  const [provider, setProvider] = useState('cpu');
-  const [detUnclipRatio, setDetUnclipRatio] = useState(DEFAULT_UNCLIP);
-  const [providerPickerOpen, setProviderPickerOpen] = useState(false);
-  const [initBusy, setInitBusy] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const ocr = useOcrModelInit({
+    onBeforeInit: () => {
+      abortRef.current?.abort();
+      abortRef.current = null;
+    },
+  });
+  const engineRef = ocr.engineRef;
+  const initBusy = ocr.initBusy;
+  const initializedFolder = ocr.initializedFolder;
+  const engineFamily = ocr.engineFamily;
   const [runBusy, setRunBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [initMessage, setInitMessage] = useState<string | null>(null);
-  const [detectSummary, setDetectSummary] = useState<string | null>(null);
   const [imageInfo, setImageInfo] = useState<OfflineImageBufferInfo | null>(
     null
   );
@@ -314,42 +113,11 @@ export default function OCRScreen() {
   const [resultTab, setResultTab] = useState<'spans' | 'markdown' | 'raw'>(
     'spans'
   );
-  const [engineFamily, setEngineFamily] = useState<OcrConcreteModelType | null>(
-    null
-  );
   const [lastMs, setLastMs] = useState<number | null>(null);
-  const engineRef = useRef<OcrEngine | null>(null);
   const imageWidgetRef = useRef<OfflineImageBufferWidgetHandle>(null);
-  const abortRef = useRef<AbortController | null>(null);
   const resultTextBufferIdRef = useRef<string | null>(null);
   const rasterBufferIdRef = useRef<string | null>(null);
   const progressBoxRef = useRef<OcrProgressBoxHandle>(null);
-
-  useEffect(() => {
-    if (selectedFolder && catalogEntries.some((e) => e.id === selectedFolder)) {
-      return;
-    }
-    const tiny = catalogEntries.find((e) =>
-      e.id.toLowerCase().includes('ppocrv6-tiny')
-    );
-    setSelectedFolder(tiny?.id ?? catalogEntries[0]?.id ?? null);
-  }, [catalogEntries, selectedFolder]);
-
-  useEffect(() => {
-    if (catalogError) {
-      setError(catalogError);
-    }
-  }, [catalogError]);
-
-  useEffect(() => {
-    if (providerOptions.length === 0) {
-      setProvider('cpu');
-      return;
-    }
-    setProvider((prev) =>
-      providerOptions.includes(prev) ? prev : providerOptions[0]!
-    );
-  }, [providerOptions]);
 
   useEffect(() => {
     isPdfiumEnabled()
@@ -360,9 +128,6 @@ export default function OCRScreen() {
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
-      const engine = engineRef.current;
-      engineRef.current = null;
-      engine?.destroy().catch(() => {});
       const resultTxt = resultTextBufferIdRef.current;
       resultTextBufferIdRef.current = null;
       if (resultTxt) {
@@ -375,230 +140,6 @@ export default function OCRScreen() {
       }
     };
   }, []);
-
-  const destroyEngine = useCallback(async () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    const engine = engineRef.current;
-    engineRef.current = null;
-    setInitializedFolder(null);
-    setInitMessage(null);
-    setDetectSummary(null);
-    setEngineFamily(null);
-    if (engine) {
-      await engine.destroy().catch(() => {});
-    }
-  }, []);
-
-  const runDetect = useCallback(
-    async (modelId: string) => {
-      const modelSource = await toDetectSource(resolveModelPath(modelId));
-      const det = await detectOcrModel(modelSource, { modelType: 'auto' });
-      setDetectSummary(
-        det.success
-          ? `detect: modelType=${det.modelType ?? '?'}`
-          : `detect failed: ${det.error ?? 'unknown'}`
-      );
-      return det;
-    },
-    [resolveModelPath]
-  );
-
-  const handleFillFromSelectedModel = useCallback(async () => {
-    if (!selectedFolder) {
-      Alert.alert('Select a model', 'Pick an OCR pack from the catalog first.');
-      return;
-    }
-    setFillLoading(true);
-    setFillHint(null);
-    setError(null);
-    try {
-      const fillResult = await fillOcrCustomConfigFromModelFolder(
-        await toDetectSource(resolveModelPath(selectedFolder))
-      );
-      setCustomInitForm((prev) => ({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-        maxNewTokens: prev.maxNewTokens,
-      }));
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setFillHint(
-        `Filled from ${getModelDisplayName(selectedFolder)}.${missing}`
-      );
-    } catch (err) {
-      setFillHint(null);
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setFillLoading(false);
-    }
-  }, [resolveModelPath, selectedFolder]);
-
-  const handleInit = useCallback(async () => {
-    const threads = Math.min(MAX_THREADS, Math.max(MIN_THREADS, numThreads));
-    const providerValue = provider.trim() || 'cpu';
-
-    const proceedAuto = async (folderId: string) => {
-      setInitBusy(true);
-      setError(null);
-      setInitMessage(null);
-      try {
-        await destroyEngine();
-        const modelSource = await toDetectSource(resolveModelPath(folderId));
-        const det = await runDetect(folderId);
-
-        const maxLabel =
-          customInitForm.maxNewTokens === 0
-            ? 'default'
-            : String(customInitForm.maxNewTokens);
-        const initOptions: OcrInitializeOptions = {
-          modelSource,
-          modelType: 'auto',
-          provider: providerValue,
-          numThreads: threads,
-          ppocr: { detUnclipRatio },
-          doctr: { detUnclipRatio },
-          maxNewTokens: customInitForm.maxNewTokens,
-        };
-        const ocr = await createOCR(initOptions);
-        engineRef.current = ocr;
-        setEngineFamily(asOcrFamily(det.success ? det.modelType : null));
-        setInitializedFolder(folderId);
-        setInitMessage(
-          `Ready · instance=${
-            ocr.instanceId
-          } · modelType=auto · ${getModelDisplayName(
-            folderId
-          )} · maxNewTokens=${maxLabel}`
-        );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setInitBusy(false);
-      }
-    };
-
-    const proceedCustom = async () => {
-      setInitBusy(true);
-      setError(null);
-      setInitMessage(null);
-      try {
-        await destroyEngine();
-        const customConfig = {
-          ...customInitForm.fileSources,
-        } as OcrCustomConfig;
-        assertOcrCustomConfig(
-          customConfig as unknown as Record<string, unknown>
-        );
-        const wantVlmOpts =
-          customInitForm.modelType === 'doc_vlm' ||
-          customInitForm.modelType === 'nemotron_parse';
-        const ocr = await createOCR({
-          initMode: 'custom',
-          modelType: customInitForm.modelType,
-          customConfig,
-          provider: providerValue,
-          numThreads: threads,
-          ...(customInitForm.modelType === 'ppocr'
-            ? { ppocr: { detUnclipRatio } }
-            : {}),
-          ...(customInitForm.modelType === 'doctr'
-            ? { doctr: { detUnclipRatio } }
-            : {}),
-          ...(wantVlmOpts ? { maxNewTokens: customInitForm.maxNewTokens } : {}),
-        });
-        engineRef.current = ocr;
-        setEngineFamily(asOcrFamily(customInitForm.modelType));
-        setInitializedFolder(
-          selectedFolder
-            ? `custom:${selectedFolder}`
-            : `custom:${customInitForm.modelType}`
-        );
-        const maxLabel =
-          customInitForm.maxNewTokens === 0
-            ? 'default'
-            : String(customInitForm.maxNewTokens);
-        setInitMessage(
-          `Ready · instance=${ocr.instanceId} · custom:${
-            customInitForm.modelType
-          }${wantVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''}`
-        );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setInitBusy(false);
-      }
-    };
-
-    if (initMode === 'custom') {
-      await proceedCustom();
-      return;
-    }
-
-    if (!selectedFolder) {
-      setError('Select an OCR pack (assets, PAD, or Download Manager → OCR).');
-      return;
-    }
-
-    const vlmWarning = largeVlmPackWarning(selectedFolder);
-    if (vlmWarning) {
-      Alert.alert('Large VLM pack', vlmWarning, [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Initialize',
-          onPress: () => {
-            proceedAuto(selectedFolder).catch(() => {});
-          },
-        },
-      ]);
-      return;
-    }
-
-    await proceedAuto(selectedFolder);
-  }, [
-    customInitForm.fileSources,
-    customInitForm.maxNewTokens,
-    customInitForm.modelType,
-    destroyEngine,
-    detUnclipRatio,
-    initMode,
-    numThreads,
-    provider,
-    resolveModelPath,
-    runDetect,
-    selectedFolder,
-  ]);
-
-  const unclipTrackWidthRef = useRef(0);
-
-  const applyUnclipFromLocationX = useCallback(
-    (locationX: number) => {
-      if (initBusy || runBusy) return;
-      const width = unclipTrackWidthRef.current;
-      if (width <= 0) return;
-      const x = Math.max(0, Math.min(width, locationX));
-      const t = x / width;
-      setDetUnclipRatio(
-        clampUnclipRatio(MIN_UNCLIP + t * (MAX_UNCLIP - MIN_UNCLIP))
-      );
-    },
-    [initBusy, runBusy]
-  );
-
-  const onUnclipTouch = useCallback(
-    (event: GestureResponderEvent) => {
-      applyUnclipFromLocationX(event.nativeEvent.locationX);
-    },
-    [applyUnclipFromLocationX]
-  );
-
-  const onUnclipSliderLayout = useCallback((event: LayoutChangeEvent) => {
-    unclipTrackWidthRef.current = event.nativeEvent.layout.width;
-  }, []);
-
-  const unclipSliderDisabled = initBusy || runBusy;
 
   const clearResults = useCallback(() => {
     setResultText('');
@@ -819,7 +360,7 @@ export default function OCRScreen() {
       setRunBusy(false);
       progressBoxRef.current?.reset();
     }
-  }, [clearResults, imageInfo, releaseResultTextBuffer]);
+  }, [clearResults, engineRef, imageInfo, releaseResultTextBuffer]);
 
   const handleCancel = useCallback(() => {
     abortRef.current?.abort();
@@ -869,245 +410,14 @@ export default function OCRScreen() {
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScreenIntroModal screenId="OCR" />
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>1. OCR model</Text>
-          <Text style={styles.sectionHint}>
-            Recommended start: ppocrv6-tiny (bundled assets or Download Manager
-            → OCR).
-          </Text>
-
-          <View style={styles.sectionBody}>
-            <InitModeSelector
-              value={initMode}
-              onChange={setInitMode}
-              disabled={initBusy || runBusy}
-            />
-
-            {initMode === 'auto' ? (
-              <>
-                <ModelFolderGrid
-                  entries={catalogEntries}
-                  selectedId={selectedFolder}
-                  initializedId={
-                    initializedFolder?.startsWith('custom:')
-                      ? null
-                      : initializedFolder
-                  }
-                  onSelect={(id) => {
-                    setSelectedFolder(id);
-                    clearResults();
-                  }}
-                  loading={loadingModels}
-                  disabled={initBusy || runBusy}
-                  emptyMessage="No OCR models found. Use bundled assets, PAD, or Download Manager → OCR."
-                />
-                {selectedFolder && isVlmOcrPack(selectedFolder) ? (
-                  <DocVlmInitOptionChips
-                    maxNewTokens={customInitForm.maxNewTokens}
-                    onChangeMaxNewTokens={(maxNewTokens) =>
-                      setCustomInitForm((prev) => ({ ...prev, maxNewTokens }))
-                    }
-                    disabled={initBusy || runBusy}
-                  />
-                ) : null}
-              </>
-            ) : (
-              <OcrCustomInitForm
-                value={customInitForm}
-                onChange={setCustomInitForm}
-                selectedCatalogModelId={selectedFolder}
-                onFillFromSelectedModel={() => {
-                  handleFillFromSelectedModel().catch(() => {});
-                }}
-                onPrepareScatteredTest={() => {
-                  setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
-                  setFillHint(
-                    'Scattered test: pick required slots manually, then Initialize.'
-                  );
-                }}
-                fillLoading={fillLoading}
-                disabled={initBusy || runBusy}
-                fillHint={
-                  fillHint ??
-                  (selectedFolder
-                    ? `Fill can use last catalog selection: ${getModelDisplayName(
-                        selectedFolder
-                      )}`
-                    : 'Pick files per slot, or switch to Auto, select a pack, then return here and Fill.')
-                }
-              />
-            )}
-
-            <Text style={styles.fieldLabel}>numThreads</Text>
-            <View style={styles.fieldControlRow}>
-              <TouchableOpacity
-                style={[
-                  styles.paramStepButton,
-                  (initBusy || runBusy || numThreads <= MIN_THREADS) &&
-                    styles.paramStepButtonDisabled,
-                ]}
-                onPress={() =>
-                  setNumThreads((v) => Math.max(MIN_THREADS, v - 1))
-                }
-                disabled={initBusy || runBusy || numThreads <= MIN_THREADS}
-              >
-                <Text style={styles.paramStepButtonText}>-</Text>
-              </TouchableOpacity>
-              <View style={styles.paramValueBadge}>
-                <Text style={styles.paramValueText}>{numThreads}</Text>
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.paramStepButton,
-                  (initBusy || runBusy || numThreads >= MAX_THREADS) &&
-                    styles.paramStepButtonDisabled,
-                ]}
-                onPress={() =>
-                  setNumThreads((v) => Math.min(MAX_THREADS, v + 1))
-                }
-                disabled={initBusy || runBusy || numThreads >= MAX_THREADS}
-              >
-                <Text style={styles.paramStepButtonText}>+</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.fieldLabel}>provider</Text>
-            <TouchableOpacity
-              style={[
-                styles.providerSelect,
-                (initBusy || runBusy || providersLoading) &&
-                  styles.providerSelectDisabled,
-              ]}
-              onPress={() => setProviderPickerOpen(true)}
-              disabled={initBusy || runBusy || providersLoading}
-            >
-              <Text style={styles.providerSelectValue}>
-                {providersLoading ? 'Detecting…' : provider}
-              </Text>
-              <Text style={styles.providerSelectHint}>
-                {providersLoading
-                  ? 'probing device'
-                  : `${providerOptions.length} available ▾`}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={styles.sliderHeader}>
-              <Text style={styles.fieldLabel}>detUnclipRatio</Text>
-              <Text style={styles.sliderValue}>
-                {detUnclipRatio.toFixed(2)}
-              </Text>
-            </View>
-            <Text style={styles.sectionHint}>
-              Expands DB detection boxes for ppocr/doctr (1.0 tight … 2.5
-              loose). Default 1.5 — not glyph-perfect bounds. Re-init to apply.
-            </Text>
-            <View
-              style={[
-                styles.sliderTrack,
-                unclipSliderDisabled && styles.sliderTrackDisabled,
-              ]}
-              onLayout={onUnclipSliderLayout}
-              onStartShouldSetResponder={() => !unclipSliderDisabled}
-              onMoveShouldSetResponder={() => !unclipSliderDisabled}
-              onResponderTerminationRequest={() => false}
-              onResponderGrant={onUnclipTouch}
-              onResponderMove={onUnclipTouch}
-            >
-              <View style={styles.sliderRail} pointerEvents="none">
-                <View
-                  style={[
-                    styles.sliderFill,
-                    {
-                      width: `${
-                        ((detUnclipRatio - MIN_UNCLIP) /
-                          (MAX_UNCLIP - MIN_UNCLIP)) *
-                        100
-                      }%`,
-                    },
-                  ]}
-                />
-              </View>
-              <View
-                pointerEvents="none"
-                style={[
-                  styles.sliderThumb,
-                  {
-                    left: `${
-                      ((detUnclipRatio - MIN_UNCLIP) /
-                        (MAX_UNCLIP - MIN_UNCLIP)) *
-                      100
-                    }%`,
-                  },
-                ]}
-              />
-            </View>
-            <View style={styles.sliderLegend}>
-              <Text style={styles.sliderLegendText}>
-                {MIN_UNCLIP.toFixed(1)}
-              </Text>
-              <Text style={styles.sliderLegendText}>
-                {MAX_UNCLIP.toFixed(1)}
-              </Text>
-            </View>
-
-            <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={[
-                  styles.primaryButton,
-                  styles.actionButtonFlex,
-                  (initBusy ||
-                    runBusy ||
-                    (initMode === 'auto' && !selectedFolder)) &&
-                    styles.primaryButtonDisabled,
-                ]}
-                onPress={() => {
-                  handleInit().catch(() => {});
-                }}
-                disabled={
-                  initBusy ||
-                  runBusy ||
-                  (initMode === 'auto' && !selectedFolder)
-                }
-              >
-                {initBusy ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>
-                    {initializedFolder ? 'Re-initialize' : 'Initialize'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-              {initializedFolder ? (
-                <TouchableOpacity
-                  style={[styles.secondaryButton, styles.actionButtonFlex]}
-                  onPress={() => {
-                    destroyEngine().catch(() => {});
-                  }}
-                  disabled={initBusy || runBusy}
-                >
-                  <Text style={styles.secondaryButtonText}>Destroy</Text>
-                </TouchableOpacity>
-              ) : null}
-            </View>
-
-            {initMessage || detectSummary ? (
-              <View style={styles.statusCard}>
-                {initMessage ? (
-                  <View style={styles.statusBlock}>
-                    <Text style={styles.statusLabel}>Engine</Text>
-                    <Text style={styles.mono}>{initMessage}</Text>
-                  </View>
-                ) : null}
-                {detectSummary ? (
-                  <View style={styles.statusBlock}>
-                    <Text style={styles.statusLabel}>Detect</Text>
-                    <Text style={styles.mono}>{detectSummary}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-          </View>
-        </View>
+        <OcrModelInitPanel
+          ocr={ocr}
+          title="1. OCR model"
+          disabled={runBusy}
+          onSelectFolder={() => {
+            clearResults();
+          }}
+        />
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>2. Input (image or PDF)</Text>
@@ -1523,53 +833,6 @@ export default function OCRScreen() {
           </View>
         ) : null}
       </ScrollView>
-
-      <Modal
-        visible={providerPickerOpen}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setProviderPickerOpen(false)}
-      >
-        <Pressable
-          style={styles.modalOverlay}
-          onPress={() => setProviderPickerOpen(false)}
-        >
-          <Pressable
-            style={styles.modalSheet}
-            onPress={(e) => e.stopPropagation()}
-          >
-            <Text style={styles.modalTitle}>Execution provider</Text>
-            <Text style={styles.sectionHint}>
-              Only providers compiled into this ORT build that also pass a
-              device canInit probe.
-            </Text>
-            <ScrollView>
-              {providerOptions.map((option) => {
-                const active = option === provider;
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    style={[styles.modalItem, active && styles.modalItemActive]}
-                    onPress={() => {
-                      setProvider(option);
-                      setProviderPickerOpen(false);
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.modalItemText,
-                        active && styles.modalItemTextActive,
-                      ]}
-                    >
-                      {option}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
     </SafeAreaView>
   );
 }
