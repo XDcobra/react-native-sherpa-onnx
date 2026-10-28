@@ -1,14 +1,14 @@
 # Package lexbor XCFramework for iOS and publish as GitHub Release.
 # Release tag is read from third_party/lexbor_prebuilt/IOS_RELEASE_TAG.
 #
-# First-release workaround: on.push only so gh workflow run --ref works from a
-# feature branch. After the first artifacts exist, switch to workflow_dispatch
-# like framework-libarchive-ios-framework.yml.
+# When to run manually (Actions --> Framework - lexbor (iOS) Release --> Run workflow):
+# 1. After updating third_party/lexbor_prebuilt/IOS_RELEASE_TAG or lexbor submodule.
+# 2. When you want to publish a new lexbor iOS release (XCFramework zip).
 #
 name: Framework - lexbor (iOS) Release
 
 on:
-  push:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

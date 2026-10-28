@@ -2,14 +2,14 @@
 # Release tag is read from third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG.
 # AAR is published to GitHub Pages Maven as com.xdcobra.sherpa:lexbor when MAVEN_REPO_PAT is set.
 #
-# First-release workaround: on.push only so gh workflow run --ref works from a
-# feature branch. After the first artifacts exist, switch to workflow_dispatch
-# like build-libarchive-android-release.yml.
+# When to run manually (Actions --> Prebuilt - lexbor (Android) Release --> Run workflow):
+# 1. After updating third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG or lexbor submodule.
+# 2. When you want to publish a new lexbor Android release (zip + AAR, optional Maven).
 #
 name: Prebuilt - lexbor (Android) Release
 
 on:
-  push:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
