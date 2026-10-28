@@ -1084,6 +1084,8 @@ export interface Spec extends TurboModule {
     storageKind: string;
     pageNumber?: number;
     dpi?: number;
+    sectionIndex?: number;
+    href?: string;
   }>;
 
   /**
@@ -1101,6 +1103,8 @@ export interface Spec extends TurboModule {
     storageKind: string;
     pageNumber?: number;
     dpi?: number;
+    sectionIndex?: number;
+    href?: string;
   }>;
 
   releaseOfflineImageBuffer(bufferId: string): Promise<void>;
@@ -1192,6 +1196,41 @@ export interface Spec extends TurboModule {
     pageCount: number;
   }>;
 
+  // ==================== Offline e-documents (EPUB/FB2/CBZ/CBR; libarchive) ====================
+
+  /**
+   * Extract markup into an empty OfflineTextBuffer (`origin: 'markup'`).
+   * Progress events: `SherpaOnnxDocProgress` `{ done, total, phase }`.
+   */
+  extractDocumentText(
+    source: Object,
+    textOutBufferId: string,
+    options?: Object | null
+  ): Promise<{
+    format: string;
+    sectionCount: number;
+    sections: Array<{ sectionIndex: number; href?: string; kind: string }>;
+    imageOnlySections: Array<{
+      sectionIndex: number;
+      href?: string;
+      kind: string;
+    }>;
+    spatialSpanCount: number;
+  }>;
+
+  /**
+   * Extract image-only sections / CBZ / CBR into a new OfflineImageBuffer.
+   * Progress events: `SherpaOnnxDocProgress` `{ done, total, phase }`.
+   */
+  extractDocumentImages(
+    source: Object,
+    options?: Object | null
+  ): Promise<{
+    bufferId: string;
+    format: string;
+    frameCount: number;
+  }>;
+
   /**
    * Get a slice of hypothesis text from an offline text buffer.
    */
@@ -1250,6 +1289,8 @@ export interface Spec extends TurboModule {
       ptsMs?: number;
       pageWidth?: number;
       pageHeight?: number;
+      sectionIndex?: number;
+      href?: string;
     }>
   >;
 

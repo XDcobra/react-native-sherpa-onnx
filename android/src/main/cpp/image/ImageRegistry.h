@@ -140,6 +140,8 @@ class ImageRegistry {
     MmapFrame mmap;
     int pageNumber = 0;
     int dpi = 0;
+    int sectionIndex = -1;
+    std::string href;
     uint64_t lruTick = 0;
   };
 

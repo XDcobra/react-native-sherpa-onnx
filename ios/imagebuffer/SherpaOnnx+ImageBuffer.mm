@@ -87,6 +87,12 @@ NSDictionary *FrameInfoDict(const sherpa_onnx::image::ImageFrameInfo &info) {
   if (info.dpi > 0) {
     dict[@"dpi"] = @(info.dpi);
   }
+  if (info.sectionIndex >= 0) {
+    dict[@"sectionIndex"] = @(info.sectionIndex);
+  }
+  if (!info.href.empty()) {
+    dict[@"href"] = [NSString stringWithUTF8String:info.href.c_str()] ?: @"";
+  }
   return dict;
 }
 

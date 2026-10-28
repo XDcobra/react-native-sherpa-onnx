@@ -23,6 +23,8 @@ data class TextSpatialSpan(
   /** PDF user-space page size when origin is textLayer. */
   val pageWidth: Float? = null,
   val pageHeight: Float? = null,
+  val sectionIndex: Int? = null,
+  val href: String? = null,
 ) {
   fun toWritableMap(): WritableMap {
     val map = Arguments.createMap()
@@ -52,6 +54,12 @@ data class TextSpatialSpan(
     if (pageHeight != null) {
       map.putDouble("pageHeight", pageHeight.toDouble())
     }
+    if (sectionIndex != null) {
+      map.putInt("sectionIndex", sectionIndex)
+    }
+    if (!href.isNullOrEmpty()) {
+      map.putString("href", href)
+    }
     return map
   }
 
@@ -69,7 +77,9 @@ data class TextSpatialSpan(
       pageNumber == other.pageNumber &&
       ptsMs == other.ptsMs &&
       pageWidth == other.pageWidth &&
-      pageHeight == other.pageHeight
+      pageHeight == other.pageHeight &&
+      sectionIndex == other.sectionIndex &&
+      href == other.href
   }
 
   override fun hashCode(): Int {
@@ -85,6 +95,8 @@ data class TextSpatialSpan(
     result = 31 * result + (ptsMs?.hashCode() ?: 0)
     result = 31 * result + (pageWidth?.hashCode() ?: 0)
     result = 31 * result + (pageHeight?.hashCode() ?: 0)
+    result = 31 * result + (sectionIndex ?: 0)
+    result = 31 * result + (href?.hashCode() ?: 0)
     return result
   }
 }

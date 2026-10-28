@@ -960,6 +960,8 @@ function mapNativeSpatialSpan(raw: {
   ptsMs?: number;
   pageWidth?: number;
   pageHeight?: number;
+  sectionIndex?: number;
+  href?: string;
 }): TextSpatialSpan {
   const level: TextSpatialSpanLevel = SPATIAL_SPAN_LEVELS.has(
     raw.level as TextSpatialSpanLevel
@@ -1008,6 +1010,13 @@ function mapNativeSpatialSpan(raw: {
   }
   if (raw.pageHeight != null && Number.isFinite(raw.pageHeight)) {
     span.pageHeight = raw.pageHeight;
+  }
+  if (raw.sectionIndex != null && Number.isFinite(raw.sectionIndex)) {
+    span.sectionIndex = Math.trunc(raw.sectionIndex);
+  }
+  const href = typeof raw.href === 'string' ? raw.href : '';
+  if (href.length > 0) {
+    span.href = href;
   }
   return span;
 }

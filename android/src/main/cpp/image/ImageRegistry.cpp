@@ -201,6 +201,8 @@ void ImageRegistry::FillFrameInfoLocked(const Frame& f, int frameIndex,
   out.storageKind = f.kind;
   out.pageNumber = f.pageNumber;
   out.dpi = f.dpi;
+  out.sectionIndex = f.sectionIndex;
+  out.href = f.href;
 }
 
 bool ImageRegistry::WriteFrameToMmap(Frame& frame, const std::string& bufferId,
@@ -333,6 +335,8 @@ bool ImageRegistry::AppendRgbFrame(const std::string& bufferId, RgbFrame frame,
   f.ram = std::move(frame.rgb);
   f.pageNumber = frame.pageNumber;
   f.dpi = frame.dpi;
+  f.sectionIndex = frame.sectionIndex;
+  f.href = frame.href;
   it->second.pathType = pathType;
   it->second.frames.push_back(std::move(f));
   UpgradeEntryLocked(it->second);
@@ -365,6 +369,8 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromRgbFrames(
     f.ram = std::move(rf.rgb);
     f.pageNumber = rf.pageNumber;
     f.dpi = rf.dpi;
+    f.sectionIndex = rf.sectionIndex;
+    f.href = rf.href;
     e.frames.push_back(std::move(f));
   }
   return FinishCreateLocked(std::move(e));

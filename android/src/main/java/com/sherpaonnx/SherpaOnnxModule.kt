@@ -277,6 +277,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   )
   private val pdfHelper = com.sherpaonnx.pdf.facade.SherpaOnnxPdfHelper(reactApplicationContext)
+  private val documentHelper =
+    com.sherpaonnx.document.facade.SherpaOnnxDocumentHelper(reactApplicationContext)
   private val onlinePunctuationHelper = SherpaOnnxOnlinePunctuationHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType, quantization ->
@@ -490,6 +492,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     onlinePunctuationHelper.shutdown()
     ocrHelper.shutdown()
     pdfHelper.shutdown()
+    documentHelper.shutdown()
     vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
@@ -3633,6 +3636,23 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     pdfHelper.rasterizePdfPages(source, options, promise)
   }
 
+  override fun extractDocumentText(
+    source: ReadableMap,
+    textOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    documentHelper.extractDocumentText(source, textOutBufferId, options, promise)
+  }
+
+  override fun extractDocumentImages(
+    source: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    documentHelper.extractDocumentImages(source, options, promise)
+  }
+
   override fun createEmptyOfflineImageBuffer(promise: Promise) {
     try {
       com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
@@ -3759,6 +3779,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       (info["dpi"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
         m.putInt("dpi", it)
       }
+      (info["sectionIndex"] as? Number)?.toInt()?.takeIf { it >= 0 }?.let {
+        m.putInt("sectionIndex", it)
+      }
+      (info["href"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+        m.putString("href", it)
+      }
       promise.resolve(m)
     } catch (e: Exception) {
       promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
@@ -3795,6 +3821,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         }
         (info["dpi"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
           m.putInt("dpi", it)
+        }
+        (info["sectionIndex"] as? Number)?.toInt()?.takeIf { it >= 0 }?.let {
+          m.putInt("sectionIndex", it)
+        }
+        (info["href"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+          m.putString("href", it)
         }
         promise.resolve(m)
       } catch (e: Exception) {

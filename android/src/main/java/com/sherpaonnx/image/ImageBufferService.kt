@@ -98,6 +98,12 @@ internal object ImageBufferService {
     (result["dpi"] as? Number)?.toInt()?.takeIf { it > 0 }?.let {
       out["dpi"] = it
     }
+    (result["sectionIndex"] as? Number)?.toInt()?.takeIf { it >= 0 }?.let {
+      out["sectionIndex"] = it
+    }
+    (result["href"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+      out["href"] = it
+    }
     return out
   }
 
