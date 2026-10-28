@@ -22,6 +22,7 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 - [Punctuation offline patterns](#punctuation-offline-patterns)
 - [Punctuation streaming patterns](#punctuation-streaming-patterns)
 - [OCR offline patterns](#ocr-offline-patterns)
+- [E-document offline patterns](#e-document-offline-patterns)
 - [VAD streaming patterns](#vad-streaming-patterns)
 - [Speaker identification offline patterns](#speaker-identification-offline-patterns)
 - [Speaker identification live patterns](#speaker-identification-live-patterns)
@@ -34,8 +35,8 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 | --- | --- | --- | --- |
 | `OfflineAudioBuffer` (`off_*`) | `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, offline feature outputs | `createSTT().transcribe`, `createEnhancement().enhance`, `createSeparation().separate`, `createAlignment().alignTextToAudio`, `saveAudioAsFile` | Batch input/output; deterministic completion |
 | `LiveAudioBuffer` (`live_*`) | `createEmptyLiveAudioBuffer`, mic capture, file ingest, streaming feature outputs | `createStreamingSTT().transcribe`, `createStreamingEnhancement().enhance`, `createSeparation().separate` (live overload), VAD `process`, `labelLiveSegments`, PCM player | Continuous stream; supports running pipelines |
-| `OfflineTextBuffer` (`txt_off_*`) | `createOfflineTextBufferFromText`, offline STT output, offline punctuation output, offline OCR output | `createTTS().synthesize`, `createAlignment().alignTextToAudio`, offline punctuation input | Batch text handoff; OCR also writes spatial spans |
-| `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles` | `createOCR().recognize` | Decoded frames for offline OCR |
+| `OfflineTextBuffer` (`txt_off_*`) | `createOfflineTextBufferFromText`, offline STT output, offline punctuation output, offline OCR output, `extractDocumentText`, `extractPdfTextLayer` | `createTTS().synthesize`, `createAlignment().alignTextToAudio`, offline punctuation input | Batch text handoff; OCR / PDF / markup also write spatial spans |
+| `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles`, `rasterizePdfPages`, `extractDocumentImages` | `createOCR().recognize` | Decoded frames for offline OCR |
 | `LiveTextBuffer` (`txt_live_*`) | app commits, streaming STT output, streaming punctuation output | `createTTS().synthesize` (live overload), streaming punctuation input | Partial + committed segments |
 | `OfflineSegmentBuffer` (`seg_off_*`) | offline alignment output, offline VAD/segmentation outputs, SID `labelOfflineSegments` | subtitle/timestamp export, anchor input for advanced alignment modes | Segment metadata for post-processing |
 | `LiveSegmentBuffer` (`seg_live_*`) | streaming VAD output, live segmentation attachments, SID `labelLiveSegments` | gating, timeline UI, downstream orchestration | Event-driven segment stream |
@@ -250,6 +251,33 @@ Related docs:
 - [ocr-offline.md](ocr-offline.md)
 - [imagebuffer-offline.md](imagebuffer-offline.md)
 - [textbuffer-offline.md](textbuffer-offline.md)
+- [document-offline.md](document-offline.md)
+
+## E-document offline patterns
+
+```mermaid
+flowchart LR
+  A[FileSource EPUB/FB2/MOBI/CBZ] --> B[extractDocumentText]
+  B --> C[OfflineTextBuffer markup]
+  A --> D[extractDocumentImages]
+  D --> E[OfflineImageBuffer]
+  E --> F["createOCR().recognize"]
+  F --> G[OfflineTextBuffer ocr]
+  C --> H[App TTS concat]
+  G --> H
+```
+
+`extractDocumentText` never runs OCR. Image-only spine items, MOBI `recindex` parts, and CBZ/CBR pages go through `extractDocumentImages`, then the existing `createOCR().recognize` path. Mixed books: the app concatenates markup and OCR slices by `sectionIndex`.
+
+When to use:
+- EPUB/FB2/MOBI flowing text for TTS without a reader widget.
+- Comics (CBZ/CBR) as ImageBuffer frames, then optional OCR.
+- Scan chapters in an otherwise textual EPUB or MOBI (`imageOnlySections`).
+
+Related docs:
+- [document-offline.md](document-offline.md)
+- [ocr-offline.md](ocr-offline.md)
+- [pdf-offline.md](pdf-offline.md)
 
 ## VAD streaming patterns
 

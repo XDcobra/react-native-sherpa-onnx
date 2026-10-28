@@ -38,6 +38,7 @@ type TtsCustomInitFormProps = {
   fillLoading?: boolean;
   disabled?: boolean;
   fillHint?: string | null;
+  showScatteredTest?: boolean;
 };
 
 export function TtsCustomInitForm({
@@ -49,6 +50,7 @@ export function TtsCustomInitForm({
   fillLoading = false,
   disabled = false,
   fillHint = null,
+  showScatteredTest = true,
 }: TtsCustomInitFormProps) {
   const [schema, setSchema] = useState<CustomModelPathRequirements>({
     fields: [],
@@ -148,18 +150,20 @@ export function TtsCustomInitForm({
             </Text>
           )}
         </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.helperButtonSecondary,
-            disabled && styles.helperButtonDisabled,
-          ]}
-          onPress={onPrepareScatteredTest}
-          disabled={disabled || fillLoading}
-        >
-          <Text style={styles.helperButtonSecondaryText}>
-            Scattered test (clear slots)
-          </Text>
-        </TouchableOpacity>
+        {showScatteredTest ? (
+          <TouchableOpacity
+            style={[
+              styles.helperButtonSecondary,
+              disabled && styles.helperButtonDisabled,
+            ]}
+            onPress={onPrepareScatteredTest}
+            disabled={disabled || fillLoading}
+          >
+            <Text style={styles.helperButtonSecondaryText}>
+              Scattered test (clear slots)
+            </Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
 
       {fillHint ? <Text style={styles.fillHint}>{fillHint}</Text> : null}

@@ -66,6 +66,7 @@ CMakeFiles/
 cmake_install.cmake
 android/test_build/
 build-test/
+test/cpp/build*/
 
 # Local venv for one-off ONNX scripts (e.g. tiny model generation)
 .venv-ort-test/
@@ -143,9 +144,11 @@ example/ios/sherpa_models/*
 !example/ios/sherpa_models/test_codec/
 !example/ios/sherpa_models/test_wavs/
 !example/ios/sherpa_models/test_pdfs/
+!example/ios/sherpa_models/test_edocs/
 !example/ios/sherpa_models/test_codec/**
 !example/ios/sherpa_models/test_wavs/**
 !example/ios/sherpa_models/test_pdfs/**
+!example/ios/sherpa_models/test_edocs/**
 example/.model-cache/
 example/models/
 
@@ -156,6 +159,8 @@ android/src/main/jniLibs/*
 android/src/main/cpp/include/ffmpeg/
 # libarchive headers (from Maven AAR or release zip; Gradle extracts to here)
 android/src/main/cpp/include/libarchive/
+# lexbor headers (from Maven AAR or release zip; Gradle extracts to here)
+android/src/main/cpp/include/lexbor/
 # libwebp headers (from Maven AAR or release zip; Gradle extracts to here)
 android/src/main/cpp/include/webp/
 # pdfium headers (from Maven AAR or release zip; Gradle extracts to here)
@@ -262,6 +267,26 @@ third_party/libarchive_prebuilt/publish-maven/publish.env
 third_party/libarchive_prebuilt/android/
 third_party/libarchive_prebuilt/build-*/
 
+# lexbor prebuilt: build output (when building prebuilts locally)
+third_party/lexbor_prebuilt/*
+!third_party/lexbor_prebuilt/README.md
+!third_party/lexbor_prebuilt/build_lexbor_android.sh
+!third_party/lexbor_prebuilt/build_lexbor_ios.sh
+!third_party/lexbor_prebuilt/create_lexbor_aar.sh
+!third_party/lexbor_prebuilt/IOS_RELEASE_TAG
+!third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG
+!third_party/lexbor_prebuilt/publish-maven/
+third_party/lexbor_prebuilt/publish-maven/*
+!third_party/lexbor_prebuilt/publish-maven/publish.env.example
+!third_party/lexbor_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/lexbor_prebuilt/publish-maven/README.md
+third_party/lexbor_prebuilt/publish-maven/publish.env
+third_party/lexbor_prebuilt/android/
+third_party/lexbor_prebuilt/ios/
+third_party/lexbor_prebuilt/build-*/
+third_party/lexbor_prebuilt/build_ios/
+third_party/lexbor_prebuilt/lexbor.xcframework/
+
 # libwebp prebuilt: build output (when building prebuilts locally)
 third_party/libwebp_prebuilt/*
 !third_party/libwebp_prebuilt/README.md
@@ -310,6 +335,7 @@ third_party/opus_prebuilt/build-*/
 ios/Frameworks/sherpa_onnx.xcframework/
 ios/Frameworks/FFmpeg.xcframework/
 ios/Frameworks/libarchive.xcframework/
+ios/Frameworks/lexbor.xcframework/
 ios/Frameworks/libwebp.xcframework/
 ios/Frameworks/*.zip
 ios/Frameworks/*.xcarchive

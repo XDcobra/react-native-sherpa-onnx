@@ -64,7 +64,7 @@ Add a short runtime note next to the `doc_vlm` pack row. Do not turn it into a b
 
 `decoder_model_merged.onnx` (opset 21, domain `com.microsoft`) uses the contrib op `GroupQueryAttention`. The host ONNX Runtime zip this repo uses (1.28.x under `third_party/onnxruntime_prebuilt`) includes it. A mobile ONNX Runtime built without Microsoft contrib ops fails when the decoder `Ort::Session` is created, inside `createOCR`, not on the first generated token. The existing load path surfaces that as `OCR_INTERNAL_ERROR`. There is no `supportsDocVlm` probe and no new error code.
 
-`provider: 'coreml' | 'nnapi' | 'qnn'` does not move this family onto the GPU. `DocVlmBackend` logs a warning and stays on CPU. Do not document a successful GPU path. Do not tell readers to rebuild ONNX Runtime.
+Do not tell readers to rebuild ONNX Runtime. `provider` is the shared createOCR field and is passed to `ApplyOrtProvider` for every family, including `doc_vlm`.
 
 #### Line-level edits
 
@@ -356,7 +356,7 @@ Searched and clean:
 - [ ] `recognize` is documented as `Promise<OcrRecognizeResult>` with `family`, `spanCount`, `doctags`, `markdown`. The guide says ppocr and doctr resolve the two strings to `""`, and that those strings are not written to the text buffer.
 - [ ] `docVlm.maxNewTokens` is documented as init-only (omit or `0` → 8192; bad values → `OCR_INVALID_ARGUMENT`).
 - [ ] The pack row states ~420 MiB archive, ~1.18 GiB unpacked, ~4 GiB RSS, `en` plus experimental `ja`/`ar`/`zh`, and that `ppocrv6-tiny` remains the phone default.
-- [ ] A reader can see that `decoder_model_merged.onnx` needs `com.microsoft.GroupQueryAttention`, that a mobile build without that contrib op fails at `createOCR`, and that CPU is the path that actually runs.
+- [ ] A reader can see that `decoder_model_merged.onnx` needs `com.microsoft.GroupQueryAttention`, and that a mobile build without that contrib op fails at `createOCR`.
 - [ ] `docs/model-languages.md` documents `DOC_VLM_ISO6391_HINTS` and does not document `getDocVlmLanguages()`.
 - [ ] `docs/feature-pipelines.md` names all three families and the promise extras.
 - [ ] `docs/README.md` OCR row names all three families.

@@ -66,6 +66,9 @@ struct TxtSpatialSpan {
 	float pageWidth = 0.f;
 	bool hasPageHeight = false;
 	float pageHeight = 0.f;
+	bool hasSectionIndex = false;
+	int sectionIndex = 0;
+	std::string href;
 };
 
 // Shared live text buffer types used by the text pipeline workers.

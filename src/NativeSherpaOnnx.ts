@@ -1084,6 +1084,8 @@ export interface Spec extends TurboModule {
     storageKind: string;
     pageNumber?: number;
     dpi?: number;
+    sectionIndex?: number;
+    href?: string;
   }>;
 
   /**
@@ -1101,6 +1103,8 @@ export interface Spec extends TurboModule {
     storageKind: string;
     pageNumber?: number;
     dpi?: number;
+    sectionIndex?: number;
+    href?: string;
   }>;
 
   releaseOfflineImageBuffer(bufferId: string): Promise<void>;
@@ -1163,6 +1167,7 @@ export interface Spec extends TurboModule {
   /**
    * Extract digital PDF text layer into an empty OfflineTextBuffer.
    * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   * `options.password` is the user/owner password for standard PDF encryption.
    */
   extractPdfTextLayer(
     source: Object,
@@ -1178,6 +1183,7 @@ export interface Spec extends TurboModule {
   /**
    * Rasterize PDF pages into a new OfflineImageBuffer (RGB8 frames with pageNumber).
    * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   * `options.password` is the user/owner password for standard PDF encryption.
    */
   rasterizePdfPages(
     source: Object,
@@ -1190,6 +1196,41 @@ export interface Spec extends TurboModule {
     totalBytes: number;
     storageKind: string;
     pageCount: number;
+  }>;
+
+  // ==================== Offline e-documents (EPUB/FB2/CBZ/CBR; libarchive) ====================
+
+  /**
+   * Extract markup into an empty OfflineTextBuffer (`origin: 'markup'`).
+   * Progress events: `SherpaOnnxDocProgress` `{ done, total, phase }`.
+   */
+  extractDocumentText(
+    source: Object,
+    textOutBufferId: string,
+    options?: Object | null
+  ): Promise<{
+    format: string;
+    sectionCount: number;
+    sections: Array<{ sectionIndex: number; href?: string; kind: string }>;
+    imageOnlySections: Array<{
+      sectionIndex: number;
+      href?: string;
+      kind: string;
+    }>;
+    spatialSpanCount: number;
+  }>;
+
+  /**
+   * Extract image-only sections / CBZ / CBR into a new OfflineImageBuffer.
+   * Progress events: `SherpaOnnxDocProgress` `{ done, total, phase }`.
+   */
+  extractDocumentImages(
+    source: Object,
+    options?: Object | null
+  ): Promise<{
+    bufferId: string;
+    format: string;
+    frameCount: number;
   }>;
 
   /**
@@ -1250,6 +1291,8 @@ export interface Spec extends TurboModule {
       ptsMs?: number;
       pageWidth?: number;
       pageHeight?: number;
+      sectionIndex?: number;
+      href?: string;
     }>
   >;
 

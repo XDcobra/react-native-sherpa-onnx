@@ -37,11 +37,13 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'a
 | Kind | Android | iOS |
 |------|---------|-----|
 | `fs` | Absolute path | Absolute path |
-| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset`; iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
-| `contentUri` | SAF document URI | Rejects |
+| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset` (APK zip entry — native copies to `<cache>/fileio_apkasset/` on first open, then reuses that file); iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
+| `contentUri` | SAF document URI (PFD when the provider allows, otherwise a stream) | Rejects |
 | `contentTree` | SAF tree URI (creates document) | Rejects |
 | `securityScoped` | Rejects | Security-scoped bookmark URL |
 | `pad` | Installed PAD pack path (Android) | Rejects — use [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) on iOS |
+
+`apkAsset` is not a real file inside the APK. Choosing it means a cache copy (then cache hit) for every `FileSource` consumer. Prefer `fs` / `app:cache` if you already materialized the file.
 
 ## Quick start
 

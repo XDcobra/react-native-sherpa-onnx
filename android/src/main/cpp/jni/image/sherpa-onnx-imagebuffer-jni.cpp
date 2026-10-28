@@ -282,6 +282,12 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeGetFrameInfo(
   if (info.dpi > 0) {
     PutInt(env, map, put, "dpi", info.dpi);
   }
+  if (info.sectionIndex >= 0) {
+    PutInt(env, map, put, "sectionIndex", info.sectionIndex);
+  }
+  if (!info.href.empty()) {
+    PutString(env, map, put, "href", info.href);
+  }
   return map;
 }
 
@@ -367,6 +373,12 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeEnsureFrame(
   }
   if (ensured.info.dpi > 0) {
     PutInt(env, map, put, "dpi", ensured.info.dpi);
+  }
+  if (ensured.info.sectionIndex >= 0) {
+    PutInt(env, map, put, "sectionIndex", ensured.info.sectionIndex);
+  }
+  if (!ensured.info.href.empty()) {
+    PutString(env, map, put, "href", ensured.info.href);
   }
   return map;
 }

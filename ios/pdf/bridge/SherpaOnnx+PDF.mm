@@ -1,12 +1,15 @@
 #import "../../SherpaOnnx.h"
 #import "../../fileio/FileIOResolver.h"
+#import "../../fileio/FileIOSeekable.h"
 #import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#import "PdfLazyIo.h"
 
 #include "ImageRegistry.h"
 #include "pdf/PdfFeatureGuard.h"
 #include "pdf/PdfLazySession.h"
 #include "pdf/PdfPageRasterizer.h"
 #include "pdf/PdfTextLayerExtractor.h"
+#include "pdf/PdfTypes.h"
 
 #include <mutex>
 #include <string>
@@ -35,6 +38,48 @@ void EnsureImageRegistryInitForPdf() {
 }
 
 }  // namespace
+
+static NSMutableDictionary<NSString *, FileIOReadHandle *> *gPdfLazyHandles;
+static NSLock *gPdfLazyLock;
+
+static void EnsurePdfLazyHandleStore() {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    gPdfLazyHandles = [NSMutableDictionary dictionary];
+    gPdfLazyLock = [[NSLock alloc] init];
+  });
+}
+
+void SherpaOnnxPdfRetainLazyHandle(NSString *bufferId,
+                                   FileIOReadHandle *handle) {
+  if (bufferId.length == 0 || !handle) {
+    return;
+  }
+  EnsurePdfLazyHandleStore();
+  [gPdfLazyLock lock];
+  FileIOReadHandle *prev = gPdfLazyHandles[bufferId];
+  gPdfLazyHandles[bufferId] = handle;
+  [gPdfLazyLock unlock];
+  if (prev && prev != handle) {
+    [prev cleanup];
+  }
+  NSLog(@"[SherpaOnnx:pdf] retain lazy handle bufferId=%@", bufferId);
+}
+
+void SherpaOnnxPdfReleaseLazyHandle(NSString *bufferId) {
+  if (bufferId.length == 0) {
+    return;
+  }
+  EnsurePdfLazyHandleStore();
+  [gPdfLazyLock lock];
+  FileIOReadHandle *handle = gPdfLazyHandles[bufferId];
+  [gPdfLazyHandles removeObjectForKey:bufferId];
+  [gPdfLazyLock unlock];
+  if (handle) {
+    NSLog(@"[SherpaOnnx:pdf] release lazy handle bufferId=%@", bufferId);
+    [handle cleanup];
+  }
+}
 
 @implementation SherpaOnnx (PDF)
 
@@ -70,23 +115,12 @@ RCT_EXPORT_METHOD(extractPdfTextLayer : (NSDictionary *)source textOutBufferId :
     return;
   }
 
-  NSData *data = nil;
-  if (handle.isFilePath && handle.filePath.length > 0) {
-    data = [NSData dataWithContentsOfFile:handle.filePath];
-  } else if (handle.stream != nil) {
-    [handle.stream open];
-    NSMutableData *buf = [NSMutableData data];
-    uint8_t chunk[65536];
-    NSInteger n = 0;
-    while ((n = [handle.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
-      [buf appendBytes:chunk length:(NSUInteger)n];
-    }
-    data = buf;
-  }
-  [handle cleanup];
-
-  if (!data || data.length == 0) {
-    reject(@"ERR_PDF_INVALID_ARGUMENT", @"PDF FileSource is empty", nil);
+  const auto src = SherpaOnnxSeekableSourceFromHandle(
+      handle, @"ERR_PDF_OPEN_FAILED", @"SherpaOnnx:pdf", &errCode, &errMsg);
+  if (src.path.empty()) {
+    [handle cleanup];
+    reject(errCode ?: @"ERR_PDF_OPEN_FAILED",
+           errMsg ?: @"Failed to resolve PDF FileSource", nil);
     return;
   }
 
@@ -99,14 +133,18 @@ RCT_EXPORT_METHOD(extractPdfTextLayer : (NSDictionary *)source textOutBufferId :
       }
     }
   }
+  id extractPasswordVal = options[@"password"];
+  if ([extractPasswordVal isKindOfClass:[NSString class]]) {
+    opts.password = [(NSString *)extractPasswordVal UTF8String];
+  }
 
   if ([self respondsToSelector:@selector(sendEventWithName:body:)]) {
     [self sendEventWithName:@"SherpaOnnxPdfProgress"
                        body:@{@"done" : @0, @"total" : @1, @"phase" : @"extract"}];
   }
 
-  const auto result = sherpa_onnx::pdf::ExtractPdfTextLayer(
-      static_cast<const uint8_t *>(data.bytes), data.length, opts);
+  const auto result = sherpa_onnx::pdf::ExtractPdfTextLayer(src, opts);
+  [handle cleanup];
   if (!result.ok) {
     NSString *code = result.error_code.empty()
                          ? @"ERR_PDF_INTERNAL"
@@ -191,23 +229,12 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
     return;
   }
 
-  NSData *data = nil;
-  if (handle.isFilePath && handle.filePath.length > 0) {
-    data = [NSData dataWithContentsOfFile:handle.filePath];
-  } else if (handle.stream != nil) {
-    [handle.stream open];
-    NSMutableData *buf = [NSMutableData data];
-    uint8_t chunk[65536];
-    NSInteger n = 0;
-    while ((n = [handle.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
-      [buf appendBytes:chunk length:(NSUInteger)n];
-    }
-    data = buf;
-  }
-  [handle cleanup];
-
-  if (!data || data.length == 0) {
-    reject(@"ERR_PDF_INVALID_ARGUMENT", @"PDF FileSource is empty", nil);
+  const auto src = SherpaOnnxSeekableSourceFromHandle(
+      handle, @"ERR_PDF_OPEN_FAILED", @"SherpaOnnx:pdf", &errCode, &errMsg);
+  if (src.path.empty()) {
+    [handle cleanup];
+    reject(errCode ?: @"ERR_PDF_OPEN_FAILED",
+           errMsg ?: @"Failed to resolve PDF FileSource", nil);
     return;
   }
 
@@ -246,6 +273,11 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
   if ([hotFramesVal respondsToSelector:@selector(intValue)]) {
     hotFrames = [hotFramesVal intValue];
   }
+  std::string password;
+  id passwordVal = options[@"password"];
+  if ([passwordVal isKindOfClass:[NSString class]]) {
+    password = [(NSString *)passwordVal UTF8String];
+  }
 
   const BOOL lazy = [strategy isEqualToString:@"lazy-lru"];
 
@@ -258,9 +290,10 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
     std::string err_code;
     std::string err_msg;
     auto session = sherpa_onnx::pdf::PdfLazySession::Open(
-        static_cast<const uint8_t *>(data.bytes), data.length, dpi, maxSide,
-        &err_code, &err_msg);
+        src, dpi, maxSide, &err_code, &err_msg,
+        sherpa_onnx::pdf::PdfPasswordOrNull(password));
     if (!session) {
+      [handle cleanup];
       NSString *code = err_code.empty()
                            ? @"ERR_PDF_INTERNAL"
                            : [NSString stringWithUTF8String:err_code.c_str()];
@@ -274,6 +307,7 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
     auto created = ImageRegistry::Instance().CreateLazyPdfSlots(
         std::move(session), pages, hotFrames);
     if (!created.ok) {
+      [handle cleanup];
       NSString *code = created.errorCode.empty()
                            ? @"ERR_PDF_INTERNAL"
                            : [NSString stringWithUTF8String:created.errorCode.c_str()];
@@ -284,12 +318,15 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
       reject(code, msg, nil);
       return;
     }
+    NSString *bufferId =
+        [NSString stringWithUTF8String:created.info.bufferId.c_str()];
+    SherpaOnnxPdfRetainLazyHandle(bufferId, handle);
     if ([self respondsToSelector:@selector(sendEventWithName:body:)]) {
       [self sendEventWithName:@"SherpaOnnxPdfProgress"
                          body:@{@"done" : @1, @"total" : @1, @"phase" : @"done"}];
     }
     resolve(@{
-      @"bufferId" : [NSString stringWithUTF8String:created.info.bufferId.c_str()],
+      @"bufferId" : bufferId,
       @"kind" : @"offlineImageBuffer",
       @"state" : [NSString
           stringWithUTF8String:sherpa_onnx::image::BufferStateName(created.info.state)],
@@ -307,9 +344,10 @@ RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
   opts.pages = std::move(pages);
   opts.dpi = dpi;
   opts.max_side = maxSide;
+  opts.password = password;
 
-  auto raster = sherpa_onnx::pdf::RasterizePdfPages(
-      static_cast<const uint8_t *>(data.bytes), data.length, opts);
+  auto raster = sherpa_onnx::pdf::RasterizePdfPages(src, opts);
+  [handle cleanup];
   if (!raster.ok) {
     NSString *code = raster.error_code.empty()
                          ? @"ERR_PDF_INTERNAL"

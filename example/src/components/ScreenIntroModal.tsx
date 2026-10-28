@@ -129,6 +129,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Offline OCR demo',
     body: 'Showcase for extractPdfTextLayer and createOCR / recognize over OfflineImageBuffer → OfflineTextBuffer. Switch ppocr, doctr, doc_vlm, or nemotron_parse packs, pick bundled images or PDFs, and inspect text plus spatial boxes (ocr pixels or mapped text-layer quads) on OfflineImageBufferAnnotatedView.',
   },
+  Documents: {
+    title: 'Read documents aloud',
+    body: 'Extract readable text from an EPUB, FB2, DRM-free MOBI/AZW3, or PDF text layer, then speak it with the same offline TTS detect/init as the TTS screen. Mixed EPUBs and CBZ comics have image-only pages: select and initialize an OCR model on this screen as well, then tap Recognize. DRM Kindle files reject with ERR_DOC_DRM. Scan-only PDFs still have no text layer — use Vision → OCR for those.',
+  },
 };
 
 const STORAGE_FILE = `${DocumentDirectoryPath}/example-screen-intros.json`;

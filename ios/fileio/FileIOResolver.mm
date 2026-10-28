@@ -355,6 +355,27 @@ static NSString *resolveAppBundleRelativePath(
   return nil;
 }
 
++ (nullable NSString *)seekableFilePathFromHandle:(FileIOReadHandle *)handle
+                                   openFailedCode:(NSString *)openFailedCode
+                                           logTag:(NSString *)logTag
+                                            error:(NSString * _Nullable * _Nullable)errorCode
+                                          message:(NSString * _Nullable * _Nullable)errorMessage
+{
+  NSString *code = openFailedCode.length > 0 ? openFailedCode : kFIOErrResolveError;
+  NSString *tag = logTag.length > 0 ? logTag : @"SherpaOnnx:fileio";
+  if (handle && handle.isFilePath && handle.filePath.length > 0) {
+    NSLog(@"[%@] open path=%@", tag, handle.filePath);
+    return handle.filePath;
+  }
+  NSLog(@"[%@] reject non-path FileSource", tag);
+  if (errorCode) *errorCode = code;
+  if (errorMessage) {
+    *errorMessage = [NSString stringWithFormat:
+        @"%@: source is not seekable (requires a filesystem path)", code];
+  }
+  return nil;
+}
+
 + (nullable NSString *)resolveSourceToFilePath:(NSDictionary *)source
                                          error:(NSString * _Nullable * _Nullable)errorCode
                                        message:(NSString * _Nullable * _Nullable)errorMessage

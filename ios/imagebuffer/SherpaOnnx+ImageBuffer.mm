@@ -1,5 +1,6 @@
 #import "SherpaOnnx.h"
 #import "../fileio/FileIOResolver.h"
+#import "../pdf/bridge/PdfLazyIo.h"
 
 #import <Foundation/Foundation.h>
 #import <ImageIO/ImageIO.h>
@@ -86,6 +87,12 @@ NSDictionary *FrameInfoDict(const sherpa_onnx::image::ImageFrameInfo &info) {
   }
   if (info.dpi > 0) {
     dict[@"dpi"] = @(info.dpi);
+  }
+  if (info.sectionIndex >= 0) {
+    dict[@"sectionIndex"] = @(info.sectionIndex);
+  }
+  if (!info.href.empty()) {
+    dict[@"href"] = [NSString stringWithUTF8String:info.href.c_str()] ?: @"";
   }
   return dict;
 }
@@ -410,6 +417,7 @@ int MaxSideFromOptions(NSDictionary *options) {
                            reject:(RCTPromiseRejectBlock)reject {
   EnsureImageRegistryInit();
   ImageRegistry::Instance().Release([bufferId UTF8String]);
+  SherpaOnnxPdfReleaseLazyHandle(bufferId);
   resolve(nil);
 }
 

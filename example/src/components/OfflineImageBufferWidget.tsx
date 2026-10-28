@@ -31,6 +31,7 @@ import {
   toFileSource as toFileSourceWithHint,
 } from '../utils/fileSourceFromUri';
 import { resolveImageDisplayUri } from '../utils/imageDisplayUri';
+import { FileSourcePicker } from './FileSourcePicker';
 import { OfflineImageBufferFramePager } from './OfflineImageBufferFramePager';
 import { widgetStyles as s } from './OfflineImageBufferWidget.styles';
 
@@ -242,7 +243,6 @@ export const OfflineImageBufferWidget = forwardRef<
   },
   ref
 ) {
-  const [sourceType, setSourceType] = useState<'example' | 'own' | null>(null);
   const [selectedExampleId, setSelectedExampleId] = useState<string | null>(
     null
   );
@@ -296,28 +296,22 @@ export const OfflineImageBufferWidget = forwardRef<
     }
   }, []);
 
-  const resetAll = useCallback(
-    async (keepSourceChoice = false) => {
-      requestRef.current += 1;
-      setLoading(false);
-      setLoadProgress(null);
-      setLoadStatus(null);
-      setLoadError(null);
-      setSelectedExampleId(null);
-      setPdfActiveLabel(null);
-      await releaseBuffer();
-      if (!keepSourceChoice) {
-        setSourceType(null);
-      }
-    },
-    [releaseBuffer]
-  );
+  const resetAll = useCallback(async () => {
+    requestRef.current += 1;
+    setLoading(false);
+    setLoadProgress(null);
+    setLoadStatus(null);
+    setLoadError(null);
+    setSelectedExampleId(null);
+    setPdfActiveLabel(null);
+    await releaseBuffer();
+  }, [releaseBuffer]);
 
   useImperativeHandle(
     ref,
     () => ({
       clear: async () => {
-        await resetAll(false);
+        await resetAll();
         onBufferReleased();
         onPdfCleared?.();
       },
@@ -474,7 +468,7 @@ export const OfflineImageBufferWidget = forwardRef<
       if (file.kind === 'pdf') {
         await selectPdf({
           label: file.name,
-          source: toImageFileSource(file.id),
+          source: fileSourceFromBundledPath(file.id),
           fixtureId: file.id,
         });
         return;
@@ -532,85 +526,55 @@ export const OfflineImageBufferWidget = forwardRef<
 
   return (
     <View style={s.root}>
-      {bufferInfo == null && pdfActiveLabel == null && sourceType == null ? (
-        <View style={s.sourceChoiceRow}>
-          <TouchableOpacity
-            style={[s.sourceChoiceButton, busy && s.sourceChoiceButtonDisabled]}
-            onPress={() => setSourceType('example')}
-            disabled={busy}
-          >
-            <Text style={s.sourceChoiceButtonText}>
-              {pdfFiles.length > 0 ? 'Example file' : 'Example Image'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.sourceChoiceButton, busy && s.sourceChoiceButtonDisabled]}
-            onPress={() => {
-              setSourceType('own');
-              handleOwnPick().catch(() => {});
-            }}
-            disabled={busy}
-          >
-            <Text style={s.sourceChoiceButtonText}>
-              {onPdfSelected ? 'Own file' : 'Own Image'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-
-      {bufferInfo == null &&
-      pdfActiveLabel == null &&
-      sourceType === 'example' ? (
-        <View style={s.root}>
-          <Text style={s.subsectionTitle}>
-            {pdfFiles.length > 0
-              ? 'Choose an example image or PDF'
-              : 'Choose an example image'}
-          </Text>
+      <FileSourcePicker
+        disabled={busy}
+        selectedLabel={bufferInfo?.sourceLabel ?? pdfActiveLabel}
+        selectedAccessory={
+          bufferInfo ? (
+            <TouchableOpacity
+              style={s.deleteButton}
+              onPress={async () => {
+                const wasPdf = bufferInfo.kind === 'pdf';
+                await resetAll();
+                onBufferReleased();
+                if (wasPdf) {
+                  clearPdfUi();
+                }
+              }}
+              disabled={busy}
+              accessibilityLabel="Remove file"
+            >
+              <Ionicons name="trash-outline" size={22} color="#c00" />
+            </TouchableOpacity>
+          ) : null
+        }
+        exampleButtonLabel={
+          pdfFiles.length > 0 ? 'Example file' : 'Example Image'
+        }
+        ownButtonLabel={onPdfSelected ? 'Own file' : 'Own Image'}
+        ownPickButtonLabel={
+          onPdfSelected ? 'Pick image or PDF…' : 'Pick image…'
+        }
+        exampleListTitle={
+          pdfFiles.length > 0
+            ? 'Choose an example image or PDF'
+            : 'Choose an example image'
+        }
+        onPickOwn={() => {
+          handleOwnPick().catch(() => {});
+        }}
+        renderExampleList={({ disabled: listDisabled, collapse }) => (
           <ExampleImageFileList
             imageFiles={exampleFiles}
             selectedId={selectedExampleId}
-            onSelect={handleExamplePick}
-            disabled={busy}
+            onSelect={(file) => {
+              collapse();
+              handleExamplePick(file);
+            }}
+            disabled={listDisabled}
           />
-          <TouchableOpacity
-            style={s.changeSourceButton}
-            onPress={() => {
-              setSourceType(null);
-              setSelectedExampleId(null);
-            }}
-            disabled={busy}
-          >
-            <Text style={s.changeSourceButtonText}>Change source</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-
-      {bufferInfo == null &&
-      pdfActiveLabel == null &&
-      sourceType === 'own' &&
-      !loading ? (
-        <View style={s.root}>
-          <TouchableOpacity
-            style={[s.sourceChoiceButton, busy && s.sourceChoiceButtonDisabled]}
-            onPress={() => {
-              handleOwnPick().catch(() => {});
-            }}
-            disabled={busy}
-          >
-            <Text style={s.sourceChoiceButtonText}>
-              {onPdfSelected ? 'Pick image or PDF…' : 'Pick image…'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.changeSourceButton}
-            onPress={() => setSourceType(null)}
-            disabled={busy}
-          >
-            <Text style={s.changeSourceButtonText}>Change source</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
+        )}
+      />
 
       {loading ? (
         <View style={s.progressBox}>
@@ -629,26 +593,6 @@ export const OfflineImageBufferWidget = forwardRef<
 
       {bufferInfo ? (
         <View style={s.readyCard}>
-          <View style={s.readyHeader}>
-            <Text style={s.readyTitle} numberOfLines={2}>
-              {bufferInfo.kind === 'pdf' ? 'PDF: ' : ''}
-              {bufferInfo.sourceLabel}
-            </Text>
-            <TouchableOpacity
-              style={s.deleteButton}
-              onPress={async () => {
-                const wasPdf = bufferInfo.kind === 'pdf';
-                await resetAll(false);
-                onBufferReleased();
-                if (wasPdf) {
-                  clearPdfUi();
-                }
-              }}
-              disabled={busy}
-            >
-              <Ionicons name="trash-outline" size={22} color="#c00" />
-            </TouchableOpacity>
-          </View>
           <OfflineImageBufferFramePager
             buffer={bufferInfo.bufferId}
             frameCount={bufferInfo.frameCount}

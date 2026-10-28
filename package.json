@@ -165,6 +165,11 @@
       "types": "./lib/typescript/src/pdf/index.d.ts",
       "default": "./lib/module/pdf/index.js"
     },
+    "./document": {
+      "source": "./src/document/index.ts",
+      "types": "./lib/typescript/src/document/index.d.ts",
+      "default": "./lib/module/document/index.js"
+    },
     "./segment": {
       "source": "./src/segment/index.ts",
       "types": "./lib/typescript/src/segment/index.d.ts",
@@ -191,8 +196,12 @@
     "third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG",
     "third_party/libarchive_prebuilt/IOS_RELEASE_TAG",
     "third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG",
+    "third_party/lexbor_prebuilt/IOS_RELEASE_TAG",
+    "third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG",
     "third_party/libwebp_prebuilt/IOS_RELEASE_TAG",
     "third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG",
+    "third_party/pugixml/src",
+    "third_party/pugixml/src/**",
     "!ios/build",
     "!android/build",
     "!android/gradle",

@@ -13,6 +13,8 @@ namespace pdf {
 struct ExtractOptions {
   /** Empty = all pages. Otherwise 1-based page indices. */
   std::vector<int> pages;
+  /** User or owner password. Empty = none. */
+  std::string password;
   std::function<bool()> is_cancelled;
   std::function<void(int done, int total, const char* phase)> on_progress;
 };
@@ -22,8 +24,7 @@ struct ExtractOptions {
  * When PDFium is not compiled in, returns ERR_PDF_PDFIUM_DISABLED.
  */
 PdfTextLayerResult ExtractPdfTextLayer(
-    const uint8_t* pdf_bytes,
-    size_t pdf_size,
+    const PdfSource& src,
     const ExtractOptions& options = {});
 
 }  // namespace pdf

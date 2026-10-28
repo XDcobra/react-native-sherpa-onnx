@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "../fileio/SeekableSource.h"
+
 namespace sherpa_onnx {
 namespace pdf {
 
@@ -16,6 +18,17 @@ inline constexpr const char* kErrNoTextLayer = "ERR_PDF_NO_TEXT_LAYER";
 inline constexpr const char* kErrCancelled = "ERR_PDF_CANCELLED";
 inline constexpr const char* kErrRenderFailed = "ERR_PDF_RENDER_FAILED";
 inline constexpr const char* kErrInternal = "ERR_PDF_INTERNAL";
+
+using PdfSource = fileio::SeekableSource;
+
+/** Empty / null → PDFium `nullptr` (omit password). Never log the value. */
+inline const char* PdfPasswordOrNull(const char* password) {
+  return (password != nullptr && password[0] != '\0') ? password : nullptr;
+}
+
+inline const char* PdfPasswordOrNull(const std::string& password) {
+  return PdfPasswordOrNull(password.c_str());
+}
 
 struct PdfTextSpan {
   int utf16_start = 0;

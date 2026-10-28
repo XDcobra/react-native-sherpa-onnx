@@ -205,6 +205,7 @@ function getOfflineTextBufferSpatialSpansSlice(
 type TextSpatialSpanLevel = 'line' | 'word' | 'block';
 type TextSpatialSpanOrigin = 'ocr' | 'textLayer' | 'markup';
 // textLayer: PDF glyph layer (react-native-sherpa-onnx/pdf); see pdf-offline.md
+// markup: EPUB/FB2 extract (react-native-sherpa-onnx/document); see document-offline.md
 
 interface TextSpatialSpan {
   utf16Start: number;
@@ -226,6 +227,10 @@ interface TextSpatialSpan {
   /** PDF user-space page size when origin is textLayer. */
   pageWidth?: number;
   pageHeight?: number;
+  /** 0-based reading-order section (EPUB spine / FB2 / comic). */
+  sectionIndex?: number;
+  /** EPUB path / FB2 id / archive path when known. */
+  href?: string;
 }
 ```
 
@@ -330,6 +335,8 @@ The following codes are the relevant runtime outcomes for offline text-buffer re
 - [Pipeline text buffers — live / streaming](textbuffer-streaming.md)
 - [Offline STT](stt-offline.md)
 - [Offline OCR](ocr-offline.md) (writes plain text + `origin: 'ocr'` spatial spans)
+- [Offline PDF](pdf-offline.md) (`origin: 'textLayer'`)
+- [Offline e-documents](document-offline.md) (`origin: 'markup'`)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
 - [Offline ImageBuffer](imagebuffer-offline.md)
 

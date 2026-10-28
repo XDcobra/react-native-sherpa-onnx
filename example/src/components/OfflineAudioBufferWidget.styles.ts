@@ -39,6 +39,25 @@ export const widgetStyles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 10,
   },
+  sourceActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  sourceActionTitle: {
+    flex: 1,
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  backButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#F2F2F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   audioFilesContainer: {
     marginBottom: 12,
   },
@@ -189,34 +208,19 @@ export const widgetStyles = StyleSheet.create({
   },
   // Pick own file
   pickButton: {
+    flex: 1,
     backgroundColor: '#007AFF',
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    minHeight: 48,
   },
   pickButtonText: {
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
-  },
-  // Change source button
-  changeSourceButton: {
-    backgroundColor: '#f5f5f5',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-    marginTop: 10,
-  },
-  changeSourceButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
   },
   // Error
   errorContainer: {

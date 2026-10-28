@@ -110,6 +110,10 @@ export interface TextSpatialSpan {
   /** PDF user-space page size when origin is textLayer. */
   pageWidth?: number;
   pageHeight?: number;
+  /** 0-based reading-order section (EPUB spine / FB2 / comic). */
+  sectionIndex?: number;
+  /** EPUB path / FB2 id / archive path when known. */
+  href?: string;
 }
 
 // ========== Info Types ==========

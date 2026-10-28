@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse), e-document read-aloud (EPUB / FB2 / CBZ / PDF), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -41,6 +41,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Codec samples**          | `android/app/src/main/assets/test_codec/`        | `ios/sherpa_models/test_codec/`        |
 | **Test images (OCR)**      | `android/app/src/main/assets/test_images/`       | `ios/sherpa_models/test_images/`       |
 | **Test PDFs (text layer)** | `android/app/src/main/assets/test_pdfs/`         | `ios/sherpa_models/test_pdfs/`         |
+| **Test e-docs (Read aloud)** | `android/app/src/main/assets/test_edocs/`      | `ios/sherpa_models/test_edocs/`        |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 >
@@ -278,3 +279,23 @@ The same screen also picks bundled PDFs from `test_pdfs/` (`digital_hello.pdf` /
 2. On `ERR_PDF_NO_TEXT_LAYER` — unlock `rasterizePdfPages` → `OfflineImageBuffer` → `recognize` like an image.
 
 PDF pick still rasterizes for `OfflineImageBufferFrameView` preview (`lazy-lru`). Results keep the text buffer and draw boxes with [`OfflineImageBufferAnnotatedView`](../docs/imagebuffer-offline.md#offlineimagebufferannotatedview) for both `origin: ocr` (frame pixels) and `origin: textLayer` (PDF user-space mapped onto the frame). A path legend on the screen lists coords and overlay rules. The example opts in PDFium (`sherpaOnnxEnablePdfium=true` / `SHERPA_ONNX_ENABLE_PDFIUM=1`) and libwebp (`sherpaOnnxEnableLibwebp=true` / `SHERPA_ONNX_ENABLE_LIBWEBP=1`); consumer apps keep both SDK defaults off. See [docs/pdf-offline.md](../docs/pdf-offline.md) and [docs/imagebuffer-offline.md](../docs/imagebuffer-offline.md).
+
+## Documents (read aloud)
+
+| ![Read aloud 1](../docs/images/example/read_aloud_1.png) | ![Read aloud 2](../docs/images/example/read_aloud_2.png) | ![Read aloud 3](../docs/images/example/read_aloud_3.png) |
+| -------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
+
+Home section **Documents (EPUB, MOBI, PDF, …)** → **Read aloud**. Extract EPUB/FB2/MOBI/AZW3/PDF text (or OCR mixed EPUB / CBZ pages) into an `OfflineTextBuffer`, then speak with the same TTS detect/init panel as Text-to-Speech (Offline): catalog, auto/custom, `detectTtsModel`, speaker/speed, and the shared TTS engine cache. See [docs/document-offline.md](../docs/document-offline.md).
+
+Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/hello.mobi`, `test_edocs/hello.azw3`, `test_edocs/drm.mobi`, `test_edocs/mixed.epub`, `test_edocs/manga.cbz`, plus the digital and scan-only PDFs from `test_pdfs/`.
+
+1. Text EPUB / FB2 / DRM-free MOBI / AZW3 → `extractDocumentText` → OfflineTextBuffer (`origin: markup`) → `tts.synthesize` → playback. The current block span is highlighted from playback position.
+2. PDF with a text layer → `extractPdfTextLayer` → same TTS path (`origin: textLayer`).
+3. Scan-only PDF → `ERR_PDF_NO_TEXT_LAYER`. This screen does not rasterize, extract images, or run OCR; use Vision → OCR.
+4. DRM MOBI (`drm.mobi`) → `ERR_DOC_DRM`. The SDK does not decrypt. This screen does not extract images or run OCR.
+5. Mixed EPUB (`mixed.epub`) → two markup chapters plus `imageOnlySections.length === 1` → `extractDocumentImages` → FramePager → optional OCR Recognize. Extracted text shows **markup** / **ocr** origin chips, interleaved by `sectionIndex` in JS (no SDK merge API). Speak uses the concatenated string.
+6. CBZ manga (`manga.cbz`) → `ERR_DOC_NO_TEXT` unlocks the same image + OCR path (no generic extract-failed panel). After Recognize, TTS is OCR-only. The archive is three JPEG pages (cover + two panels) from University of Tsukuba’s CC0 manga [ヒトはそれを『発達障害』と名づけました](https://dac.tsukuba.ac.jp/radd/joint-base/manga/).
+
+OCR detect/init on this screen is the same panel and engine cache as Vision → OCR. Recognize is a separate button, not automatic.
+
+See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offline.md](../docs/pdf-offline.md). Android bundled assets use `app:apkAsset` (the SDK copies them into app cache on first open).

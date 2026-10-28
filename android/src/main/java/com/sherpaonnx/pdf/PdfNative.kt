@@ -11,10 +11,14 @@ internal object PdfNative {
   /**
    * Returns Object[]:
    * ok, errorCode, errorMessage, text, pageCount, pagesWithText, spans[]
+   *
+   * [path] filesystem path, or empty when [fd] is a borrowed ParcelFileDescriptor.
    */
   external fun nativeExtractTextLayer(
-    pdfBytes: ByteArray,
+    path: String,
+    fd: Int,
     pages: IntArray?,
+    password: String?,
   ): Array<Any?>
 
   /**
@@ -24,11 +28,13 @@ internal object PdfNative {
    * Returns HashMap: ok, errorCode?, errorMessage?, bufferId, frameCount, …
    */
   external fun nativeRasterizePages(
-    pdfBytes: ByteArray,
+    path: String,
+    fd: Int,
     pages: IntArray?,
     dpi: Int,
     maxSide: Int,
     strategy: String?,
     hotFrames: Int,
+    password: String?,
   ): HashMap<String, Any>
 }

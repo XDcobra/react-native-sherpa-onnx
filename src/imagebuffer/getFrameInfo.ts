@@ -43,6 +43,8 @@ function mapFrameInfo(raw: {
   storageKind: string;
   pageNumber?: number;
   dpi?: number;
+  sectionIndex?: number;
+  href?: string;
 }): OfflineImageFrameInfo {
   const frame: OfflineImageFrameInfo = {
     index: raw.index,
@@ -60,6 +62,17 @@ function mapFrameInfo(raw: {
   }
   if (raw.dpi != null && Number.isFinite(raw.dpi) && raw.dpi > 0) {
     frame.dpi = Math.trunc(raw.dpi);
+  }
+  if (
+    raw.sectionIndex != null &&
+    Number.isFinite(raw.sectionIndex) &&
+    raw.sectionIndex >= 0
+  ) {
+    frame.sectionIndex = Math.trunc(raw.sectionIndex);
+  }
+  const href = typeof raw.href === 'string' ? raw.href : '';
+  if (href.length > 0) {
+    frame.href = href;
   }
   return frame;
 }

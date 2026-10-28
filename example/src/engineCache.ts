@@ -1,5 +1,5 @@
 /**
- * Persists STT/TTS engine instances and UI state across screen navigation.
+ * Persists STT/TTS/OCR engine instances and UI state across screen navigation.
  * When the user leaves a screen, the instance is not released; when they return,
  * the same state (selected model, Free button visible) is restored.
  *
@@ -12,6 +12,10 @@
 
 import type { SttEngine } from 'react-native-sherpa-onnx/stt';
 import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
+import type {
+  OcrConcreteModelType,
+  OcrEngine,
+} from 'react-native-sherpa-onnx/ocr';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -99,4 +103,50 @@ export function clearTtsCache(): void {
   ttsDetectedModels = [];
   ttsSelectedModelType = null;
   ttsModelInfo = null;
+}
+
+// --- OCR cache ---
+
+let ocrEngine: OcrEngine | null = null;
+let ocrModelFolder: string | null = null;
+let ocrEngineFamily: OcrConcreteModelType | null = null;
+let ocrInitMessage: string | null = null;
+let ocrDetectSummary: string | null = null;
+
+export function getOcrCache(): {
+  engine: OcrEngine | null;
+  modelFolder: string | null;
+  engineFamily: OcrConcreteModelType | null;
+  initMessage: string | null;
+  detectSummary: string | null;
+} {
+  return {
+    engine: ocrEngine,
+    modelFolder: ocrModelFolder,
+    engineFamily: ocrEngineFamily,
+    initMessage: ocrInitMessage,
+    detectSummary: ocrDetectSummary,
+  };
+}
+
+export function setOcrCache(
+  engine: OcrEngine,
+  modelFolder: string,
+  engineFamily: OcrConcreteModelType | null,
+  initMessage: string | null,
+  detectSummary: string | null
+): void {
+  ocrEngine = engine;
+  ocrModelFolder = modelFolder;
+  ocrEngineFamily = engineFamily;
+  ocrInitMessage = initMessage;
+  ocrDetectSummary = detectSummary;
+}
+
+export function clearOcrCache(): void {
+  ocrEngine = null;
+  ocrModelFolder = null;
+  ocrEngineFamily = null;
+  ocrInitMessage = null;
+  ocrDetectSummary = null;
 }

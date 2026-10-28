@@ -635,7 +635,7 @@ This phase:
 
 Phase 5 `docs/ocr-offline.md` should say that `doc_vlm` needs an ORT build with Microsoft contrib ops, and that a stock mobile build without them fails at `createOCR`, not at the first token. That sentence is not written in this phase.
 
-`provider: 'coreml' | 'nnapi' | 'qnn'` is unchanged at the API. `DocVlmBackend` already logs a warning and uses CPU. Do not document a successful GPU path.
+`provider` is unchanged at the API and is passed to `ApplyOrtProvider` like ppocr/doctr (`cpu`, `nnapi`, `xnnpack`, `coreml`). Missing or unusable EP logs and stays on CPU.
 
 ---
 

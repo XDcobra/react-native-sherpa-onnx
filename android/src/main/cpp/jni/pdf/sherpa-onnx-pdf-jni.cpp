@@ -82,6 +82,14 @@ void PutBool(JNIEnv* env, jobject map, jmethodID put, const char* key,
   env->DeleteLocalRef(boolClass);
 }
 
+std::string JstringToStd(JNIEnv* env, jstring js) {
+  if (!js) return {};
+  const char* c = env->GetStringUTFChars(js, nullptr);
+  std::string s = c ? c : "";
+  if (c) env->ReleaseStringUTFChars(js, c);
+  return s;
+}
+
 }  // namespace
 
 extern "C" {
@@ -109,8 +117,10 @@ JNIEXPORT jobjectArray JNICALL
 Java_com_sherpaonnx_pdf_PdfNative_nativeExtractTextLayer(
     JNIEnv* env,
     jclass,
-    jbyteArray pdfBytes,
-    jintArray pagesOrNull) {
+    jstring jpath,
+    jint fd,
+    jintArray pagesOrNull,
+    jstring passwordOrNull) {
   jclass objCls = env->FindClass("java/lang/Object");
   jclass boolCls = env->FindClass("java/lang/Boolean");
   jclass intCls = env->FindClass("java/lang/Integer");
@@ -124,28 +134,6 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeExtractTextLayer(
 
   jobjectArray out = env->NewObjectArray(7, objCls, nullptr);
 
-  if (pdfBytes == nullptr) {
-    env->SetObjectArrayElement(
-        out, 0, env->CallStaticObjectMethod(boolCls, boolValueOf, JNI_FALSE));
-    env->SetObjectArrayElement(
-        out, 1, JString(env, sherpa_onnx::pdf::kErrInvalidArgument));
-    env->SetObjectArrayElement(out, 2, JString(env, "PDF bytes required"));
-    env->SetObjectArrayElement(out, 3, JString(env, ""));
-    env->SetObjectArrayElement(
-        out, 4, env->CallStaticObjectMethod(intCls, intValueOf, 0));
-    env->SetObjectArrayElement(
-        out, 5, env->CallStaticObjectMethod(intCls, intValueOf, 0));
-    env->SetObjectArrayElement(out, 6, env->NewObjectArray(0, objCls, nullptr));
-    return out;
-  }
-
-  const jsize n = env->GetArrayLength(pdfBytes);
-  std::vector<uint8_t> bytes(static_cast<size_t>(n));
-  if (n > 0) {
-    env->GetByteArrayRegion(
-        pdfBytes, 0, n, reinterpret_cast<jbyte*>(bytes.data()));
-  }
-
   sherpa_onnx::pdf::ExtractOptions opts;
   if (pagesOrNull != nullptr) {
     const jsize pn = env->GetArrayLength(pagesOrNull);
@@ -154,9 +142,11 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeExtractTextLayer(
       env->GetIntArrayRegion(pagesOrNull, 0, pn, opts.pages.data());
     }
   }
+  opts.password = JstringToStd(env, passwordOrNull);
 
   const auto result = sherpa_onnx::pdf::ExtractPdfTextLayer(
-      bytes.data(), bytes.size(), opts);
+      sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd),
+      opts);
 
   env->SetObjectArrayElement(
       out,
@@ -226,29 +216,20 @@ JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
     JNIEnv* env,
     jclass,
-    jbyteArray pdfBytes,
+    jstring jpath,
+    jint fd,
     jintArray pagesOrNull,
     jint dpi,
     jint maxSide,
     jstring strategyOrNull,
-    jint hotFrames) {
+    jint hotFrames,
+    jstring passwordOrNull) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!map) return nullptr;
 
-  if (pdfBytes == nullptr) {
-    PutBool(env, map, put, "ok", JNI_FALSE);
-    PutString(env, map, put, "errorCode", sherpa_onnx::pdf::kErrInvalidArgument);
-    PutString(env, map, put, "errorMessage", "PDF bytes required");
-    return map;
-  }
-
-  const jsize n = env->GetArrayLength(pdfBytes);
-  std::vector<uint8_t> bytes(static_cast<size_t>(n));
-  if (n > 0) {
-    env->GetByteArrayRegion(
-        pdfBytes, 0, n, reinterpret_cast<jbyte*>(bytes.data()));
-  }
+  const auto src =
+      sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd);
 
   std::vector<int> pages;
   if (pagesOrNull != nullptr) {
@@ -260,6 +241,7 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
   }
 
   const int useDpi = dpi > 0 ? dpi : 144;
+  const std::string password = JstringToStd(env, passwordOrNull);
   bool lazy = false;
   if (strategyOrNull != nullptr) {
     const char* raw = env->GetStringUTFChars(strategyOrNull, nullptr);
@@ -273,7 +255,8 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
     std::string err_code;
     std::string err_msg;
     auto session = sherpa_onnx::pdf::PdfLazySession::Open(
-        bytes.data(), bytes.size(), useDpi, maxSide, &err_code, &err_msg);
+        src, useDpi, maxSide, &err_code, &err_msg,
+        sherpa_onnx::pdf::PdfPasswordOrNull(password));
     if (!session) {
       PutBool(env, map, put, "ok", JNI_FALSE);
       PutString(
@@ -314,9 +297,9 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeRasterizePages(
   opts.dpi = useDpi;
   opts.max_side = maxSide;
   opts.pages = std::move(pages);
+  opts.password = password;
 
-  auto raster = sherpa_onnx::pdf::RasterizePdfPages(
-      bytes.data(), bytes.size(), opts);
+  auto raster = sherpa_onnx::pdf::RasterizePdfPages(src, opts);
   if (!raster.ok) {
     PutBool(env, map, put, "ok", JNI_FALSE);
     PutString(env, map, put, "errorCode", raster.error_code);

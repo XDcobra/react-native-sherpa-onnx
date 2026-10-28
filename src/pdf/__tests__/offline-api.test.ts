@@ -31,6 +31,29 @@ describe('pdf offline api', () => {
     jest.clearAllMocks();
   });
 
+  it('forwards apkAsset FileSource to native', async () => {
+    mockNative.extractPdfTextLayer.mockResolvedValue({
+      pageCount: 1,
+      pagesWithText: 1,
+      utf16Length: 4,
+      spatialSpanCount: 1,
+    });
+    const source = {
+      kind: 'app' as const,
+      base: 'apkAsset' as const,
+      path: 'test_pdfs/a.pdf',
+    };
+    await extractPdfTextLayer(
+      source,
+      'txt_off_00000000-0000-0000-0000-000000000001'
+    );
+    expect(mockNative.extractPdfTextLayer).toHaveBeenCalledWith(
+      source,
+      'txt_off_00000000-0000-0000-0000-000000000001',
+      {}
+    );
+  });
+
   it('isPdfiumEnabled forwards native', async () => {
     mockNative.isPdfiumEnabled.mockResolvedValue(false);
     await expect(isPdfiumEnabled()).resolves.toBe(false);
@@ -92,6 +115,47 @@ describe('pdf offline api', () => {
     );
   });
 
+  it('extractPdfTextLayer forwards password and omits empty', async () => {
+    mockNative.extractPdfTextLayer.mockResolvedValue({
+      pageCount: 1,
+      pagesWithText: 1,
+      utf16Length: 4,
+      spatialSpanCount: 1,
+    });
+    await extractPdfTextLayer(
+      { kind: 'fs', path: '/tmp/secret.pdf' },
+      'txt_off_00000000-0000-0000-0000-000000000001',
+      { password: 'secret' }
+    );
+    expect(mockNative.extractPdfTextLayer).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/secret.pdf' },
+      'txt_off_00000000-0000-0000-0000-000000000001',
+      { password: 'secret' }
+    );
+    mockNative.extractPdfTextLayer.mockClear();
+    await extractPdfTextLayer(
+      { kind: 'fs', path: '/tmp/secret.pdf' },
+      'txt_off_00000000-0000-0000-0000-000000000001',
+      { password: '' }
+    );
+    expect(mockNative.extractPdfTextLayer).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/secret.pdf' },
+      'txt_off_00000000-0000-0000-0000-000000000001',
+      {}
+    );
+  });
+
+  it('extractPdfTextLayer rejects non-string password', async () => {
+    await expect(
+      extractPdfTextLayer(
+        { kind: 'fs', path: '/tmp/a.pdf' },
+        'txt_off_00000000-0000-0000-0000-000000000001',
+        { password: 1 as unknown as string }
+      )
+    ).rejects.toMatchObject({ code: PdfErrorCode.INVALID_ARGUMENT });
+    expect(mockNative.extractPdfTextLayer).not.toHaveBeenCalled();
+  });
+
   it('rasterizePdfPages maps disabled error', async () => {
     mockNative.rasterizePdfPages.mockRejectedValue(
       new Error('ERR_PDF_PDFIUM_DISABLED: PDFium is not linked')
@@ -151,6 +215,26 @@ describe('pdf offline api', () => {
     expect(mockNative.rasterizePdfPages).toHaveBeenCalledWith(
       { kind: 'fs', path: '/tmp/big.pdf' },
       { strategy: 'lazy-lru', hotFrames: 2, dpi: 144 }
+    );
+  });
+
+  it('rasterizePdfPages forwards password', async () => {
+    mockNative.rasterizePdfPages.mockResolvedValue({
+      bufferId: 'img_off_00000000-0000-0000-0000-0000000000cc',
+      kind: 'offlineImageBuffer',
+      state: 'immutable',
+      frameCount: 1,
+      totalBytes: 10,
+      storageKind: 'ram',
+      pageCount: 1,
+    });
+    await rasterizePdfPages(
+      { kind: 'fs', path: '/tmp/secret.pdf' },
+      { password: 'secret' }
+    );
+    expect(mockNative.rasterizePdfPages).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/secret.pdf' },
+      { strategy: 'rasterize-all', password: 'secret' }
     );
   });
 

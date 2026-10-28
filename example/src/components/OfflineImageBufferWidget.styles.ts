@@ -34,6 +34,23 @@ export const widgetStyles = StyleSheet.create({
     color: '#555',
     marginBottom: 4,
   },
+  sourceActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  sourceActionTitle: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  backButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#F2F2F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   imageFilesContainer: {
     gap: 4,
   },
@@ -139,17 +156,5 @@ export const widgetStyles = StyleSheet.create({
     color: '#64748b',
     fontFamily: 'Menlo',
     lineHeight: 17,
-  },
-  changeSourceButton: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    backgroundColor: '#eef2ff',
-  },
-  changeSourceButtonText: {
-    color: '#3730a3',
-    fontWeight: '600',
-    fontSize: 13,
   },
 });

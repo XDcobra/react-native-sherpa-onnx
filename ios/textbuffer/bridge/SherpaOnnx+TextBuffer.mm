@@ -156,6 +156,12 @@ struct TxtOfflineEntry {
         if (span.hasPageHeight) {
             map[@"pageHeight"] = @(span.pageHeight);
         }
+        if (span.hasSectionIndex) {
+            map[@"sectionIndex"] = @(span.sectionIndex);
+        }
+        if (!span.href.empty()) {
+            map[@"href"] = [NSString stringWithUTF8String:span.href.c_str()] ?: @"";
+        }
         return map;
     }
 

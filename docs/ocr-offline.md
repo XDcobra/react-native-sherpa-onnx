@@ -240,6 +240,8 @@ const ocr = await createOCR({
 
 Family option bags (`ppocr` / `doctr`) are constrained by `modelType`. Shared VLM cap is top-level `maxNewTokens`.
 
+`provider` and `numThreads` apply to every family, including `doc_vlm` and `nemotron_parse`. The provider string is passed to ONNX Runtime (`cpu`, `nnapi`, `xnnpack`, `coreml`). If that EP is missing or cannot attach, native logs and the session stays on CPU — it does not throw. See [execution-providers.md](execution-providers.md).
+
 `ppocr.detUnclipRatio` / `doctr.detUnclipRatio` (default `1.5`) control DB box expansion after detection — lower values tighten spatial quads around glyphs.
 
 ### `engine.recognize(imageBuffer, textOut, options?)`
@@ -597,6 +599,7 @@ The monorepo example exposes **Home → Vision → OCR** (`example/src/screens/o
 ## See also
 
 - [PDF](pdf-offline.md) (text-layer extract + page raster → ImageBuffer; opt-in PDFium; OCR stays explicit)
+- [E-documents](document-offline.md) (EPUB/FB2/MOBI markup → TextBuffer; CBZ/CBR / image-only spine → ImageBuffer; OCR stays explicit)
 - [ImageBuffer offline](imagebuffer-offline.md) (typical **source** of frames)
 - [TextBuffer offline](textbuffer-offline.md) (text + spatial spans)
 - [Feature pipelines](feature-pipelines.md#ocr-offline-patterns)

@@ -42,7 +42,7 @@ Graphs inspected: `vision_encoder.onnx` (opset 14), `embed_tokens.onnx` (opset 2
 | `OcrResult` | Add `doctags_utf8` and `markdown_utf8` now (empty string default). ppocr/doctr leave them empty. TS/JNI export is Phase 3. |
 | Factory | Do not edit `OcrFactory.cpp`. |
 | OpenCV | None. Lanczos is in-tree. |
-| ORT provider | CPU. `OcrLoadOptions::provider` empty or `"cpu"` → CPU. Any other string: log a warning and use CPU. |
+| ORT provider | `ApplyOrtProvider` (same as other first-party sessions). Empty/`cpu` → CPU. `nnapi` / `xnnpack` / `coreml` attach when available; missing or unusable EP logs and stays on CPU. `qnn` is unknown here and falls back to CPU. |
 | Threads | `SetIntraOpNumThreads(max(1, options.num_threads))`. Leave inter-op at 1. Vision, embed, and decoder run one after another on the calling thread. `Recognize` is not thread-safe. |
 | Graph opt | `ORT_ENABLE_EXTENDED` on all three sessions. `ORT_ENABLE_ALL` on the 628 MiB decoder spends init memory on fusions this spike does not need. |
 | CI | Do not add this pack to `.github/workflows/test-ocr-host.yml` (Phase 5). The new ctest skips the ORT smoke when the pack is absent. |
@@ -676,7 +676,6 @@ Phase 5 may turn the strict file into a required CI artifact. Phase 2 only has t
 - Add `docvlm-granite-258m` to `test-ocr-host.yml` or any job that downloads every OCR pack per PR. Phase 5.
 - A second weight variant (fp16, q4, q4f16) or PaddleOCR-VL.
 - PDF pages, multi-image prompts, `controls` in the chat template, OTSL→CSV, picture classification tokens, beam search, logprob spans.
-- CoreML / NNAPI / QNN providers. CPU only, with a warning if `provider` is anything else.
 - Rebuilding ONNX Runtime to add contrib ops. If the host zip lacks `GroupQueryAttention`, stop; that zip is the official 1.28.x release and does include it.
 - Skipping the 2048 upscale, letterboxing instead of the HF tile grid, or treating `<image>` as one embedding.
 - Parsing `vocab.json` / `merges.txt` in addition to `tokenizer.json`.

@@ -36,6 +36,10 @@ export interface OfflineImageFrameInfo {
   pageNumber?: number;
   /** Raster DPI when frame came from rasterizePdfPages. */
   dpi?: number;
+  /** 0-based document section (EPUB image-only item / comic page). */
+  sectionIndex?: number;
+  /** EPUB path or archive member path. */
+  href?: string;
 }
 
 /** Branded handle for an offline image buffer. */

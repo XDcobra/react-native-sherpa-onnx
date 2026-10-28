@@ -16,6 +16,10 @@ struct RgbFrame {
   int pageNumber = 0;
   /** Raster DPI used when producing this frame; 0 = unset. */
   int dpi = 0;
+  /** 0-based document section; -1 = unset. */
+  int sectionIndex = -1;
+  /** EPUB path / archive member. */
+  std::string href;
 
   size_t byteSize() const {
     return static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
@@ -55,6 +59,9 @@ struct ImageFrameInfo {
   int pageNumber = 0;
   /** Raster DPI; 0 = unset. */
   int dpi = 0;
+  /** 0-based document section; -1 = unset. */
+  int sectionIndex = -1;
+  std::string href;
 };
 
 struct ImageBufferInfo {

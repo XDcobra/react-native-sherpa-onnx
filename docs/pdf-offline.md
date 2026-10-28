@@ -20,6 +20,10 @@ Prebuilts: [third_party/pdfium_prebuilt/README.md](../third_party/pdfium_prebuil
 
 Without enable, both APIs reject with `ERR_PDF_PDFIUM_DISABLED`.
 
+## FileSource I/O
+
+`source` is a `FileSource` (see [fileio.md](fileio.md)). Android `apkAsset` copies into app cache on first open. A `contentUri` that is only a stream (no ParcelFileDescriptor) → `ERR_PDF_OPEN_FAILED`. `extractPdfTextLayer` and `rasterize-all` close the handle when the call returns. **`lazy-lru` keeps the open PDFium document (and the fd / security-scoped URL) until `releaseOfflineImageBuffer`.** Standard PDF encryption: pass `options.password` (user or owner). Missing or wrong → `ERR_PDF_ENCRYPTED`. Not Adobe DRM / FileOpen.
+
 ## Quick start — text layer
 
 ```ts
@@ -152,7 +156,7 @@ function extractPdfTextLayer(
 const r = await extractPdfTextLayer(pdfSource, textOut, { pages: [1] });
 ```
 
-Writes digital text into an empty TextBuffer (`origin: 'textLayer'`). No text layer → `ERR_PDF_NO_TEXT_LAYER`. Options: `pages`, `signal`, `onProgress`.
+Writes digital text into an empty TextBuffer (`origin: 'textLayer'`). No text layer → `ERR_PDF_NO_TEXT_LAYER`. Options: `pages`, `password`, `signal`, `onProgress`.
 
 #### `rasterizePdfPages(source, options?)`
 
@@ -180,6 +184,7 @@ Returns a new OfflineImageBuffer (no OCR). See [Raster strategies](#raster-strat
 | `maxSide` | `4096` | longest-edge cap; `<= 0` disables |
 | `strategy` | `'rasterize-all'` | `'lazy-lru'` → on-demand decode; see table above |
 | `hotFrames` | `8` | `lazy-lru` only; clamped **1..32** |
+| `password` | — | user or owner password for standard PDF encryption |
 | `signal` / `onProgress` | — | cancel / progress |
 
 ## Spans and coordinates (text layer)
@@ -204,8 +209,8 @@ See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md
 |------|---------|
 | `ERR_PDF_PDFIUM_DISABLED` | Binary built without PDFium |
 | `ERR_PDF_INVALID_ARGUMENT` | Bad source / pages / dpi / populated text buffer |
-| `ERR_PDF_OPEN_FAILED` | Unreadable / corrupt PDF |
-| `ERR_PDF_ENCRYPTED` | Password-protected |
+| `ERR_PDF_OPEN_FAILED` | Unreadable / corrupt PDF, or a non-seekable source (stream, PFD with no length) |
+| `ERR_PDF_ENCRYPTED` | Encrypted PDF; missing or incorrect `options.password` |
 | `ERR_PDF_NO_TEXT_LAYER` | No extractable text (extract only) |
 | `ERR_PDF_RENDER_FAILED` | Page raster failed |
 | `ERR_PDF_CANCELLED` | AbortSignal / cancel |

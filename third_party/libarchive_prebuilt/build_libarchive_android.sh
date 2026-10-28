@@ -36,6 +36,7 @@ fi
 ZSTD_PREBUILT="$REPO_ROOT/third_party/zstd_prebuilt/android"
 
 # Disable programs and tests; only build shared library. Disable optional deps not in NDK.
+# ENABLE_ZLIB=ON: ZIP Deflate (EPUB/CBZ). RAR/RAR5 has no extra flag (in-tree). ENABLE_UNZIP is the unzip CLI, not the zip reader.
 CMAKE_OPTS=(
     -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
     -DANDROID_ABI=ABI_PLACEHOLDER
@@ -48,6 +49,7 @@ CMAKE_OPTS=(
     -DENABLE_UNZIP=OFF
     -DENABLE_TEST=OFF
     -DENABLE_OPENSSL=OFF
+    -DENABLE_ZLIB=ON
     -DENABLE_LIBXML2=OFF
     -DENABLE_EXPAT=OFF
     -DENABLE_LZMA=OFF

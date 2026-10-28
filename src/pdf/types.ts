@@ -23,6 +23,11 @@ export type PdfErrorCodeValue =
 export type ExtractPdfTextLayerOptions = {
   /** 1-based page indices. Omit or `'all'` for every page. */
   pages?: 'all' | number[];
+  /**
+   * User or owner password for standard PDF encryption.
+   * Missing or wrong → `ERR_PDF_ENCRYPTED`. Not logged.
+   */
+  password?: string;
   signal?: AbortSignal;
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };
@@ -54,6 +59,11 @@ export type RasterizePdfPagesOptions = {
    * Ignored for `rasterize-all`.
    */
   hotFrames?: number;
+  /**
+   * User or owner password for standard PDF encryption.
+   * Missing or wrong → `ERR_PDF_ENCRYPTED`. Not logged.
+   */
+  password?: string;
   signal?: AbortSignal;
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };

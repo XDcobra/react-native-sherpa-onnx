@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description>
+    <title-info>
+      <book-title>The North Wind and the Sun</book-title>
+      <author><first-name>VoiceLab</first-name><last-name>Fixtures</last-name></author>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <section>
+      <title><p>The North Wind and the Sun</p></title>
+      <epigraph>
+        <p>Pride, said the Sun, yields where warmth persists.</p>
+        <text-author>A fable</text-author>
+      </epigraph>
+      <p>The North Wind and the Sun disputed which was the stronger, while a traveler walked the road wrapped in a warm cloak.</p>
+      <p>They agreed that the one who first made the traveler take off his cloak should be counted the stronger.</p>
+    </section>
+    <section>
+      <title><p>After the contest</p></title>
+      <poem>
+        <v>The wind blew; the cloak stayed.</v>
+        <v>The sun shone; the cloak fell.</v>
+      </poem>
+      <p>Then the Sun shone out warmly, and immediately the traveler took off his cloak.</p>
+      <p>This FB2 has flowing text only, so extractDocumentText can fill an OfflineTextBuffer for offline TTS.</p>
+    </section>
+  </body>
+</FictionBook>

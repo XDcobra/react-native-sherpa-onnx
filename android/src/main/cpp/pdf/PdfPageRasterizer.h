@@ -20,6 +20,8 @@ struct RasterOptions {
   int dpi = 144;
   /** Longest-edge cap after DPI scale (default 4096). <= 0 disables. */
   int max_side = 4096;
+  /** User or owner password. Empty = none. */
+  std::string password;
   std::function<bool()> is_cancelled;
   std::function<void(int done, int total, const char* phase)> on_progress;
 };
@@ -52,8 +54,7 @@ bool RasterizePdfPage(
  * When PDFium is not compiled in, returns ERR_PDF_PDFIUM_DISABLED.
  */
 PdfRasterResult RasterizePdfPages(
-    const uint8_t* pdf_bytes,
-    size_t pdf_size,
+    const PdfSource& src,
     const RasterOptions& options = {});
 
 }  // namespace pdf

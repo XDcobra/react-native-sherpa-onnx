@@ -110,6 +110,7 @@ export type OcrVlmOptions = {
 export type OcrDocVlmOptions = OcrVlmOptions;
 
 type OcrInitShared = {
+  /** ORT execution provider (`cpu`, `nnapi`, `xnnpack`, `coreml`, …). Shared by all families. */
   provider?: string;
   numThreads?: number;
   maxNewTokens?: number;
