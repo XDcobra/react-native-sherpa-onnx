@@ -671,6 +671,9 @@ target_include_directories(pdf_text_layer_host_test PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image"
 )
 target_link_libraries(pdf_text_layer_host_test PRIVATE ${PDF_GTEST_LIBS})
+target_compile_definitions(pdf_text_layer_host_test PRIVATE
+  SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
 # Default host builds leave HAVE_PDFIUM undefined (disabled stub).
 add_test(NAME pdf_text_layer_host_test COMMAND $<TARGET_FILE:pdf_text_layer_host_test>)
 set_tests_properties(pdf_text_layer_host_test PROPERTIES

@@ -9,6 +9,7 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.sherpaonnx.fileio.FileIOHelper
+import com.sherpaonnx.fileio.SeekableOpenedSource
 import com.sherpaonnx.pdf.PdfNative
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import com.sherpaonnx.text.pipeline.TextSpatialSpan
@@ -85,22 +86,15 @@ class SherpaOnnxPdfHelper(
       return
     }
 
-    val bytes =
-      try {
-        val file = fileIO.resolveSourceToFilePath(source)
-        file.readBytes()
-      } catch (e: Exception) {
-        promise.reject(ERR_OPEN, "Failed to read PDF FileSource: ${e.message}", e)
-        return
-      }
-    if (bytes.isEmpty()) {
-      promise.reject(ERR_INVALID, "PDF FileSource is empty")
-      return
-    }
-
+    val opened = openSeekable(source, promise) ?: return
     val pages = readPages(options)
     emitProgress(0, 1, "extract")
-    val raw = PdfNative.nativeExtractTextLayer(bytes, pages)
+    val raw =
+      try {
+        PdfNative.nativeExtractTextLayer(opened.path, opened.fd, pages)
+      } finally {
+        opened.close()
+      }
     val ok = raw.getOrNull(0) as? Boolean ?: false
     val errorCode = raw.getOrNull(1) as? String
     val errorMessage = raw.getOrNull(2) as? String
@@ -165,19 +159,7 @@ class SherpaOnnxPdfHelper(
 
     com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactContext)
 
-    val bytes =
-      try {
-        val file = fileIO.resolveSourceToFilePath(source)
-        file.readBytes()
-      } catch (e: Exception) {
-        promise.reject(ERR_OPEN, "Failed to read PDF FileSource: ${e.message}", e)
-        return
-      }
-    if (bytes.isEmpty()) {
-      promise.reject(ERR_INVALID, "PDF FileSource is empty")
-      return
-    }
-
+    val opened = openSeekable(source, promise) ?: return
     val pages = readPages(options)
     val dpi =
       if (options != null && options.hasKey("dpi") && !options.isNull("dpi")) {
@@ -206,7 +188,19 @@ class SherpaOnnxPdfHelper(
 
     emitProgress(0, 1, "raster")
     val raw =
-      PdfNative.nativeRasterizePages(bytes, pages, dpi, maxSide, strategy, hotFrames)
+      try {
+        PdfNative.nativeRasterizePages(
+          opened.path,
+          opened.fd,
+          pages,
+          dpi,
+          maxSide,
+          strategy,
+          hotFrames,
+        )
+      } finally {
+        opened.close()
+      }
     val ok = raw["ok"] as? Boolean ?: false
     if (!ok) {
       val code = raw["errorCode"] as? String ?: ERR_INTERNAL
@@ -238,6 +232,9 @@ class SherpaOnnxPdfHelper(
     result.putInt("pageCount", (raw["pageCount"] as? Number)?.toInt() ?: 0)
     promise.resolve(result)
   }
+
+  private fun openSeekable(source: ReadableMap, promise: Promise): SeekableOpenedSource? =
+    fileIO.openSeekableSourceOrReject(source, promise, ERR_OPEN, TAG)
 
   private fun emitProgress(done: Int, total: Int, phase: String) {
     try {

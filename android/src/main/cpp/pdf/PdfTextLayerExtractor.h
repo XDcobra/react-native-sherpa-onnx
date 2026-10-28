@@ -22,8 +22,7 @@ struct ExtractOptions {
  * When PDFium is not compiled in, returns ERR_PDF_PDFIUM_DISABLED.
  */
 PdfTextLayerResult ExtractPdfTextLayer(
-    const uint8_t* pdf_bytes,
-    size_t pdf_size,
+    const PdfSource& src,
     const ExtractOptions& options = {});
 
 }  // namespace pdf

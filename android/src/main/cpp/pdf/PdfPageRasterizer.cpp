@@ -141,8 +141,7 @@ bool RasterizePageUnlocked(
 }
 
 PdfRasterResult RasterizeWithPdfium(
-    const uint8_t* pdf_bytes,
-    size_t pdf_size,
+    const PdfSource& src,
     const RasterOptions& options) {
   PdfRasterResult result;
 
@@ -154,8 +153,7 @@ PdfRasterResult RasterizeWithPdfium(
 
   std::string open_code;
   std::string open_msg;
-  PdfDocument doc =
-      PdfDocument::OpenMem(pdf_bytes, pdf_size, &open_code, &open_msg);
+  PdfDocument doc = PdfDocument::Open(src, &open_code, &open_msg);
   if (!doc.ok()) {
     result.error_code = open_code.empty() ? kErrOpenFailed : open_code;
     result.error_message = open_msg.empty() ? "Failed to open PDF" : open_msg;
@@ -285,15 +283,13 @@ bool RasterizePdfPage(
 }
 
 PdfRasterResult RasterizePdfPages(
-    const uint8_t* pdf_bytes,
-    size_t pdf_size,
+    const PdfSource& src,
     const RasterOptions& options) {
 #if defined(HAVE_PDFIUM) && HAVE_PDFIUM
   (void)IsPdfiumCompiledIn();
-  return RasterizeWithPdfium(pdf_bytes, pdf_size, options);
+  return RasterizeWithPdfium(src, options);
 #else
-  (void)pdf_bytes;
-  (void)pdf_size;
+  (void)src;
   (void)options;
   return RasterizeDisabled();
 #endif

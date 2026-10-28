@@ -52,8 +52,7 @@ bool RasterizePdfPage(
  * When PDFium is not compiled in, returns ERR_PDF_PDFIUM_DISABLED.
  */
 PdfRasterResult RasterizePdfPages(
-    const uint8_t* pdf_bytes,
-    size_t pdf_size,
+    const PdfSource& src,
     const RasterOptions& options = {});
 
 }  // namespace pdf

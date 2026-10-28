@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "../fileio/SeekableSource.h"
+
 namespace sherpa_onnx {
 namespace pdf {
 
@@ -16,6 +18,8 @@ inline constexpr const char* kErrNoTextLayer = "ERR_PDF_NO_TEXT_LAYER";
 inline constexpr const char* kErrCancelled = "ERR_PDF_CANCELLED";
 inline constexpr const char* kErrRenderFailed = "ERR_PDF_RENDER_FAILED";
 inline constexpr const char* kErrInternal = "ERR_PDF_INTERNAL";
+
+using PdfSource = fileio::SeekableSource;
 
 struct PdfTextSpan {
   int utf16_start = 0;

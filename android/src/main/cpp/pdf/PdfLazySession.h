@@ -6,18 +6,16 @@
 
 #include "ImageTypes.h"
 
-#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <vector>
 
 namespace sherpa_onnx {
 namespace pdf {
 
 /**
  * Retained PDFium document for lazy-lru OfflineImageBuffer slots.
- * Owns PDF bytes (FPDF_LoadMemDocument requires lifetime) + open doc.
+ * Owns the open FPDF_DOCUMENT (and dup'd fd when opened from a PFD).
  * Thread-safe single-page rasterize.
  */
 class PdfLazySession final : public PdfLazyBackend {
@@ -28,13 +26,8 @@ class PdfLazySession final : public PdfLazyBackend {
   PdfLazySession& operator=(PdfLazySession&&) = delete;
   ~PdfLazySession() override;
 
-  /**
-   * Open PDF from bytes. Copies bytes into owned storage.
-   * On failure returns nullptr and sets err_code / err_message.
-   */
   static std::unique_ptr<PdfLazySession> Open(
-      const uint8_t* pdf_bytes,
-      size_t pdf_size,
+      const PdfSource& src,
       int dpi,
       int max_side,
       std::string* err_code,
@@ -51,14 +44,8 @@ class PdfLazySession final : public PdfLazyBackend {
       std::string* err_message) override;
 
  private:
-  PdfLazySession(
-      std::vector<uint8_t> bytes,
-      PdfDocument doc,
-      int page_count,
-      int dpi,
-      int max_side);
+  PdfLazySession(PdfDocument doc, int page_count, int dpi, int max_side);
 
-  std::vector<uint8_t> bytes_;
   PdfDocument doc_;
   int page_count_ = 0;
   int dpi_ = 144;

@@ -1,5 +1,6 @@
 #import "SherpaOnnx.h"
 #import "../fileio/FileIOResolver.h"
+#import "../pdf/bridge/PdfLazyIo.h"
 
 #import <Foundation/Foundation.h>
 #import <ImageIO/ImageIO.h>
@@ -416,6 +417,7 @@ int MaxSideFromOptions(NSDictionary *options) {
                            reject:(RCTPromiseRejectBlock)reject {
   EnsureImageRegistryInit();
   ImageRegistry::Instance().Release([bufferId UTF8String]);
+  SherpaOnnxPdfReleaseLazyHandle(bufferId);
   resolve(nil);
 }
 
