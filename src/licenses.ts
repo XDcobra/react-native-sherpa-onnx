@@ -1,5 +1,12 @@
 import SherpaOnnx from './NativeSherpaOnnx';
 
+/** Vendored libyuv (BSD-3-Clause + PATENTS). Full text: THIRD_PARTY_LICENSES/libyuv.txt */
+export const LIBYUV_LICENSE = {
+  name: 'libyuv',
+  license: 'BSD-3-Clause',
+  url: 'https://chromium.googlesource.com/libyuv/libyuv',
+} as const;
+
 export interface ModelLicense {
   asset_name: string;
   license_type: string;
