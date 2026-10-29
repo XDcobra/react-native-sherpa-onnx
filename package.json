@@ -155,6 +155,11 @@
       "types": "./lib/typescript/src/imagebuffer/index.d.ts",
       "default": "./lib/module/imagebuffer/index.js"
     },
+    "./videobuffer": {
+      "source": "./src/videobuffer/index.ts",
+      "types": "./lib/typescript/src/videobuffer/index.d.ts",
+      "default": "./lib/module/videobuffer/index.js"
+    },
     "./ocr": {
       "source": "./src/ocr/index.ts",
       "types": "./lib/typescript/src/ocr/index.d.ts",
@@ -202,6 +207,8 @@
     "third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG",
     "third_party/pugixml/src",
     "third_party/pugixml/src/**",
+    "third_party/libyuv",
+    "third_party/libyuv/**",
     "!ios/build",
     "!android/build",
     "!android/gradle",

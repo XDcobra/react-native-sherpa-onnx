@@ -3545,6 +3545,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return m
   }
 
+  private fun videoInfoToWritableMap(info: Map<String, Any>): com.facebook.react.bridge.WritableMap {
+    val m = Arguments.createMap()
+    for ((k, v) in info) {
+      when (v) {
+        is String -> m.putString(k, v)
+        is Int -> m.putInt(k, v)
+        is Long -> m.putDouble(k, v.toDouble())
+        is Double -> m.putDouble(k, v)
+        is Float -> m.putDouble(k, v.toDouble())
+        is Boolean -> m.putBoolean(k, v)
+        else -> m.putString(k, v.toString())
+      }
+    }
+    return m
+  }
+
   private fun emitImageProgress(operationId: String?, done: Int, total: Int, phase: String) {
     if (operationId.isNullOrEmpty()) return
     try {
@@ -3660,6 +3676,99 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(imageInfoToWritableMap(info))
     } catch (e: Exception) {
       promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun createOfflineVideoBufferFromFile(path: String, options: ReadableMap?, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.createOfflineFromFile(path)))
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun createEmptyLiveVideoBuffer(options: ReadableMap?, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      val ring = if (options != null && options.hasKey("ringSeconds")) options.getInt("ringSeconds") else 10
+      val retention = if (options != null && options.hasKey("retentionMode")) options.getInt("retentionMode") else 0
+      val retPath = if (options != null && options.hasKey("retentionPath")) options.getString("retentionPath") else null
+      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.createLive(ring, retention, retPath)))
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun ingestFileToLiveVideoBuffer(liveBufferId: String, path: String, options: ReadableMap?, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      val realtime = options != null && options.hasKey("pacing") && options.getString("pacing") == "realtime"
+      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.ingestFile(liveBufferId, path, realtime)))
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun finalizeLiveVideoBuffer(liveBufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.finalizeLive(liveBufferId)))
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun getVideoBufferInfo(bufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.getInfo(bufferId)))
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun getVideoKeyframeTimes(bufferId: String, fromUs: Double, toUs: Double, maxCount: Double, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      val times = com.sherpaonnx.video.VideoBufferService.keyframeTimes(bufferId, fromUs.toLong(), toUs.toLong(), maxCount.toInt())
+      val arr = Arguments.createArray()
+      for (t in times) arr.pushDouble(t.toDouble())
+      promise.resolve(arr)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun releaseVideoBuffer(bufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      com.sherpaonnx.video.VideoBufferService.release(bufferId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun createOfflineImageBufferFromVideo(bufferId: String, options: ReadableMap?, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      val sampling = if (options != null && options.hasKey("sampling")) options.getInt("sampling") else 0
+      val uniform = if (options != null && options.hasKey("uniformCount")) options.getInt("uniformCount") else 0
+      val fps = if (options != null && options.hasKey("fps")) options.getDouble("fps") else 0.0
+      val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 0
+      var times: LongArray? = null
+      if (options != null && options.hasKey("timesUs") && !options.isNull("timesUs")) {
+        val arr = options.getArray("timesUs")
+        if (arr != null && arr.size() > 0) {
+          times = LongArray(arr.size()) { i -> arr.getDouble(i).toLong() }
+        }
+      }
+      promise.resolve(videoInfoToWritableMap(
+        com.sherpaonnx.video.VideoBufferService.createImageFromVideo(bufferId, sampling, uniform, fps, maxSide, times)
+      ))
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
     }
   }
 
@@ -3785,6 +3894,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       (info["href"] as? String)?.takeIf { it.isNotEmpty() }?.let {
         m.putString("href", it)
       }
+      (info["sourceVideoBufferId"] as? String)?.takeIf { it.isNotEmpty() }?.let { id ->
+        m.putString("sourceVideoBufferId", id)
+        (info["sourcePtsUs"] as? Number)?.toDouble()?.let { m.putDouble("sourcePtsUs", it) }
+        (info["sourceFrameIndex"] as? Number)?.toDouble()?.let { m.putDouble("sourceFrameIndex", it) }
+      }
       promise.resolve(m)
     } catch (e: Exception) {
       promise.reject("ERR_IMAGE_INTERNAL", e.message, e)
@@ -3827,6 +3941,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         }
         (info["href"] as? String)?.takeIf { it.isNotEmpty() }?.let {
           m.putString("href", it)
+        }
+        (info["sourceVideoBufferId"] as? String)?.takeIf { it.isNotEmpty() }?.let { id ->
+          m.putString("sourceVideoBufferId", id)
+          (info["sourcePtsUs"] as? Number)?.toDouble()?.let { m.putDouble("sourcePtsUs", it) }
+          (info["sourceFrameIndex"] as? Number)?.toDouble()?.let { m.putDouble("sourceFrameIndex", it) }
         }
         promise.resolve(m)
       } catch (e: Exception) {

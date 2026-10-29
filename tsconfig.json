@@ -33,6 +33,7 @@
       "react-native-sherpa-onnx/extraction": ["./src/extraction/index.ts"],
       "react-native-sherpa-onnx/alignment": ["./src/alignment/index.ts"],
       "react-native-sherpa-onnx/imagebuffer": ["./src/imagebuffer/index.ts"],
+      "react-native-sherpa-onnx/videobuffer": ["./src/videobuffer/index.ts"],
       "react-native-sherpa-onnx/ocr": ["./src/ocr/index.ts"],
       "react-native-sherpa-onnx/pdf": ["./src/pdf/index.ts"]
     },

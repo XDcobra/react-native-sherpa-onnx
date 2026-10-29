@@ -1107,6 +1107,9 @@ export interface Spec extends TurboModule {
     dpi?: number;
     sectionIndex?: number;
     href?: string;
+    sourceVideoBufferId?: string;
+    sourcePtsUs?: number;
+    sourceFrameIndex?: number;
   }>;
 
   /**
@@ -1126,6 +1129,9 @@ export interface Spec extends TurboModule {
     dpi?: number;
     sectionIndex?: number;
     href?: string;
+    sourceVideoBufferId?: string;
+    sourcePtsUs?: number;
+    sourceFrameIndex?: number;
   }>;
 
   releaseOfflineImageBuffer(bufferId: string): Promise<void>;
@@ -3161,6 +3167,95 @@ export interface Spec extends TurboModule {
 
   /** Cancel network activity; does not delete the partial file. */
   cancelForegroundDownload(id: string): Promise<boolean>;
+
+  // ── VideoBuffer ────────────────────────────────────────────────────────
+
+  createOfflineVideoBufferFromFile(
+    path: string,
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    liveEdgeUs?: number;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: string;
+    seekableStartUs?: number;
+    seekableEndUs?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  createEmptyLiveVideoBuffer(options?: Object): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    liveEdgeUs?: number;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: string;
+    seekableStartUs?: number;
+    seekableEndUs?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  ingestFileToLiveVideoBuffer(
+    liveBufferId: string,
+    path: string,
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  finalizeLiveVideoBuffer(liveBufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  getVideoBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    liveEdgeUs?: number;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: string;
+    seekableStartUs?: number;
+    seekableEndUs?: number;
+  }>;
+
+  getVideoKeyframeTimes(
+    bufferId: string,
+    fromUs: number,
+    toUs: number,
+    maxCount: number
+  ): Promise<number[]>;
+
+  releaseVideoBuffer(bufferId: string): Promise<void>;
+
+  createOfflineImageBufferFromVideo(
+    bufferId: string,
+    options?: Object
+  ): Promise<{
+    imageBufferId?: string;
+    frameCount?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
 
   /** Required by NativeEventEmitter on RN iOS/Android. */
   addListener(eventName: string): void;
