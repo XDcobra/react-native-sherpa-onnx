@@ -337,6 +337,7 @@ ios/Frameworks/FFmpeg.xcframework/
 ios/Frameworks/libarchive.xcframework/
 ios/Frameworks/lexbor.xcframework/
 ios/Frameworks/libwebp.xcframework/
+ios/Frameworks/pdfium.xcframework/
 ios/Frameworks/*.zip
 ios/Frameworks/*.xcarchive
 ios/Frameworks/.framework-version

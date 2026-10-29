@@ -16,6 +16,8 @@ Default SDK builds do **not** include PDFium.
 | Android | `sherpaOnnxEnablePdfium=true` in the app (or library) `gradle.properties` |
 | iOS | `SHERPA_ONNX_ENABLE_PDFIUM=1` when installing pods / building |
 
+iOS vendors `pdfium.xcframework` with `pdfium.framework` slices. An autolinked app build phase copies `pdfium.framework` into the app bundle.
+
 Prebuilts: [third_party/pdfium_prebuilt/README.md](../third_party/pdfium_prebuilt/README.md).
 
 Without enable, both APIs reject with `ERR_PDF_PDFIUM_DISABLED`.

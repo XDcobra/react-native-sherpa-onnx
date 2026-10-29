@@ -117,6 +117,7 @@
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
 				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
+				3CFAAEC43510D76FC7C14205 /* [CP-User] [SherpaOnnx] Embed pdfium.framework */,
 			);
 			buildRules = (
 			);
@@ -204,6 +205,16 @@
 			shellPath = /bin/sh;
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
+		};
+		3CFAAEC43510D76FC7C14205 /* [CP-User] [SherpaOnnx] Embed pdfium.framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			name = "[CP-User] [SherpaOnnx] Embed pdfium.framework";
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "#!/bin/bash\n# Copy pdfium.framework into the app bundle. Runs as an autolinked script phase\n# on the *app* target (React Native static pods do not embed a dynamic\n# XCFramework via [CP] Embed Pods Frameworks).\n#\n# No-ops when PDFium is not installed (SDK default is off).\nset -euo pipefail\n\nif [ -z \"${FRAMEWORKS_FOLDER_PATH:-}\" ]; then\n  exit 0\nfi\n\nfind_pdfium_xcframework() {\n  local candidate\n  for candidate in \\\n    \"${PODS_ROOT:-}/../../node_modules/react-native-sherpa-onnx/ios/Frameworks/pdfium.xcframework\" \\\n    \"${PODS_ROOT:-}/../../../node_modules/react-native-sherpa-onnx/ios/Frameworks/pdfium.xcframework\" \\\n    \"${PODS_ROOT:-}/../../../ios/Frameworks/pdfium.xcframework\" \\\n    \"${SRCROOT:-}/../node_modules/react-native-sherpa-onnx/ios/Frameworks/pdfium.xcframework\"\n  do\n    if [ -d \"$candidate/ios-arm64/pdfium.framework\" ]; then\n      printf '%s\\n' \"$candidate\"\n      return 0\n    fi\n  done\n  return 1\n}\n\nXCFW=\"$(find_pdfium_xcframework || true)\"\nif [ -z \"$XCFW\" ]; then\n  exit 0\nfi\n\nSLICE=\"ios-arm64\"\nif [[ \"${PLATFORM_NAME:-}\" == *simulator* ]]; then\n  SLICE=\"ios-arm64_x86_64-simulator\"\nfi\n\nSRC=\"${XCFW}/${SLICE}/pdfium.framework\"\nif [ ! -d \"$SRC\" ]; then\n  echo \"error: pdfium.framework missing at $SRC\" >&2\n  exit 1\nfi\n\nDEST=\"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nmkdir -p \"$DEST\"\nrsync -a --delete \"$SRC\" \"$DEST/\"\n\nif [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ] \\\n  && [ \"${CODE_SIGNING_REQUIRED:-}\" != \"NO\" ] \\\n  && [ \"${CODE_SIGNING_ALLOWED:-}\" != \"NO\" ]; then\n  /usr/bin/codesign --force --sign \"${EXPANDED_CODE_SIGN_IDENTITY}\" \\\n    ${OTHER_CODE_SIGN_FLAGS:-} \\\n    --preserve-metadata=identifier,entitlements \\\n    \"${DEST}/pdfium.framework\"\nfi\n";
 		};
 		A7B8C9D0E1F2031425364758 /* Copy Sherpa models and test_wavs from sherpa_models */ = {
 			isa = PBXShellScriptBuildPhase;

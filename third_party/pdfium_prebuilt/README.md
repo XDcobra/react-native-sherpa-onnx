@@ -23,8 +23,8 @@ Resolution (only when enable is true): THIRD_PARTY → LOCAL_SDK → Maven `com.
 
 ```
 third_party/pdfium_prebuilt/pdfium.xcframework/
-  ios-arm64/libpdfium.dylib + Headers/
-  ios-arm64_x86_64-simulator/libpdfium.dylib + Headers/
+  ios-arm64/pdfium.framework/{pdfium, Headers/, Info.plist}
+  ios-arm64_x86_64-simulator/pdfium.framework/{pdfium, Headers/, Info.plist}
 ```
 
 Release asset `pdfium-ios.zip` contains that XCFramework. With `SHERPA_ONNX_ENABLE_PDFIUM=1`, `scripts/setup-ios-framework.sh` installs it under `ios/Frameworks/pdfium.xcframework`.
