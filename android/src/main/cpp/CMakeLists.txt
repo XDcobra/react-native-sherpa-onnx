@@ -203,6 +203,7 @@ set(SOURCES
     image/ImageFrameEncoder.cpp
     image/decode/ImageDecoder.cpp
     jni/image/sherpa-onnx-imagebuffer-jni.cpp
+    jni/video/sherpa-onnx-videobuffer-jni.cpp
     ocr/OcrFactory.cpp
     ocr/OcrDetect.cpp
     ocr/OcrTextUtils.cpp
@@ -262,6 +263,32 @@ set(SOURCES
     document/DocMobi.cpp
     ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
     jni/document/sherpa-onnx-document-jni.cpp
+    video/core/AlignedBuffer.cpp
+    video/core/FileIo.cpp
+    video/core/ColorConvert.cpp
+    video/core/Timeline.cpp
+    video/core/MemoryBudget.cpp
+    video/core/FrameSlab.cpp
+    video/core/DecodedFrameCache.cpp
+    video/demux/BitstreamUtil.cpp
+    video/decode/FakeDecoder.cpp
+    video/decode/DecoderFactory.cpp
+    video/decode/DecoderPool.cpp
+    video/decode/DecodeSession.cpp
+    video/decode/ThinningPlanner.cpp
+    video/demux/FfmpegDemuxer.cpp
+    video/VideoEntry.cpp
+    video/OfflineVideoEntry.cpp
+    video/VideoRegistry.cpp
+    video/VideoFrameAccess.cpp
+    video/VideoPacketReader.cpp
+    video/VideoImageBridge.cpp
+    video/live/EncodedPacketRing.cpp
+    video/live/PacketSpool.cpp
+    video/live/LiveVideoEntry.cpp
+    video/live/LiveIngest.cpp
+    video/platform/android/AMediaCodecDecoder.cpp
+    video/platform/android/AMediaCodecEncoder.cpp
 )
 
 # lexbor: prebuilt shared .so (TAG + Gradle download). No in-tree source build.
@@ -401,6 +428,12 @@ else()
 endif()
 endif(USE_PDFIUM)
 
+# Vendored libyuv (VideoBuffer convert / scale / rotate).
+if(NOT TARGET yuv)
+    add_subdirectory("${PROJECT_ROOT}/../third_party/libyuv"
+                     "${CMAKE_CURRENT_BINARY_DIR}/libyuv")
+endif()
+
 # Create shared library
 add_library(sherpaonnx SHARED
     ${SOURCES}
@@ -482,6 +515,8 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
     ${CMAKE_CURRENT_SOURCE_DIR}/image
     ${CMAKE_CURRENT_SOURCE_DIR}/image/decode
+    ${CMAKE_CURRENT_SOURCE_DIR}/video
+    ${PROJECT_ROOT}/../third_party/libyuv/include
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/ppocr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doctr
@@ -573,7 +608,7 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor)
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor yuv mediandk)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE
