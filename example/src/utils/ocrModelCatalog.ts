@@ -53,7 +53,9 @@ export function isOcrModelFolder(folder: string, hint?: string): boolean {
     normalized.includes('granite-docling') ||
     normalized.includes('nemotron-3.5-parse') ||
     normalized.includes('nemotron-parse') ||
-    normalized.includes('nemotron_parse')
+    normalized.includes('nemotron_parse') ||
+    normalized.includes('paddleocr-vl') ||
+    normalized.includes('paddleocr_vl')
   );
 }
 
@@ -65,8 +67,15 @@ export function isVlmOcrPack(id: string): boolean {
     lower.includes('granite') ||
     lower.includes('nemotron-3.5-parse') ||
     lower.includes('nemotron-parse') ||
-    lower.includes('nemotron_parse')
+    lower.includes('nemotron_parse') ||
+    lower.includes('paddleocr-vl') ||
+    lower.includes('paddleocr_vl')
   );
+}
+
+export function isPaddleocrVlOcrPack(id: string): boolean {
+  const lower = id.toLowerCase();
+  return lower.includes('paddleocr-vl') || lower.includes('paddleocr_vl');
 }
 
 export function resolveOcrModelSource(

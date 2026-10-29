@@ -17,10 +17,8 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
     'silero-vad', // Lightweight VAD
   ],
   [ModelCategory.Kws]: [
-    // Bundled via example/scripts/model-download-config.json (all three KWS packs)
+    // Bundled via example/scripts/model-download-config.json
     'sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20',
-    'sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01',
-    'sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01',
   ],
   [ModelCategory.AudioTagging]: [
     'sherpa-onnx-ced-mini-audio-tagging-2024-04-19',
@@ -38,11 +36,9 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
   [ModelCategory.Punctuation]: [],
   [ModelCategory.Qnn]: [],
   [ModelCategory.Ocr]: [
-    // Bundled via example/scripts/model-download-config.json (one pack per family)
+    // Bundled via example/scripts/model-download-config.json
     'ppocrv6-tiny',
-    'doctr-mobile',
-    'docvlm-granite-258m-fp32',
-    'nemotron-3.5-parse-int8',
+    'paddleocr-vl-1.6-fp16',
   ],
 };
 

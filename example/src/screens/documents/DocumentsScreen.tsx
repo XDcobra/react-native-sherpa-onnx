@@ -993,10 +993,8 @@ export default function DocumentsScreen() {
           <Ionicons name="book-outline" size={48} style={styles.icon} />
           <Text style={styles.title}>Read aloud</Text>
           <Text style={styles.subtitle}>
-            Extract EPUB / FB2 / DRM-free MOBI / AZW3 markup or a PDF text
-            layer, then speak it with offline TTS. Mixed EPUBs and CBZ comics
-            need an OCR model on this screen too (init, then Recognize). DRM
-            Kindle files and scan-only PDFs cannot be read here.
+            Extract EPUB, FB2, MOBI, AZW3, or PDF text — or OCR mixed EPUB/CBZ
+            pages — then speak with offline TTS.
           </Text>
         </View>
 

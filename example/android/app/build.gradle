@@ -153,6 +153,8 @@ dependencies {
 
 // Play Asset Delivery (PAD) + local debug:
 // - Download writes into the :sherpa_models asset-pack (source for PAD / installDebugWithPad).
+// - IDs removed from model-download-config.json are pruned from the pack and from mirrored
+//   app assets (manual extras such as UVR stay). ZIP32 APKs cannot exceed 4 GiB.
 // - syncPackModelsToAppAssets mirrors those folders into app/src/main/assets/models so plain
 //   yarn android / installDebug can discover them via listAssetModels() without PAD or adb.
 // - assetPacks = [":sherpa_models"]; include ':sherpa_models' in settings.gradle.
@@ -170,7 +172,8 @@ tasks.register("downloadSherpaModels", Exec) {
         "--platform", "android",
         "--output", sherpaModelsOutputDir.absolutePath,
         "--cache", sherpaModelsCacheDir.absolutePath,
-        "--config", sherpaModelsConfig.absolutePath
+        "--config", sherpaModelsConfig.absolutePath,
+        "--prune", androidAppModelsDir.absolutePath
 }
 
 tasks.register("syncPackModelsToAppAssets") {

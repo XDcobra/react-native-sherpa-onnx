@@ -34,6 +34,7 @@ function concreteFromDetect(
     modelType === 'doctr' ||
     modelType === 'doc_vlm' ||
     modelType === 'nemotron_parse' ||
+    modelType === 'paddleocr_vl' ||
     modelType === 'ppocr'
   ) {
     return modelType;
@@ -85,5 +86,5 @@ export async function fillOcrCustomConfigFromModelFolder(
 }
 
 export function emptyOcrCustomInitFormState(): OcrCustomInitFormState {
-  return { modelType: 'ppocr', fileSources: {}, maxNewTokens: 0 };
+  return { modelType: 'ppocr', fileSources: {}, maxNewTokens: 0, maxPixels: 0 };
 }

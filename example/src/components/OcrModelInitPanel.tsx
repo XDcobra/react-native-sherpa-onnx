@@ -16,9 +16,10 @@ import {
   InitModeSelector,
   ModelFolderGrid,
   OcrCustomInitForm,
+  PaddleocrVlMaxPixelsChips,
 } from './modelInit';
 import { getModelDisplayName } from '../modelConfig';
-import { isVlmOcrPack } from '../utils/ocrModelCatalog';
+import { isPaddleocrVlOcrPack, isVlmOcrPack } from '../utils/ocrModelCatalog';
 import {
   OCR_MAX_THREADS,
   OCR_MAX_UNCLIP,
@@ -114,6 +115,15 @@ export function OcrModelInitPanel({
                 maxNewTokens={ocr.customInitForm.maxNewTokens}
                 onChangeMaxNewTokens={(maxNewTokens) =>
                   ocr.setCustomInitForm((prev) => ({ ...prev, maxNewTokens }))
+                }
+                disabled={busy || ocr.fillLoading}
+              />
+            ) : null}
+            {ocr.selectedFolder && isPaddleocrVlOcrPack(ocr.selectedFolder) ? (
+              <PaddleocrVlMaxPixelsChips
+                maxPixels={ocr.customInitForm.maxPixels}
+                onChangeMaxPixels={(maxPixels) =>
+                  ocr.setCustomInitForm((prev) => ({ ...prev, maxPixels }))
                 }
                 disabled={busy || ocr.fillLoading}
               />
