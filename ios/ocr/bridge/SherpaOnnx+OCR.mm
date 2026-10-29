@@ -94,6 +94,13 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
     t.hasConfidence = true;
     t.confidence = span.confidence;
     t.origin = "ocr";
+    sherpa_onnx::image::ImageFrameInfo finfo;
+    if (ImageRegistry::Instance().GetFrameInfo(imageBufferId, span.frame_index,
+                                               finfo) &&
+        !finfo.sourceVideoBufferId.empty() && finfo.sourcePtsUs >= 0) {
+      t.hasPtsMs = true;
+      t.ptsMs = static_cast<double>(finfo.sourcePtsUs) / 1000.0;
+    }
     out.push_back(t);
   }
   return out;

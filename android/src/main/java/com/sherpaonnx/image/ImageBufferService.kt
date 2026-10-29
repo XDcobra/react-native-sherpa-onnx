@@ -104,6 +104,11 @@ internal object ImageBufferService {
     (result["href"] as? String)?.takeIf { it.isNotEmpty() }?.let {
       out["href"] = it
     }
+    (result["sourceVideoBufferId"] as? String)?.takeIf { it.isNotEmpty() }?.let { id ->
+      out["sourceVideoBufferId"] = id
+      (result["sourcePtsUs"] as? Number)?.toLong()?.let { out["sourcePtsUs"] = it }
+      (result["sourceFrameIndex"] as? Number)?.toLong()?.let { out["sourceFrameIndex"] = it }
+    }
     return out
   }
 

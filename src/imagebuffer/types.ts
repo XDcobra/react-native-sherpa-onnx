@@ -40,6 +40,12 @@ export interface OfflineImageFrameInfo {
   sectionIndex?: number;
   /** EPUB path or archive member path. */
   href?: string;
+  /** Optional VideoBuffer origin (createOfflineImageBufferFromVideo). */
+  source?: {
+    videoBufferId: string;
+    ptsUs: number;
+    frameIndex: number;
+  };
 }
 
 /** Branded handle for an offline image buffer. */

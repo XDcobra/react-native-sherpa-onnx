@@ -94,6 +94,12 @@ NSDictionary *FrameInfoDict(const sherpa_onnx::image::ImageFrameInfo &info) {
   if (!info.href.empty()) {
     dict[@"href"] = [NSString stringWithUTF8String:info.href.c_str()] ?: @"";
   }
+  if (!info.sourceVideoBufferId.empty()) {
+    dict[@"sourceVideoBufferId"] =
+        [NSString stringWithUTF8String:info.sourceVideoBufferId.c_str()] ?: @"";
+    dict[@"sourcePtsUs"] = @(info.sourcePtsUs);
+    dict[@"sourceFrameIndex"] = @(info.sourceFrameIndex);
+  }
   return dict;
 }
 

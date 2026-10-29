@@ -45,6 +45,9 @@ function mapFrameInfo(raw: {
   dpi?: number;
   sectionIndex?: number;
   href?: string;
+  sourceVideoBufferId?: string;
+  sourcePtsUs?: number;
+  sourceFrameIndex?: number;
 }): OfflineImageFrameInfo {
   const frame: OfflineImageFrameInfo = {
     index: raw.index,
@@ -73,6 +76,22 @@ function mapFrameInfo(raw: {
   const href = typeof raw.href === 'string' ? raw.href : '';
   if (href.length > 0) {
     frame.href = href;
+  }
+  const vid =
+    typeof raw.sourceVideoBufferId === 'string' ? raw.sourceVideoBufferId : '';
+  if (
+    vid.length > 0 &&
+    raw.sourcePtsUs != null &&
+    Number.isFinite(raw.sourcePtsUs)
+  ) {
+    frame.source = {
+      videoBufferId: vid,
+      ptsUs: raw.sourcePtsUs,
+      frameIndex:
+        raw.sourceFrameIndex != null && Number.isFinite(raw.sourceFrameIndex)
+          ? Math.trunc(raw.sourceFrameIndex)
+          : 0,
+    };
   }
   return frame;
 }
