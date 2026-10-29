@@ -804,6 +804,14 @@ TEST(ModelDetectTest, DetectOcrFromFileListMatchesExpected) {
             EXPECT_TRUE(result.paths.rec.empty()) << block.assetName;
             EXPECT_TRUE(result.paths.cls.empty()) << block.assetName;
             EXPECT_TRUE(result.paths.rec_dict.empty()) << block.assetName;
+        } else if (expectedKind == sherpaonnx::OcrModelKind::kPaddleocrVl) {
+            EXPECT_FALSE(result.paths.vision_encoder.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.embedding.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.decoder.empty()) << block.assetName;
+            EXPECT_FALSE(result.paths.tokenizer.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.embed_tokens.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.det.empty()) << block.assetName;
+            EXPECT_TRUE(result.paths.rec.empty()) << block.assetName;
         }
     }
 }
@@ -918,6 +926,14 @@ TEST(ModelDetectTest, OcrKindStringsMapDocVlmAliases) {
               "nemotron_parse");
     EXPECT_EQ(model_detect_test::OcrKindFromString("nemotron"),
               OcrModelKind::kUnknown);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("paddleocr_vl"),
+              OcrModelKind::kPaddleocrVl);
+    EXPECT_EQ(model_detect_test::OcrKindFromString("paddleocr-vl"),
+              OcrModelKind::kPaddleocrVl);
+    EXPECT_EQ(model_detect_test::OcrKindToString(OcrModelKind::kPaddleocrVl),
+              "paddleocr_vl");
+    EXPECT_EQ(model_detect_test::OcrKindFromString("paddleocr"),
+              OcrModelKind::kPpocr);
 }
 
 std::vector<std::string> DocVlmFileLines(const std::string& root,
@@ -1250,6 +1266,123 @@ TEST(ModelDetectTest, DetectOcrManifestFamilyNemotronParseWinsOverGraniteOctet) 
     EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kNemotronParse);
     EXPECT_FALSE(result.paths.patch_embed.empty());
     EXPECT_FALSE(result.paths.pos_embed.empty());
+}
+
+std::vector<std::string> PaddleocrVlFileLines(const std::string& root,
+                                              bool includeData,
+                                              const std::string& suffix = "") {
+    std::vector<std::string> lines = {
+        root + "/",
+        root + "/vision_encoder" + suffix + ".onnx",
+        root + "/embedding" + suffix + ".onnx",
+        root + "/decoder" + suffix + ".onnx",
+        root + "/tokenizer.json",
+        root + "/ocr_manifest.json",
+    };
+    if (includeData) {
+        lines.push_back(root + "/vision_encoder" + suffix + ".onnx_data");
+        lines.push_back(root + "/embedding" + suffix + ".onnx_data");
+        lines.push_back(root + "/decoder" + suffix + ".onnx_data");
+    }
+    return lines;
+}
+
+void TouchPaddleocrVlGroup(const ScopedOcrDir& dir, bool includeData) {
+    dir.Touch("vision_encoder.onnx");
+    dir.Touch("embedding.onnx");
+    dir.Touch("decoder.onnx");
+    dir.Touch("tokenizer.json");
+    if (includeData) {
+        dir.Touch("vision_encoder.onnx_data");
+        dir.Touch("embedding.onnx_data");
+        dir.Touch("decoder.onnx_data");
+    }
+}
+
+TEST(ModelDetectTest, DetectOcrPaddleocrVlFromFileList) {
+    const std::string root = "community-paddleocr-vl-pack";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, PaddleocrVlFileLines(root, true));
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kPaddleocrVl);
+    EXPECT_FALSE(result.paths.vision_encoder.empty());
+    EXPECT_FALSE(result.paths.embedding.empty());
+    EXPECT_FALSE(result.paths.decoder.empty());
+    EXPECT_FALSE(result.paths.tokenizer.empty());
+    EXPECT_TRUE(result.paths.embed_tokens.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrPaddleocrVlWithoutExternalData) {
+    const std::string root = "paddleocr-vl-self-contained";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, PaddleocrVlFileLines(root, false));
+    auto result = sherpaonnx::DetectOcrModelFromFileList(files, root, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kPaddleocrVl);
+    EXPECT_TRUE(result.paths.embedding_data.empty());
+}
+
+TEST(ModelDetectTest, DetectOcrPaddleocrVlSuffixedQuantGroup) {
+    const std::string root = "paddleocr-vl-fp16-mix";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, PaddleocrVlFileLines(root, true, "_fp16"));
+    auto result =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "auto", "fp16");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kPaddleocrVl);
+    EXPECT_NE(result.paths.decoder.find("decoder_fp16.onnx"), std::string::npos);
+    EXPECT_NE(result.paths.embedding.find("embedding_fp16.onnx"),
+              std::string::npos);
+}
+
+TEST(ModelDetectTest, DetectOcrPaddleocrVlNameIsNotPpocr) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "paddleocr-vl-1.6-fp16", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kPaddleocrVl);
+    EXPECT_NE(result.selectedKind, sherpaonnx::OcrModelKind::kPpocr);
+}
+
+TEST(ModelDetectTest, DetectOcrExplicitPaddleocrVlAlias) {
+    const std::string root = "community-paddleocr-vl-pack";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        root, PaddleocrVlFileLines(root, true));
+    auto result =
+        sherpaonnx::DetectOcrModelFromFileList(files, root, "paddleocr-vl");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kPaddleocrVl);
+}
+
+TEST(ModelDetectTest, DetectOcrBarePaddleocrIsPpocrNotVl) {
+    auto result = sherpaonnx::DetectOcrModelFromFileList(
+        {}, "paddleocrv4-server", "auto");
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kPpocr);
+    EXPECT_NE(result.selectedKind, sherpaonnx::OcrModelKind::kPaddleocrVl);
+}
+
+TEST(ModelDetectTest, DetectOcrManifestFamilyPaddleocrVlWins) {
+    ScopedOcrDir dir("family-paddleocr-vl");
+    TouchPaddleocrVlGroup(dir, true);
+    dir.Write("ocr_manifest.json", "{\"family\":\"paddleocr_vl\"}");
+    auto result = sherpaonnx::DetectOcrModel(
+        std::optional<std::string>(dir.path), std::nullopt, "auto", "");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::OcrModelKind::kPaddleocrVl);
+    EXPECT_FALSE(result.paths.embedding.empty());
+}
+
+TEST(UnifiedModelDetectTest, PaddleocrVlDirectoryIsOcrNotEnhancement) {
+    ScopedOcrDir dir("unified-paddleocr-vl");
+    TouchPaddleocrVlGroup(dir, true);
+    dir.Write("ocr_manifest.json", "{\"family\":\"paddleocr_vl\"}");
+    auto result = sherpaonnx::DetectModel(
+        std::optional<std::string>(dir.path), std::nullopt);
+    EXPECT_TRUE(result.matched) << result.error << " category=" << result.category
+                                << " type=" << result.modelType;
+    EXPECT_EQ(result.category, "ocr");
+    EXPECT_EQ(result.modelType, "paddleocr_vl");
 }
 
 TEST(ModelDetectTest, DetectOcrNemotronParseFailsWithoutPosEmbed) {

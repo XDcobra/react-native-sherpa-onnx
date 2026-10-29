@@ -216,4 +216,14 @@ describe('github-asset-rules — OCR', () => {
       isAssetSupportedForCategory(ModelCategory.Ocr, 'det.onnx', 'onnx')
     ).toBe(false);
   });
+
+  it('accepts paddleocr_vl tar.bz2 packs', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Ocr,
+        'paddleocr-vl-1.6-fp16.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+  });
 });

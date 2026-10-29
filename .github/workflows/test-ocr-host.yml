@@ -1,6 +1,7 @@
 # Host OCR tests: unit (CTC/DB/factory) + real PpocrBackend golden with ppocrv6-tiny
 # + DoctrBackend golden with doctr-mobile
 # + DocVlmBackend unit tests (grid math, DocTags, Family, empty extras).
+# + paddleocr_vl_host_test units (no multi-GB pack download).
 # The granite pack is not downloaded on pull_request or push; tokenizer, prompt,
 # and DocVlmSmoke.EnHello skip. Dispatch with run_doc_vlm_golden to download the
 # archive and run the smoke. Downloaded packs come from the ocr-models release.
@@ -39,7 +40,7 @@ concurrency:
 
 jobs:
   ocr-host:
-    name: OCR host tests — ppocr + doctr + doc_vlm + nemotron_parse units (no VLM packs)
+    name: OCR host tests — ppocr + doctr + doc_vlm + nemotron_parse + paddleocr_vl units (no VLM packs)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -89,11 +90,11 @@ jobs:
           test -f build/ocr-models/doctr-mobile/ocr_manifest.json
 
       # ── build + run ─────────────────────────────────────────────
-      - name: Configure and build ppocr_host_test + doctr_host_test + doc_vlm_host_test + nemotron_parse_host_test
+      - name: Configure and build ppocr_host_test + doctr_host_test + doc_vlm_host_test + nemotron_parse_host_test + paddleocr_vl_host_test
         run: |
           mkdir -p test/cpp/build && cd test/cpp/build
           cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --target ppocr_host_test doctr_host_test doc_vlm_host_test nemotron_parse_host_test
+          cmake --build . --target ppocr_host_test doctr_host_test doc_vlm_host_test nemotron_parse_host_test paddleocr_vl_host_test
 
       - name: Run ppocr host tests
         working-directory: ${{ github.workspace }}
@@ -120,6 +121,12 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           ctest --test-dir test/cpp/build -R nemotron_parse_host_test --output-on-failure
+
+      # Pack-gated paddleocr_vl cases GTEST_SKIP. Do not set PADDLEOCR_VL_MODEL_DIR.
+      - name: Run paddleocr_vl host unit tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R paddleocr_vl_host_test --output-on-failure
 
   doc-vlm-golden:
     name: OCR host smoke — doc_vlm granite (manual)

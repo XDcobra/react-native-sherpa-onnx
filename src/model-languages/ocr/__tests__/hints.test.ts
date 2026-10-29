@@ -169,6 +169,30 @@ describe('doc_vlm pack language hints', () => {
     );
   });
 
+  it('returns Table A1 ISO-639-1 hints for paddleocr_vl packs and family', () => {
+    const hints = iso6391HintsForOcrModelType('paddleocr_vl');
+    expect(hints).toBeDefined();
+    expect(hints![0]).toBe('en');
+    expect(hints![1]).toBe('zh');
+    expect(hints).toEqual(
+      expect.arrayContaining([
+        'en',
+        'zh',
+        'ja',
+        'ko',
+        'ar',
+        'ru',
+        'hi',
+        'th',
+        'el',
+        'ta',
+      ])
+    );
+    expect(OCR_PACK_ISO6391_HINTS_BY_ID['paddleocr-vl-1.6-fp16']).toEqual(
+      hints
+    );
+  });
+
   it('keeps doctr, ppocr, and auto family hints', () => {
     expect(iso6391HintsForOcrModelType('doctr')).toEqual([
       ...DOCTR_ISO6391_HINTS,

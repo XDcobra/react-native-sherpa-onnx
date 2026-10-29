@@ -8,3 +8,4 @@ docvlm-granite-258m-q8.tar.bz2,doc_vlm
 ppocrv6-medium.tar.bz2,ppocr
 ppocrv6-small.tar.bz2,ppocr
 ppocrv6-tiny.tar.bz2,ppocr
+paddleocr-vl-1.6-fp16.tar.bz2,paddleocr_vl
