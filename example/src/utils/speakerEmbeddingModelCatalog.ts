@@ -20,7 +20,6 @@ import {
 const PAD_PACK_NAME = 'sherpa_models';
 
 export const RECOMMENDED_SPEAKER_EMBEDDING_IDS = [
-  '3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k',
   '3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k',
   'wespeaker_en_voxceleb_CAM++',
   'sherpa-onnx-wespeaker-voxceleb-resnet34',

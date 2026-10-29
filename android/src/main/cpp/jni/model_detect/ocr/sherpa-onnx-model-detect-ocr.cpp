@@ -90,6 +90,12 @@ std::string FindRecDict(const std::vector<FileEntry>& files) {
     return "";
 }
 
+bool InferPaddleocrVlNameOnly(const std::string& nameHint) {
+    const std::string lower = ToLower(nameHint);
+    return lower.find("paddleocr_vl") != std::string::npos ||
+           lower.find("paddleocr-vl") != std::string::npos;
+}
+
 bool InferNemotronParseNameOnly(const std::string& nameHint) {
     const std::string lower = ToLower(nameHint);
     return lower.find("nemotron_parse") != std::string::npos ||
@@ -107,6 +113,7 @@ bool InferDocVlmNameOnly(const std::string& nameHint) {
 }
 
 bool InferPpocrNameOnly(const std::string& nameHint) {
+    if (InferPaddleocrVlNameOnly(nameHint)) return false;
     const std::string lower = ToLower(nameHint);
     return lower.find("ppocr") != std::string::npos ||
            lower.find("paddleocr") != std::string::npos ||
@@ -212,6 +219,69 @@ bool TryCompleteDocVlmGroup(const std::vector<FileEntry>& files,
     return true;
 }
 
+struct PaddleocrVlGroup {
+    std::string suffix;
+    std::string vision;
+    std::string vision_data;
+    std::string embedding;
+    std::string embedding_data;
+    std::string decoder;
+    std::string decoder_data;
+    std::uint64_t decoder_size = 0;
+};
+
+bool TryCompletePaddleocrVlGroup(const std::vector<FileEntry>& files,
+                                 const std::string& suffix, PaddleocrVlGroup& out) {
+    const std::string vision = FindFileByName(files, "vision_encoder" + suffix + ".onnx");
+    const std::string vision_data =
+        FindFileByName(files, "vision_encoder" + suffix + ".onnx_data");
+    const std::string embedding = FindFileByName(files, "embedding" + suffix + ".onnx");
+    const std::string embedding_data =
+        FindFileByName(files, "embedding" + suffix + ".onnx_data");
+    const std::string decoder = FindFileByName(files, "decoder" + suffix + ".onnx");
+    const std::string decoder_data =
+        FindFileByName(files, "decoder" + suffix + ".onnx_data");
+    if (vision.empty() || embedding.empty() || decoder.empty()) {
+        return false;
+    }
+    out.suffix = suffix;
+    out.vision = vision;
+    out.vision_data = vision_data;
+    out.embedding = embedding;
+    out.embedding_data = embedding_data;
+    out.decoder = decoder;
+    out.decoder_data = decoder_data;
+    out.decoder_size = FileSizeByPath(files, decoder);
+    return true;
+}
+
+std::vector<PaddleocrVlGroup> CollectPaddleocrVlGroups(
+    const std::vector<FileEntry>& files) {
+    static const std::string kVisionStem = "vision_encoder";
+    std::vector<std::string> suffixes;
+    for (const auto& entry : files) {
+        if (!EndsWithOnnxGraph(entry.nameLower)) continue;
+        if (entry.nameLower.size() < kVisionStem.size() + 5) continue;
+        if (entry.nameLower.compare(0, kVisionStem.size(), kVisionStem) != 0) {
+            continue;
+        }
+        const std::string suffix =
+            OnnxSuffixAfterStem(entry.nameLower, kVisionStem);
+        if (std::find(suffixes.begin(), suffixes.end(), suffix) == suffixes.end()) {
+            suffixes.push_back(suffix);
+        }
+    }
+
+    std::vector<PaddleocrVlGroup> groups;
+    for (const auto& suffix : suffixes) {
+        PaddleocrVlGroup group;
+        if (TryCompletePaddleocrVlGroup(files, suffix, group)) {
+            groups.push_back(std::move(group));
+        }
+    }
+    return groups;
+}
+
 std::vector<DocVlmGroup> CollectDocVlmGroups(const std::vector<FileEntry>& files) {
     static const std::string kVisionStem = "vision_encoder";
     std::vector<std::string> suffixes;
@@ -269,6 +339,32 @@ const DocVlmGroup* SelectDocVlmGroup(const std::vector<DocVlmGroup>& groups,
     }
     if (matching.empty()) return nullptr;
     const DocVlmGroup* best = matching.front();
+    for (const auto* group : matching) {
+        if (group->decoder_size > best->decoder_size) best = group;
+    }
+    return best;
+}
+
+const PaddleocrVlGroup* SelectPaddleocrVlGroup(
+    const std::vector<PaddleocrVlGroup>& groups, const std::string& quantization,
+    const std::string& modelDir) {
+    if (groups.empty()) return nullptr;
+
+    const bool onlyUnsuffixed =
+        groups.size() == 1 && groups.front().suffix.empty();
+    if (onlyUnsuffixed) {
+        return FlattenFolderAccepts(quantization, modelDir) ? &groups.front()
+                                                            : nullptr;
+    }
+
+    std::vector<const PaddleocrVlGroup*> matching;
+    for (const auto& group : groups) {
+        if (MatchesQuantization(ToLower(BaseName(group.vision)), quantization)) {
+            matching.push_back(&group);
+        }
+    }
+    if (matching.empty()) return nullptr;
+    const PaddleocrVlGroup* best = matching.front();
     for (const auto* group : matching) {
         if (group->decoder_size > best->decoder_size) best = group;
     }
@@ -426,13 +522,31 @@ void FillNemotronParsePaths(sherpaonnx::OcrModelPaths& paths,
     paths.pos_embed = FindFileByName(files, "pos_embed.npy");
 }
 
+void FillPaddleocrVlPaths(sherpaonnx::OcrModelPaths& paths,
+                          const std::vector<FileEntry>& files,
+                          const PaddleocrVlGroup& group,
+                          const std::string& manifest) {
+    paths.vision_encoder = group.vision;
+    paths.vision_encoder_data = group.vision_data;
+    paths.embedding = group.embedding;
+    paths.embedding_data = group.embedding_data;
+    paths.decoder = group.decoder;
+    paths.decoder_data = group.decoder_data;
+    paths.tokenizer = FindFileByName(files, "tokenizer.json");
+    paths.manifest =
+        manifest.empty() ? FindFileByName(files, "ocr_manifest.json") : manifest;
+}
+
 bool LayoutPresent(sherpaonnx::OcrModelKind kind, bool canNemotronParse,
-                   bool canDocVlm, bool canPpocr, bool canDoctr) {
+                   bool canDocVlm, bool canPaddleocrVl, bool canPpocr,
+                   bool canDoctr) {
     switch (kind) {
         case sherpaonnx::OcrModelKind::kNemotronParse:
             return canNemotronParse;
         case sherpaonnx::OcrModelKind::kDocVlm:
             return canDocVlm;
+        case sherpaonnx::OcrModelKind::kPaddleocrVl:
+            return canPaddleocrVl;
         case sherpaonnx::OcrModelKind::kPpocr:
             return canPpocr;
         case sherpaonnx::OcrModelKind::kDoctr:
@@ -488,6 +602,9 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
         } else if (InferDocVlmNameOnly(modelDir)) {
             result.selectedKind = OK::kDocVlm;
             result.detectedModels.push_back({"doc_vlm", modelDir});
+        } else if (InferPaddleocrVlNameOnly(modelDir)) {
+            result.selectedKind = OK::kPaddleocrVl;
+            result.detectedModels.push_back({"paddleocr_vl", modelDir});
         } else if (InferPpocrNameOnly(modelDir)) {
             result.selectedKind = OK::kPpocr;
             result.detectedModels.push_back({"ppocr", modelDir});
@@ -526,6 +643,12 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
         !FindFileByName(files, "patch_embed" + docVlmGroup->suffix + ".onnx")
              .empty() &&
         !FindFileByName(files, "pos_embed.npy").empty();
+    const auto paddleocrVlGroups = CollectPaddleocrVlGroups(files);
+    const PaddleocrVlGroup* paddleocrVlGroup =
+        !tokenizer.empty()
+            ? SelectPaddleocrVlGroup(paddleocrVlGroups, quantization, modelDir)
+            : nullptr;
+    const bool canPaddleocrVl = paddleocrVlGroup != nullptr;
     const bool canPpocr = !det.empty() && !rec.empty() && !recDict.empty();
     const bool canDoctr = CanDoctrLayout(files, quantization) && !manifest.empty();
 
@@ -534,6 +657,9 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
     }
     if (canDocVlm) {
         result.detectedModels.push_back({"doc_vlm", modelDir});
+    }
+    if (canPaddleocrVl) {
+        result.detectedModels.push_back({"paddleocr_vl", modelDir});
     }
     if (canPpocr) {
         result.detectedModels.push_back({"ppocr", modelDir});
@@ -550,8 +676,8 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
         }
         selected = requestedExplicit;
         AppendUniqueSource(result.detectionSources, DS::kExplicitModelType);
-        if (!LayoutPresent(selected, canNemotronParse, canDocVlm, canPpocr,
-                           canDoctr)) {
+        if (!LayoutPresent(selected, canNemotronParse, canDocVlm, canPaddleocrVl,
+                           canPpocr, canDoctr)) {
             result.error = LayoutMissingError(selected, modelDir);
             return result;
         }
@@ -564,8 +690,8 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
         }
         if (family.status == ManifestFamilyStatus::kKnown) {
             selected = family.kind;
-            if (!LayoutPresent(selected, canNemotronParse, canDocVlm, canPpocr,
-                               canDoctr)) {
+            if (!LayoutPresent(selected, canNemotronParse, canDocVlm,
+                               canPaddleocrVl, canPpocr, canDoctr)) {
                 result.error = LayoutMissingError(selected, modelDir);
                 return result;
             }
@@ -574,6 +700,9 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
         } else if (canDocVlm) {
             selected = OK::kDocVlm;
+            AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
+        } else if (canPaddleocrVl) {
+            selected = OK::kPaddleocrVl;
             AppendUniqueSource(result.detectionSources, DS::kFallbackOrder);
         } else if (canPpocr) {
             selected = OK::kPpocr;
@@ -586,9 +715,10 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
                 "OCR: unrecognized pack layout (need a complete "
                 "nemotron_parse patch_embed + pos_embed.npy + vision/embed/"
                 "decoder triple, a complete doc_vlm vision/embed/decoder "
-                "triple plus tokenizer.json and ocr_manifest.json, or det + "
-                "rec ONNX and either a rec dictionary yml/txt for ppocr, or "
-                "ocr_manifest.json for doctr) in " +
+                "triple plus tokenizer.json and ocr_manifest.json, a complete "
+                "paddleocr_vl vision_encoder/embedding/decoder triple plus "
+                "tokenizer.json, or det + rec ONNX and either a rec dictionary "
+                "yml/txt for ppocr, or ocr_manifest.json for doctr) in " +
                 modelDir;
             return result;
         }
@@ -607,6 +737,12 @@ sherpaonnx::OcrDetectResult DetectOcrModelFromFiles(
             return result;
         }
         FillDocVlmPaths(result.paths, files, *docVlmGroup, manifest);
+    } else if (selected == OK::kPaddleocrVl) {
+        if (paddleocrVlGroup == nullptr) {
+            result.error = LayoutMissingError(selected, modelDir);
+            return result;
+        }
+        FillPaddleocrVlPaths(result.paths, files, *paddleocrVlGroup, manifest);
     } else if (selected == OK::kPpocr) {
         result.paths.det = det;
         result.paths.rec = rec;

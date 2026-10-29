@@ -212,6 +212,9 @@ function validateCatalog(catalog) {
   if (!catalog.ocr.nemotron_parse?.hints?.length) {
     throw new Error('ocr.nemotron_parse.hints must be a non-empty array');
   }
+  if (!catalog.ocr.paddleocr_vl?.hints?.length) {
+    throw new Error('ocr.paddleocr_vl.hints must be a non-empty array');
+  }
   const funasr = catalog.stt.funasr_nano;
   if (funasr?.entries) {
     validateFunasrPickerVariants(funasr);

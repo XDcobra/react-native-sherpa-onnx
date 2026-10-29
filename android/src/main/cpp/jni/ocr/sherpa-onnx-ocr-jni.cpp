@@ -134,6 +134,8 @@ void ApplyPathOverrides(JNIEnv* env, jobject pathOverrides,
   opts.path_vision_encoder_data = readKey("vision_encoder_data");
   opts.path_embed_tokens = readKey("embed_tokens");
   opts.path_embed_tokens_data = readKey("embed_tokens_data");
+  opts.path_embedding = readKey("embedding");
+  opts.path_embedding_data = readKey("embedding_data");
   opts.path_decoder = readKey("decoder");
   opts.path_decoder_data = readKey("decoder_data");
   opts.path_tokenizer = readKey("tokenizer");
@@ -152,8 +154,8 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring modelDir,
     jstring modelType, jint numThreads, jstring provider, jint maxSideLen,
     jboolean useOrientationCls, jfloat detBoxThresh, jfloat detBoxScoreThresh,
-    jfloat detUnclipRatio, jint maxNewTokens, jstring quantization,
-    jobject pathOverrides) {
+    jfloat detUnclipRatio, jint maxNewTokens, jint maxPixels,
+    jstring quantization, jobject pathOverrides, jstring paddleocrVlTask) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string dir = JstringToStd(env, modelDir);
   const std::string type = JstringToStd(env, modelType);
@@ -167,13 +169,29 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     opts.det_box_score_thresh = detBoxScoreThresh;
     opts.det_unclip_ratio = detUnclipRatio;
     opts.max_new_tokens = maxNewTokens;
+    opts.max_pixels = maxPixels;
     opts.provider = JstringToStd(env, provider);
     opts.quantization = JstringToStd(env, quantization);
+    opts.paddleocr_vl_task = JstringToStd(env, paddleocrVlTask);
     ApplyPathOverrides(env, pathOverrides, opts);
+    LOGI("nativeLoad instance=%s type=%s provider=%s threads=%d dir=%s",
+         id.c_str(), type.c_str(),
+         opts.provider.empty() ? "cpu" : opts.provider.c_str(),
+         opts.num_threads, dir.c_str());
     engine.Load(type.empty() ? "auto" : type, dir, opts);
   } catch (const std::exception& e) {
+    const char* msg = e.what() ? e.what() : "OCR load failed";
+    LOGI("nativeLoad failed instance=%s: %s", id.c_str(), msg);
     jclass ex = env->FindClass("java/lang/RuntimeException");
-    env->ThrowNew(ex, e.what() ? e.what() : "OCR load failed");
+    if (ex != nullptr) {
+      env->ThrowNew(ex, msg);
+    }
+  } catch (...) {
+    LOGI("nativeLoad failed instance=%s: unknown exception", id.c_str());
+    jclass ex = env->FindClass("java/lang/RuntimeException");
+    if (ex != nullptr) {
+      env->ThrowNew(ex, "OCR load failed");
+    }
   }
 }
 
@@ -256,6 +274,13 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
       PutString(env, pathsMap, pathsPut, "embed_tokens_data",
                 detect.embedTokensDataPath);
     }
+    if (!detect.embeddingPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "embedding", detect.embeddingPath);
+    }
+    if (!detect.embeddingDataPath.empty()) {
+      PutString(env, pathsMap, pathsPut, "embedding_data",
+                detect.embeddingDataPath);
+    }
     if (!detect.decoderPath.empty()) {
       PutString(env, pathsMap, pathsPut, "decoder", detect.decoderPath);
     }
@@ -315,6 +340,13 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     if (!detect.embedTokensDataPath.empty()) {
       PutString(env, filesMap, filesPut, "embed_tokens_data",
                 detect.embedTokensDataPath);
+    }
+    if (!detect.embeddingPath.empty()) {
+      PutString(env, filesMap, filesPut, "embedding", detect.embeddingPath);
+    }
+    if (!detect.embeddingDataPath.empty()) {
+      PutString(env, filesMap, filesPut, "embedding_data",
+                detect.embeddingDataPath);
     }
     if (!detect.decoderPath.empty()) {
       PutString(env, filesMap, filesPut, "decoder", detect.decoderPath);
@@ -418,7 +450,8 @@ JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring imageBufferId,
     jintArray frameIndices, jstring granularity, jstring operationId,
-    jint progressMinIntervalMs) {
+    jint progressMinIntervalMs, jboolean hasPaddleocrVl,
+    jstring paddleocrVlTask) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string imageId = JstringToStd(env, imageBufferId);
   const std::string opId = JstringToStd(env, operationId);
@@ -440,6 +473,8 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   opts.granularity = ParseGranularity(gran);
   opts.progress_min_interval_ms =
       progressMinIntervalMs < 0 ? 0 : static_cast<int>(progressMinIntervalMs);
+  opts.has_paddleocr_vl = hasPaddleocrVl == JNI_TRUE;
+  opts.paddleocr_vl_task = JstringToStd(env, paddleocrVlTask);
   if (frameIndices != nullptr) {
     const jsize n = env->GetArrayLength(frameIndices);
     jint* elems = env->GetIntArrayElements(frameIndices, nullptr);

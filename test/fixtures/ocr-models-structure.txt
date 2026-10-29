@@ -124,3 +124,25 @@ ppocrv6-tiny/cls.onnx
 ppocrv6-tiny/LICENSE
 ppocrv6-tiny/rec.onnx
 ppocrv6-tiny/rec_inference.yml
+# Asset: paddleocr-vl-1.6-fp16.tar.bz2
+# updated_at: 2026-10-28T11:50:50Z
+paddleocr-vl-1.6-fp16/
+paddleocr-vl-1.6-fp16/LICENSE
+paddleocr-vl-1.6-fp16/chat_template.jinja
+paddleocr-vl-1.6-fp16/config.json
+paddleocr-vl-1.6-fp16/configuration_paddleocr_vl.py
+paddleocr-vl-1.6-fp16/decoder.onnx
+paddleocr-vl-1.6-fp16/decoder.onnx_data
+paddleocr-vl-1.6-fp16/embedding.onnx
+paddleocr-vl-1.6-fp16/embedding.onnx_data
+paddleocr-vl-1.6-fp16/generation_config.json
+paddleocr-vl-1.6-fp16/image_processing_paddleocr_vl.py
+paddleocr-vl-1.6-fp16/ocr_manifest.json
+paddleocr-vl-1.6-fp16/preprocessor_config.json
+paddleocr-vl-1.6-fp16/processing_paddleocr_vl.py
+paddleocr-vl-1.6-fp16/processor_config.json
+paddleocr-vl-1.6-fp16/special_tokens_map.json
+paddleocr-vl-1.6-fp16/tokenizer.json
+paddleocr-vl-1.6-fp16/tokenizer_config.json
+paddleocr-vl-1.6-fp16/vision_encoder.onnx
+paddleocr-vl-1.6-fp16/vision_encoder.onnx_data

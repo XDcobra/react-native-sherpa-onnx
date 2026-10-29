@@ -310,8 +310,12 @@ export type OcrInitBridgeOptions = {
   detBoxThresh?: number;
   detBoxScoreThresh?: number;
   detUnclipRatio?: number;
-  /** VLM generation cap (`doc_vlm` / `nemotron_parse`). Omit → native 0 → 8192. */
+  /** VLM generation cap (`doc_vlm` / `nemotron_parse` / `paddleocr_vl`). Omit → native 0 → 8192. */
   maxNewTokens?: number;
+  /** paddleocr_vl smart_resize cap. Omit → native 0 → 1003520. */
+  maxPixels?: number;
+  /** paddleocr_vl control-prompt task (`ocr` | `spotting`). Omit → native `ocr`. */
+  paddleocrVlTask?: string;
   quantization?: string;
 };
 
@@ -332,6 +336,10 @@ export type OcrRecognizeBridgeOptions = {
   operationId?: string;
   /** Native coalesce interval. Default 200. `0` = unthrottled. */
   progressMinIntervalMs?: number;
+  /** paddleocr_vl-only. Presence on a non-paddleocr_vl family is `OCR_INVALID_ARGUMENT`. */
+  paddleocrVl?: {
+    task?: string;
+  };
 };
 
 /** Native result from `detectOcrModel`. */
@@ -356,6 +364,8 @@ export type OcrDetectNativeResult = {
     vision_encoder_data?: string;
     embed_tokens?: string;
     embed_tokens_data?: string;
+    embedding?: string;
+    embedding_data?: string;
     decoder?: string;
     decoder_data?: string;
     tokenizer?: string;
@@ -375,6 +385,8 @@ export type OcrDetectNativeResult = {
     vision_encoder_data?: string;
     embed_tokens?: string;
     embed_tokens_data?: string;
+    embedding?: string;
+    embedding_data?: string;
     decoder?: string;
     decoder_data?: string;
     tokenizer?: string;

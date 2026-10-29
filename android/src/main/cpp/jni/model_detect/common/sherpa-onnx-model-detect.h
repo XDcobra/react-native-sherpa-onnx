@@ -111,7 +111,7 @@ enum class AlignmentModelKind {
     kWav2Vec2
 };
 
-/** Offline OCR families: ppocr, doctr, doc_vlm (granite-docling), nemotron_parse. */
+/** Offline OCR families: ppocr, doctr, doc_vlm, nemotron_parse, paddleocr_vl. */
 enum class OcrModelKind {
     kUnknown,
     kPpocr,
@@ -120,12 +120,17 @@ enum class OcrModelKind {
     /** Granite-Docling packs: vision encoder, embed tokens, merged decoder, tokenizer, manifest. */
     kDocVlm,
     /** Nemotron-3.5-Parse: granite octet plus patch_embed + pos_embed.npy. */
-    kNemotronParse
+    kNemotronParse,
+    /** PaddleOCR-VL: vision_encoder + embedding + decoder (not embed_tokens / decoder_model_merged). */
+    kPaddleocrVl
 };
 
-/** Canonical family token. Alias only `nemotron-parse` (never bare `nemotron`). */
+/** Canonical family token. Alias only `paddleocr-vl` (never bare `paddleocr`). */
 inline OcrModelKind ParseOcrModelType(const std::string& modelType) {
     const std::string t = model_detect::ToLower(modelType);
+    if (t == "paddleocr_vl" || t == "paddleocr-vl") {
+        return OcrModelKind::kPaddleocrVl;
+    }
     if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
         return OcrModelKind::kPpocr;
     }
@@ -152,13 +157,16 @@ inline const char* OcrModelKindToLiteral(OcrModelKind kind) {
             return "doc_vlm";
         case OcrModelKind::kNemotronParse:
             return "nemotron_parse";
+        case OcrModelKind::kPaddleocrVl:
+            return "paddleocr_vl";
         default:
             return "unknown";
     }
 }
 
 inline bool IsOcrVlmKind(OcrModelKind kind) {
-    return kind == OcrModelKind::kDocVlm || kind == OcrModelKind::kNemotronParse;
+    return kind == OcrModelKind::kDocVlm || kind == OcrModelKind::kNemotronParse ||
+           kind == OcrModelKind::kPaddleocrVl;
 }
 
 /** Offline source separation: Spleeter (vocals+accompaniment) or UVR (single MDX-Net ONNX). */
@@ -402,7 +410,11 @@ struct OcrModelPaths {
     std::string embed_tokens;
     /** doc_vlm: `embed_tokens.onnx_data`. */
     std::string embed_tokens_data;
-    /** doc_vlm: `decoder_model_merged.onnx`. Key name is `decoder`. */
+    /** paddleocr_vl: `embedding.onnx` (not embed_tokens). */
+    std::string embedding;
+    /** paddleocr_vl: `embedding.onnx_data`. */
+    std::string embedding_data;
+    /** doc_vlm: `decoder_model_merged.onnx`. paddleocr_vl: `decoder.onnx`. Key name is `decoder`. */
     std::string decoder;
     /** doc_vlm: `decoder_model_merged.onnx_data`. */
     std::string decoder_data;

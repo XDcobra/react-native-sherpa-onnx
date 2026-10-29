@@ -99,10 +99,13 @@ Pod::Spec.new do |s|
   private_headers = Dir.glob(File.join(pod_root, "ios", "**", "*.h")).reject do |path|
     path.start_with?(File.join(pod_root, "ios", "Frameworks") + File::SEPARATOR)
   end
-  # Mark all shared C++ headers from android/ as private so CocoaPods does not
-  # put them in the umbrella module map. Swift's Clang dependency scanner builds
-  # the module as non-C++ and fails on #include <cstdint> otherwise.
-  private_headers += Dir.glob(File.join(pod_root, "android", "src", "main", "cpp", "**", "*.h"))
+  # Mark all shared C++ headers as private so CocoaPods does not put them in
+  # the umbrella module map. Swift's Clang dependency scanner builds the module
+  # as non-C++ and fails on #include <cstdint> / <exception> otherwise.
+  # `*.h` only would still leak `*.hpp` (pugixml, alignment, ios C++ helpers).
+  private_headers += Dir.glob(File.join(pod_root, "android", "src", "main", "cpp", "**", "*.{h,hpp}"))
+  private_headers += Dir.glob(File.join(pod_root, "ios", "**", "*.hpp"))
+  private_headers += Dir.glob(File.join(pod_root, "third_party", "pugixml", "src", "**", "*.{h,hpp}"))
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox", "ImageIO", "CoreGraphics", "UIKit"
@@ -134,11 +137,17 @@ Pod::Spec.new do |s|
     has_libwebp = true
   end
 
-  # Opt-in (default off). Require explicit SHERPA_ONNX_ENABLE_PDFIUM=1 and xcframework present.
+  # Opt-in (default off). Require explicit SHERPA_ONNX_ENABLE_PDFIUM=1 and pdfium.framework slices.
   has_pdfium = false
   enable_pdfium = ENV['SHERPA_ONNX_ENABLE_PDFIUM']
-  if (enable_pdfium == '1' || enable_pdfium == 'true') && File.exist?(pdfium_xcframework)
-    has_pdfium = true
+  pdfium_enabled = (enable_pdfium == '1' || enable_pdfium == 'true')
+  pdfium_framework_bin = File.join(pdfium_xcframework, "ios-arm64", "pdfium.framework", "pdfium")
+  if pdfium_enabled
+    if File.exist?(pdfium_framework_bin)
+      has_pdfium = true
+    elsif File.exist?(pdfium_xcframework)
+      abort("[SherpaOnnx] ios/Frameworks/pdfium.xcframework must contain pdfium.framework. Rebuild with third_party/pdfium_prebuilt/create_pdfium_ios_xcframework.sh or re-run scripts/setup-ios-framework.sh.")
+    end
   end
 
   vendored = ["ios/Frameworks/sherpa_onnx.xcframework"]
@@ -177,8 +186,10 @@ Pod::Spec.new do |s|
   libwebp_device_slice = File.join(libwebp_xcframework_root, "ios-arm64")
 
   pdfium_xcframework_root = File.join(pod_root, "ios", "Frameworks", "pdfium.xcframework")
-  pdfium_simulator_headers = File.join(pdfium_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
-  pdfium_device_headers = File.join(pdfium_xcframework_root, "ios-arm64", "Headers")
+  pdfium_device_framework = File.join(pdfium_xcframework_root, "ios-arm64", "pdfium.framework")
+  pdfium_simulator_framework = File.join(pdfium_xcframework_root, "ios-arm64_x86_64-simulator", "pdfium.framework")
+  pdfium_simulator_headers = File.join(pdfium_simulator_framework, "Headers")
+  pdfium_device_headers = File.join(pdfium_device_framework, "Headers")
   pdfium_simulator_slice = File.join(pdfium_xcframework_root, "ios-arm64_x86_64-simulator")
   pdfium_device_slice = File.join(pdfium_xcframework_root, "ios-arm64")
 
@@ -208,7 +219,7 @@ Pod::Spec.new do |s|
     ld_flags_base += ' -lwebp'
   end
   if has_pdfium
-    ld_flags_base += ' -lpdfium'
+    ld_flags_base += ' -framework pdfium'
   end
   ld_flags_ios = "#{ld_flags_base} -force_load \"#{device_sherpa_binary}\""
   ld_flags_sim = "#{ld_flags_base} -force_load \"#{simulator_sherpa_binary}\""
@@ -243,6 +254,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/ocr/doctr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/doc_vlm\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/nemotron_parse\"",
+    "\"#{pod_root}/android/src/main/cpp/ocr/paddleocr_vl\"",
     "\"#{pod_root}/android/src/main/cpp\"",
     "\"#{pod_root}/android/src/main/cpp/pdf\"",
     "\"#{pod_root}/android/src/main/cpp/document\"",
@@ -315,9 +327,11 @@ Pod::Spec.new do |s|
     library_search_paths_ios << "\"#{libwebp_device_slice}\""
     library_search_paths_sim << "\"#{libwebp_simulator_slice}\""
   end
+  framework_search_paths_ios = ["$(inherited)"]
+  framework_search_paths_sim = ["$(inherited)"]
   if has_pdfium
-    library_search_paths_ios << "\"#{pdfium_device_slice}\""
-    library_search_paths_sim << "\"#{pdfium_simulator_slice}\""
+    framework_search_paths_ios << "\"#{pdfium_device_slice}\""
+    framework_search_paths_sim << "\"#{pdfium_simulator_slice}\""
   end
 
   s.pod_target_xcconfig = {
@@ -328,6 +342,8 @@ Pod::Spec.new do |s|
     "OTHER_CPLUSPLUSFLAGS" => "$(inherited)",
     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => library_search_paths_ios.join(" "),
     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => library_search_paths_sim.join(" "),
+    "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" => framework_search_paths_ios.join(" "),
+    "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" => framework_search_paths_sim.join(" "),
     "OTHER_LDFLAGS[sdk=iphoneos*]" => ld_flags_ios,
     "OTHER_LDFLAGS[sdk=iphonesimulator*]" => ld_flags_sim
   }
@@ -337,6 +353,9 @@ Pod::Spec.new do |s|
     "CLANG_CXX_LIBRARY" => "libc++",
     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]" => library_search_paths_ios.join(" "),
     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]" => library_search_paths_sim.join(" "),
+    "FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]" => framework_search_paths_ios.join(" "),
+    "FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]" => framework_search_paths_sim.join(" "),
+    "LD_RUNPATH_SEARCH_PATHS" => "$(inherited) @executable_path/Frameworks @loader_path/Frameworks",
     "OTHER_LDFLAGS[sdk=iphoneos*]" => ld_flags_ios,
     "OTHER_LDFLAGS[sdk=iphonesimulator*]" => ld_flags_sim
   }

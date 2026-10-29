@@ -55,7 +55,7 @@ jobs:
           body: |
             ## Archive Structure
             Prebuilt **PDFium** XCFramework for iOS (device + simulator). Used by offline PDF text-layer extract in `react-native-sherpa-onnx` (`react-native-sherpa-onnx/pdf`).
-            - **pdfium-ios.zip** – Contains `pdfium.xcframework` (arm64 device; arm64 + x86_64 simulator; `libpdfium.dylib` + headers).
+            - **pdfium-ios.zip** – Contains `pdfium.xcframework` (arm64 device; arm64 + x86_64 simulator; embeddable `pdfium.framework` + headers).
 
             Upstream binaries: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) `chromium/${{ steps.tag.outputs.version }}`.
 
@@ -81,7 +81,7 @@ jobs:
 
             - **Version:** ${{ steps.tag.outputs.release_tag }}
             - **Architectures:** arm64 (device), arm64 + x86_64 (simulator)
-            - **Contents:** `libpdfium.dylib`, public PDFium headers under each slice’s `Headers/`
+            - **Contents:** `pdfium.framework` (binary + public PDFium headers) per slice
             - **Tag pin:** `third_party/pdfium_prebuilt/IOS_RELEASE_TAG`
 
             Opt-in (default off): set `SHERPA_ONNX_ENABLE_PDFIUM=1`. Without it, PDFium is not vendored and `extractPdfTextLayer` rejects with `ERR_PDF_PDFIUM_DISABLED`.

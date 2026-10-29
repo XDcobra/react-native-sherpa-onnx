@@ -1,7 +1,6 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "react-native-sherpa-onnx": ["../src/index.tsx"],
       "react-native-sherpa-onnx/provider": ["../src/provider.ts"],

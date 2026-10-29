@@ -8,6 +8,9 @@ import {
   View,
 } from 'react-native';
 import {
+  PADDLEOCR_VL_MIN_PIXELS,
+  PADDLEOCR_VL_MOBILE_MAX_PIXELS,
+  PADDLEOCR_VL_OFFICIAL_MAX_PIXELS,
   type OcrConcreteModelType,
   type OcrCustomPathKey,
 } from 'react-native-sherpa-onnx/ocr';
@@ -24,6 +27,7 @@ const OCR_CONCRETE_TYPES: readonly OcrConcreteModelType[] = [
   'doctr',
   'doc_vlm',
   'nemotron_parse',
+  'paddleocr_vl',
 ];
 
 export type OcrCustomInitFormState = {
@@ -31,6 +35,8 @@ export type OcrCustomInitFormState = {
   fileSources: Partial<Record<OcrCustomPathKey, FileSource>>;
   /** 0 → backend default (8192). Used by VLM families. */
   maxNewTokens: number;
+  /** 0 → official 1003520. Used by paddleocr_vl. */
+  maxPixels: number;
 };
 
 type OcrCustomInitFormProps = {
@@ -46,6 +52,11 @@ type OcrCustomInitFormProps = {
 };
 
 const MAX_NEW_TOKEN_PRESETS = [0, 512, 2048, 4096, 8192] as const;
+const MAX_PIXEL_PRESETS = [
+  0,
+  PADDLEOCR_VL_MOBILE_MAX_PIXELS,
+  PADDLEOCR_VL_MIN_PIXELS,
+] as const;
 
 type DocVlmInitOptionChipsProps = {
   maxNewTokens: number;
@@ -95,6 +106,55 @@ export function DocVlmInitOptionChips({
   );
 }
 
+type PaddleocrVlMaxPixelsChipsProps = {
+  maxPixels: number;
+  onChangeMaxPixels: (value: number) => void;
+  disabled?: boolean;
+};
+
+export function PaddleocrVlMaxPixelsChips({
+  maxPixels,
+  onChangeMaxPixels,
+  disabled = false,
+}: PaddleocrVlMaxPixelsChipsProps) {
+  return (
+    <View>
+      <Text style={styles.subheading}>paddleocrVl.maxPixels</Text>
+      <Text style={styles.hint}>
+        Vision smart_resize area. 0 is the official{' '}
+        {PADDLEOCR_VL_OFFICIAL_MAX_PIXELS} cap. {PADDLEOCR_VL_MOBILE_MAX_PIXELS}{' '}
+        is a phone-oriented 512-token cap.
+      </Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.typeRow}
+      >
+        {MAX_PIXEL_PRESETS.map((preset) => {
+          const active = maxPixels === preset;
+          return (
+            <TouchableOpacity
+              key={preset}
+              style={[styles.typeChip, active && styles.typeChipActive]}
+              onPress={() => onChangeMaxPixels(preset)}
+              disabled={disabled}
+            >
+              <Text
+                style={[
+                  styles.typeChipText,
+                  active && styles.typeChipTextActive,
+                ]}
+              >
+                {preset === 0 ? 'official' : String(preset)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 const PATH_LABELS: Record<OcrCustomPathKey, string> = {
   det: 'Det ONNX',
   rec: 'Rec ONNX',
@@ -103,6 +163,8 @@ const PATH_LABELS: Record<OcrCustomPathKey, string> = {
   manifest: 'ocr_manifest.json',
   vision_encoder: 'vision_encoder.onnx',
   vision_encoder_data: 'vision_encoder.onnx_data',
+  embedding: 'embedding.onnx',
+  embedding_data: 'embedding.onnx_data',
   embed_tokens: 'embed_tokens.onnx',
   embed_tokens_data: 'embed_tokens.onnx_data',
   decoder: 'decoder_model_merged.onnx',
@@ -165,6 +227,7 @@ export function OcrCustomInitForm({
       modelType,
       fileSources: {},
       maxNewTokens: value.maxNewTokens,
+      maxPixels: value.maxPixels,
     });
   };
 
@@ -173,6 +236,13 @@ export function OcrCustomInitForm({
       return;
     }
     onChange({ ...value, maxNewTokens });
+  };
+
+  const setMaxPixels = (maxPixels: number) => {
+    if (maxPixels === value.maxPixels) {
+      return;
+    }
+    onChange({ ...value, maxPixels });
   };
 
   const setFileSource = (
@@ -218,10 +288,20 @@ export function OcrCustomInitForm({
         })}
       </ScrollView>
 
-      {value.modelType === 'doc_vlm' || value.modelType === 'nemotron_parse' ? (
+      {value.modelType === 'doc_vlm' ||
+      value.modelType === 'nemotron_parse' ||
+      value.modelType === 'paddleocr_vl' ? (
         <DocVlmInitOptionChips
           maxNewTokens={value.maxNewTokens}
           onChangeMaxNewTokens={setMaxNewTokens}
+          disabled={disabled || fillLoading}
+        />
+      ) : null}
+
+      {value.modelType === 'paddleocr_vl' ? (
+        <PaddleocrVlMaxPixelsChips
+          maxPixels={value.maxPixels}
+          onChangeMaxPixels={setMaxPixels}
           disabled={disabled || fillLoading}
         />
       ) : null}

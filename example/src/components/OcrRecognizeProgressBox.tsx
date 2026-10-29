@@ -21,6 +21,7 @@ const OCR_PHASES_BY_FAMILY: Record<OcrConcreteModelType, readonly string[]> = {
     'decode',
     'parse',
   ],
+  paddleocr_vl: ['preprocess', 'vision', 'embed', 'prefill', 'decode', 'parse'],
   doc_vlm: ['preprocess', 'vision', 'embed', 'prefill', 'decode', 'parse'],
   ppocr: ['preprocess', 'detect', 'recognize'],
   doctr: ['preprocess', 'detect', 'recognize'],

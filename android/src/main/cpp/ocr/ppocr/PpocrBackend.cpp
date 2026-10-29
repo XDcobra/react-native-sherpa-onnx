@@ -1,6 +1,7 @@
 #include "PpocrBackend.h"
 
 #include "OcrOrtEnv.h"
+#include "OcrOrtHelpers.h"
 #include "PpocrCtcDecoder.h"
 #include "PpocrDbPostprocess.h"
 #include "PpocrImageOps.h"
@@ -80,9 +81,9 @@ void PpocrBackend::Load(const std::string& model_dir, const OcrLoadOptions& opti
   ApplyOrtProvider(*session_options_, options_.provider);
 
   det_session_ =
-      std::make_unique<Ort::Session>(env, det_path.c_str(), *session_options_);
+      OcrCreateOrtSession(env, *session_options_, det_path, "det.onnx", options_.provider);
   rec_session_ =
-      std::make_unique<Ort::Session>(env, rec_path.c_str(), *session_options_);
+      OcrCreateOrtSession(env, *session_options_, rec_path, "rec.onnx", options_.provider);
   det_input_name_ = FirstInputName(*det_session_);
   det_output_name_ = FirstOutputName(*det_session_);
   rec_input_name_ = FirstInputName(*rec_session_);
@@ -90,8 +91,8 @@ void PpocrBackend::Load(const std::string& model_dir, const OcrLoadOptions& opti
 
   has_cls_ = options_.use_orientation_cls && fs::exists(cls_path);
   if (has_cls_) {
-    cls_session_ =
-        std::make_unique<Ort::Session>(env, cls_path.c_str(), *session_options_);
+    cls_session_ = OcrCreateOrtSession(env, *session_options_, cls_path, "cls.onnx",
+                                       options_.provider);
     cls_input_name_ = FirstInputName(*cls_session_);
     cls_output_name_ = FirstOutputName(*cls_session_);
   }

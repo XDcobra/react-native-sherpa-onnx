@@ -64,6 +64,7 @@ export {
 } from './AudioTaggingCustomInitForm';
 export {
   DocVlmInitOptionChips,
+  PaddleocrVlMaxPixelsChips,
   OcrCustomInitForm,
   type OcrCustomInitFormState,
 } from './OcrCustomInitForm';

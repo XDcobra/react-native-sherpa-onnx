@@ -62,8 +62,25 @@ const manualHint =
       throw new Error('Model config is empty.');
     }
 
+    const wantedIds = new Set(
+      config.models.map((entry) => entry.id).filter(Boolean)
+    );
+    const managedIds = collectManagedModelIds(outputDir, cacheDir);
+
     for (const entry of config.models) {
       await ensureModel(entry);
+    }
+
+    pruneUnlistedModels(outputDir, wantedIds, {
+      label: outputDir,
+    });
+    const extraPruneDir = args.prune ? path.resolve(String(args.prune)) : null;
+    if (extraPruneDir && extraPruneDir !== outputDir) {
+      pruneUnlistedModels(extraPruneDir, wantedIds, {
+        label: extraPruneDir,
+        managedOnly: true,
+        managedIds,
+      });
     }
 
     console.log('[SherpaOnnx] Model download step completed.');
@@ -110,6 +127,39 @@ async function ensureModel(entry) {
 
   console.log(`[SherpaOnnx] Copying ${modelId} into output.`);
   replaceDir(targetModelDir, cacheModelDir);
+}
+
+function collectManagedModelIds(...dirs) {
+  const ids = new Set();
+  for (const dirPath of dirs) {
+    if (!dirPath || !fs.existsSync(dirPath)) continue;
+    for (const name of fs.readdirSync(dirPath)) {
+      if (!name || name.startsWith('.') || name === 'README.md') continue;
+      const full = path.join(dirPath, name);
+      if (fs.statSync(full).isDirectory()) {
+        ids.add(name);
+      }
+    }
+  }
+  return ids;
+}
+
+function pruneUnlistedModels(dirPath, wantedIds, options = {}) {
+  if (!dirPath || !fs.existsSync(dirPath)) return;
+  const managedOnly = Boolean(options.managedOnly);
+  const managedIds = options.managedIds || null;
+  const label = options.label || dirPath;
+  for (const name of fs.readdirSync(dirPath)) {
+    if (!name || name.startsWith('.') || name === 'README.md') continue;
+    if (wantedIds.has(name)) continue;
+    if (managedOnly && managedIds && !managedIds.has(name)) continue;
+    const full = path.join(dirPath, name);
+    if (!fs.statSync(full).isDirectory()) continue;
+    console.log(
+      `[SherpaOnnx] Pruning ${name} from ${label} (not in model-download-config.json)`
+    );
+    removePath(full);
+  }
 }
 
 function hasModelContent(dirPath) {

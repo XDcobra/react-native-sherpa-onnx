@@ -46,6 +46,8 @@ OcrDetectResult DetectOcrModel(const std::string& model_dir,
   out.visionEncoderDataPath = native.paths.vision_encoder_data;
   out.embedTokensPath = native.paths.embed_tokens;
   out.embedTokensDataPath = native.paths.embed_tokens_data;
+  out.embeddingPath = native.paths.embedding;
+  out.embeddingDataPath = native.paths.embedding_data;
   out.decoderPath = native.paths.decoder;
   out.decoderDataPath = native.paths.decoder_data;
   out.tokenizerPath = native.paths.tokenizer;

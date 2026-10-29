@@ -31,6 +31,17 @@ static const OcrFieldRequirement kDocVlmReqs[] = {
     {"manifest", &OcrModelPaths::manifest, true},
 };
 
+static const OcrFieldRequirement kPaddleocrVlReqs[] = {
+    {"vision_encoder", &OcrModelPaths::vision_encoder, true},
+    {"vision_encoder_data", &OcrModelPaths::vision_encoder_data, false},
+    {"embedding", &OcrModelPaths::embedding, true},
+    {"embedding_data", &OcrModelPaths::embedding_data, false},
+    {"decoder", &OcrModelPaths::decoder, true},
+    {"decoder_data", &OcrModelPaths::decoder_data, false},
+    {"tokenizer", &OcrModelPaths::tokenizer, true},
+    {"manifest", &OcrModelPaths::manifest, false},
+};
+
 static const OcrFieldRequirement kNemotronParseReqs[] = {
     {"vision_encoder", &OcrModelPaths::vision_encoder, true},
     {"vision_encoder_data", &OcrModelPaths::vision_encoder_data, true},
@@ -59,6 +70,9 @@ static const OcrFieldRequirement* GetRequirements(OcrModelKind kind, size_t& cou
         case OcrModelKind::kNemotronParse:
             count = std::size(kNemotronParseReqs);
             return kNemotronParseReqs;
+        case OcrModelKind::kPaddleocrVl:
+            count = std::size(kPaddleocrVlReqs);
+            return kPaddleocrVlReqs;
         default:
             count = 0;
             return nullptr;

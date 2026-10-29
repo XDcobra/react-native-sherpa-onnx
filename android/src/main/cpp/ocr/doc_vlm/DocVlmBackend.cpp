@@ -5,6 +5,7 @@
 #include "DocVlmImageOps.h"
 #include "DocVlmPrompt.h"
 #include "OcrOrtEnv.h"
+#include "OcrOrtHelpers.h"
 #include "ort/ApplyOrtProvider.h"
 
 #include <onnxruntime_cxx_api.h>
@@ -230,14 +231,7 @@ void DocVlmBackend::Load(const std::string& model_dir, const OcrLoadOptions& opt
   ApplyOrtProvider(*session_options_, options_.provider);
 
   const auto open_session = [&](const std::string& path, const char* label) {
-    const auto t0 = std::chrono::steady_clock::now();
-    auto session =
-        std::make_unique<Ort::Session>(env, path.c_str(), *session_options_);
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - t0)
-                        .count();
-    OCR_LOGI("doc_vlm session %s %lld ms", label, static_cast<long long>(ms));
-    return session;
+    return OcrCreateOrtSession(env, *session_options_, path, label, options_.provider);
   };
   vision_session_ = open_session(vision_path, "vision_encoder.onnx");
   embed_session_ = open_session(embed_path, "embed_tokens.onnx");

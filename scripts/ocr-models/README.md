@@ -4,6 +4,10 @@ Nemotron-3.5-Parse ONNX (FP16 desktop + compact INT8) lives on
 `XDcobra/Nemotron-3.5-Parse-ONNX`. Export/quantize tooling:
 `scripts/ocr-models/nemotron-parse/`.
 
+PaddleOCR-VL-1.6 ONNX (FP16, VLM-only three graphs) lives on
+`XDcobra/PaddleOCR-VL-1.6-ONNX`. Export/quantize tooling:
+`scripts/ocr-models/paddleocr-vl/`.
+
 This folder contains a CSV-driven pipeline that builds one `.tar.bz2` archive per
 OCR pack ID and uploads missing archives to the GitHub release tag `ocr-models`.
 
@@ -21,18 +25,18 @@ File: `scripts/ocr-models/sources.csv`
 | Column | Required | Description |
 | --- | --- | --- |
 | `id` | yes | Directory name inside archive and archive base name (`<id>.tar.bz2`) |
-| `family` | yes | `ppocr`, `doctr`, `doc_vlm`, or `nemotron_parse` — drives archive layout and which columns apply |
-| `det_url` | ppocr, doctr | Direct URL to detection ONNX → stored as `det.onnx`. Empty for `doc_vlm` / `nemotron_parse` |
-| `rec_url` | ppocr, doctr | Direct URL to recognition ONNX → stored as `rec.onnx`. Empty for `doc_vlm` / `nemotron_parse` |
-| `cls_url` | ppocr | Orientation classifier ONNX → `cls.onnx` (empty for doctr, `doc_vlm`, `nemotron_parse`) |
-| `rec_yml_url` | ppocr | Recognition `inference.yml` → `rec_inference.yml` (must be empty for doctr, `doc_vlm`, `nemotron_parse`) |
-| `det_config_url` | doctr | OnnxTR det `config.json` (merged into `ocr_manifest.json`). Empty for `doc_vlm` / `nemotron_parse` |
-| `rec_config_url` | doctr | OnnxTR rec `config.json` (vocab + preprocess → `ocr_manifest.json`). Empty for `doc_vlm` / `nemotron_parse` |
+| `family` | yes | `ppocr`, `doctr`, `doc_vlm`, `nemotron_parse`, or `paddleocr_vl` — drives archive layout and which columns apply |
+| `det_url` | ppocr, doctr | Direct URL to detection ONNX → stored as `det.onnx`. Empty for `doc_vlm` / `nemotron_parse` / `paddleocr_vl` |
+| `rec_url` | ppocr, doctr | Direct URL to recognition ONNX → stored as `rec.onnx`. Empty for `doc_vlm` / `nemotron_parse` / `paddleocr_vl` |
+| `cls_url` | ppocr | Orientation classifier ONNX → `cls.onnx` (empty for doctr, `doc_vlm`, `nemotron_parse`, `paddleocr_vl`) |
+| `rec_yml_url` | ppocr | Recognition `inference.yml` → `rec_inference.yml` (must be empty for doctr, `doc_vlm`, `nemotron_parse`, `paddleocr_vl`) |
+| `det_config_url` | doctr | OnnxTR det `config.json` (merged into `ocr_manifest.json`). Empty for `doc_vlm` / `nemotron_parse` / `paddleocr_vl` |
+| `rec_config_url` | doctr | OnnxTR rec `config.json` (vocab + preprocess → `ocr_manifest.json`). Empty for `doc_vlm` / `nemotron_parse` / `paddleocr_vl` |
 | `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE` |
 | `license_type` | yes | SPDX-style label (e.g. `apache-2.0`, `openmdw-1.1`) |
 | `commercial_use` | yes | `yes`, `no`, or `conditional` (OpenMDW / copyleft house convention) |
 | `languages` | no | Comma-separated ISO codes for catalog hints. Empty = not curated. |
-| `hf_repo` | doc_vlm, nemotron_parse | Hugging Face `owner/name` (no scheme). The script owns the file list and flattens one Hub folder into the pack root. Must be empty for `ppocr` and `doctr` |
+| `hf_repo` | doc_vlm, nemotron_parse, paddleocr_vl | Hugging Face `owner/name` (no scheme). The script owns the file list and flattens one Hub folder into the pack root. Must be empty for `ppocr` and `doctr` |
 
 ## Archive layouts (detect contract)
 
@@ -141,6 +145,41 @@ Language hints are NVIDIA MOSCAR coverage (163 language/script entries → uniqu
 
 CI uses the same **Publish OCR model assets** job as granite (HF download → archive). Set `NEMOTRON_PARSE_EXPORT_ROOT` only to flatten a local export instead of the Hub. Re-export / restage HF with `scripts/ocr-models/nemotron-parse/`.
 
+### `paddleocr_vl` (PaddleOCR-VL)
+
+Same HF flatten as Nemotron. Hub:
+[`XDcobra/PaddleOCR-VL-1.6-ONNX`](https://huggingface.co/XDcobra/PaddleOCR-VL-1.6-ONNX).
+One published folder per archive (`onnx/fp16`). Names are already canonical
+(`vision_encoder` / `embedding` / `decoder`), so no external-data rewrite.
+
+```text
+<id>/
+  vision_encoder.onnx
+  vision_encoder.onnx_data
+  embedding.onnx
+  embedding.onnx_data
+  decoder.onnx
+  decoder.onnx_data
+  tokenizer.json
+  ocr_manifest.json       # family: "paddleocr_vl"
+  LICENSE                 # Apache-2.0 (from the CSV license URL)
+```
+
+| ID | Repo (`hf_repo`) | Hub folder | Languages (hints) |
+| --- | --- | --- | --- |
+| `paddleocr-vl-1.6-fp16` | `XDcobra/PaddleOCR-VL-1.6-ONNX` | `onnx/fp16` | Official 109-language Table A1 → unique ISO 639-1 (`en`, `zh` first) |
+
+Weights: **Apache-2.0**, `commercial_use=yes`. Do not pack Hub `onnx/fp16` together
+with unpublished INT8 / Q4 folders. INT8 and Q4F16 failed the camera-photo gate
+and are not release packs.
+
+Language hints are the PaddleOCR-VL paper Table A1 languages that have an ISO 639-1
+code. Script-only / 639-3 names (Adyghe, Bhojpuri, …) are omitted. This is catalog
+coverage, not a per-page guarantee.
+
+Set `PADDLEOCR_VL_EXPORT_ROOT` only to flatten a local export instead of the Hub.
+Re-export / restage HF with `scripts/ocr-models/paddleocr-vl/`.
+
 ### `checksum.txt`
 
 After each non–dry-run publish, the script refreshes release asset **`checksum.txt`**:
@@ -167,7 +206,7 @@ GITHUB_TOKEN=... node scripts/ocr-models/build_and_upload.js \
 Workflow **Publish OCR model assets** (`models-publish-ocr.yml`):
 
 - `dry_run` — pack without upload
-- One job: `ppocr` / `doctr` / `doc_vlm` / `nemotron_parse` (HF downloads)
+- One job: `ppocr` / `doctr` / `doc_vlm` / `nemotron_parse` / `paddleocr_vl` (HF downloads)
 - Existing release assets are skipped; only missing ids are built
 - License CSV sync runs after upload (unless dry-run)
 

@@ -466,6 +466,7 @@ Offline OCR runs on decoded [`OfflineImageBuffer`](./docs/imagebuffer-offline.md
 | **docTR (OnnxTR)** | `'doctr'` | Det / Rec + manifest. | [OCR models](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) |
 | **Granite Docling** | `'doc_vlm'` | Document VLM (`raw` / DocTags / GFM markdown). | [OCR models](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) |
 | **Nemotron Parse** | `'nemotron_parse'` | Document VLM (alias `nemotron-parse` only — never bare `nemotron`). | [OCR models](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) |
+| **PaddleOCR-VL** | `'paddleocr_vl'` | Document VLM (alias `paddleocr-vl` only — never bare `paddleocr`). | [OCR models](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/ocr-models) |
 
 APIs, pack layouts, and overlays: [Offline OCR](./docs/ocr-offline.md). PDF pages and e-book images are **source adapters** — extract or rasterize first, then call `recognize` yourself ([PDF](./docs/pdf-offline.md), [e-documents](./docs/document-offline.md)).
 

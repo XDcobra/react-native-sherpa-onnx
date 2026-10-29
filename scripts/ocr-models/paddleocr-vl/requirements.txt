@@ -1,0 +1,12 @@
+transformers>=4.57.0,<5.0
+torch>=2.6
+torchvision
+onnx>=1.17
+onnxruntime>=1.20
+onnxscript
+pillow
+huggingface-hub>=0.26
+numpy
+tokenizers
+sentencepiece
+einops

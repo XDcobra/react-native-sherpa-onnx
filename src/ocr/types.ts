@@ -14,11 +14,17 @@ export type OcrModelType =
   | 'ppocr'
   | 'doctr'
   | 'doc_vlm'
-  | 'nemotron_parse';
+  | 'nemotron_parse'
+  | 'paddleocr_vl';
 export type OcrConcreteModelType = Exclude<OcrModelType, 'auto'>;
 
 /** OCR backend family. Matches `OcrBackend::Family()` after a successful load. */
-export type OcrFamily = 'ppocr' | 'doctr' | 'doc_vlm' | 'nemotron_parse';
+export type OcrFamily =
+  | 'ppocr'
+  | 'doctr'
+  | 'doc_vlm'
+  | 'nemotron_parse'
+  | 'paddleocr_vl';
 
 /** Runtime model-type array + guard (parallel TTS pattern). */
 export const OCR_MODEL_TYPES: readonly OcrModelType[] = [
@@ -26,6 +32,7 @@ export const OCR_MODEL_TYPES: readonly OcrModelType[] = [
   'doctr',
   'doc_vlm',
   'nemotron_parse',
+  'paddleocr_vl',
   'auto',
 ] as const;
 
@@ -99,8 +106,8 @@ export type OcrDoctrOptions = {
 };
 
 /**
- * Shared VLM generation cap (`doc_vlm` / `nemotron_parse`). Ignored by
- * ppocr / doctr. Omit or `0` → backend default (8192).
+ * Shared VLM generation cap (`doc_vlm` / `nemotron_parse` / `paddleocr_vl`).
+ * Omit or `0` → backend default (8192). Not valid on `ppocr` / `doctr`.
  */
 export type OcrVlmOptions = {
   maxNewTokens?: number;
@@ -109,11 +116,33 @@ export type OcrVlmOptions = {
 /** @deprecated Use {@link OcrVlmOptions} / top-level `maxNewTokens`. */
 export type OcrDocVlmOptions = OcrVlmOptions;
 
+/** Official PaddleOCR-VL `smart_resize` pixel bounds. */
+export const PADDLEOCR_VL_MIN_PIXELS = 112896;
+export const PADDLEOCR_VL_OFFICIAL_MAX_PIXELS = 1003520;
+/** Phone-oriented cap (512 visual tokens). Pass via `paddleocrVl.maxPixels`. */
+export const PADDLEOCR_VL_MOBILE_MAX_PIXELS = 401408;
+
+/** Official PaddleOCR-VL control-prompt task. Omit → `'ocr'`. */
+export type OcrPaddleocrVlTask = 'ocr' | 'spotting';
+
+export type OcrPaddleocrVlOptions = {
+  /**
+   * `smart_resize` area cap. Omit or `0` → {@link PADDLEOCR_VL_OFFICIAL_MAX_PIXELS}.
+   * Clamped to `[PADDLEOCR_VL_MIN_PIXELS, PADDLEOCR_VL_OFFICIAL_MAX_PIXELS]`.
+   */
+  maxPixels?: number;
+  /**
+   * Control-prompt task. Omit → `'ocr'`. `'spotting'` returns instance
+   * text plus `<|LOC_n|>` quads on `textOut` spans. Same loaded session;
+   * override per recognize via {@link OcrRecognizeOptions.paddleocrVl}.
+   */
+  task?: OcrPaddleocrVlTask;
+};
+
 type OcrInitShared = {
   /** ORT execution provider (`cpu`, `nnapi`, `xnnpack`, `coreml`, …). Shared by all families. */
   provider?: string;
   numThreads?: number;
-  maxNewTokens?: number;
 };
 
 type OcrInitFolderShared = OcrInitShared & {
@@ -121,18 +150,25 @@ type OcrInitFolderShared = OcrInitShared & {
   quantization?: QuantizationPreference;
 };
 
-export type OcrInitializeOptionsAuto = OcrInitFolderShared & {
-  initMode?: 'auto';
-  modelType?: 'auto';
-  ppocr?: OcrPpocrOptions;
-  doctr?: OcrDoctrOptions;
+type OcrVlmInitFields = {
+  maxNewTokens?: number;
 };
+
+export type OcrInitializeOptionsAuto = OcrInitFolderShared &
+  OcrVlmInitFields & {
+    initMode?: 'auto';
+    modelType?: 'auto';
+    ppocr?: OcrPpocrOptions;
+    doctr?: OcrDoctrOptions;
+    paddleocrVl?: OcrPaddleocrVlOptions;
+  };
 
 export type OcrInitializeOptionsPpocr = OcrInitFolderShared & {
   initMode?: 'auto';
   modelType: 'ppocr';
   ppocr?: OcrPpocrOptions;
   doctr?: never;
+  paddleocrVl?: never;
 };
 
 export type OcrInitializeOptionsDoctr = OcrInitFolderShared & {
@@ -140,31 +176,68 @@ export type OcrInitializeOptionsDoctr = OcrInitFolderShared & {
   modelType: 'doctr';
   ppocr?: never;
   doctr?: OcrDoctrOptions;
+  paddleocrVl?: never;
 };
 
-export type OcrInitializeOptionsDocVlm = OcrInitFolderShared & {
-  initMode?: 'auto';
-  modelType: 'doc_vlm';
-  ppocr?: never;
-  doctr?: never;
-};
+export type OcrInitializeOptionsDocVlm = OcrInitFolderShared &
+  OcrVlmInitFields & {
+    initMode?: 'auto';
+    modelType: 'doc_vlm';
+    ppocr?: never;
+    doctr?: never;
+    paddleocrVl?: never;
+  };
 
-export type OcrInitializeOptionsNemotronParse = OcrInitFolderShared & {
-  initMode?: 'auto';
-  modelType: 'nemotron_parse';
-  ppocr?: never;
-  doctr?: never;
-};
+export type OcrInitializeOptionsNemotronParse = OcrInitFolderShared &
+  OcrVlmInitFields & {
+    initMode?: 'auto';
+    modelType: 'nemotron_parse';
+    ppocr?: never;
+    doctr?: never;
+    paddleocrVl?: never;
+  };
 
-export type OcrCustomInitializeOptions = OcrInitShared & {
+export type OcrInitializeOptionsPaddleocrVl = OcrInitFolderShared &
+  OcrVlmInitFields & {
+    initMode?: 'auto';
+    modelType: 'paddleocr_vl';
+    ppocr?: never;
+    doctr?: never;
+    paddleocrVl?: OcrPaddleocrVlOptions;
+  };
+
+type OcrCustomInitBase = OcrInitShared & {
   initMode: 'custom';
-  modelType: OcrConcreteModelType;
   customConfig: OcrCustomConfig;
-  /** Applied when `modelType` is `ppocr`. */
-  ppocr?: OcrPpocrOptions;
-  /** Applied when `modelType` is `doctr`. */
-  doctr?: OcrDoctrOptions;
 };
+
+export type OcrCustomInitializeOptions =
+  | (OcrCustomInitBase & {
+      modelType: 'ppocr';
+      ppocr?: OcrPpocrOptions;
+      doctr?: never;
+      paddleocrVl?: never;
+    })
+  | (OcrCustomInitBase & {
+      modelType: 'doctr';
+      ppocr?: never;
+      doctr?: OcrDoctrOptions;
+      paddleocrVl?: never;
+    })
+  | (OcrCustomInitBase &
+      OcrVlmInitFields & {
+        modelType: 'doc_vlm' | 'nemotron_parse';
+        ppocr?: never;
+        doctr?: never;
+        paddleocrVl?: never;
+      })
+  | (OcrCustomInitBase &
+      OcrVlmInitFields & {
+        modelType: 'paddleocr_vl';
+        ppocr?: never;
+        doctr?: never;
+        paddleocrVl?: OcrPaddleocrVlOptions;
+      });
 
 export type OcrInitializeOptions =
   | OcrInitializeOptionsAuto
@@ -172,6 +245,7 @@ export type OcrInitializeOptions =
   | OcrInitializeOptionsDoctr
   | OcrInitializeOptionsDocVlm
   | OcrInitializeOptionsNemotronParse
+  | OcrInitializeOptionsPaddleocrVl
   | OcrCustomInitializeOptions;
 
 export type OcrRecognizeOptions = {
@@ -179,6 +253,13 @@ export type OcrRecognizeOptions = {
   frames?: number[];
   /** Span level filter (default `'line'`). */
   granularity?: OcrGranularity;
+  /**
+   * paddleocr_vl-only recognize override. Omit → init `paddleocrVl.task`
+   * (default `'ocr'`). Session stays loaded. Rejected on other families.
+   */
+  paddleocrVl?: {
+    task?: OcrPaddleocrVlTask;
+  };
   onProgress?: (progress: OcrProgress) => void;
   /**
    * Minimum ms between native progress events. Default
@@ -229,6 +310,10 @@ export type OcrRecognizeResult =
     })
   | (OcrVlmRecognizeShared & {
       family: 'nemotron_parse';
+      stopReason: 'eos' | 'max_new_tokens';
+    })
+  | (OcrVlmRecognizeShared & {
+      family: 'paddleocr_vl';
       stopReason: 'eos' | 'max_new_tokens';
     });
 

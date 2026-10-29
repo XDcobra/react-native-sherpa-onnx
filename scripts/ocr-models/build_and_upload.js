@@ -32,10 +32,20 @@ const EXPECTED_HEADER = [
   'languages',
   'hf_repo',
 ];
-const VALID_FAMILIES = new Set(['ppocr', 'doctr', 'doc_vlm', 'nemotron_parse']);
+const VALID_FAMILIES = new Set([
+  'ppocr',
+  'doctr',
+  'doc_vlm',
+  'nemotron_parse',
+  'paddleocr_vl',
+]);
 const NEMOTRON_PARSE_EXPORT_ROOT = path.join(
   __dirname,
   '../../build/ocr-models/nemotron-3.5-parse'
+);
+const PADDLEOCR_VL_EXPORT_ROOT = path.join(
+  __dirname,
+  '../../build/ocr-models/paddleocr-vl-1.6'
 );
 const NEMOTRON_PARSE_VARIANT_DIRS = {
   fp16: 'onnx-fp16',
@@ -77,6 +87,42 @@ const NEMOTRON_PARSE_MIN_BYTES = {
     ['decoder_model_merged.onnx_data', 150 * MIB],
     ['embed_tokens.onnx_data', 50 * MIB],
     ['pos_embed.npy', 20 * MIB],
+    ['tokenizer.json', 1 * MIB],
+  ]),
+};
+const PADDLEOCR_VL_VARIANT_DIRS = {
+  fp16: 'onnx-fp16',
+  int8: 'onnx-int8',
+  fp32: 'onnx',
+  q4f16: 'onnx-q4f16',
+};
+const PADDLEOCR_VL_HUB_FOLDERS = {
+  fp16: 'onnx/fp16',
+};
+const PADDLEOCR_VL_PACK_FILES = [
+  'vision_encoder.onnx',
+  'vision_encoder.onnx_data',
+  'embedding.onnx',
+  'embedding.onnx_data',
+  'decoder.onnx',
+  'decoder.onnx_data',
+  'tokenizer.json',
+  'ocr_manifest.json',
+];
+const PADDLEOCR_VL_OPTIONAL_FILES = [
+  'preprocessor_config.json',
+  'tokenizer_config.json',
+  'special_tokens_map.json',
+  'generation_config.json',
+  'config.json',
+  'processor_config.json',
+  'chat_template.jinja',
+];
+const PADDLEOCR_VL_MIN_BYTES = {
+  fp16: new Map([
+    ['vision_encoder.onnx_data', 700 * MIB],
+    ['decoder.onnx_data', 500 * MIB],
+    ['embedding.onnx_data', 150 * MIB],
     ['tokenizer.json', 1 * MIB],
   ]),
 };
@@ -150,6 +196,17 @@ function nemotronParseVariantFromId(modelId) {
   if (id.endsWith('-fp32')) return 'fp32';
   throw new Error(
     `${id}: nemotron_parse id must end with -fp16, -int8, -fp32, or -q4f16`
+  );
+}
+
+function paddleocrVlVariantFromId(modelId) {
+  const id = String(modelId ?? '');
+  if (id.endsWith('-q4f16')) return 'q4f16';
+  if (id.endsWith('-fp16')) return 'fp16';
+  if (id.endsWith('-int8')) return 'int8';
+  if (id.endsWith('-fp32')) return 'fp32';
+  throw new Error(
+    `${id}: paddleocr_vl id must end with -fp16, -int8, -fp32, or -q4f16`
   );
 }
 
@@ -236,6 +293,7 @@ Options:
 
 Nemotron-Parse packs flatten onnx/fp16 and onnx/int8 from
 XDcobra/Nemotron-3.5-Parse-ONNX (same hf_repo column as granite).
+PaddleOCR-VL packs flatten onnx/fp16 from XDcobra/PaddleOCR-VL-1.6-ONNX.
 
 After uploads, writes ${CHECKSUM_ASSET_NAME} (SHA-256 per .tar.bz2, tab-separated) and uploads with --clobber.
 
@@ -444,7 +502,7 @@ async function readSources(csvPath) {
     }
     if (!VALID_FAMILIES.has(family)) {
       throw new Error(
-        `Line ${lineNumber}: family must be "ppocr", "doctr", "doc_vlm", or "nemotron_parse" (got "${row[1]}")`
+        `Line ${lineNumber}: family must be "ppocr", "doctr", "doc_vlm", "nemotron_parse", or "paddleocr_vl" (got "${row[1]}")`
       );
     }
     if (family === 'ppocr' || family === 'doctr') {
@@ -546,6 +604,35 @@ async function readSources(csvPath) {
         const message = error instanceof Error ? error.message : String(error);
         throw new Error(`Line ${lineNumber}: ${message}`);
       }
+    } else if (family === 'paddleocr_vl') {
+      if (
+        detUrl ||
+        recUrl ||
+        clsUrl ||
+        recYmlUrl ||
+        detConfigUrl ||
+        recConfigUrl
+      ) {
+        throw new Error(
+          `Line ${lineNumber}: det_url, rec_url, cls_url, rec_yml_url, det_config_url, and rec_config_url must be empty for paddleocr_vl`
+        );
+      }
+      if (!hfRepo) {
+        throw new Error(
+          `Line ${lineNumber}: hf_repo is required for paddleocr_vl`
+        );
+      }
+      if (!DOC_VLM_HF_REPO_RE.test(hfRepo)) {
+        throw new Error(
+          `Line ${lineNumber}: hf_repo must be owner/name with no scheme (got "${hfRepo}")`
+        );
+      }
+      try {
+        paddleocrVlVariantFromId(modelId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Line ${lineNumber}: ${message}`);
+      }
     }
     if (!licenseType) {
       throw new Error(`Line ${lineNumber}: license_type is required`);
@@ -583,6 +670,10 @@ async function readSources(csvPath) {
       nemotronParseVariant:
         family === 'nemotron_parse'
           ? nemotronParseVariantFromId(modelId)
+          : undefined,
+      paddleocrVlVariant:
+        family === 'paddleocr_vl'
+          ? paddleocrVlVariantFromId(modelId)
           : undefined,
     });
   }
@@ -1576,6 +1667,90 @@ async function buildNemotronParsePack(source, modelDir) {
   }
 }
 
+async function copyPaddleocrVlLocalPack(source, modelDir, variant) {
+  const exportRoot =
+    process.env.PADDLEOCR_VL_EXPORT_ROOT || PADDLEOCR_VL_EXPORT_ROOT;
+  const srcDir = path.join(exportRoot, PADDLEOCR_VL_VARIANT_DIRS[variant]);
+  if (!fs.existsSync(srcDir)) {
+    throw new Error(
+      `${source.modelId}: local export missing at ${srcDir} (PADDLEOCR_VL_EXPORT_ROOT)`
+    );
+  }
+  for (const name of PADDLEOCR_VL_PACK_FILES) {
+    const src = path.join(srcDir, name);
+    if (name.endsWith('.onnx_data') && !fs.existsSync(src)) {
+      continue;
+    }
+    if (!fs.existsSync(src)) {
+      throw new Error(`${source.modelId}: missing ${name} in ${srcDir}`);
+    }
+    const dest = path.join(modelDir, name);
+    await fsp.copyFile(src, dest);
+    const size = (await fsp.stat(dest)).size;
+    if (size <= 0) {
+      throw new Error(`${source.modelId}: ${name} is empty`);
+    }
+  }
+  for (const name of PADDLEOCR_VL_OPTIONAL_FILES) {
+    const src = path.join(srcDir, name);
+    if (fs.existsSync(src)) {
+      await fsp.copyFile(src, path.join(modelDir, name));
+    }
+  }
+  console.log(`[flatten] ${source.modelId}: copied from ${srcDir}`);
+}
+
+async function downloadPaddleocrVlHubPack(source, modelDir, variant) {
+  const hubFolder = PADDLEOCR_VL_HUB_FOLDERS[variant];
+  if (!hubFolder) {
+    throw new Error(
+      `${source.modelId}: ${variant} is not a published Hub variant (fp16)`
+    );
+  }
+  const minBytes = PADDLEOCR_VL_MIN_BYTES[variant] || new Map();
+  for (const name of PADDLEOCR_VL_PACK_FILES) {
+    const destination = path.join(modelDir, name);
+    const url = docVlmFileUrl(source.hfRepo, `${hubFolder}/${name}`);
+    console.log(`[download] ${source.modelId}: ${name} ← ${hubFolder}/${name}`);
+    await downloadFile(url, destination);
+    await assertNotGitLfsPointer(destination);
+    const requiredBytes = minBytes.get(name);
+    const size = requiredBytes
+      ? await assertMinBytes(destination, requiredBytes)
+      : (await fsp.stat(destination)).size;
+    if (size <= 0) {
+      throw new Error(`${source.modelId}: ${name} is empty`);
+    }
+  }
+  for (const name of PADDLEOCR_VL_OPTIONAL_FILES) {
+    const destination = path.join(modelDir, name);
+    const url = docVlmFileUrl(source.hfRepo, `${hubFolder}/${name}`);
+    const downloaded = await downloadFile(url, destination, { optional: true });
+    if (downloaded) {
+      await assertNotGitLfsPointer(destination);
+      console.log(`[download] ${source.modelId}: ${name}`);
+    }
+  }
+  console.log(`[flatten] ${source.modelId}: ${source.hfRepo}/${hubFolder}`);
+}
+
+async function buildPaddleocrVlPack(source, modelDir) {
+  const variant =
+    source.paddleocrVlVariant ?? paddleocrVlVariantFromId(source.modelId);
+  if (process.env.PADDLEOCR_VL_EXPORT_ROOT) {
+    await copyPaddleocrVlLocalPack(source, modelDir, variant);
+  } else {
+    await downloadPaddleocrVlHubPack(source, modelDir, variant);
+  }
+  const manifestPath = path.join(modelDir, 'ocr_manifest.json');
+  const manifest = JSON.parse(await fsp.readFile(manifestPath, 'utf8'));
+  if (manifest.family !== 'paddleocr_vl') {
+    throw new Error(
+      `${source.modelId}: ocr_manifest.json family must be paddleocr_vl (got ${manifest.family})`
+    );
+  }
+}
+
 async function buildArchives(sources, buildDir, distDir) {
   await fsp.mkdir(buildDir, { recursive: true });
   await fsp.mkdir(distDir, { recursive: true });
@@ -1594,6 +1769,8 @@ async function buildArchives(sources, buildDir, distDir) {
       await buildDocVlmPack(source, modelDir);
     } else if (source.family === 'nemotron_parse') {
       await buildNemotronParsePack(source, modelDir);
+    } else if (source.family === 'paddleocr_vl') {
+      await buildPaddleocrVlPack(source, modelDir);
     } else {
       throw new Error(`Unknown family for ${source.modelId}: ${source.family}`);
     }

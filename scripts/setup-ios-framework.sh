@@ -190,9 +190,9 @@ get_framework_config() {
       XCFRAMEWORK_NAME="pdfium.xcframework"
       ZIP_ASSET_NAME="pdfium-ios.zip"
       VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-pdfium"
-      LIB_DEVICE="libpdfium.dylib"
-      LIB_SIMULATOR="libpdfium.dylib"
-      HEADER_CHECK="Headers/fpdfview.h"
+      LIB_DEVICE="pdfium.framework/pdfium"
+      LIB_SIMULATOR="pdfium.framework/pdfium"
+      HEADER_CHECK="pdfium.framework/Headers/fpdfview.h"
       DISPLAY_NAME="pdfium"
       ;;
     *)
@@ -212,6 +212,13 @@ framework_valid() {
   [ -f "$fw_root/ios-arm64_x86_64-simulator/$LIB_SIMULATOR" ] || return 1
   [ -f "$fw_root/ios-arm64_x86_64-simulator/$HEADER_CHECK" ] || return 1
   return 0
+}
+
+post_process_ios_frameworks() {
+  # Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
+  if [ -d "$FRAMEWORKS_DIR/FFmpeg.xcframework" ]; then
+    find "$FRAMEWORKS_DIR/FFmpeg.xcframework" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
+  fi
 }
 
 # Helper: get installed framework version (from version file or xcframework VERSION.txt)
@@ -331,11 +338,7 @@ if [ "$FORCE_DOWNLOAD" != true ] && [ "$SKIP_ALL" = true ]; then
     fi
   done
   
-  # Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
-  if [ -d "$FRAMEWORKS_DIR/FFmpeg.xcframework" ]; then
-    find "$FRAMEWORKS_DIR/FFmpeg.xcframework" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
-  fi
-
+  post_process_ios_frameworks
   exit 0
 fi
 
@@ -525,9 +528,5 @@ if [ "$INTERACTIVE" = true ]; then
   echo "" >&2
 fi
 
-# Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
-if [ -d "$FRAMEWORKS_DIR/FFmpeg.xcframework" ]; then
-  find "$FRAMEWORKS_DIR/FFmpeg.xcframework" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
-fi
-
+post_process_ios_frameworks
 exit 0

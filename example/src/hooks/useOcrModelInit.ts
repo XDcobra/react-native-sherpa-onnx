@@ -19,6 +19,7 @@ import {
   emptyOcrCustomInitFormState,
   fillOcrCustomConfigFromModelFolder,
 } from '../utils/ocrCustomInitFill';
+import { isPaddleocrVlOcrPack } from '../utils/ocrModelCatalog';
 import { useOcrModelCatalog } from './useOcrModelCatalog';
 import { useDeviceProviders } from '../providers/DeviceProvidersContext';
 
@@ -40,7 +41,8 @@ export function asOcrFamily(
     value === 'ppocr' ||
     value === 'doctr' ||
     value === 'doc_vlm' ||
-    value === 'nemotron_parse'
+    value === 'nemotron_parse' ||
+    value === 'paddleocr_vl'
   ) {
     return value;
   }
@@ -58,6 +60,9 @@ function largeVlmPackWarning(id: string): string | null {
     lower.includes('nemotron_parse')
   ) {
     return 'nemotron-3.5-parse INT8 is ~753 MB unpacked (FP16 ~1.44 GB) and needs significant RAM. Continue?';
+  }
+  if (lower.includes('paddleocr-vl') || lower.includes('paddleocr_vl')) {
+    return 'paddleocr-vl-1.6 FP16 is ~1.8 GB unpacked. Use provider CPU (XNNPACK fails init: fp16 FastGelu). On phones set paddleocrVl.maxPixels to 401408 and maxNewTokens 512. Continue?';
   }
   return null;
 }
@@ -187,6 +192,7 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
         modelType: fillResult.modelType,
         fileSources: fillResult.customConfig,
         maxNewTokens: prev.maxNewTokens,
+        maxPixels: prev.maxPixels,
       }));
       const missing =
         fillResult.missingKeys.length > 0
@@ -245,6 +251,9 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
           ppocr: { detUnclipRatio },
           doctr: { detUnclipRatio },
           maxNewTokens: customInitForm.maxNewTokens,
+          ...(isPaddleocrVlOcrPack(folderId)
+            ? { paddleocrVl: { maxPixels: customInitForm.maxPixels } }
+            : {}),
         };
         const ocr = await createOCR(initOptions);
         engineRef.current = ocr;
@@ -267,6 +276,7 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
     [
       resolveModelPath,
       customInitForm.maxNewTokens,
+      customInitForm.maxPixels,
       detUnclipRatio,
       numThreads,
       provider,
@@ -297,21 +307,40 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
       assertOcrCustomConfig(customConfig as unknown as Record<string, unknown>);
       const wantVlmOpts =
         customInitForm.modelType === 'doc_vlm' ||
-        customInitForm.modelType === 'nemotron_parse';
-      const ocr = await createOCR({
-        initMode: 'custom',
-        modelType: customInitForm.modelType,
+        customInitForm.modelType === 'nemotron_parse' ||
+        customInitForm.modelType === 'paddleocr_vl';
+      const customBase = {
+        initMode: 'custom' as const,
         customConfig,
         provider: providerValue,
         numThreads: threads,
-        ...(customInitForm.modelType === 'ppocr'
-          ? { ppocr: { detUnclipRatio } }
-          : {}),
-        ...(customInitForm.modelType === 'doctr'
-          ? { doctr: { detUnclipRatio } }
-          : {}),
-        ...(wantVlmOpts ? { maxNewTokens: customInitForm.maxNewTokens } : {}),
-      });
+      };
+      const ocr = await createOCR(
+        customInitForm.modelType === 'ppocr'
+          ? {
+              ...customBase,
+              modelType: 'ppocr',
+              ppocr: { detUnclipRatio },
+            }
+          : customInitForm.modelType === 'doctr'
+          ? {
+              ...customBase,
+              modelType: 'doctr',
+              doctr: { detUnclipRatio },
+            }
+          : customInitForm.modelType === 'paddleocr_vl'
+          ? {
+              ...customBase,
+              modelType: 'paddleocr_vl',
+              maxNewTokens: customInitForm.maxNewTokens,
+              paddleocrVl: { maxPixels: customInitForm.maxPixels },
+            }
+          : {
+              ...customBase,
+              modelType: customInitForm.modelType,
+              maxNewTokens: customInitForm.maxNewTokens,
+            }
+      );
       engineRef.current = ocr;
       const family = asOcrFamily(customInitForm.modelType);
       const folder = selectedFolder
@@ -336,6 +365,7 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
   }, [
     customInitForm.fileSources,
     customInitForm.maxNewTokens,
+    customInitForm.maxPixels,
     customInitForm.modelType,
     detectSummary,
     detUnclipRatio,

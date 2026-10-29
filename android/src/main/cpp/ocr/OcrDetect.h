@@ -37,6 +37,9 @@ struct OcrDetectResult {
   std::string visionEncoderDataPath;
   std::string embedTokensPath;
   std::string embedTokensDataPath;
+  /** paddleocr_vl: `embedding.onnx`. */
+  std::string embeddingPath;
+  std::string embeddingDataPath;
   std::string decoderPath;
   std::string decoderDataPath;
   std::string tokenizerPath;

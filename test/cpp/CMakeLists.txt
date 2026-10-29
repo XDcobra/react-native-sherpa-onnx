@@ -352,6 +352,15 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseNpy.cpp"
     "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseTokenizer.cpp"
   )
+  set(PADDLEOCR_VL_SOURCES
+    "${OCR_CPP_ROOT}/OcrOrtHelpers.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlBackend.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlImageOps.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlManifest.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlMarkup.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlRope.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlTokenizer.cpp"
+  )
   add_executable(ppocr_host_test
     "${OCR_TEST_DIR}/ppocr_host_test.cpp"
     "${OCR_TEST_DIR}/ocr_test_image.cpp"
@@ -359,6 +368,7 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     ${OCR_CONTEXT_SOURCE}
     ${OCR_ORT_ENV_SOURCE}
     "${OCR_CPP_ROOT}/OcrFactory.cpp"
+    ${PADDLEOCR_VL_SOURCES}
     "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrDbPostprocess.cpp"
@@ -420,6 +430,7 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     ${OCR_CONTEXT_SOURCE}
     ${OCR_ORT_ENV_SOURCE}
     "${OCR_CPP_ROOT}/OcrFactory.cpp"
+    ${PADDLEOCR_VL_SOURCES}
     "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
     "${OCR_CPP_ROOT}/ppocr/PpocrDbPostprocess.cpp"
@@ -480,6 +491,7 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     ${OCR_CONTEXT_SOURCE}
     ${OCR_ORT_ENV_SOURCE}
     "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/OcrOrtHelpers.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTagsPrefix.cpp"
@@ -528,6 +540,7 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     ${OCR_CONTEXT_SOURCE}
     ${OCR_ORT_ENV_SOURCE}
     "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/OcrOrtHelpers.cpp"
     ${NEMOTRON_PARSE_SOURCES}
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
@@ -563,6 +576,48 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     TIMEOUT 600
   )
   message(STATUS "OCR nemotron_parse_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  add_executable(paddleocr_vl_host_test
+    "${OCR_TEST_DIR}/paddleocr_vl_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    ${PADDLEOCR_VL_SOURCES}
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
+  )
+  target_include_directories(paddleocr_vl_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/paddleocr_vl"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(paddleocr_vl_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(paddleocr_vl_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(paddleocr_vl_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(paddleocr_vl_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(paddleocr_vl_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(paddleocr_vl_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(paddleocr_vl_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME paddleocr_vl_host_test COMMAND $<TARGET_FILE:paddleocr_vl_host_test>)
+  set_tests_properties(paddleocr_vl_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    TIMEOUT 600
+  )
+  message(STATUS "OCR paddleocr_vl_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
 else()
   message(STATUS "CTC alignment / OCR host tests skipped (set SHERPA_ONNX_HOST_ORT_ROOT or use Linux/macOS)")
 endif()

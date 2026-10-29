@@ -304,6 +304,18 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
         });
     ExpectRequirementsMatch("ocr", "nemotron_parse", kOcrNemotronParseFields);
     ExpectRequirementsMatch("ocr", "nemotron-parse", kOcrNemotronParseFields);
+    const FieldList kOcrPaddleocrVlFields = {
+        {"vision_encoder", true, std::nullopt},
+        {"vision_encoder_data", false, std::nullopt},
+        {"embedding", true, std::nullopt},
+        {"embedding_data", false, std::nullopt},
+        {"decoder", true, std::nullopt},
+        {"decoder_data", false, std::nullopt},
+        {"tokenizer", true, std::nullopt},
+        {"manifest", false, std::nullopt},
+    };
+    ExpectRequirementsMatch("ocr", "paddleocr_vl", kOcrPaddleocrVlFields);
+    ExpectRequirementsMatch("ocr", "paddleocr-vl", kOcrPaddleocrVlFields);
     ExpectRequirementsMatch("punctuation", "ct_transformer", {{"ct_transformer", true, std::nullopt}});
     ExpectRequirementsMatch("punctuation", "cnn_bilstm", {
         {"cnn_bilstm", true, std::nullopt},

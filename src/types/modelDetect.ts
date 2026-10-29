@@ -189,11 +189,15 @@ export interface OcrDetectModelResult extends ModelDetectResultBase {
     embed_tokens?: string;
     /** `embed_tokens.onnx_data` — doc_vlm. */
     embed_tokens_data?: string;
-    /** `decoder_model_merged.onnx` — doc_vlm. */
+    /** `embedding.onnx` — paddleocr_vl. */
+    embedding?: string;
+    /** `embedding.onnx_data` — paddleocr_vl. */
+    embedding_data?: string;
+    /** `decoder_model_merged.onnx` — doc_vlm. `decoder.onnx` — paddleocr_vl. */
     decoder?: string;
     /** `decoder_model_merged.onnx_data` — doc_vlm. */
     decoder_data?: string;
-    /** `tokenizer.json` — doc_vlm / nemotron_parse. */
+    /** `tokenizer.json` — doc_vlm / nemotron_parse / paddleocr_vl. */
     tokenizer?: string;
     /** `patch_embed.onnx` — nemotron_parse. */
     patch_embed?: string;
