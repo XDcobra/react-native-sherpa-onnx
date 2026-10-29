@@ -18,6 +18,8 @@ export type OcrCustomPathKey =
   | 'vision_encoder_data'
   | 'embed_tokens'
   | 'embed_tokens_data'
+  | 'embedding'
+  | 'embedding_data'
   | 'decoder'
   | 'decoder_data'
   | 'tokenizer'
@@ -57,11 +59,23 @@ export type OcrNemotronParseCustomConfig = OcrDocVlmCustomConfig & {
   patch_embed_data?: FileSource;
 };
 
+export type OcrPaddleocrVlCustomConfig = {
+  vision_encoder: FileSource;
+  embedding: FileSource;
+  decoder: FileSource;
+  tokenizer: FileSource;
+  vision_encoder_data?: FileSource;
+  embedding_data?: FileSource;
+  decoder_data?: FileSource;
+  manifest?: FileSource;
+};
+
 export type OcrCustomConfigByModelType = {
   ppocr: OcrPpocrCustomConfig;
   doctr: OcrDoctrCustomConfig;
   doc_vlm: OcrDocVlmCustomConfig;
   nemotron_parse: OcrNemotronParseCustomConfig;
+  paddleocr_vl: OcrPaddleocrVlCustomConfig;
 };
 
 export type OcrCustomConfig = OcrCustomConfigByModelType[OcrConcreteModelType];

@@ -69,6 +69,10 @@ std::string InferOcrModelTypeFromKey(const std::string& modelKey) {
         lower.find("docling") != std::string::npos) {
         return "doc_vlm";
     }
+    if (lower.find("paddleocr_vl") != std::string::npos ||
+        lower.find("paddleocr-vl") != std::string::npos) {
+        return "paddleocr_vl";
+    }
     if (lower.find("ppocr") != std::string::npos ||
         lower.find("paddleocr") != std::string::npos ||
         lower.find("pp-ocr") != std::string::npos) {
