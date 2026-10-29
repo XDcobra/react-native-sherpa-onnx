@@ -151,6 +151,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [segmentbuffer-offline.md](./segmentbuffer-offline.md) | Offline segment buffer — segment links, maps |
 | [segmentbuffer-streaming.md](./segmentbuffer-streaming.md) | Live segment buffer — streaming segment linking |
 | [imagebuffer-offline.md](./imagebuffer-offline.md) | Offline image buffer — decode files, multi-frame, spatial OCR input |
+| [videobuffer.md](./videobuffer.md) | Offline + live video buffers — demux, HW decode, image bridge, OCR `ptsMs` |
 
 ---
 

@@ -47,8 +47,10 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 |-----|-------------|
 | **`saveAudioAsWav16k(input, output)`** | Saves a buffer or `FileSource` as 16 kHz mono WAV. Builds without FFmpeg may reject when a backend path requires FFmpeg. |
 | **`saveAudioAsFile(input, output, format, options?)`** | Saves a buffer or `FileSource` to the requested output format. Non-WAV formats require FFmpeg. |
+| **`createOfflineVideoBufferFromFile(path)`** | Opens a container (`mov` / `matroska`) via libavformat. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`ingestFileToLiveVideoBuffer(path, live)`** | Remuxes a file into a live video buffer. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 
-The helpers above are exposed from **`react-native-sherpa-onnx/audio`**. STT, archive extraction, model detection, and general pipeline buffer operations continue to work when FFmpeg is disabled.
+The audio helpers above are exposed from **`react-native-sherpa-onnx/audio`**. Video file APIs are from **`react-native-sherpa-onnx/videobuffer`**. Live video buffers fed by native producers (no file demux) keep working. STT, archive extraction, model detection, and general pipeline buffer operations continue to work when FFmpeg is disabled.
 
 ## Risks and limitations of disabling FFmpeg
 
