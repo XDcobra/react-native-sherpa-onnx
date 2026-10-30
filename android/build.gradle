@@ -177,7 +177,7 @@ repositories {
 
 // Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR --> jniLibs + headers),
 // extractSherpaOnnxClasses (sherpa-onnx classes.jar), extractOnnxruntimeClasses (onnxruntime classes.jar).
-configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; lexborAar; libwebpAar; pdfiumAar; onnxruntimeAar }
+configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; lexborAar; libyuvAar; libwebpAar; pdfiumAar; onnxruntimeAar }
 
 // Registers downloadNativeLibsIfNeeded, checkJniLibs, extractSherpaOnnxClasses, extractOnnxruntimeClasses; wires preBuild.dependsOn checkJniLibs.
 apply from: file("${project.projectDir}/prebuilt-download.gradle")
@@ -195,6 +195,7 @@ dependencies {
   ffmpegAar "com.xdcobra.sherpa:ffmpeg:${ffmpegVersion}@aar"
   libarchiveAar "com.xdcobra.sherpa:libarchive:${libarchiveVersion}@aar"
   lexborAar "com.xdcobra.sherpa:lexbor:${lexborVersion}@aar"
+  libyuvAar "com.xdcobra.sherpa:libyuv:${libyuvVersion}@aar"
   def enableLibwebpDep = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
   if (enableLibwebpDep) {
     libwebpAar "com.xdcobra.sherpa:libwebp:${libwebpVersion}@aar"

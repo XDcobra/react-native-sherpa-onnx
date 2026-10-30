@@ -297,6 +297,27 @@ third_party/lexbor_prebuilt/build-*/
 third_party/lexbor_prebuilt/build_ios/
 third_party/lexbor_prebuilt/lexbor.xcframework/
 
+# libyuv prebuilt: build output (when building prebuilts locally)
+third_party/libyuv_prebuilt/*
+!third_party/libyuv_prebuilt/README.md
+!third_party/libyuv_prebuilt/CMakeLists.txt
+!third_party/libyuv_prebuilt/build_libyuv_android.sh
+!third_party/libyuv_prebuilt/build_libyuv_ios.sh
+!third_party/libyuv_prebuilt/create_libyuv_aar.sh
+!third_party/libyuv_prebuilt/IOS_RELEASE_TAG
+!third_party/libyuv_prebuilt/ANDROID_RELEASE_TAG
+!third_party/libyuv_prebuilt/publish-maven/
+third_party/libyuv_prebuilt/publish-maven/*
+!third_party/libyuv_prebuilt/publish-maven/publish.env.example
+!third_party/libyuv_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/libyuv_prebuilt/publish-maven/README.md
+third_party/libyuv_prebuilt/publish-maven/publish.env
+third_party/libyuv_prebuilt/android/
+third_party/libyuv_prebuilt/ios/
+third_party/libyuv_prebuilt/build-*/
+third_party/libyuv_prebuilt/build_ios/
+third_party/libyuv_prebuilt/libyuv.xcframework/
+
 # libwebp prebuilt: build output (when building prebuilts locally)
 third_party/libwebp_prebuilt/*
 !third_party/libwebp_prebuilt/README.md

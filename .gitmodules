@@ -28,3 +28,6 @@
 [submodule "third_party/lexbor"]
 	path = third_party/lexbor
 	url = https://github.com/lexbor/lexbor.git
+[submodule "third_party/libyuv"]
+	path = third_party/libyuv
+	url = https://chromium.googlesource.com/libyuv/libyuv.git

@@ -1,6 +1,6 @@
 import SherpaOnnx from './NativeSherpaOnnx';
 
-/** Vendored libyuv (BSD-3-Clause + PATENTS). Full text: THIRD_PARTY_LICENSES/libyuv.txt */
+/** libyuv (BSD-3-Clause + PATENTS). Submodule third_party/libyuv; full text: THIRD_PARTY_LICENSES/libyuv.txt */
 export const LIBYUV_LICENSE = {
   name: 'libyuv',
   license: 'BSD-3-Clause',

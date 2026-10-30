@@ -830,9 +830,13 @@ set_tests_properties(document_host_test PROPERTIES
 )
 
 # --- VideoBuffer host tests (C++ SOT; FakeDecoder, no device) ---
+# Compile libyuv from the submodule via third_party/libyuv_prebuilt wrapper CMake.
+# Other host-test jobs that do not init this submodule skip these targets.
 set(VIDEO_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/video")
 set(VIDEOBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/videobuffer")
 set(LIBYUV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libyuv")
+set(LIBYUV_PREBUILT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libyuv_prebuilt")
+if(EXISTS "${LIBYUV_ROOT}/include/libyuv.h")
 if(GTest_FOUND)
   set(VIDEOBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
 else()
@@ -840,7 +844,7 @@ else()
 endif()
 
 if(NOT TARGET yuv)
-  add_subdirectory("${LIBYUV_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/libyuv")
+  add_subdirectory("${LIBYUV_PREBUILT}" "${CMAKE_CURRENT_BINARY_DIR}/libyuv")
 endif()
 
 set(VIDEOBUFFER_CORE_SOURCES
@@ -1027,5 +1031,9 @@ if(APPLE)
     "-framework QuartzCore"
   )
   add_test(NAME videobuffer_sb_host_test COMMAND $<TARGET_FILE:videobuffer_sb_host_test>)
+endif()
+
+else()
+  message(STATUS "videobuffer host tests skipped (git submodule update --init third_party/libyuv)")
 endif()
 

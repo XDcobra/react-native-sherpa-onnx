@@ -69,6 +69,15 @@ if (!lexborVersion) {
 project.ext.lexborVersion = lexborVersion
 println "[react-native-sherpa-onnx] lexbor version (extracted/used): ${lexborVersion}"
 
+// libyuv: 1. LIBYUV_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
+def libyuvVersion = System.getenv('LIBYUV_VERSION')
+if (!libyuvVersion) {
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/libyuv_prebuilt/ANDROID_RELEASE_TAG'), 'libyuv-android-v')
+  libyuvVersion = v ?: (project.hasProperty('libyuvVersion') ? project.libyuvVersion : '1976-1')
+}
+project.ext.libyuvVersion = libyuvVersion
+println "[react-native-sherpa-onnx] libyuv version (extracted/used): ${libyuvVersion}"
+
 // pdfium: 1. PDFIUM_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def pdfiumVersion = System.getenv('PDFIUM_VERSION')
 if (!pdfiumVersion) {

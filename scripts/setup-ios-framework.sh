@@ -104,6 +104,7 @@ else
 fi
 
 FRAMEWORK_SLUGS+=(lexbor)
+FRAMEWORK_SLUGS+=(libyuv)
 
 # libwebp is opt-in (default off) — only download when explicitly enabled.
 if [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-false}" = "true" ]; then
@@ -172,6 +173,17 @@ get_framework_config() {
       LIB_SIMULATOR="liblexbor.a"
       HEADER_CHECK="Headers/lexbor/html/parser.h"
       DISPLAY_NAME="lexbor"
+      ;;
+    libyuv)
+      TAG_FILE="$PROJECT_ROOT/third_party/libyuv_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="libyuv-ios-v"
+      XCFRAMEWORK_NAME="libyuv.xcframework"
+      ZIP_ASSET_NAME="libyuv-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-libyuv"
+      LIB_DEVICE="libyuv.a"
+      LIB_SIMULATOR="libyuv.a"
+      HEADER_CHECK="Headers/libyuv/convert.h"
+      DISPLAY_NAME="libyuv"
       ;;
     libwebp)
       TAG_FILE="$PROJECT_ROOT/third_party/libwebp_prebuilt/IOS_RELEASE_TAG"

@@ -2,7 +2,7 @@
 
 This directory contains **full license texts** for libraries shipped with this module (e.g. sherpa-onnx, ONNX Runtime, FFmpeg, libyuv). See the repository [README](../README.md#third-party-libraries) for links.
 
-VideoBuffer vendors [libyuv](libyuv.txt) (BSD-3-Clause; Google `PATENTS` grant in `third_party/libyuv/PATENTS`).
+VideoBuffer uses [libyuv](libyuv.txt) (BSD-3-Clause; Google `PATENTS` grant in the `third_party/libyuv` submodule). Consumer prebuilts come from `third_party/libyuv_prebuilt`.
 
 OCR (PP-OCR spike / `PpocrBackend`) additionally attributes RapidOCR and PaddleOCR under Apache-2.0 — see [`rapidocr-paddleocr.txt`](rapidocr-paddleocr.txt).
 
