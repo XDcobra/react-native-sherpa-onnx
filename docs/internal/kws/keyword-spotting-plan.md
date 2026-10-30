@@ -436,5 +436,5 @@ Do **not** invent a SLID-style shortcut of “licenses come from ASR” — KWS 
 - Pretrained packs index: https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html
 - Fork (full A/iOS): https://github.com/skillmakerai/react-native-sherpa-onnx-kw/tree/feat/expose-keyword-spotting
 - Fork (Android spike + OWW branch): https://github.com/lakshgk/react-native-sherpa-onnx
-- SDK analogs: [stt-streaming.md](../stt-streaming.md), [streaming-pipelines-overview.md](../streaming-pipelines-overview.md), [audiobuffer-streaming.md](../audiobuffer-streaming.md), [sdk-feature-support-matrix.md](sdk-feature-support-matrix.md)
-- Sibling plan style: [spoken-language-identification-plan.md](spoken-language-identification-plan.md)
+- SDK analogs: [stt-streaming.md](../../stt-streaming.md), [streaming-pipelines-overview.md](../../streaming-pipelines-overview.md), [audiobuffer-streaming.md](../../audiobuffer-streaming.md), [sdk-feature-support-matrix.md](../sdk-feature-support-matrix.md)
+- Sibling plan style: [spoken-language-identification-plan.md](../language-identification/spoken-language-identification-plan.md)

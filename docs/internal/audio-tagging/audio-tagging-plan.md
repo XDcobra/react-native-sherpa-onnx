@@ -220,7 +220,7 @@ interface AudioTaggingResult {
 | --- | --- |
 | **LiveText (required)** | `text` = primary event `name`; `source` = `'audio_tagging'`; `meta.events` = nested top-K `[{name,index,prob}]` (JSON-tree LiveText contract); `meta.durationMs`; timestamps = span start/end |
 
-> **Done:** LiveText meta JSON-tree contract landed (`meta.events` nested arrays). String encode/decode workaround removed (clean cut). See [textbuffer-streaming.md](../textbuffer-streaming.md) / [audio-tagging-live.md](../audio-tagging-live.md).
+> **Done:** LiveText meta JSON-tree contract landed (`meta.events` nested arrays). String encode/decode workaround removed (clean cut). See [textbuffer-streaming.md](../../textbuffer-streaming.md) / [audio-tagging-live.md](../../audio-tagging-live.md).
 | **LiveSegment (optional `targetSegmentBuffer`)** | Same payload as offline: `{ source: 'audioTagging', primaryName?, events? }` |
 | **JS callbacks** | `onSegment` / `onEvent` from LiveText commits (map primary name + meta) — **no** SLID-style `onLanguageChanged` |
 
@@ -228,7 +228,7 @@ Apps that only need structured offline results ignore buffers; live always needs
 
 ### 5.3 Live overload — concrete Zielbild (Phase 4 research)
 
-Primary template: **SLID live** (`src/language-identification/live.ts`, `SlidOfflineLivePipelineWorker`, `startLanguageIdOfflineLivePipeline`). Shared contracts: [`docs/internal/live-overload.md`](live-overload.md). Showcase/docs order: implement live **before** example + public docs (same reason as SLID — one screen toggles offline/live via shared ingest components; `audio-tagging-live.md` is authored from the landed overload and linked from offline docs).
+Primary template: **SLID live** (`src/language-identification/live.ts`, `SlidOfflineLivePipelineWorker`, `startLanguageIdOfflineLivePipeline`). Shared contracts: [`docs/internal/live-overload.md`](../live-overload.md). Showcase/docs order: implement live **before** example + public docs (same reason as SLID — one screen toggles offline/live via shared ingest components; `audio-tagging-live.md` is authored from the landed overload and linked from offline docs).
 
 ```mermaid
 flowchart LR
@@ -437,7 +437,7 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 ### 8.3 Lifecycle / Fabric notes
 
 - Snapshot event arrays to plain JSON before emitting to JS (avoid retaining native HybridData — lesson from KWS LiveText meta).
-- **LiveText meta:** top-K `events` committed as a nested array under `meta.events` (JSON-tree LiveText contract). See [audio-tagging-live.md](../audio-tagging-live.md).
+- **LiveText meta:** top-K `events` committed as a nested array under `meta.events` (JSON-tree LiveText contract). See [audio-tagging-live.md](../../audio-tagging-live.md).
 - Always await worker stop before `release()` (pipeline join lesson).
 
 ---
@@ -502,6 +502,6 @@ Do **not** piggyback ASR licenses — these tarballs never appear in `asr-models
 - Kotlin API: `third_party/sherpa-onnx/sherpa-onnx/kotlin-api/AudioTagging.kt`
 - C-API: `third_party/sherpa-onnx/sherpa-onnx/c-api/c-api.h` (`SherpaOnnxCreateAudioTagging`, …)
 - Upstream Android demo: `third_party/sherpa-onnx/android/SherpaOnnxAudioTagging/`
-- Live overload contracts: [live-overload.md](live-overload.md)
-- SDK analogs: [language-identification-offline.md](../language-identification-offline.md), [language-identification-live.md](../language-identification-live.md), [keyword-spotting-plan.md](keyword-spotting-plan.md) (collect pattern), [sdk-feature-support-matrix.md](sdk-feature-support-matrix.md)
+- Live overload contracts: [live-overload.md](../live-overload.md)
+- SDK analogs: [language-identification-offline.md](../../language-identification-offline.md), [language-identification-live.md](../../language-identification-live.md), [keyword-spotting-plan.md](../kws/keyword-spotting-plan.md) (collect pattern), [sdk-feature-support-matrix.md](../sdk-feature-support-matrix.md)
 - JS WASM example (illustrative): https://k2-fsa.github.io/sherpa/onnx/javascript-api/examples/audio_tagging.html

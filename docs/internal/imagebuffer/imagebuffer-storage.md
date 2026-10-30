@@ -12,4 +12,4 @@ Offline ImageBuffer mirrors OfflineAudioBuffer mmap policy in C++ (`android/src/
 | Orphan sweep | Prefix `img_off_`, suffix `.rgb8`, maxAge 1h at init |
 | Engine ptr | `ImageRegistry::GetFrameRgbPtr` |
 
-Public docs: [`docs/imagebuffer-offline.md`](../imagebuffer-offline.md).
+Public docs: [`docs/imagebuffer-offline.md`](../../imagebuffer-offline.md).

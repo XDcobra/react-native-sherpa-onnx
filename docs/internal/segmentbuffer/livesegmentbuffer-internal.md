@@ -107,7 +107,7 @@ LiveSegmentBuffer                    LiveAudioBuffer
 
 The spool provides **full-history retention** beyond the in-memory window using a journal + checkpoint model.
 
-**Spool format:** See `docs/internal/segmentbuffer-spool-v2-format.md` for binary details.
+**Spool format:** See [segmentbuffer-spool-v2-format.md](./segmentbuffer-spool-v2-format.md) for binary details.
 
 **File layout:**
 ```

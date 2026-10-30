@@ -12,7 +12,7 @@ Every externally supplied Android artifact (native `.so`, C headers, `classes.ja
 | **4** | `GITHUB_RELEASE` | `curl` from `https://github.com/<repo>/releases/download/<tag>/<asset>.zip`. The tag is read from `third_party/*/ANDROID_RELEASE_TAG`. |
 | **5** | `ERROR` | `RuntimeException` / failed build when a required artifact is still missing after all applicable stages. |
 
-**Optional skips:** FFmpeg and libarchive are skipped entirely when `sherpaOnnxDisableFfmpeg` or `sherpaOnnxDisableLibarchive` is set in `gradle.properties`; see [disable-ffmpeg.md](./disable-ffmpeg.md) and [disable-libarchive.md](./disable-libarchive.md).
+**Optional skips:** FFmpeg and libarchive are skipped entirely when `sherpaOnnxDisableFfmpeg` or `sherpaOnnxDisableLibarchive` is set in `gradle.properties`; see [disable-ffmpeg.md](../disable-ffmpeg.md) and [disable-libarchive.md](../disable-libarchive.md).
 
 **Opt-in (default off):**
 

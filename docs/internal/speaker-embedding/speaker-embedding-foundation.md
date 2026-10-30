@@ -1,11 +1,11 @@
 # Speaker embedding foundation — Internal design
 
-> **Status:** Phase 1 (SID) **shipped** — shared extractor/manager + offline SID + live `labelLiveSegments`. Phase 2 offline diarization **shipped** — shared `SpeakerEmbeddingRunner` + `createDiarization` / `diarize` (see [diarization-offline.md](../diarization-offline.md) and [§10](#10-diarization-core-design-phase-2--decisions)). Remaining: live/streaming diarization (out of scope upstream). `speech_pyannote_segmentation` offline evaluator **shipped**.
+> **Status:** Phase 1 (SID) **shipped** — shared extractor/manager + offline SID + live `labelLiveSegments`. Phase 2 offline diarization **shipped** — shared `SpeakerEmbeddingRunner` + `createDiarization` / `diarize` (see [diarization-offline.md](../../diarization-offline.md) and [§10](#10-diarization-core-design-phase-2--decisions)). Remaining: live/streaming diarization (out of scope upstream). `speech_pyannote_segmentation` offline evaluator **shipped**.
 > **Audience:** SDK maintainers.
 > **Strategy:** Ship **Speaker Identification (SID)** first on a shared **Extractor + Manager** layer designed so **Speaker Diarization** can reuse the same embedding engine without rework.
 > **User request:** [Discussion #113 — Speaker Identification](https://github.com/XDcobra/react-native-sherpa-onnx/discussions/113)
 >
-> Live-overload implementation details: [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-native-worker).
+> Live-overload implementation details: [live-overload.md §11](../live-overload.md#11-speaker-identification-live-overload-native-worker).
 
 ---
 
@@ -81,11 +81,11 @@ engine.destroy(): Promise<void>
 
 **Persistence:** Thin SID helpers `exportEnrollments` / `importEnrollments` return/accept a versioned embeddings JSON bundle (`SpeakerEnrollmentBundle`). The SDK does not write files — the app stores the object. Export is fed by a JS enrollment mirror (native manager cannot read embeddings back). Diarization does not need persistence.
 
-**Live SID:** Offline embedding weights + mandatory speech segmentation + per-utterance extract/search in a native `OfflineLivePipelineWorker`. Public handle matches other live overloads — see [live-overload.md §11](live-overload.md#11-speaker-identification-live-overload-native-worker).
+**Live SID:** Offline embedding weights + mandatory speech segmentation + per-utterance extract/search in a native `OfflineLivePipelineWorker`. Public handle matches other live overloads — see [live-overload.md §11](../live-overload.md#11-speaker-identification-live-overload-native-worker).
 
 ### 2.3 `src/diarization/` (Phase 2 — offline shipped)
 
-Public module: `createDiarization` / `detectDiarizationModel` / `diarize(audioIn, segmentsOut)` with `kind: 'diarization'` segments. Shared C++ session acquires `SpeakerEmbeddingRunner` from the same registry as SID — see [diarization-offline.md](../diarization-offline.md) and [§10](#10-diarization-core-design-phase-2--decisions).
+Public module: `createDiarization` / `detectDiarizationModel` / `diarize(audioIn, segmentsOut)` with `kind: 'diarization'` segments. Shared C++ session acquires `SpeakerEmbeddingRunner` from the same registry as SID — see [diarization-offline.md](../../diarization-offline.md) and [§10](#10-diarization-core-design-phase-2--decisions).
 
 **Do not** store cluster labels in `SpeakerEmbeddingManager`. Apps map anonymous clusters to names via `getClusterEmbeddings()` + SID search.
 
@@ -190,7 +190,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
-- Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md)
+- Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../../future-work/speaker-embedding-manager-upstream-export-import.md)
 - Optional embedding JSI (deferred; only if low-level extract profiles hot)
 
 ---
@@ -211,13 +211,13 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 ## 9. Related documents
 
 - [Discussion #113 — Speaker Identification request](https://github.com/XDcobra/react-native-sherpa-onnx/discussions/113)
-- [speaker-identification-offline.md](../speaker-identification-offline.md)
-- [speaker-identification-live.md](../speaker-identification-live.md)
-- [speaker-embedding-manager-upstream-export-import.md](../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
+- [speaker-identification-offline.md](../../speaker-identification-offline.md)
+- [speaker-identification-live.md](../../speaker-identification-live.md)
+- [speaker-embedding-manager-upstream-export-import.md](../../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
 - [speaker-embedding-sharing-verification.md](./speaker-embedding-sharing-verification.md) — device logcat sharing check
-- [diarization-offline.md](../diarization-offline.md) — offline batch (shipped)
-- [diarization-named-timeline.md](../diarization-named-timeline.md) — SID × diarization named timeline
-- [sdk-feature-support-matrix.md](./sdk-feature-support-matrix.md)
+- [diarization-offline.md](../../diarization-offline.md) — offline batch (shipped)
+- [diarization-named-timeline.md](../../diarization-named-timeline.md) — SID × diarization named timeline
+- [sdk-feature-support-matrix.md](../sdk-feature-support-matrix.md)
 - [Diarization core design](#10-diarization-core-design-phase-2--decisions) — this doc, §10
 - Upstream: `third_party/sherpa-onnx/sherpa-onnx/kotlin-api/Speaker.kt`, `OfflineSpeakerDiarization.kt` (Kotlin API — **not** used for diarization; see §10.2)
 

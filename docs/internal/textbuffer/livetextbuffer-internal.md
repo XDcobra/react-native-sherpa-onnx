@@ -84,7 +84,7 @@ The segment log is an **ordered list** of committed text segments.
 
 The spool provides **full-history retention** beyond the in-memory window using a journal + checkpoint model.
 
-**Spool format:** See `docs/internal/textbuffer-spool-v2-format.md` for binary details.
+**Spool format:** See [textbuffer-spool-v2-format.md](./textbuffer-spool-v2-format.md) for binary details.
 
 **File layout:**
 ```
@@ -264,7 +264,7 @@ Seeds a new live buffer with the offline text buffer's content. The live buffer 
 | Spool on by default (`mode: 'on'`) | Most use cases need full history (export, post-processing). Opt-out with `'off'` for memory-only lightweight buffers. |
 | UTF-16 for slice positions | JavaScript strings are UTF-16. Using UTF-16 indices avoids costly codepoint conversion at the bridge. |
 | maxSegments eviction | Prevents unbounded memory growth in very long sessions (hours of transcription). Spool retains evicted segments. |
-| Opaque `meta` on segments | Allows pipeline workers (TTS, punctuation, etc.) to attach feature-specific metadata without schema coupling. LiveText `meta` is a Fabric-safe JSON tree (`Record<string, JsonValue>`); see [textbuffer-streaming.md](../textbuffer-streaming.md). |
+| Opaque `meta` on segments | Allows pipeline workers (TTS, punctuation, etc.) to attach feature-specific metadata without schema coupling. LiveText `meta` is a Fabric-safe JSON tree (`Record<string, JsonValue>`); see [textbuffer-streaming.md](../../textbuffer-streaming.md). |
 
 ---
 

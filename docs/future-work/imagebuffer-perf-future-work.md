@@ -3,7 +3,7 @@
 **Status:** Future optimization note — not implemented (except items already shipped in public docs).  
 **Scope:** Image-specific (and live-image) memory/perf **beyond** what Offline ImageBuffer already ships.  
 **Shipped already (do not re-plan here):** RAM vs mmap, dynamic threshold, temp lifecycle, `GetFrameRgbPtr`, decode progress/cancel, `maxSide`, PDF `rasterizePdfPages`, PDF **`strategy: 'lazy-lru'` + `hotFrames`**, `ensureOfflineImageBufferFrame`, `OfflineImageBufferFrameView`, `exportOfflineImageBufferFrame`. See [imagebuffer-offline.md](../imagebuffer-offline.md) and [pdf-offline.md](../pdf-offline.md).  
-**Audio reference:** [`docs/internal/offlineaudiobuffer-internal.md`](../internal/offlineaudiobuffer-internal.md)
+**Audio reference:** [`docs/internal/audiobuffer/offlineaudiobuffer-internal.md`](../internal/audiobuffer/offlineaudiobuffer-internal.md)
 
 ---
 

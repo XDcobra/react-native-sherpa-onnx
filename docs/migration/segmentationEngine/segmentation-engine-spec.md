@@ -653,9 +653,9 @@ The TTS incremental engine can be removed once these gates are passed:
 
 - `docs/migration/segmentationEngine/segmentation-engine-foundation.md`
 - `docs/migration/segmentationEngine/sdk-feature-support-matrix.md`
-- `docs/internal/liveaudiobuffer-internal.md`
-- `docs/internal/livetextbuffer-internal.md`
-- `docs/internal/livesegmentbuffer-internal.md`
-- `docs/internal/offlineaudiobuffer-internal.md`
-- `docs/internal/offlinetextbuffer-internal.md`
-- `docs/internal/offlinesegmentbuffer-internal.md`
+- `docs/internal/audiobuffer/liveaudiobuffer-internal.md`
+- `docs/internal/textbuffer/livetextbuffer-internal.md`
+- `docs/internal/segmentbuffer/livesegmentbuffer-internal.md`
+- `docs/internal/audiobuffer/offlineaudiobuffer-internal.md`
+- `docs/internal/textbuffer/offlinetextbuffer-internal.md`
+- `docs/internal/segmentbuffer/offlinesegmentbuffer-internal.md`
