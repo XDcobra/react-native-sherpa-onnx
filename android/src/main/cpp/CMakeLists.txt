@@ -293,6 +293,13 @@ set(SOURCES
     video/live/PacketSpool.cpp
     video/live/LiveVideoEntry.cpp
     video/live/LiveIngest.cpp
+    video/preview/PlaybackController.cpp
+    video/preview/PlaybackClock.cpp
+    video/preview/FrameScheduler.cpp
+    video/preview/PreviewPlayer.cpp
+    video/platform/android/MediaCodecSurfaceRenderer.cpp
+    video/platform/android/JniAudioTrackRenderer.cpp
+    jni/video/sherpa-onnx-videopreview-jni.cpp
     video/platform/android/AMediaCodecDecoder.cpp
     video/platform/android/AMediaCodecEncoder.cpp
 )

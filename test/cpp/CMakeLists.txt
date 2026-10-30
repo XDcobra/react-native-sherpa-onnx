@@ -874,6 +874,10 @@ set(VIDEOBUFFER_CORE_SOURCES
   "${VIDEO_CPP_ROOT}/live/PacketSpool.cpp"
   "${VIDEO_CPP_ROOT}/live/LiveVideoEntry.cpp"
   "${VIDEO_CPP_ROOT}/live/LiveIngest.cpp"
+  "${VIDEO_CPP_ROOT}/preview/PlaybackController.cpp"
+  "${VIDEO_CPP_ROOT}/preview/PlaybackClock.cpp"
+  "${VIDEO_CPP_ROOT}/preview/FrameScheduler.cpp"
+  "${VIDEO_CPP_ROOT}/preview/PreviewPlayer.cpp"
 )
 
 add_executable(videobuffer_core_host_test
@@ -893,6 +897,12 @@ add_executable(videobuffer_core_host_test
   "${VIDEOBUFFER_TEST_DIR}/iterator_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/decoder_pool_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/audio_timeline_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/preview_controller_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/preview_live_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/preview_sync_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/clock_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/frame_scheduler_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/pcm_ring_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/live_audio_test.cpp"
   ${VIDEOBUFFER_CORE_SOURCES}
 )
@@ -1007,5 +1017,15 @@ if(APPLE)
   set_tests_properties(videobuffer_vt_host_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
   )
+
+  add_executable(videobuffer_sb_host_test
+    "${VIDEOBUFFER_TEST_DIR}/sb_host_test.mm"
+  )
+  target_link_libraries(videobuffer_sb_host_test PRIVATE
+    ${VIDEOBUFFER_GTEST_LIBS}
+    "-framework AVFoundation" "-framework CoreMedia" "-framework Foundation"
+    "-framework QuartzCore"
+  )
+  add_test(NAME videobuffer_sb_host_test COMMAND $<TARGET_FILE:videobuffer_sb_host_test>)
 endif()
 

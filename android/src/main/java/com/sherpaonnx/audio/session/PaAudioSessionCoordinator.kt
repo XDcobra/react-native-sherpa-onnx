@@ -57,6 +57,33 @@ object PaAudioSessionCoordinator {
   private var holdingFocus: Boolean = false
   private var focusRequest: AudioFocusRequest? = null
   private var initialized = false
+  private val focusListeners = mutableListOf<(Int) -> Unit>()
+  private val preOFocusListener = AudioManager.OnAudioFocusChangeListener { change ->
+    dispatchFocusChange(change)
+  }
+
+  fun addFocusListener(listener: (change: Int) -> Unit): () -> Unit {
+    synchronized(lock) {
+      focusListeners.add(listener)
+    }
+    return {
+      synchronized(lock) {
+        focusListeners.remove(listener)
+      }
+    }
+  }
+
+  private fun dispatchFocusChange(change: Int) {
+    Log.i(TAG, "onAudioFocusChange $change")
+    val copy = synchronized(lock) { focusListeners.toList() }
+    for (listener in copy) {
+      try {
+        listener(change)
+      } catch (e: Exception) {
+        Log.w(TAG, "focus listener failed: ${e.message}")
+      }
+    }
+  }
 
   // Device callback
   private var deviceCallback: AudioDeviceCallback? = null
@@ -282,7 +309,7 @@ object PaAudioSessionCoordinator {
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
         )
-        .setOnAudioFocusChangeListener { /* best-effort: log only */ }
+        .setOnAudioFocusChangeListener { change -> dispatchFocusChange(change) }
         .build()
       focusRequest = req
       val result = am.requestAudioFocus(req)
@@ -291,7 +318,7 @@ object PaAudioSessionCoordinator {
     } else {
       @Suppress("DEPRECATION")
       val result = am.requestAudioFocus(
-        { /* listener */ },
+        preOFocusListener,
         AudioManager.STREAM_MUSIC,
         AudioManager.AUDIOFOCUS_GAIN
       )

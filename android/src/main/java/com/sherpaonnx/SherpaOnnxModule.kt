@@ -3704,7 +3704,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
       val realtime = options != null && options.hasKey("pacing") && options.getString("pacing") == "realtime"
-      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.ingestFile(liveBufferId, path, realtime)))
+      val includeAudio = options == null || !options.hasKey("includeAudio") || options.getBoolean("includeAudio")
+      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.ingestFile(liveBufferId, path, realtime, includeAudio)))
     } catch (e: Exception) {
       promise.reject("VIDEO_INTERNAL", e.message, e)
     }
@@ -3740,6 +3741,57 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun configureVideoBuffer(options: ReadableMap?, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      var cpu = -1
+      var display = -1
+      if (options != null && options.hasKey("decoderBudget") && !options.isNull("decoderBudget")) {
+        val budget = options.getMap("decoderBudget")
+        if (budget != null) {
+          if (budget.hasKey("cpu") && !budget.isNull("cpu")) cpu = budget.getInt("cpu")
+          if (budget.hasKey("display") && !budget.isNull("display")) display = budget.getInt("display")
+        }
+      }
+      com.sherpaonnx.video.VideoBufferService.configureDecoderBudget(cpu, display)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INVALID_ARGUMENT", e.message, e)
+    }
+  }
+
+  override fun startLiveVideoAudioTap(
+    videoBufferId: String,
+    liveAudioBufferId: String,
+    targetSampleRateHz: Double,
+    promise: Promise,
+  ) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      val raw = com.sherpaonnx.video.VideoBufferService.startLiveAudioTap(
+        videoBufferId, liveAudioBufferId, targetSampleRateHz.toInt()
+      )
+      val err = raw?.get("errorCode") as? String
+      if (!err.isNullOrEmpty()) {
+        promise.reject(err, raw["errorMessage"] as? String ?: err)
+      } else {
+        promise.resolve(null)
+      }
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun stopLiveVideoAudioTap(videoBufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      com.sherpaonnx.video.VideoBufferService.stopLiveAudioTap(videoBufferId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
   override fun releaseVideoBuffer(bufferId: String, promise: Promise) {
     try {
       com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
@@ -3747,6 +3799,263 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("VIDEO_INTERNAL", e.message, e)
+    }
+  }
+
+  override fun createOfflineAudioBufferFromVideo(bufferId: String, options: ReadableMap?, promise: Promise) {
+    val operationId =
+      if (options != null && options.hasKey("operationId") && !options.isNull("operationId")) {
+        options.getString("operationId") ?: "vid_aud_${java.util.UUID.randomUUID()}"
+      } else {
+        "vid_aud_${java.util.UUID.randomUUID()}"
+      }
+    val startUs =
+      if (options != null && options.hasKey("startUs") && !options.isNull("startUs")) {
+        options.getDouble("startUs").toLong()
+      } else {
+        0L
+      }
+    val endUs =
+      if (options != null && options.hasKey("endUs") && !options.isNull("endUs")) {
+        options.getDouble("endUs").toLong()
+      } else {
+        -1L
+      }
+    val targetRate =
+      if (options != null && options.hasKey("targetSampleRateHz") && !options.isNull("targetSampleRateHz")) {
+        options.getInt("targetSampleRateHz")
+      } else {
+        16000
+      }
+    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    decodeCancelFlags[operationId] = cancelFlag
+    decodeExecutor.execute {
+      val cancelFlagAddr = nativeAllocateCancelFlag()
+      val cancelChecker = Thread {
+        while (!cancelFlag.get()) {
+          try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+        }
+        nativeSetCancelFlag(cancelFlagAddr, true)
+      }
+      cancelChecker.isDaemon = true
+      cancelChecker.start()
+      try {
+        com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+        val dir = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.cacheDir
+          ?: reactApplicationContext.cacheDir
+        val tmpF32 = java.io.File(dir, "vid_aud_${java.util.UUID.randomUUID()}.f32")
+        val progressCallback = object {
+          @Suppress("unused")
+          fun onProgress(percent: Int, decodedMs: Long) {
+            emitDecodeProgress(operationId, decodedMs, 0, percent, 0, 0)
+          }
+        }
+        @Suppress("UNCHECKED_CAST")
+        val raw = com.sherpaonnx.video.VideoBufferService.extractAudioFromVideo(
+          bufferId, startUs, endUs, targetRate, tmpF32.absolutePath, cancelFlagAddr, progressCallback
+        ) as? HashMap<String, Any>
+        if (raw == null) {
+          tmpF32.delete()
+          promise.reject("VIDEO_INTERNAL", "null extract result")
+          return@execute
+        }
+        val err = raw["errorCode"] as? String
+        if (!err.isNullOrEmpty()) {
+          tmpF32.delete()
+          promise.reject(err, raw["errorMessage"] as? String ?: err)
+          return@execute
+        }
+        val numSamples = (raw["numSamples"] as? Long)?.toInt() ?: 0
+        val sampleRate = (raw["sampleRate"] as? Long)?.toInt() ?: targetRate
+        if (numSamples <= 0) {
+          tmpF32.delete()
+          promise.reject("VIDEO_AUDIO_DECODE_FAILED", "no samples in range")
+          return@execute
+        }
+        val rawSize = numSamples.toLong() * 4
+        val threshold = com.sherpaonnx.audio.pipeline.MmapThresholdPolicy.thresholdBytes(
+          com.sherpaonnx.audio.pipeline.ThresholdPathType.FILE_ORIGIN
+        )
+        val entry = if (rawSize >= threshold) {
+          com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromMmapFile(
+            tmpF32.absolutePath, numSamples, sampleRate, 1
+          )
+        } else {
+          val samples = FloatArray(numSamples)
+          java.io.RandomAccessFile(tmpF32, "r").use { raf ->
+            val buf = java.nio.ByteBuffer.allocate(numSamples * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            raf.channel.read(buf)
+            buf.flip()
+            buf.asFloatBuffer().get(samples)
+          }
+          tmpF32.delete()
+          com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromFloatArray(
+            samples, sampleRate, 1
+          )
+        }
+        val map = entry.toWritableMap()
+        map.putDouble("mediaStartMs", ((raw["mediaStartUs"] as? Long) ?: 0L).toDouble() / 1000.0)
+        map.putString("sourceCodec", raw["sourceCodec"] as? String ?: "")
+        map.putInt("sourceSampleRate", (raw["sourceSampleRate"] as? Long)?.toInt() ?: 0)
+        map.putInt("sourceChannels", (raw["sourceChannels"] as? Long)?.toInt() ?: 0)
+        promise.resolve(map)
+      } catch (e: Exception) {
+        val msg = e.message ?: "extract failed"
+        val code = if (msg.startsWith("VIDEO_")) msg.substringBefore(":").trim() else "VIDEO_INTERNAL"
+        promise.reject(code, msg, e)
+      } finally {
+        nativeFreeCancelFlag(cancelFlagAddr)
+        cancelChecker.interrupt()
+        decodeCancelFlags.remove(operationId)
+      }
+    }
+  }
+
+  override fun createVideoPreviewPlayer(bufferId: String, options: ReadableMap?, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      val map = com.sherpaonnx.video.preview.VideoPreviewService.create(bufferId, options)
+      val err = if (map.hasKey("errorCode")) map.getString("errorCode") else null
+      if (!err.isNullOrEmpty()) {
+        promise.reject(err, if (map.hasKey("message")) map.getString("message") else err)
+        return
+      }
+      promise.resolve(map)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewPlay(playerId: String, requestId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      val map = com.sherpaonnx.video.preview.VideoPreviewService.command(playerId, "play")
+      val err = if (map.hasKey("errorCode")) map.getString("errorCode") else null
+      if (!err.isNullOrEmpty()) {
+        promise.reject(err, if (map.hasKey("message")) map.getString("message") else err)
+      } else {
+        promise.resolve(null)
+      }
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewPause(playerId: String, requestId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      val map = com.sherpaonnx.video.preview.VideoPreviewService.command(playerId, "pause")
+      val err = if (map.hasKey("errorCode")) map.getString("errorCode") else null
+      if (!err.isNullOrEmpty()) {
+        promise.reject(err, if (map.hasKey("message")) map.getString("message") else err)
+      } else {
+        promise.resolve(null)
+      }
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewSeek(
+    playerId: String,
+    positionMs: Double,
+    mode: String,
+    relative: Boolean,
+    requestId: String,
+    promise: Promise,
+  ) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      val map = com.sherpaonnx.video.preview.VideoPreviewService.seek(playerId, positionMs, mode, relative)
+      val err = if (map.hasKey("errorCode")) map.getString("errorCode") else null
+      if (!err.isNullOrEmpty()) {
+        promise.reject(err, if (map.hasKey("message")) map.getString("message") else err)
+      } else {
+        promise.resolve(map)
+      }
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewSeekToLiveEdge(playerId: String, requestId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      val map = com.sherpaonnx.video.preview.VideoPreviewService.command(playerId, "seekToLiveEdge")
+      val err = if (map.hasKey("errorCode")) map.getString("errorCode") else null
+      if (!err.isNullOrEmpty()) {
+        promise.reject(err, if (map.hasKey("message")) map.getString("message") else err)
+      } else {
+        promise.resolve(map)
+      }
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewStepFrame(playerId: String, direction: Double, requestId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      val map = com.sherpaonnx.video.preview.VideoPreviewService.command(
+        playerId, "stepFrame", if (direction < 0) "-1" else "1"
+      )
+      val err = if (map.hasKey("errorCode")) map.getString("errorCode") else null
+      if (!err.isNullOrEmpty()) {
+        promise.reject(err, if (map.hasKey("message")) map.getString("message") else err)
+      } else {
+        promise.resolve(map)
+      }
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewSetVolume(playerId: String, volume: Double, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      com.sherpaonnx.video.preview.VideoPreviewService.setVolume(playerId, volume)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewSetMuted(playerId: String, muted: Boolean, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      com.sherpaonnx.video.preview.VideoPreviewService.setMuted(playerId, muted)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewSetLoop(playerId: String, loop: Boolean, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      com.sherpaonnx.video.preview.VideoPreviewService.setLoop(playerId, loop)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
+    }
+  }
+
+  override fun videoPreviewSnapshot(playerId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      promise.resolve(com.sherpaonnx.video.preview.VideoPreviewService.snapshot(playerId))
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_NOT_FOUND", e.message, e)
+    }
+  }
+
+  override fun releaseVideoPreviewPlayer(playerId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.video.preview.VideoPreviewService.ensure(reactApplicationContext)
+      com.sherpaonnx.video.preview.VideoPreviewService.release(playerId)
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
     }
   }
 
