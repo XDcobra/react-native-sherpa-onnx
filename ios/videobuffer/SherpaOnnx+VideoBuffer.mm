@@ -1,4 +1,5 @@
 #import "SherpaOnnx.h"
+#import "../fileio/FileIOResolver.h"
 
 #include "VideoImageBridge.h"
 #include "VideoLog.h"
@@ -138,14 +139,41 @@ void BindVideoModule(SherpaOnnx *mod) {
 
 @implementation SherpaOnnx (VideoBuffer)
 
-- (void)createOfflineVideoBufferFromFile:(NSString *)path
+- (void)createOfflineVideoBufferFromFile:(NSDictionary *)source
                                  options:(NSDictionary *)options
                                  resolve:(RCTPromiseResolveBlock)resolve
                                   reject:(RCTPromiseRejectBlock)reject {
   (void)options;
   BindVideoModule(self);
-  auto r = VideoRegistry::Instance().CreateOfflineFromFile(
-      path ? [path UTF8String] : "");
+  if (![source isKindOfClass:[NSDictionary class]]) {
+    reject(@"VIDEO_INVALID_ARGUMENT", @"source must be a FileSource", nil);
+    return;
+  }
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source
+                                                         error:&errCode
+                                                       message:&errMsg];
+  if (!readHandle) {
+    reject(errCode ?: @"VIDEO_INVALID_ARGUMENT",
+           errMsg ?: @"Failed to resolve FileSource", nil);
+    return;
+  }
+  NSString *path = [FileIOResolver demuxableFilePathFromHandle:readHandle
+                                                        source:source
+                                                         error:&errCode
+                                                       message:&errMsg];
+  if (path.length == 0) {
+    [readHandle cleanup];
+    reject(errCode ?: @"VIDEO_INVALID_ARGUMENT",
+           errMsg ?: @"FileSource is not a readable file", nil);
+    return;
+  }
+  VIDEO_LOGI("video.file createOfflineFromFile kind=%s path=%s",
+             [[source[@"kind"] description] UTF8String] ?: "?",
+             [path UTF8String]);
+  auto r = VideoRegistry::Instance().CreateOfflineFromFile([path UTF8String]);
+  [readHandle cleanup];
   if (!r.ok()) {
     resolve(VideoError(r.status.errorCode.c_str(), r.status.errorMessage));
     return;
@@ -184,15 +212,39 @@ void BindVideoModule(SherpaOnnx *mod) {
 }
 
 - (void)ingestFileToLiveVideoBuffer:(NSString *)liveBufferId
-                               path:(NSString *)path
+                             source:(NSDictionary *)source
                             options:(NSDictionary *)options
                             resolve:(RCTPromiseResolveBlock)resolve
                              reject:(RCTPromiseRejectBlock)reject {
   BindVideoModule(self);
+  if (![source isKindOfClass:[NSDictionary class]]) {
+    reject(@"VIDEO_INVALID_ARGUMENT", @"source must be a FileSource", nil);
+    return;
+  }
   auto live = VideoRegistry::Instance().GetLive(
       liveBufferId ? [liveBufferId UTF8String] : "");
   if (!live) {
     resolve(VideoError("VIDEO_BUFFER_NOT_FOUND", "live buffer not found"));
+    return;
+  }
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source
+                                                         error:&errCode
+                                                       message:&errMsg];
+  if (!readHandle) {
+    reject(errCode ?: @"VIDEO_INVALID_ARGUMENT",
+           errMsg ?: @"Failed to resolve FileSource", nil);
+    return;
+  }
+  NSString *path = [FileIOResolver demuxableFilePathFromHandle:readHandle
+                                                        source:source
+                                                         error:&errCode
+                                                       message:&errMsg];
+  if (path.length == 0) {
+    [readHandle cleanup];
+    reject(errCode ?: @"VIDEO_INVALID_ARGUMENT",
+           errMsg ?: @"FileSource is not a readable file", nil);
     return;
   }
   LiveIngestOptions opts;
@@ -203,7 +255,12 @@ void BindVideoModule(SherpaOnnx *mod) {
   if (options[@"includeAudio"] != nil) {
     opts.includeAudio = [options[@"includeAudio"] boolValue];
   }
-  auto st = LiveIngest::Run(path ? [path UTF8String] : "", live.get(), opts);
+  VIDEO_LOGI("video.file ingestFile live=%s kind=%s path=%s",
+             liveBufferId ? [liveBufferId UTF8String] : "",
+             [[source[@"kind"] description] UTF8String] ?: "?",
+             [path UTF8String]);
+  auto st = LiveIngest::Run([path UTF8String], live.get(), opts);
+  [readHandle cleanup];
   if (!st.ok) {
     resolve(VideoError(st.errorCode.c_str(), st.errorMessage));
     return;

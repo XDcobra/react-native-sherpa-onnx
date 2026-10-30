@@ -3,7 +3,7 @@
 > For installation and a feature overview, start at the [root README](../README.md).  
 > **New to models?** Follow the [How to start](../README.md#how-to-start) reading path under Feature Support in the root README.
 
-This index maps every user-facing guide to its canonical file. Internal notes: [internal/README.md](./internal/README.md). Migration docs live under `docs/migration/`.
+This index maps every user-facing guide to its canonical file. Internal and migration docs live in separate sub-folders and are **not** listed here.
 
 ---
 
@@ -151,8 +151,8 @@ This index maps every user-facing guide to its canonical file. Internal notes: [
 | [segmentbuffer-offline.md](./segmentbuffer-offline.md) | Offline segment buffer — segment links, maps |
 | [segmentbuffer-streaming.md](./segmentbuffer-streaming.md) | Live segment buffer — streaming segment linking |
 | [imagebuffer-offline.md](./imagebuffer-offline.md) | Offline image buffer — decode files, multi-frame, spatial OCR input |
-| [videobuffer-offline.md](./videobuffer-offline.md) | Offline video buffer — file open, image/audio extract, frame export, OCR `ptsMs` |
-| [videobuffer-streaming.md](./videobuffer-streaming.md) | Live video buffer — ring/spool, file ingest, events, live audio tap |
+| [videobuffer-offline.md](./videobuffer-offline.md) | Offline video buffer — FileSource open, image/audio extract, frame export, OCR `ptsMs` |
+| [videobuffer-streaming.md](./videobuffer-streaming.md) | Live video buffer — ring/spool, FileSource ingest, events, live audio tap |
 | [videopreview.md](./videopreview.md) | Player object + `<VideoPreviewView>` for VideoBuffer preview (A/V, seek, live edge) |
 
 ---

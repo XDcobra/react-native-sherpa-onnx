@@ -11,6 +11,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
+import java.security.MessageDigest
 
 private const val LOG_TAG = "SherpaOnnxFileIO"
 
@@ -153,6 +154,42 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
         FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
         "Unknown source kind: $kind"
       )
+    }
+  }
+
+  /**
+   * Filesystem path FFmpeg / libavformat can open.
+   *
+   * - [ReadHandle.FilePath]: as-is. `apkAsset` is already a cache file
+   *   ([resolveApkAssetFile]).
+   * - [ReadHandle.FileDescriptor]: `/proc/self/fd/N`. Caller must keep this
+   *   handle open until native `open()` has duplicated the fd.
+   * - [ReadHandle.Stream]: copy into `<cache>/fileio_nofd/<sha256>` (same
+   *   identity → cache hit). Video demux needs a seekable file; a
+   *   content-URI stream has none.
+   */
+  fun resolveDemuxableSource(source: ReadableMap): DemuxableOpenedSource {
+    val handle = resolveSource(source)
+    return when (handle) {
+      is ReadHandle.FilePath -> {
+        Log.i(LOG_TAG, "demux FilePath path=${handle.file.absolutePath}")
+        DemuxableOpenedSource(handle.file.absolutePath, handle)
+      }
+      is ReadHandle.FileDescriptor -> {
+        Log.i(LOG_TAG, "demux FileDescriptor fdPath=${handle.fdPath} len=${handle.length}")
+        DemuxableOpenedSource(handle.fdPath, handle)
+      }
+      is ReadHandle.Stream -> {
+        try {
+          val file = materializeStreamToManagedCache(handle, source)
+          DemuxableOpenedSource(file.absolutePath, ReadHandle.FilePath(file))
+        } finally {
+          try {
+            handle.close()
+          } catch (_: Exception) {
+          }
+        }
+      }
     }
   }
 
@@ -311,6 +348,117 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
     }
   }
 
+  /**
+   * Copy a non-FD stream into `<cache>/fileio_nofd/<sha256>[.ext]`.
+   * Identity is `kind|uri|path|packName`; same source → cache hit.
+   */
+  private fun materializeStreamToManagedCache(
+    handle: ReadHandle.Stream,
+    source: ReadableMap,
+  ): File {
+    val cacheRoot = File(context.cacheDir, "fileio_nofd").canonicalFile
+    cacheRoot.mkdirs()
+    val key = sha256Hex(demuxCacheIdentity(source))
+    val ext = extensionHint(source)
+    val outFile = File(cacheRoot, key + ext).canonicalFile
+    if (!outFile.path.startsWith(cacheRoot.path)) {
+      throw FileIOException(
+        FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED,
+        "nofd cache path escapes cache root",
+      )
+    }
+    val knownLen = handle.length?.takeIf { it > 0L }
+    if (outFile.exists() && outFile.isFile && outFile.length() > 0L) {
+      if (knownLen == null || outFile.length() == knownLen) {
+        Log.i(LOG_TAG, "nofd cache hit path=${outFile.absolutePath}")
+        return outFile
+      }
+      Log.i(
+        LOG_TAG,
+        "nofd cache stale path=${outFile.absolutePath} size=${outFile.length()} expected=$knownLen — recopy",
+      )
+    }
+    val tmpFile = File(cacheRoot, "$key.tmp")
+    Log.i(LOG_TAG, "nofd copy -> ${outFile.absolutePath}")
+    try {
+      tmpFile.outputStream().use { out ->
+        handle.inputStream.copyTo(out, 65536)
+      }
+    } catch (e: Exception) {
+      try {
+        tmpFile.delete()
+      } catch (_: Exception) {
+      }
+      throw FileIOException(
+        FileIOErrorCodes.READ_ERROR,
+        "Failed to materialize stream source for demux: ${e.message}",
+        e,
+      )
+    }
+    if (outFile.exists()) {
+      try {
+        outFile.delete()
+      } catch (_: Exception) {
+      }
+    }
+    if (!tmpFile.renameTo(outFile)) {
+      try {
+        tmpFile.copyTo(outFile, overwrite = true)
+        tmpFile.delete()
+      } catch (e: Exception) {
+        try {
+          tmpFile.delete()
+        } catch (_: Exception) {
+        }
+        throw FileIOException(
+          FileIOErrorCodes.WRITE_ERROR,
+          "Failed to commit nofd cache file: ${e.message}",
+          e,
+        )
+      }
+    }
+    return outFile
+  }
+
+  private fun demuxCacheIdentity(source: ReadableMap): String {
+    val kind = source.getString("kind") ?: "unknown"
+    val ident = when (kind) {
+      "contentUri" -> source.getString("uri").orEmpty()
+      "fs" -> source.getString("path").orEmpty()
+      "app" -> "${source.getString("base").orEmpty()}:${source.getString("path").orEmpty()}"
+      "pad" -> "${source.getString("packName").orEmpty()}:${source.getString("path").orEmpty()}"
+      "securityScoped" -> source.getString("uri").orEmpty()
+      else -> "$kind:${source.getString("path").orEmpty()}:${source.getString("uri").orEmpty()}"
+    }
+    return "$kind|$ident"
+  }
+
+  private fun extensionHint(source: ReadableMap): String {
+    val name = sequenceOf(
+      source.getString("displayName"),
+      source.getString("path"),
+      source.getString("uri"),
+    ).mapNotNull { it?.trim()?.takeIf { s -> s.isNotEmpty() } }.firstOrNull()
+      ?: return ""
+    val slash = name.lastIndexOf('/')
+    val leaf = if (slash >= 0) name.substring(slash + 1) else name
+    val dot = leaf.lastIndexOf('.')
+    if (dot <= 0 || dot == leaf.length - 1) {
+      return ""
+    }
+    val ext = leaf.substring(dot + 1).lowercase()
+    return if (ext.isNotEmpty() && ext.length <= 8 && ext.all { it.isLetterOrDigit() }) {
+      ".$ext"
+    } else {
+      ""
+    }
+  }
+
+  private fun sha256Hex(value: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+    return digest.joinToString("") { b -> "%02x".format(b.toInt() and 0xff) }
+  }
+
   private fun resolveAppPath(base: String, relativePath: String): File {
     val baseDir = when (base) {
       "cache" -> context.cacheDir
@@ -407,6 +555,18 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
 internal class SeekableOpenedSource(
   val path: String,
   val fd: Int,
+  private val handle: FileIOResolver.ReadHandle,
+) : Closeable {
+  override fun close() = handle.close()
+}
+
+/**
+ * Path FFmpeg can open. For [FileIOResolver.ReadHandle.FileDescriptor] the
+ * handle stays open until [close] so `/proc/self/fd/N` remains valid through
+ * native `open()`.
+ */
+internal class DemuxableOpenedSource(
+  val path: String,
   private val handle: FileIOResolver.ReadHandle,
 ) : Closeable {
   override fun close() = handle.close()

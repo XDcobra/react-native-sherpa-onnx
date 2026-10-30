@@ -57,8 +57,11 @@ import { releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer
 // Global HW decode slots: `cpu` = OCR / export; `display` = preview. Each 1–4 (default 1).
 await configureVideoBuffer({ decoderBudget: { cpu: 1, display: 1 } });
 
-// Open a local filesystem path. Needs FFmpeg. Pixels are not decoded yet.
-const video = await createOfflineVideoBufferFromFile('/tmp/clip.mp4');
+// Open a FileSource. Needs FFmpeg. Pixels are not decoded yet.
+const video = await createOfflineVideoBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/clip.mp4',
+});
 
 // Fresh native metadata. Offline clips are immutable; `video.info` from create is enough,
 // but this is the same call you use for live buffers.
@@ -224,14 +227,19 @@ Raise `cpu` if you run OCR sampling and export in parallel. Raise `display` only
 
 ### Offline buffer
 
-#### `createOfflineVideoBufferFromFile(path)`
+#### `createOfflineVideoBufferFromFile(source)`
 
 ```ts
-function createOfflineVideoBufferFromFile(path: string): Promise<OfflineVideoBufferRef>;
+function createOfflineVideoBufferFromFile(
+  source: FileSource
+): Promise<OfflineVideoBufferRef>;
 ```
 
 ```ts
-const video = await createOfflineVideoBufferFromFile('/tmp/clip.mp4');
+const video = await createOfflineVideoBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/clip.mp4',
+});
 // video ≈ {
 //   bufferId: 'vid_off_8f3a…',
 //   info: {
@@ -253,7 +261,16 @@ const video = await createOfflineVideoBufferFromFile('/tmp/clip.mp4');
 // }
 ```
 
-`path` is a local filesystem path (not a content URI). Needs FFmpeg. Does not decode pixels at create time.
+`source` is a `FileSource` (see [fileio.md](fileio.md)). Same resolver as audio/image/pdf. Needs FFmpeg. Does not decode pixels at create time.
+
+| Kind | How the file is opened |
+| --- | --- |
+| `fs` / `app` (`cache`, `files`, …) / `pad` / iOS `appBundle` / iOS `securityScoped` | Direct path. |
+| Android `app` + `apkAsset` | APK zip entry has no fd. Copied to `<cache>/fileio_apkasset/…` on first open; later opens are a cache hit. |
+| Android `contentUri` with ParcelFileDescriptor | Opened via `/proc/self/fd/N` (seekable). |
+| Android `contentUri` stream (no PFD) | Copied to `<cache>/fileio_nofd/<sha256>` on first open; later opens of the same URI are a cache hit. |
+
+A string path is rejected (`VIDEO_INVALID_ARGUMENT`).
 
 **Returns** (`OfflineVideoBufferRef`)
 
@@ -461,7 +478,7 @@ Preview-only codes (`VIDEO_PREVIEW_…`) are documented in [videopreview.md](vid
 - [Pipeline image buffers — offline](imagebuffer-offline.md) (`source.ptsUs` on sampled frames)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
 - [OCR — offline](ocr-offline.md)
-- [fileio.md](fileio.md) (`FileDestination` / `ResolvedFileRef`)
+- [fileio.md](fileio.md) (`FileSource` / `FileDestination` / `ResolvedFileRef`)
 - [Disabling FFmpeg](disable-ffmpeg.md)
 
 ---
@@ -472,7 +489,10 @@ Preview-only codes (`VIDEO_PREVIEW_…`) are documented in [videopreview.md](vid
 **OCR a clip at 2 fps, keep timestamps**
 
 ```ts
-const video = await createOfflineVideoBufferFromFile(path);
+const video = await createOfflineVideoBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/clip.mp4',
+});
 const images = await createOfflineImageBufferFromVideo(video, {
   sampling: 'fps',
   fps: 2,

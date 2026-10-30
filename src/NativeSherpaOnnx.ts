@@ -3171,7 +3171,7 @@ export interface Spec extends TurboModule {
   // ── VideoBuffer ────────────────────────────────────────────────────────
 
   createOfflineVideoBufferFromFile(
-    path: string,
+    source: Object,
     options?: Object
   ): Promise<{
     bufferId: string;
@@ -3205,7 +3205,7 @@ export interface Spec extends TurboModule {
 
   ingestFileToLiveVideoBuffer(
     liveBufferId: string,
-    path: string,
+    source: Object,
     options?: Object
   ): Promise<{
     bufferId: string;

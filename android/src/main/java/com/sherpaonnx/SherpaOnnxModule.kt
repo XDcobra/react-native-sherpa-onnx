@@ -3680,12 +3680,34 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun createOfflineVideoBufferFromFile(path: String, options: ReadableMap?, promise: Promise) {
+  override fun createOfflineVideoBufferFromFile(
+    source: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    var demux: com.sherpaonnx.fileio.DemuxableOpenedSource? = null
     try {
       com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
-      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.createOfflineFromFile(path)))
+      demux = fileIOHelper.resolveDemuxableSource(source)
+      android.util.Log.i(
+        "SherpaOnnx:video",
+        "createOfflineFromFile kind=${source.getString("kind")} path=${demux.path}",
+      )
+      promise.resolve(
+        videoInfoToWritableMap(
+          com.sherpaonnx.video.VideoBufferService.createOfflineFromFile(demux.path),
+        ),
+      )
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      android.util.Log.w("SherpaOnnx:video", "createOfflineFromFile fileio: ${e.message}")
+      promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
       promise.reject("VIDEO_INTERNAL", e.message, e)
+    } finally {
+      try {
+        demux?.close()
+      } catch (_: Exception) {
+      }
     }
   }
 
@@ -3701,14 +3723,42 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  override fun ingestFileToLiveVideoBuffer(liveBufferId: String, path: String, options: ReadableMap?, promise: Promise) {
+  override fun ingestFileToLiveVideoBuffer(
+    liveBufferId: String,
+    source: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    var demux: com.sherpaonnx.fileio.DemuxableOpenedSource? = null
     try {
       com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      demux = fileIOHelper.resolveDemuxableSource(source)
       val realtime = options != null && options.hasKey("pacing") && options.getString("pacing") == "realtime"
       val includeAudio = options == null || !options.hasKey("includeAudio") || options.getBoolean("includeAudio")
-      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.ingestFile(liveBufferId, path, realtime, includeAudio)))
+      android.util.Log.i(
+        "SherpaOnnx:video",
+        "ingestFile live=$liveBufferId kind=${source.getString("kind")} path=${demux.path} realtime=$realtime includeAudio=$includeAudio",
+      )
+      promise.resolve(
+        videoInfoToWritableMap(
+          com.sherpaonnx.video.VideoBufferService.ingestFile(
+            liveBufferId,
+            demux.path,
+            realtime,
+            includeAudio,
+          ),
+        ),
+      )
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      android.util.Log.w("SherpaOnnx:video", "ingestFile fileio: ${e.message}")
+      promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
       promise.reject("VIDEO_INTERNAL", e.message, e)
+    } finally {
+      try {
+        demux?.close()
+      } catch (_: Exception) {
+      }
     }
   }
 

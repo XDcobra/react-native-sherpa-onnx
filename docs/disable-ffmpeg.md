@@ -47,8 +47,8 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 |-----|-------------|
 | **`saveAudioAsWav16k(input, output)`** | Saves a buffer or `FileSource` as 16 kHz mono WAV. Builds without FFmpeg may reject when a backend path requires FFmpeg. |
 | **`saveAudioAsFile(input, output, format, options?)`** | Saves a buffer or `FileSource` to the requested output format. Non-WAV formats require FFmpeg. |
-| **`createOfflineVideoBufferFromFile(path)`** | Opens a container (`mov` / `matroska`) via libavformat. Rejects with `VIDEO_FFMPEG_DISABLED`. |
-| **`ingestFileToLiveVideoBuffer(path, live)`** | Remuxes a file into a live video buffer. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`createOfflineVideoBufferFromFile(source)`** | Opens a `FileSource` container (`mov` / `matroska`) via libavformat. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`ingestFileToLiveVideoBuffer(source, live)`** | Remuxes a `FileSource` into a live video buffer. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 | **`createOfflineAudioBufferFromVideo(video)`** | Decodes the container audio track through FFmpeg. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 | **`createLiveAudioBufferFromLiveVideo(live)`** | Live audio tap decode. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 | **`createVideoPreviewPlayer` audio track** | Preview audio uses FFmpeg SW decode. Video still plays; `audioUnavailable` / status `unavailable`. |

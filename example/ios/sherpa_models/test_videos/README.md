@@ -2,8 +2,7 @@
 
 Bundled clip for the Video Preview example screen.
 
-Runtime access: `resolveBundledAssetPath('test_videos/preview_h264_aac.mp4')` then
-`createOfflineVideoBufferFromFile(path)`.
+Runtime access: `createOfflineVideoBufferFromFile({ kind: 'app', base: 'appBundle', path: 'test_videos/preview_h264_aac.mp4' })`.
 
 The Xcode build phase copies this folder into `App.app/test_videos/` (README is skipped).
 It also copies from Android `assets/test_videos/` when that folder is present.

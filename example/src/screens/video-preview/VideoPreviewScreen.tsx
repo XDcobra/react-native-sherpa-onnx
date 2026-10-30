@@ -6,7 +6,6 @@ import {
   Switch,
   Text,
   TouchableOpacity,
-  TurboModuleRegistry,
   View,
   type GestureResponderEvent,
   type LayoutChangeEvent,
@@ -28,18 +27,12 @@ import {
   type VideoPreviewPlayer,
 } from 'react-native-sherpa-onnx/videopreview';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import { fileSourceFromBundledPath } from '../../utils/fileSourceFromUri';
 import { TEST_VIDEO_FILES } from '../../videoConfig';
 import { styles } from './VideoPreviewScreen.styles';
 
 const BUNDLED_VIDEO = TEST_VIDEO_FILES.PREVIEW_H264_AAC;
 const SEEK_STEP_MS = 2000;
-
-function resolveBundledAssetPath(relativePath: string): Promise<string> {
-  const native = TurboModuleRegistry.getEnforcing('SherpaOnnx') as unknown as {
-    resolveBundledAssetPath(path: string): Promise<string>;
-  };
-  return native.resolveBundledAssetPath(relativePath);
-}
 
 function formatClock(ms: number): string {
   const clamped = Math.max(0, Math.floor(ms));
@@ -124,9 +117,9 @@ export default function VideoPreviewScreen() {
 
     void (async () => {
       try {
-        const path = await resolveBundledAssetPath(BUNDLED_VIDEO);
-        if (cancelled) return;
-        const created = await createOfflineVideoBufferFromFile(path);
+        const created = await createOfflineVideoBufferFromFile(
+          fileSourceFromBundledPath(BUNDLED_VIDEO)
+        );
         bufferLocal = created;
         if (cancelled) {
           await releaseAll();
@@ -255,7 +248,7 @@ export default function VideoPreviewScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Bundled clip</Text>
           <Text style={styles.sectionHint}>
-            Loads the bundled clip via resolveBundledAssetPath, then
+            Loads the bundled clip as a FileSource (apkAsset / appBundle), then
             createOfflineVideoBufferFromFile and createVideoPreviewPlayer.
           </Text>
           <Text style={styles.mono}>{BUNDLED_VIDEO}</Text>

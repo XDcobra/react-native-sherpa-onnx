@@ -86,10 +86,14 @@ const stopEvents = subscribeLiveVideoBufferEvents(live, (e) => {
 // File → live (FFmpeg). Default pacing is `asFast`. `realtime` sleeps to wall-clock.
 // `includeAudio: true` (default) keeps the audio track for preview + live tap.
 // Resolves with a fresh LiveVideoBufferInfo when ingest finishes.
-const ingested = await ingestFileToLiveVideoBuffer('/tmp/clip.mp4', live, {
-  pacing: 'asFast',
-  includeAudio: true,
-});
+const ingested = await ingestFileToLiveVideoBuffer(
+  { kind: 'fs', path: '/tmp/clip.mp4' },
+  live,
+  {
+    pacing: 'asFast',
+    includeAudio: true,
+  }
+);
 
 // Re-query while recording if you need a later snapshot than `ingested`.
 const recordingInfo = await getVideoBufferInfo(live);
@@ -257,18 +261,22 @@ Creates `state: 'recording'` with no packets yet. A native camera/producer or `i
 
 `configureVideoBuffer({ decoderBudget })` is documented on the [offline](videobuffer-offline.md) page (preview = `display`, OCR/export after finalize = `cpu`).
 
-#### `ingestFileToLiveVideoBuffer(path, live, options?)`
+#### `ingestFileToLiveVideoBuffer(source, live, options?)`
 
 ```ts
 function ingestFileToLiveVideoBuffer(
-  path: string,
+  source: FileSource,
   live: LiveVideoBufferIdSource,
   options?: IngestFileToLiveOptions
 ): Promise<LiveVideoBufferInfo>;
 ```
 
 ```ts
-const info = await ingestFileToLiveVideoBuffer('/tmp/clip.mp4', live, { pacing: 'realtime' });
+const info = await ingestFileToLiveVideoBuffer(
+  { kind: 'fs', path: '/tmp/clip.mp4' },
+  live,
+  { pacing: 'realtime' }
+);
 // info ≈ {
 //   bufferId: 'vid_live_4e21…',
 //   kind: 'liveVideoBuffer',
@@ -291,7 +299,7 @@ const info = await ingestFileToLiveVideoBuffer('/tmp/clip.mp4', live, { pacing: 
 // }
 ```
 
-Remuxes a file into a **recording** live buffer. Needs FFmpeg. Resolves with a fresh `LiveVideoBufferInfo` when ingest completes. Finished / unknown buffer → `VIDEO_BUFFER_INVALID_STATE` / `VIDEO_BUFFER_NOT_FOUND`.
+Remuxes a `FileSource` into a **recording** live buffer. Needs FFmpeg. Same resolver as [`createOfflineVideoBufferFromFile`](videobuffer-offline.md#createofflinevideobufferfromfilesource) (`apkAsset` cache, `contentUri` PFD or `fileio_nofd` copy). A string path is rejected (`VIDEO_INVALID_ARGUMENT`). Resolves with a fresh `LiveVideoBufferInfo` when ingest completes. Finished / unknown buffer → `VIDEO_BUFFER_INVALID_STATE` / `VIDEO_BUFFER_NOT_FOUND`.
 
 **`options`** (`IngestFileToLiveOptions`)
 
@@ -513,6 +521,7 @@ Offline extract/export codes after finalize: [videobuffer-offline.md](videobuffe
 - [Pipeline video buffers — offline](videobuffer-offline.md)
 - [Video preview](videopreview.md) (`seekToLiveEdge`, display decoder budget)
 - [Pipeline audio buffers — live / streaming](audiobuffer-streaming.md)
+- [fileio.md](fileio.md) (`FileSource`)
 - [Disabling FFmpeg](disable-ffmpeg.md)
 
 ---
@@ -526,7 +535,11 @@ Offline extract/export codes after finalize: [videobuffer-offline.md](videobuffe
 const live = await createEmptyLiveVideoBuffer({ retention: 'session' });
 const player = await createVideoPreviewPlayer(live, { audio: { source: 'track' } });
 await player.play();
-await ingestFileToLiveVideoBuffer(path, live, { pacing: 'realtime' });
+await ingestFileToLiveVideoBuffer(
+  { kind: 'fs', path: '/tmp/clip.mp4' },
+  live,
+  { pacing: 'realtime' }
+);
 await player.seekToLiveEdge();
 ```
 
@@ -543,7 +556,11 @@ const live = await createEmptyLiveVideoBuffer({
 
 ```ts
 const live = await createEmptyLiveVideoBuffer();
-await ingestFileToLiveVideoBuffer(path, live, { pacing: 'realtime', includeAudio: true });
+await ingestFileToLiveVideoBuffer(
+  { kind: 'fs', path: '/tmp/clip.mp4' },
+  live,
+  { pacing: 'realtime', includeAudio: true }
+);
 const tap = await createLiveAudioBufferFromLiveVideo(live, { targetSampleRateHz: 16000 });
 // pass tap.audio into streaming STT (see audiobuffer-streaming.md)
 await tap.stop();

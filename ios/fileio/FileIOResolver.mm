@@ -1,5 +1,8 @@
 #import "FileIOResolver.h"
 
+#import <CommonCrypto/CommonDigest.h>
+#include <string.h>
+
 // Error code constants
 NSString * const kFIOErrInvalidArgument       = @"FILEIO_INVALID_ARGUMENT";
 NSString * const kFIOErrUnsupportedLocationKind = @"FILEIO_UNSUPPORTED_LOCATION_KIND";
@@ -374,6 +377,132 @@ static NSString *resolveAppBundleRelativePath(
         @"%@: source is not seekable (requires a filesystem path)", code];
   }
   return nil;
+}
+
+static NSString *sha256Hex(NSString *value) {
+  const char *c = value.UTF8String ?: "";
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256(c, (CC_LONG)strlen(c), digest);
+  NSMutableString *out = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+    [out appendFormat:@"%02x", digest[i]];
+  }
+  return out;
+}
+
+static NSString *demuxCacheIdentity(NSDictionary *source) {
+  NSString *kind = source[@"kind"] ?: @"unknown";
+  NSString *ident = @"";
+  if ([kind isEqualToString:@"contentUri"] || [kind isEqualToString:@"securityScoped"]) {
+    ident = source[@"uri"] ?: @"";
+  } else if ([kind isEqualToString:@"app"]) {
+    ident = [NSString stringWithFormat:@"%@:%@", source[@"base"] ?: @"", source[@"path"] ?: @""];
+  } else if ([kind isEqualToString:@"pad"]) {
+    ident = [NSString stringWithFormat:@"%@:%@", source[@"packName"] ?: @"", source[@"path"] ?: @""];
+  } else {
+    ident = source[@"path"] ?: (source[@"uri"] ?: @"");
+  }
+  return [NSString stringWithFormat:@"%@|%@", kind, ident];
+}
+
+static NSString *extensionHint(NSDictionary *source) {
+  NSString *name = source[@"displayName"];
+  if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+    name = source[@"path"];
+  }
+  if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+    name = source[@"uri"];
+  }
+  if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+    return @"";
+  }
+  NSString *leaf = name.lastPathComponent ?: name;
+  NSString *ext = leaf.pathExtension.lowercaseString;
+  if (ext.length == 0 || ext.length > 8) {
+    return @"";
+  }
+  for (NSUInteger i = 0; i < ext.length; i++) {
+    unichar c = [ext characterAtIndex:i];
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) {
+      return @"";
+    }
+  }
+  return [@"." stringByAppendingString:ext];
+}
+
++ (nullable NSString *)demuxableFilePathFromHandle:(FileIOReadHandle *)handle
+                                            source:(NSDictionary *)source
+                                             error:(NSString * _Nullable * _Nullable)errorCode
+                                           message:(NSString * _Nullable * _Nullable)errorMessage
+{
+  if (handle && handle.isFilePath && handle.filePath.length > 0) {
+    NSLog(@"[SherpaOnnxFileIO] demux FilePath path=%@", handle.filePath);
+    return handle.filePath;
+  }
+  if (!handle || handle.stream == nil) {
+    if (errorCode) *errorCode = kFIOErrInvalidArgument;
+    if (errorMessage) *errorMessage = @"FileSource is not a readable file";
+    return nil;
+  }
+
+  NSArray<NSString *> *caches = NSSearchPathForDirectoriesInDomains(
+      NSCachesDirectory, NSUserDomainMask, YES);
+  NSString *cacheRoot = [[caches firstObject] stringByAppendingPathComponent:@"fileio_nofd"];
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSError *mkErr = nil;
+  [fm createDirectoryAtPath:cacheRoot withIntermediateDirectories:YES attributes:nil error:&mkErr];
+  if (mkErr) {
+    if (errorCode) *errorCode = kFIOErrWriteError;
+    if (errorMessage) *errorMessage = [NSString stringWithFormat:
+        @"Failed to create nofd cache: %@", mkErr.localizedDescription];
+    return nil;
+  }
+
+  NSString *key = sha256Hex(demuxCacheIdentity(source ?: @{}));
+  NSString *outPath = [cacheRoot stringByAppendingPathComponent:
+                       [key stringByAppendingString:extensionHint(source ?: @{})]];
+  if ([fm fileExistsAtPath:outPath]) {
+    NSDictionary *attrs = [fm attributesOfItemAtPath:outPath error:nil];
+    unsigned long long size = [attrs fileSize];
+    int64_t known = handle.length;
+    if (size > 0 && (known <= 0 || (unsigned long long)known == size)) {
+      NSLog(@"[SherpaOnnxFileIO] nofd cache hit path=%@", outPath);
+      return outPath;
+    }
+    NSLog(@"[SherpaOnnxFileIO] nofd cache stale path=%@ size=%llu expected=%lld — recopy",
+          outPath, size, (long long)known);
+  }
+
+  NSString *tmpPath = [outPath stringByAppendingString:@".tmp"];
+  NSLog(@"[SherpaOnnxFileIO] nofd copy -> %@", outPath);
+  NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+  [out open];
+  [handle.stream open];
+  uint8_t buf[65536];
+  NSInteger bytesRead;
+  while ((bytesRead = [handle.stream read:buf maxLength:sizeof(buf)]) > 0) {
+    [out write:buf maxLength:(NSUInteger)bytesRead];
+  }
+  NSInteger streamErr = handle.stream.streamError ? 1 : 0;
+  [out close];
+  if (bytesRead < 0 || streamErr) {
+    [fm removeItemAtPath:tmpPath error:nil];
+    if (errorCode) *errorCode = kFIOErrReadError;
+    if (errorMessage) *errorMessage = @"Failed to materialize stream source for demux";
+    return nil;
+  }
+  [fm removeItemAtPath:outPath error:nil];
+  NSError *mvErr = nil;
+  if (![fm moveItemAtPath:tmpPath toPath:outPath error:&mvErr]) {
+    [fm removeItemAtPath:tmpPath error:nil];
+    if (errorCode) *errorCode = kFIOErrWriteError;
+    if (errorMessage) {
+      *errorMessage = [NSString stringWithFormat:
+          @"Failed to commit nofd cache file: %@", mvErr.localizedDescription];
+    }
+    return nil;
+  }
+  return outPath;
 }
 
 + (nullable NSString *)resolveSourceToFilePath:(NSDictionary *)source

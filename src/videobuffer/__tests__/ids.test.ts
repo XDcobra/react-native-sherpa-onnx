@@ -50,6 +50,7 @@ import {
   createOfflineAudioBufferFromVideo,
   createOfflineVideoBufferFromFile,
   finalizeLiveVideoBuffer,
+  ingestFileToLiveVideoBuffer,
   resolveLiveVideoBufferId,
   resolveOfflineVideoBufferId,
   resolvePipelineVideoBufferId,
@@ -118,6 +119,7 @@ describe('videobuffer public API mapping', () => {
     __mockNative: {
       createOfflineVideoBufferFromFile: jest.Mock;
       createEmptyLiveVideoBuffer: jest.Mock;
+      ingestFileToLiveVideoBuffer: jest.Mock;
       finalizeLiveVideoBuffer: jest.Mock;
       createOfflineAudioBufferFromVideo: jest.Mock;
       configureVideoBuffer: jest.Mock;
@@ -137,10 +139,23 @@ describe('videobuffer public API mapping', () => {
       state: 'immutable',
       frameCount: 12,
     });
-    const ref = await createOfflineVideoBufferFromFile('/tmp/a.mp4');
+    const source = { kind: 'fs' as const, path: '/tmp/a.mp4' };
+    const ref = await createOfflineVideoBufferFromFile(source);
+    expect(
+      rn.__mockNative.createOfflineVideoBufferFromFile
+    ).toHaveBeenCalledWith(source, {});
     expect(ref.bufferId).toBe(OFF);
     expect(ref.info.kind).toBe('offlineVideoBuffer');
     expect(ref.info.frameCount).toBe(12);
+  });
+
+  it('rejects a string path instead of FileSource', async () => {
+    await expect(
+      createOfflineVideoBufferFromFile('/tmp/a.mp4' as never)
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: source must be a FileSource/);
+    expect(
+      rn.__mockNative.createOfflineVideoBufferFromFile
+    ).not.toHaveBeenCalled();
   });
 
   it('maps live create and finalize', async () => {
@@ -168,6 +183,32 @@ describe('videobuffer public API mapping', () => {
     const done = await finalizeLiveVideoBuffer(live);
     expect(done.info.state).toBe('finished');
     expect(resolveOfflineVideoBufferId(done)).toBe(LIVE);
+  });
+
+  it('maps ingest FileSource onto the native live id', async () => {
+    const source = { kind: 'fs' as const, path: '/tmp/a.mp4' };
+    rn.__mockNative.ingestFileToLiveVideoBuffer.mockResolvedValue({
+      bufferId: LIVE,
+      kind: 'liveVideoBuffer',
+      state: 'recording',
+      frameCount: 12,
+    });
+    const info = await ingestFileToLiveVideoBuffer(source, LIVE, {
+      pacing: 'asFast',
+    });
+    expect(rn.__mockNative.ingestFileToLiveVideoBuffer).toHaveBeenCalledWith(
+      LIVE,
+      source,
+      { pacing: 'asFast', includeAudio: true }
+    );
+    expect(info.frameCount).toBe(12);
+  });
+
+  it('rejects a string path for ingest instead of FileSource', async () => {
+    await expect(
+      ingestFileToLiveVideoBuffer('/tmp/a.mp4' as never, LIVE)
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: source must be a FileSource/);
+    expect(rn.__mockNative.ingestFileToLiveVideoBuffer).not.toHaveBeenCalled();
   });
 
   it('parses live events for the subscribed buffer only', () => {

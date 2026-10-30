@@ -12,7 +12,11 @@ import {
   exportOfflineImageBufferFrame,
   releaseOfflineImageBuffer,
 } from '../imagebuffer';
-import type { FileDestination, ResolvedFileRef } from '../fileio/types';
+import type {
+  FileDestination,
+  FileSource,
+  ResolvedFileRef,
+} from '../fileio/types';
 import type {
   LiveAudioBufferRef,
   OfflineAudioBufferRef,
@@ -176,11 +180,33 @@ function mapInfo(raw: {
   return info;
 }
 
+function assertFileSource(source: FileSource): void {
+  if (
+    !source ||
+    typeof source !== 'object' ||
+    typeof (source as FileSource).kind !== 'string'
+  ) {
+    throw new Error('VIDEO_INVALID_ARGUMENT: source must be a FileSource');
+  }
+}
+
 export async function createOfflineVideoBufferFromFile(
-  path: string
+  source: FileSource
 ): Promise<OfflineVideoBufferRef> {
-  const raw = await getNative().createOfflineVideoBufferFromFile(path, {});
+  assertFileSource(source);
+  const raw = await getNative().createOfflineVideoBufferFromFile(
+    source as Object,
+    {}
+  );
   const info = mapInfo(raw) as OfflineVideoBufferInfo;
+  if (__DEV__) {
+    console.log(
+      '[SherpaOnnx:video] createOfflineFromFile',
+      info.bufferId,
+      'kind=',
+      source.kind
+    );
+  }
   return {
     info,
     bufferId: info.bufferId as OfflineVideoBufferHandle,
@@ -215,16 +241,30 @@ export async function createEmptyLiveVideoBuffer(
 }
 
 export async function ingestFileToLiveVideoBuffer(
-  path: string,
+  source: FileSource,
   live: LiveVideoBufferIdSource,
   options?: IngestFileToLiveOptions
 ): Promise<LiveVideoBufferInfo> {
+  assertFileSource(source);
   const id = resolveLiveVideoBufferId(live);
-  const raw = await getNative().ingestFileToLiveVideoBuffer(id, path, {
-    pacing: options?.pacing ?? 'asFast',
-    includeAudio: options?.includeAudio ?? true,
-  });
-  return mapInfo(raw) as LiveVideoBufferInfo;
+  const raw = await getNative().ingestFileToLiveVideoBuffer(
+    id,
+    source as Object,
+    {
+      pacing: options?.pacing ?? 'asFast',
+      includeAudio: options?.includeAudio ?? true,
+    }
+  );
+  const info = mapInfo(raw) as LiveVideoBufferInfo;
+  if (__DEV__) {
+    console.log(
+      '[SherpaOnnx:video] ingestFileToLive',
+      id,
+      'kind=',
+      source.kind
+    );
+  }
+  return info;
 }
 
 export async function finalizeLiveVideoBuffer(

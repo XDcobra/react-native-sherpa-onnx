@@ -2,8 +2,7 @@
 
 Bundled clip for the Video Preview example screen.
 
-Runtime access: `resolveBundledAssetPath('test_videos/preview_h264_aac.mp4')` then
-`createOfflineVideoBufferFromFile(path)`.
+Runtime access: `createOfflineVideoBufferFromFile({ kind: 'app', base: 'apkAsset', path: 'test_videos/preview_h264_aac.mp4' })`.
 
 | File | Format | Notes |
 |------|--------|-------|

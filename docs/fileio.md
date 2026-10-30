@@ -45,6 +45,8 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'a
 
 `apkAsset` is not a real file inside the APK. Choosing it means a cache copy (then cache hit) for every `FileSource` consumer. Prefer `fs` / `app:cache` if you already materialized the file.
 
+FFmpeg demux (`createOfflineVideoBufferFromFile`, `ingestFileToLiveVideoBuffer`) also needs a seekable file. An Android `contentUri` without a ParcelFileDescriptor is copied to `<cache>/fileio_nofd/` on first open; the same URI is a cache hit later. PDF/document still reject a stream-only source.
+
 ## Quick start
 
 ```ts
