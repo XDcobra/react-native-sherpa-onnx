@@ -13,12 +13,16 @@ import onnxruntime as ort
 from PIL import Image, ImageDraw, ImageFont, ImageTransform
 
 from constants import (
+    DEFAULT_MAX_PIXELS,
     EOS_TOKEN_ID,
     HEAD_DIM,
     IMAGE_TOKEN_ID,
     NUM_DECODER_LAYERS,
     NUM_KV_HEADS,
+    SPOTTING_MAX_PIXELS,
+    SPOTTING_UPSCALE_THRESHOLD,
     TASK_PROMPT,
+    TASK_PROMPTS,
 )
 from paths import HF_SRC, ONNX_DIR, ensure_hf_src_on_path
 from rope_index import decode_position_ids, rope_index_numpy
@@ -26,16 +30,43 @@ from wrappers import decoder_input_names, decoder_output_names
 
 
 def session(path: Path) -> ort.InferenceSession:
+    import os
+
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    threads = max(1, int(os.environ.get("ORT_NUM_THREADS") or os.environ.get("OMP_NUM_THREADS") or "14"))
+    opts.intra_op_num_threads = threads
+    opts.inter_op_num_threads = 1
     return ort.InferenceSession(str(path), opts, providers=["CPUExecutionProvider"])
 
 
-def ocr_prompt_text(processor) -> str:
+def task_prompt_text(task: str) -> str:
+    if task not in TASK_PROMPTS:
+        raise ValueError(f"unknown paddleocr_vl task {task!r}; expected {sorted(TASK_PROMPTS)}")
+    return TASK_PROMPTS[task]
+
+
+def max_pixels_for_task(task: str) -> int:
+    return SPOTTING_MAX_PIXELS if task == "spotting" else DEFAULT_MAX_PIXELS
+
+
+def maybe_upscale_spotting(image: Image.Image, task: str) -> tuple[Image.Image, bool]:
+    if task != "spotting":
+        return image, False
+    width, height = image.size
+    if width < SPOTTING_UPSCALE_THRESHOLD and height < SPOTTING_UPSCALE_THRESHOLD:
+        return (
+            image.resize((width * 2, height * 2), Image.Resampling.LANCZOS),
+            True,
+        )
+    return image, False
+
+
+def ocr_prompt_text(processor, task: str = "ocr") -> str:
     messages = [
         {
             "role": "user",
-            "content": [{"type": "image"}, {"type": "text", "text": TASK_PROMPT}],
+            "content": [{"type": "image"}, {"type": "text", "text": task_prompt_text(task)}],
         }
     ]
     return processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
@@ -54,9 +85,25 @@ class OrtParser:
             str(HF_SRC), trust_remote_code=True, local_files_only=True
         )
 
-    def prepare(self, image: Image.Image, prompt: str | None = None) -> dict:
-        text = prompt if prompt is not None else ocr_prompt_text(self.processor)
-        features = self.processor(images=image, text=[text], return_tensors="np")
+    def prepare(
+        self,
+        image: Image.Image,
+        prompt: str | None = None,
+        task: str = "ocr",
+        max_pixels: int | None = None,
+    ) -> dict:
+        text = prompt if prompt is not None else ocr_prompt_text(self.processor, task)
+        pixels = max_pixels if max_pixels is not None else max_pixels_for_task(task)
+        image_processor = getattr(self.processor, "image_processor", None)
+        previous = None
+        if image_processor is not None and hasattr(image_processor, "max_pixels"):
+            previous = image_processor.max_pixels
+            image_processor.max_pixels = int(pixels)
+        try:
+            features = self.processor(images=image, text=[text], return_tensors="np")
+        finally:
+            if image_processor is not None and previous is not None:
+                image_processor.max_pixels = previous
         pixel_values = np.asarray(features["pixel_values"], dtype=np.float32)
         if pixel_values.ndim == 4:
             pixel_values = pixel_values[None, ...]
@@ -77,6 +124,8 @@ class OrtParser:
             "input_ids": input_ids,
             "attention_mask": attention_mask.astype(np.float32),
             "prompt_text": text,
+            "max_pixels": int(pixels),
+            "task": task,
         }
 
     def encode_image(self, pixel_values: np.ndarray, image_grid_thw: np.ndarray) -> np.ndarray:
@@ -127,8 +176,11 @@ class OrtParser:
         image: Image.Image,
         prompt: str | None = None,
         max_new_tokens: int = 64,
+        task: str = "ocr",
+        max_pixels: int | None = None,
     ) -> dict:
-        prepared = self.prepare(image, prompt)
+        image, upscaled = maybe_upscale_spotting(image, task)
+        prepared = self.prepare(image, prompt, task=task, max_pixels=max_pixels)
         image_embeds = self.encode_image(prepared["pixel_values"], prepared["image_grid_thw"])
         input_ids = prepared["input_ids"]
         text_embeds = self.embed_tokens(input_ids)
@@ -158,6 +210,10 @@ class OrtParser:
             "image_grid_thw": prepared["image_grid_thw"].tolist(),
             "image_tokens": int(image_embeds.shape[0]),
             "prompt_text": prepared["prompt_text"],
+            "task": prepared["task"],
+            "max_pixels": prepared["max_pixels"],
+            "upscaled": upscaled,
+            "image_size": list(image.size),
         }
 
 
@@ -217,6 +273,12 @@ def parse_args(argv):
     parser.add_argument("--image", type=Path)
     parser.add_argument("--max-new-tokens", type=int, default=32)
     parser.add_argument("--prompt", default=None)
+    parser.add_argument(
+        "--task",
+        choices=tuple(TASK_PROMPTS),
+        default="ocr",
+        help="Official PaddleOCR-VL-1.6 task prompt (default OCR:).",
+    )
     return parser.parse_args(argv)
 
 
@@ -224,7 +286,12 @@ def main(argv=None):
     args = parse_args(argv or sys.argv[1:])
     image = Image.open(args.image).convert("RGB") if args.image else make_hello_image()
     parser = OrtParser(args.onnx_dir)
-    result = parser.generate(image, prompt=args.prompt, max_new_tokens=args.max_new_tokens)
+    result = parser.generate(
+        image,
+        prompt=args.prompt,
+        max_new_tokens=args.max_new_tokens,
+        task=args.task,
+    )
     print(json.dumps({k: result[k] for k in result if k != "prompt_ids"}, indent=2)[:4000])
     return 0
 

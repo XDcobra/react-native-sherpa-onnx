@@ -1,0 +1,1 @@
+<chart><loc_0><loc_0><loc_500><loc_500><unknown><fcel>Characteristic<fcel>Value<nl><fcel>Q1<fcel>40.0<nl><fcel>Q2<fcel>55.0<nl><fcel>Q3<fcel>33.0<nl><fcel>Q4<fcel>70.0<nl></chart><|end_of_text|>

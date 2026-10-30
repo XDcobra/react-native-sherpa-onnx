@@ -5,6 +5,17 @@ from __future__ import annotations
 HF_REPO = "PaddlePaddle/PaddleOCR-VL-1.6"
 # Official page-parse prompt. Image placeholders are inserted by the processor.
 TASK_PROMPT = "OCR:"
+TASK_PROMPTS = {
+    "ocr": "OCR:",
+    "table": "Table Recognition:",
+    "formula": "Formula Recognition:",
+    "chart": "Chart Recognition:",
+    "spotting": "Spotting:",
+    "seal": "Seal Recognition:",
+}
+DEFAULT_MAX_PIXELS = 1280 * 28 * 28  # 1_003_520
+SPOTTING_MAX_PIXELS = 2048 * 28 * 28  # 1_605_632
+SPOTTING_UPSCALE_THRESHOLD = 1500
 
 DECODER_WIDTH = 1024
 VISION_HIDDEN = 1152

@@ -1,0 +1,5 @@
+<doctag><section_header_level_1><loc_11><loc_14><loc_224><loc_29>Harbor Traffic Summary</section_header_level_1>
+<text><loc_11><loc_39><loc_73><loc_46>Fixture page 03</text>
+<text><loc_11><loc_61><loc_209><loc_69>Three bulk carriers docked before noon.</text>
+<text><loc_11><loc_79><loc_222><loc_87>Tug availability dropped after the fog advisory.</text>
+<text><loc_11><loc_97><loc_222><loc_105>Pilot boats remained

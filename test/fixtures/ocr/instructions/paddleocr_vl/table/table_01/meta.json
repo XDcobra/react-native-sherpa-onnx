@@ -1,0 +1,31 @@
+{
+  "family": "paddleocr_vl",
+  "task": "table",
+  "profile": null,
+  "fixture_id": "table_01",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Table Recognition:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1003520,
+    "upscaled": false,
+    "image_size": [
+      720,
+      360
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/table_01.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 53,
+  "ort_token_count": 53,
+  "prefix_len": 53,
+  "grammar": {
+    "kind": "otsl",
+    "ok": true,
+    "unknown": [],
+    "cell_count": 20,
+    "notes": [],
+    "sample": "<fcel>Item<fcel>Qty<fcel>Price<nl><fcel>Bolts<fcel>120<fcel>4.50<nl><fcel>Nuts<fcel>240<fcel>1.20<nl><fcel>Washers<fcel>400<fcel>0.40<nl><ecel><ecel><ecel><nl></s>"
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/table/table_01",
+  "max_new_tokens": 128
+}

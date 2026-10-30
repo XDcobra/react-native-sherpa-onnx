@@ -1,0 +1,5 @@
+<doctag><section_header_level_1><loc_11><loc_14><loc_263><loc_30>Quarterly Operations Report</section_header_level_1>
+<text><loc_11><loc_39><loc_72><loc_46>Fixture page 01</text>
+<text><loc_11><loc_61><loc_234><loc_69>Inbound shipments were inspected on arrival.</text>
+<text><loc_11><loc_79><loc_226><loc_87>The packing line ran 18 shifts this week.</text>
+<text><loc_11><loc_97><loc_246><loc_105>Customer returns concentrated

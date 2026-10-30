@@ -1,0 +1,26 @@
+{
+  "family": "doc_vlm",
+  "task": "identifyElement",
+  "profile": null,
+  "fixture_id": "page_01",
+  "pack_id": "docvlm-granite-258m-fp32",
+  "prompt_text": "<|start_of_role|>user<|end_of_role|><image>Identify element at: <loc_27><loc_23><loc_278><loc_37><|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>",
+  "preprocess": {
+    "user_text": "Identify element at: <loc_27><loc_23><loc_278><loc_37>",
+    "image": "test/fixtures/ocr/instructions/_images/page_01.png"
+  },
+  "token_identical": false,
+  "hf_token_count": 5,
+  "ort_token_count": 5,
+  "prefix_len": 0,
+  "grammar": {
+    "kind": "doctags_element",
+    "ok": true,
+    "unknown": [],
+    "tags": [],
+    "loc_count": 0,
+    "notes": []
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/doc_vlm/identifyElement/page_01",
+  "max_new_tokens": 128
+}

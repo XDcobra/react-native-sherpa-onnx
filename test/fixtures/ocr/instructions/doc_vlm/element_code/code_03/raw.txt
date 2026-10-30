@@ -1,0 +1,3 @@
+<code><loc_0><loc_0><loc_500><loc_500><_SQL_>SELECT id, name
+FROM users
+WHERE active = 1;</code><|end_of_text|>

@@ -1,0 +1,33 @@
+{
+  "family": "paddleocr_vl",
+  "task": "chart",
+  "profile": null,
+  "fixture_id": "chart_02",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Chart Recognition:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1003520,
+    "upscaled": false,
+    "image_size": [
+      720,
+      420
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/chart_02.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 35,
+  "ort_token_count": 35,
+  "prefix_len": 35,
+  "grammar": {
+    "kind": "chart",
+    "ok": true,
+    "unknown": [],
+    "form": "gfm",
+    "notes": [
+      "chart_form=gfm"
+    ],
+    "sample": "Quarter | Units by day\nQ1 | 40\nQ2 | 55\nQ3 | 33\nQ4 | 70</s>"
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/chart/chart_02",
+  "max_new_tokens": 128
+}

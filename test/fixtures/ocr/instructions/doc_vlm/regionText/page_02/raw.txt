@@ -1,0 +1,6 @@
+Laboratory Safety Briefing Fixture page 02 </ocr></text>
+<text><loc_11><loc_53><loc_236><loc_61>Wear gloves before opening solvent cabinets.</text>
+<text><loc_11><loc_71><loc_211><loc_80>Record every spill in the yellow log book.</text>
+<text><loc_11><loc_89><loc_261><loc_98>Evacuation maps are posted beside each stairwell.</text>
+<text><loc_11><loc_107><loc_138><loc_118>Shift summary</text>
+<text><loc_

@@ -1,0 +1,30 @@
+{
+  "family": "paddleocr_vl",
+  "task": "formula",
+  "profile": null,
+  "fixture_id": "formula_01",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Formula Recognition:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1003520,
+    "upscaled": false,
+    "image_size": [
+      640,
+      180
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/formula_01.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 14,
+  "ort_token_count": 14,
+  "prefix_len": 14,
+  "grammar": {
+    "kind": "latex",
+    "ok": true,
+    "unknown": [],
+    "notes": [],
+    "sample": "\\[{\\sf E}=\\mathsf{m c}^{2}\\]</s>"
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/formula/formula_01",
+  "max_new_tokens": 128
+}

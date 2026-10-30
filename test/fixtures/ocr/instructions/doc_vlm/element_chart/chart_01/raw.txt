@@ -1,0 +1,1 @@
+<chart><loc_0><loc_0><loc_500><loc_500><unknown><fcel>Characteristic<fcel>Value<nl><fcel>Mon<fcel>12.0<nl><fcel>Tue<fcel>18.0<nl><fcel>Wed<fcel>9.0<nl><fcel>Thu<fcel>21.0<nl></chart><|end_of_text|>
