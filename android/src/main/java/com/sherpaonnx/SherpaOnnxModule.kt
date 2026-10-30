@@ -3545,7 +3545,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return m
   }
 
-  private fun videoInfoToWritableMap(info: Map<String, Any>): com.facebook.react.bridge.WritableMap {
+  private fun videoInfoToWritableMap(info: Map<String, Any>?): com.facebook.react.bridge.WritableMap {
+    requireNotNull(info) { "native video call returned no info" }
     val m = Arguments.createMap()
     for ((k, v) in info) {
       when (v) {

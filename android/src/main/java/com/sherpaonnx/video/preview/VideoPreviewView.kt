@@ -14,7 +14,7 @@ import android.view.View
 import android.widget.FrameLayout
 import com.facebook.react.uimanager.ThemedReactContext
 
-internal class VideoPreviewView(
+class VideoPreviewView(
   context: ThemedReactContext,
   private val useTexture: Boolean,
 ) : FrameLayout(context) {
