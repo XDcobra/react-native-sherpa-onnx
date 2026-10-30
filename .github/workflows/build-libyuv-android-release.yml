@@ -9,6 +9,8 @@
 name: Prebuilt - libyuv (Android) Release
 
 on:
+  # Temporary: register the workflow off main so `gh workflow run --ref` works.
+  push:
   workflow_dispatch:
 
 concurrency:
