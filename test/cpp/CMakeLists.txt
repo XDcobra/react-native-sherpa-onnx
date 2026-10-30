@@ -285,6 +285,31 @@ set_tests_properties(speaker_embedding_core_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+set(OCR_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ocr")
+set(OCR_INSTRUCTION_SOURCES
+  "${OCR_CPP_ROOT}/OcrRecognizeSpec.cpp"
+  "${OCR_CPP_ROOT}/OcrCapabilities.cpp"
+  "${OCR_CPP_ROOT}/OcrGeometry.cpp"
+  "${OCR_CPP_ROOT}/OcrCrop.cpp"
+  "${OCR_CPP_ROOT}/markup/OcrTable.cpp"
+  "${OCR_CPP_ROOT}/markup/OcrOtsl.cpp"
+  "${OCR_CPP_ROOT}/markup/OcrElementKind.cpp"
+)
+add_executable(ocr_instruction_host_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/ocr/ocr_recognize_spec_host_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/ocr/ocr_geometry_host_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/ocr/ocr_markup_shared_host_test.cpp"
+  ${OCR_INSTRUCTION_SOURCES}
+)
+target_include_directories(ocr_instruction_host_test PRIVATE
+  "${OCR_CPP_ROOT}"
+)
+target_link_libraries(ocr_instruction_host_test PRIVATE ${SPEAKER_EMBEDDING_GTEST_LIBS})
+add_test(NAME ocr_instruction_host_test COMMAND $<TARGET_FILE:ocr_instruction_host_test>)
+set_tests_properties(ocr_instruction_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
 if(TARGET audio_f32le_to_format_host_test)
   add_test(NAME audio_f32le_to_format_host_test COMMAND $<TARGET_FILE:audio_f32le_to_format_host_test>)
   set_tests_properties(audio_f32le_to_format_host_test PROPERTIES
@@ -360,6 +385,11 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlMarkup.cpp"
     "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlRope.cpp"
     "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlTokenizer.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrOtsl.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrTable.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrElementKind.cpp"
+    "${OCR_CPP_ROOT}/OcrGeometry.cpp"
+    "${OCR_CPP_ROOT}/OcrCrop.cpp"
   )
   add_executable(ppocr_host_test
     "${OCR_TEST_DIR}/ppocr_host_test.cpp"
@@ -367,6 +397,7 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_TEST_DIR}/ocr_recognize_context_host_test.cpp"
     ${OCR_CONTEXT_SOURCE}
     ${OCR_ORT_ENV_SOURCE}
+    "${OCR_CPP_ROOT}/OcrCapabilities.cpp"
     "${OCR_CPP_ROOT}/OcrFactory.cpp"
     ${PADDLEOCR_VL_SOURCES}
     "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
@@ -499,6 +530,9 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
     "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    "${OCR_CPP_ROOT}/OcrGeometry.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrOtsl.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrElementKind.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(doc_vlm_host_test PRIVATE
@@ -542,6 +576,8 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
     "${OCR_CPP_ROOT}/OcrOrtHelpers.cpp"
     ${NEMOTRON_PARSE_SOURCES}
+    "${OCR_CPP_ROOT}/OcrGeometry.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrElementKind.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(nemotron_parse_host_test PRIVATE

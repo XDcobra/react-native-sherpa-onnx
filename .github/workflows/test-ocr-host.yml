@@ -90,11 +90,11 @@ jobs:
           test -f build/ocr-models/doctr-mobile/ocr_manifest.json
 
       # ── build + run ─────────────────────────────────────────────
-      - name: Configure and build ppocr_host_test + doctr_host_test + doc_vlm_host_test + nemotron_parse_host_test + paddleocr_vl_host_test
+      - name: Configure and build ppocr_host_test + doctr_host_test + doc_vlm_host_test + nemotron_parse_host_test + paddleocr_vl_host_test + ocr_instruction_host_test
         run: |
           mkdir -p test/cpp/build && cd test/cpp/build
           cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --target ppocr_host_test doctr_host_test doc_vlm_host_test nemotron_parse_host_test paddleocr_vl_host_test
+          cmake --build . --target ppocr_host_test doctr_host_test doc_vlm_host_test nemotron_parse_host_test paddleocr_vl_host_test ocr_instruction_host_test
 
       - name: Run ppocr host tests
         working-directory: ${{ github.workspace }}
@@ -127,6 +127,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           ctest --test-dir test/cpp/build -R paddleocr_vl_host_test --output-on-failure
+
+      - name: Run OCR instruction host tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R '^ocr_instruction_host_test$' --output-on-failure
 
   doc-vlm-golden:
     name: OCR host smoke — doc_vlm granite (manual)

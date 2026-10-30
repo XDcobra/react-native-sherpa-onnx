@@ -206,7 +206,7 @@ describe('OCR customConfig / bridge', () => {
       initMode: 'custom',
       modelType: 'paddleocr_vl',
       maxNewTokens: 512,
-      paddleocrVl: { maxPixels: 401408, task: 'spotting' },
+      paddleocrVl: { maxPixels: 401408 },
       customConfig: {
         vision_encoder: { kind: 'fs', path: '/m/vision_encoder.onnx' },
         vision_encoder_data: {
@@ -227,7 +227,6 @@ describe('OCR customConfig / bridge', () => {
         modelType: 'paddleocr_vl',
         maxNewTokens: 512,
         maxPixels: 401408,
-        paddleocrVlTask: 'spotting',
         modelPaths: {
           vision_encoder: '/m/vision_encoder.onnx',
           vision_encoder_data: '/m/vision_encoder.onnx_data',

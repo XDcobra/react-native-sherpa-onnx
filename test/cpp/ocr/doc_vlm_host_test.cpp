@@ -15,13 +15,16 @@
 #include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <stdexcept>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "DocVlmBackend.h"
@@ -29,8 +32,11 @@
 #include "DocVlmDocTagsPrefix.h"
 #include "DocVlmImageOps.h"
 #include "DocVlmPrompt.h"
+#include "DocVlmTaskProfile.h"
 #include "DocVlmTokenizer.h"
+#include "OcrInstruction.h"
 #include "OcrTypes.h"
+#include "ocr_elements_json.h"
 #include "ocr_test_image.h"
 
 namespace fs = std::filesystem;
@@ -119,8 +125,28 @@ std::string PackDirOrEmpty() {
   return dir;
 }
 
+std::string TokenizerDirOrEmpty() {
+  const std::string pack = PackDirOrEmpty();
+  if (!pack.empty()) return pack;
+  const char* candidates[] = {
+      "example/.model-cache/docvlm-granite-258m-fp32",
+      "example/.model-cache/docvlm-granite-258m",
+      "build/ocr-models/docvlm-granite-258m-fp32",
+      "build/ocr-models/docvlm-granite-258m/hf-src",
+  };
+  for (const char* candidate : candidates) {
+    if (fs::is_regular_file(fs::path(candidate) / "tokenizer.json")) return candidate;
+  }
+  if (const char* env = std::getenv("DOCVLM_MODEL_DIR")) {
+    if (env[0] != '\0' && fs::is_regular_file(fs::path(env) / "tokenizer.json")) {
+      return env;
+    }
+  }
+  return {};
+}
+
 const DocVlmTokenizer& TestTokenizer() {
-  static const std::string dir = PackDirOrEmpty();
+  static const std::string dir = TokenizerDirOrEmpty();
   static DocVlmTokenizer tok = DocVlmTokenizer::Load((fs::path(dir) / "tokenizer.json").string());
   return tok;
 }
@@ -171,6 +197,50 @@ std::vector<int32_t> ExpectedEnHelloIds() {
   ids.push_back(100339);
   ids.insert(ids.end(), {12281, 420, 2199, 311, 4733, 2785, 13, 100257, 198, 100264, 78191, 100265});
   return ids;
+}
+
+std::vector<int32_t> ParseIntArrayJson(const std::string& json) {
+  std::vector<int32_t> ids;
+  size_t i = 0;
+  while (i < json.size() && json[i] != '[') ++i;
+  if (i >= json.size()) throw std::runtime_error("prompt_ids.json is not an array");
+  ++i;
+  while (i < json.size()) {
+    while (i < json.size() && (json[i] == ' ' || json[i] == '\n' || json[i] == '\t' ||
+                               json[i] == '\r' || json[i] == ',')) {
+      ++i;
+    }
+    if (i < json.size() && json[i] == ']') break;
+    if (i >= json.size()) break;
+    char* end = nullptr;
+    const long value = std::strtol(json.c_str() + i, &end, 10);
+    if (end == json.c_str() + i) {
+      throw std::runtime_error("prompt_ids.json has a non-integer");
+    }
+    ids.push_back(static_cast<int32_t>(value));
+    i = static_cast<size_t>(end - json.c_str());
+  }
+  return ids;
+}
+
+/** Ids between the last `<fake_token_around_image>` (100339) and `<|end_of_text|>` (100257). */
+std::vector<int32_t> UserTextIdsFromPrompt(const std::vector<int32_t>& prompt) {
+  size_t eos = prompt.size();
+  for (size_t i = 0; i < prompt.size(); ++i) {
+    if (prompt[i] == 100257) eos = i;
+  }
+  if (eos == prompt.size()) {
+    throw std::runtime_error("prompt_ids.json missing eos 100257");
+  }
+  size_t start = eos;
+  for (size_t i = eos; i > 0; --i) {
+    if (prompt[i - 1] == 100339) {
+      start = i;
+      break;
+    }
+  }
+  return std::vector<int32_t>(prompt.begin() + static_cast<std::ptrdiff_t>(start),
+                              prompt.begin() + static_cast<std::ptrdiff_t>(eos));
 }
 
 int CountId(const std::vector<int32_t>& ids, int32_t id) {
@@ -256,7 +326,7 @@ TEST(GridMath, SingleImageBranch) {
 }
 
 TEST(Tokenizer, UserSentence) {
-  if (PackDirOrEmpty().empty()) {
+  if (TokenizerDirOrEmpty().empty()) {
     GTEST_SKIP() << "tokenizer.json is in the doc_vlm pack; " << kUnpackHint;
   }
   const DocVlmTokenizer& tok = TestTokenizer();
@@ -268,14 +338,14 @@ TEST(Tokenizer, UserSentence) {
 }
 
 TEST(Tokenizer, SpecialsBeforeBpe) {
-  if (PackDirOrEmpty().empty()) {
+  if (TokenizerDirOrEmpty().empty()) {
     GTEST_SKIP() << "tokenizer.json is in the doc_vlm pack; " << kUnpackHint;
   }
   EXPECT_EQ(TestTokenizer().Encode("<|start_of_role|>"), (std::vector<int32_t>{100264}));
 }
 
 TEST(Tokenizer, DecodeSpecial) {
-  if (PackDirOrEmpty().empty()) {
+  if (TokenizerDirOrEmpty().empty()) {
     GTEST_SKIP() << "tokenizer.json is in the doc_vlm pack; " << kUnpackHint;
   }
   const DocVlmTokenizer& tok = TestTokenizer();
@@ -286,7 +356,7 @@ TEST(Tokenizer, DecodeSpecial) {
 }
 
 TEST(Prompt, EnHelloIds) {
-  if (PackDirOrEmpty().empty()) {
+  if (TokenizerDirOrEmpty().empty()) {
     GTEST_SKIP() << "tokenizer.json is in the doc_vlm pack; " << kUnpackHint;
   }
   const DocVlmTokenizer& tok = TestTokenizer();
@@ -298,7 +368,7 @@ TEST(Prompt, EnHelloIds) {
 }
 
 TEST(Prompt, ImageTokenCount) {
-  if (PackDirOrEmpty().empty()) {
+  if (TokenizerDirOrEmpty().empty()) {
     GTEST_SKIP() << "tokenizer.json is in the doc_vlm pack; " << kUnpackHint;
   }
   const DocVlmTokenizer& tok = TestTokenizer();
@@ -308,6 +378,340 @@ TEST(Prompt, ImageTokenCount) {
   EXPECT_EQ(CountId(BuildPromptIds(tok, 1, 4), image), 320);
   EXPECT_EQ(CountId(BuildPromptIds(tok, 2, 4), image), 576);
   EXPECT_EQ(CountId(BuildPromptIds(tok, 4, 4), image), 1088);
+}
+
+TEST(Prompt, UserTextElementAndRegion) {
+  DocVlmInstruction page;
+  EXPECT_EQ(BuildDocVlmUserText(page, 900, 1200), "Convert this page to docling.");
+
+  DocVlmInstruction table;
+  table.task = DocVlmTask::kElement;
+  table.element = DocVlmElement::kTable;
+  EXPECT_EQ(BuildDocVlmUserText(table, 720, 360), "Convert table to OTSL.");
+
+  DocVlmInstruction chart;
+  chart.task = DocVlmTask::kElement;
+  chart.element = DocVlmElement::kChart;
+  EXPECT_EQ(BuildDocVlmUserText(chart, 720, 360), "Convert chart to table.");
+
+  DocVlmInstruction formula;
+  formula.task = DocVlmTask::kElement;
+  formula.element = DocVlmElement::kFormula;
+  EXPECT_EQ(BuildDocVlmUserText(formula, 640, 180), "Convert formula to LaTeX.");
+  EXPECT_EQ(ProfileFor(formula).content_format, OcrContentFormat::kLatex);
+
+  DocVlmInstruction code;
+  code.task = DocVlmTask::kElement;
+  code.element = DocVlmElement::kCode;
+  EXPECT_EQ(BuildDocVlmUserText(code, 640, 360), "Convert code to text.");
+  EXPECT_EQ(ProfileFor(code).content_format, OcrContentFormat::kCode);
+
+  DocVlmInstruction region;
+  region.task = DocVlmTask::kRegionText;
+  region.region = OcrPixelRect{48, 55, 452, 33};
+  EXPECT_EQ(BuildDocVlmUserText(region, 900, 1200),
+            "OCR the text in a specific location: <loc_27><loc_23><loc_278><loc_37>");
+  EXPECT_EQ(ProfileFor(region).content_format, OcrContentFormat::kPlain);
+
+  DocVlmInstruction ident;
+  ident.task = DocVlmTask::kIdentifyElement;
+  ident.region = region.region;
+  EXPECT_EQ(BuildDocVlmUserText(ident, 900, 1200),
+            "Identify element at: <loc_27><loc_23><loc_278><loc_37>");
+  EXPECT_TRUE(ProfileFor(ident).has_content);
+  EXPECT_EQ(ProfileFor(ident).content_format, OcrContentFormat::kPlain);
+
+  region.region = OcrPixelRect{800, 0, 200, 10};
+  EXPECT_THROW(BuildDocVlmUserText(region, 900, 1200), OcrCodedError);
+}
+
+TEST(Prompt, RegionLocTokenizerParity) {
+  if (TokenizerDirOrEmpty().empty()) {
+    GTEST_SKIP() << "tokenizer.json is in the doc_vlm pack; " << kUnpackHint;
+  }
+  const DocVlmTokenizer& tok = TestTokenizer();
+  struct Case {
+    const char* fixture;
+    OcrPixelRect region;
+    DocVlmTask task;
+  };
+  const Case cases[] = {
+      {"page_01", {48, 55, 452, 33}, DocVlmTask::kRegionText},
+      {"page_02", {48, 55, 416, 33}, DocVlmTask::kRegionText},
+      {"page_03", {48, 55, 384, 33}, DocVlmTask::kRegionText},
+  };
+  for (const auto& c : cases) {
+    DocVlmInstruction inst;
+    inst.task = c.task;
+    inst.region = c.region;
+    const std::string user = BuildDocVlmUserText(inst, 900, 1200);
+    const std::vector<int32_t> ids = tok.Encode(user);
+    const std::string rel =
+        std::string("ocr/instructions/doc_vlm/regionText/") + c.fixture +
+        "/prompt_ids.json";
+    const std::vector<int32_t> golden =
+        ParseIntArrayJson(ReadWholeFile(RepoRelativeFixture(rel.c_str())));
+    const std::vector<int32_t> golden_user = UserTextIdsFromPrompt(golden);
+    EXPECT_EQ(ids, golden_user) << c.fixture << " user=" << user;
+  }
+}
+
+TEST(Prompt, TaskUserIdsMatchGoldens) {
+  if (TokenizerDirOrEmpty().empty()) {
+    GTEST_SKIP() << "tokenizer.json is in the doc_vlm pack; " << kUnpackHint;
+  }
+  const DocVlmTokenizer& tok = TestTokenizer();
+  struct Case {
+    DocVlmInstruction inst;
+    const char* rel;
+    int frame_w;
+    int frame_h;
+  };
+  DocVlmInstruction page;
+  DocVlmInstruction table;
+  table.task = DocVlmTask::kElement;
+  table.element = DocVlmElement::kTable;
+  DocVlmInstruction chart;
+  chart.task = DocVlmTask::kElement;
+  chart.element = DocVlmElement::kChart;
+  DocVlmInstruction formula;
+  formula.task = DocVlmTask::kElement;
+  formula.element = DocVlmElement::kFormula;
+  DocVlmInstruction code;
+  code.task = DocVlmTask::kElement;
+  code.element = DocVlmElement::kCode;
+  DocVlmInstruction region;
+  region.task = DocVlmTask::kRegionText;
+  region.region = OcrPixelRect{48, 55, 452, 33};
+  DocVlmInstruction ident;
+  ident.task = DocVlmTask::kIdentifyElement;
+  ident.region = region.region;
+  const Case cases[] = {
+      {page, "ocr/instructions/doc_vlm/page/page_01/prompt_ids.json", 900, 1200},
+      {table, "ocr/instructions/doc_vlm/element_table/table_01/prompt_ids.json", 720,
+       360},
+      {chart, "ocr/instructions/doc_vlm/element_chart/chart_01/prompt_ids.json", 720,
+       360},
+      {formula, "ocr/instructions/doc_vlm/element_formula/formula_01/prompt_ids.json",
+       640, 180},
+      {code, "ocr/instructions/doc_vlm/element_code/code_01/prompt_ids.json", 640, 360},
+      {region, "ocr/instructions/doc_vlm/regionText/page_01/prompt_ids.json", 900, 1200},
+      {ident, "ocr/instructions/doc_vlm/identifyElement/page_01/prompt_ids.json", 900,
+       1200},
+  };
+  for (const auto& c : cases) {
+    const std::string user = BuildDocVlmUserText(c.inst, c.frame_w, c.frame_h);
+    const std::vector<int32_t> ids = tok.Encode(user);
+    const std::vector<int32_t> golden =
+        ParseIntArrayJson(ReadWholeFile(RepoRelativeFixture(c.rel)));
+    const std::vector<int32_t> golden_user = UserTextIdsFromPrompt(golden);
+    EXPECT_EQ(ids, golden_user) << c.rel << " user=" << user;
+  }
+}
+
+std::string UnescapeJsonString(std::string_view s) {
+  std::string out;
+  for (size_t i = 0; i < s.size(); ++i) {
+    if (s[i] == '\\' && i + 1 < s.size()) {
+      const char n = s[i + 1];
+      if (n == 'n') {
+        out.push_back('\n');
+        ++i;
+        continue;
+      }
+      if (n == '"') {
+        out.push_back('"');
+        ++i;
+        continue;
+      }
+      if (n == '\\') {
+        out.push_back('\\');
+        ++i;
+        continue;
+      }
+    }
+    out.push_back(s[i]);
+  }
+  return out;
+}
+
+std::string HfGenerateTextFromCacheJson(const std::string& json) {
+  const auto hf = json.find("\"hf\"");
+  if (hf == std::string::npos) {
+    throw std::runtime_error("hf-128.json missing hf object");
+  }
+  const auto key = json.find("\"text\": \"", hf);
+  if (key == std::string::npos) {
+    throw std::runtime_error("hf-128.json missing hf.text");
+  }
+  std::string raw;
+  for (size_t i = key + 9; i < json.size(); ++i) {
+    if (json[i] == '\\' && i + 1 < json.size()) {
+      raw.push_back(json[i]);
+      raw.push_back(json[i + 1]);
+      ++i;
+      continue;
+    }
+    if (json[i] == '"') break;
+    raw.push_back(json[i]);
+  }
+  return UnescapeJsonString(raw);
+}
+
+TEST(DocTags, InstructionParityCacheParsesWithoutUnknownKinds) {
+  const fs::path root("build/ocr-models/phase0-cache/doc_vlm");
+  if (!fs::is_directory(root)) {
+    GTEST_SKIP() << "Granite HF cache not pulled yet";
+  }
+  int parsed = 0;
+  for (const auto& entry : fs::recursive_directory_iterator(root)) {
+    if (!entry.is_regular_file() || entry.path().filename() != "hf-128.json") {
+      continue;
+    }
+    const std::string text = HfGenerateTextFromCacheJson(ReadWholeFile(entry.path().string()));
+    ASSERT_FALSE(text.empty()) << entry.path();
+    const std::string path = entry.path().generic_string();
+    if (path.find("/element_chart/") != std::string::npos) {
+      EXPECT_THROW(ParseDocTags(text, 900, 1200, 0), OcrCodedError) << path;
+      try {
+        ParseDocTags(text, 900, 1200, 0);
+      } catch (const OcrCodedError& e) {
+        EXPECT_EQ(std::string(e.code()), kOcrErrParseUnknownKind) << path;
+      }
+      ++parsed;
+      continue;
+    }
+    DocTagsParse tags = ParseDocTags(text, 900, 1200, 0);
+    for (const auto& el : tags.elements) {
+      if (el.has_quad) {
+        for (int k = 0; k < 8; ++k) {
+          EXPECT_TRUE(std::isfinite(el.quad.xy[k])) << entry.path();
+        }
+      }
+    }
+    if (path.find("/regionText/") != std::string::npos) {
+      if (text.find("<text>") != std::string::npos) {
+        // page_02 hits the 128-token cap and leaks DocTags after the title.
+        ASSERT_FALSE(tags.elements.empty()) << path;
+      } else {
+        EXPECT_TRUE(tags.elements.empty()) << path;
+        EXPECT_TRUE(tags.spans.empty()) << path;
+        AdoptBareProse(tags, text);
+        EXPECT_FALSE(tags.text_utf8.empty()) << path;
+        EXPECT_EQ(tags.text_utf8.find('<'), std::string::npos) << path;
+      }
+    } else if (path.find("/identifyElement/") != std::string::npos) {
+      EXPECT_TRUE(tags.elements.empty()) << path;
+      AdoptBareProse(tags, text);
+      EXPECT_FALSE(tags.text_utf8.empty()) << path;
+      EXPECT_EQ(tags.text_utf8.find('<'), std::string::npos) << path;
+    } else {
+      ASSERT_FALSE(tags.elements.empty()) << path;
+      if (path.find("/element_table/") != std::string::npos) {
+        EXPECT_EQ(tags.elements[0].kind, OcrElementKind::kTable) << path;
+        EXPECT_TRUE(tags.elements[0].has_quad) << path;
+      } else if (path.find("/element_formula/") != std::string::npos) {
+        EXPECT_EQ(tags.elements[0].kind, OcrElementKind::kFormula) << path;
+        EXPECT_TRUE(tags.elements[0].has_quad) << path;
+      } else if (path.find("/element_code/") != std::string::npos) {
+        EXPECT_EQ(tags.elements[0].kind, OcrElementKind::kCode) << path;
+        EXPECT_FALSE(tags.language.empty()) << path;
+      } else if (path.find("/page/") != std::string::npos) {
+        EXPECT_EQ(tags.elements[0].kind, OcrElementKind::kSectionHeader) << path;
+        EXPECT_TRUE(tags.elements[0].has_quad) << path;
+      }
+    }
+    ++parsed;
+  }
+  EXPECT_GE(parsed, 12);
+}
+
+TEST(DocTags, CodeLanguageTagAndIndent) {
+  const DocTagsParse parsed = ParseDocTags(
+      "<code><loc_0><loc_0><loc_500><loc_500><_Python_>def add(a, b):\n"
+      "    return a + b\n</code>",
+      640, 360, 0);
+  EXPECT_EQ(parsed.language, "Python");
+  EXPECT_EQ(parsed.text_utf8, "def add(a, b):\n    return a + b");
+  ASSERT_EQ(parsed.elements.size(), 1u);
+  EXPECT_EQ(parsed.elements[0].kind, OcrElementKind::kCode);
+  EXPECT_TRUE(parsed.elements[0].has_quad);
+}
+
+TEST(DocTags, RegionTextBareProseHasNoElements) {
+  DocTagsParse parsed =
+      ParseDocTags("Quarterly Operations Report<|end_of_text|>", 900, 1200, 0);
+  EXPECT_TRUE(parsed.elements.empty());
+  EXPECT_TRUE(parsed.text_utf8.empty());
+  AdoptBareProse(parsed, "Quarterly Operations Report<|end_of_text|>");
+  EXPECT_EQ(parsed.text_utf8, "Quarterly Operations Report");
+  EXPECT_TRUE(parsed.elements.empty());
+  EXPECT_TRUE(parsed.spans.empty());
+}
+
+TEST(DocTags, InstructionGoldenRawsParseAndIdentity) {
+  struct Case {
+    const char* rel;
+    bool identical;
+    bool chart_unknown;
+    bool bare_prose;
+    const char* needle;
+  };
+  const Case cases[] = {
+      {"page/page_01", false, false, false, "Quarterly Operations Report"},
+      {"page/page_02", false, false, false, "Laboratory Safety Briefing"},
+      {"page/page_03", false, false, false, "Harbor Traffic Summary"},
+      {"element_table/table_01", true, false, false, "Item"},
+      {"element_table/table_02", true, false, false, "City"},
+      {"element_table/table_03", true, false, false, "Code"},
+      {"element_chart/chart_01", false, true, false, nullptr},
+      {"element_chart/chart_02", false, true, false, nullptr},
+      {"element_chart/chart_03", false, true, false, nullptr},
+      {"element_formula/formula_01", false, false, false, "E = m"},
+      {"element_formula/formula_02", true, false, false, "a ^"},
+      {"element_formula/formula_03", false, false, false, "F = m"},
+      {"element_code/code_01", true, false, false, "def add"},
+      {"element_code/code_02", false, false, false, "function greet"},
+      {"element_code/code_03", true, false, false, "SELECT"},
+      {"regionText/page_01", true, false, true, "Quarterly Operations Report"},
+      {"regionText/page_02", false, false, false, "Wear gloves"},
+      {"regionText/page_03", false, false, true, "Harbor Traffic Summary"},
+      {"identifyElement/page_01", false, false, true, "Fixture page 01"},
+      {"identifyElement/page_02", false, false, true, "Fixture page 02"},
+      {"identifyElement/page_03", true, false, true, "Harbor Traffic Summary"},
+  };
+  int identical = 0;
+  for (const auto& c : cases) {
+    const std::string dir =
+        std::string("ocr/instructions/doc_vlm/") + c.rel;
+    const std::string meta_path = RepoRelativeFixture((dir + "/meta.json").c_str());
+    const std::string raw_path = RepoRelativeFixture((dir + "/raw.txt").c_str());
+    if (!fs::is_regular_file(meta_path) || !fs::is_regular_file(raw_path)) {
+      GTEST_SKIP() << "instruction golden missing: " << dir;
+    }
+    const std::string meta = ReadWholeFile(meta_path);
+    const bool meta_identical = meta.find("\"token_identical\": true") != std::string::npos;
+    EXPECT_EQ(meta_identical, c.identical) << c.rel;
+    if (meta_identical) ++identical;
+    const std::string raw = ReadWholeFile(raw_path);
+    ASSERT_FALSE(raw.empty()) << c.rel;
+    if (c.chart_unknown) {
+      EXPECT_THROW(ParseDocTags(raw, 720, 405, 0), OcrCodedError) << c.rel;
+      continue;
+    }
+    DocTagsParse tags = ParseDocTags(raw, 900, 1200, 0);
+    if (c.bare_prose) {
+      EXPECT_TRUE(tags.elements.empty()) << c.rel;
+      AdoptBareProse(tags, raw);
+      EXPECT_FALSE(tags.text_utf8.empty()) << c.rel;
+    } else {
+      ASSERT_FALSE(tags.elements.empty()) << c.rel;
+    }
+    if (c.needle != nullptr) {
+      EXPECT_NE(raw.find(c.needle), std::string::npos) << c.rel << " raw=" << raw;
+    }
+  }
+  EXPECT_EQ(identical, 8);
 }
 
 TEST(DocTags, HelloQuad) {
@@ -327,6 +731,14 @@ TEST(DocTags, HelloQuad) {
   EXPECT_FLOAT_EQ(parsed.spans[0].quad.xy[7], 120.f);
   EXPECT_FLOAT_EQ(parsed.spans[0].confidence, 1.f);
   EXPECT_EQ(parsed.spans[0].frame_index, 0);
+  ASSERT_EQ(parsed.elements.size(), 1u);
+  EXPECT_EQ(parsed.elements[0].kind, sherpa_onnx::ocr::OcrElementKind::kText);
+  EXPECT_TRUE(parsed.elements[0].has_quad);
+  EXPECT_TRUE(parsed.elements[0].has_utf16);
+  EXPECT_EQ(parsed.elements[0].utf16_start, 0);
+  EXPECT_EQ(parsed.elements[0].utf16_end, 5);
+  EXPECT_EQ(ocr_test::ElementsToJson(parsed.elements),
+            ocr_test::ReadElementsGolden("doctags_hello_quad.json"));
 }
 
 TEST(DocTags, TitleMarkdown) {
@@ -336,6 +748,10 @@ TEST(DocTags, TitleMarkdown) {
   EXPECT_EQ(parsed.text_utf8, "Hi");
   ASSERT_EQ(parsed.spans.size(), 1u);
   EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
+  ASSERT_EQ(parsed.elements.size(), 1u);
+  EXPECT_EQ(parsed.elements[0].kind, sherpa_onnx::ocr::OcrElementKind::kTitle);
+  EXPECT_EQ(ocr_test::ElementsToJson(parsed.elements),
+            ocr_test::ReadElementsGolden("doctags_title.json"));
 }
 
 TEST(DocTags, FallbackStripsTags) {
@@ -351,6 +767,11 @@ TEST(DocTags, OtslUnclosedTwoByTwo) {
   EXPECT_EQ(parsed.text_utf8, "A | B\nC | D");
   EXPECT_EQ(parsed.markdown_utf8, "| A | B |\n| --- | --- |\n| C | D |");
   EXPECT_TRUE(parsed.spans.empty());
+  ASSERT_EQ(parsed.elements.size(), 1u);
+  EXPECT_EQ(parsed.elements[0].kind, sherpa_onnx::ocr::OcrElementKind::kTable);
+  EXPECT_FALSE(parsed.elements[0].has_quad);
+  EXPECT_EQ(ocr_test::ElementsToJson(parsed.elements),
+            ocr_test::ReadElementsGolden("doctags_otsl_unclosed.json"));
 }
 
 TEST(DocTags, OtslClosedWithWrapperLocs) {
@@ -425,10 +846,18 @@ TEST(DocTags, OtslCaptionBeforeTable) {
             "Notes\n| A | B |\n| --- | --- |\n| C | D |");
 }
 
-TEST(DocTags, UnknownTagDoesNotDropNeighbors) {
-  const DocTagsParse parsed = ParseDocTags(
-      "<text>A</text><unknown>x</unknown><text>B</text>", 1000, 240, 0);
-  EXPECT_EQ(parsed.text_utf8, "A\nB");
+TEST(DocTags, UnknownTagThrowsParseUnknownKind) {
+  EXPECT_THROW(ParseDocTags("<text>A</text><unknown>x</unknown><text>B</text>",
+                            1000, 240, 0),
+               OcrCodedError);
+  try {
+    ParseDocTags("<chart><loc_0><loc_0><loc_500><loc_500><unknown><fcel>A",
+                 720, 405, 0);
+  } catch (const OcrCodedError& e) {
+    EXPECT_EQ(std::string(e.code()), kOcrErrParseUnknownKind);
+    return;
+  }
+  FAIL() << "expected OCR_PARSE_UNKNOWN_KIND";
 }
 
 TEST(DocTags, TruncatedTextIsBestEffort) {
@@ -440,6 +869,16 @@ TEST(DocTags, TruncatedTextIsBestEffort) {
 TEST(DocTagsPrefix, RejectsStartWithoutDoctag) {
   DocTagsPrefix prefix;
   EXPECT_FALSE(prefix.Feed("Fo"));
+}
+
+TEST(DocTagsPrefix, ElementModeAcceptsCodeAndOtslRoots) {
+  DocTagsPrefix code(DocTagsPrefixKind::kElement);
+  EXPECT_TRUE(code.Feed(
+      "<code><loc_0><loc_0><loc_500><loc_500><_Python_>def add(a, b):</code>"));
+  DocTagsPrefix table(DocTagsPrefixKind::kElement);
+  EXPECT_TRUE(table.Feed("<otsl><loc_0><loc_0><loc_500><loc_500><fcel>Item"));
+  DocTagsPrefix page;
+  EXPECT_FALSE(page.Feed("<code>def add"));
 }
 
 TEST(DocTagsPrefix, RejectsLocWithoutOpen) {
@@ -497,8 +936,9 @@ TEST(DocTagsPrefix, AcceptsTableCloseWithoutOtslClose) {
 
 TEST(OcrResult, ExtrasDefaultEmpty) {
   OcrResult result;
-  EXPECT_TRUE(result.doctags_utf8.empty());
-  EXPECT_TRUE(result.markdown_utf8.empty());
+  EXPECT_TRUE(result.raw_utf8.empty());
+  EXPECT_FALSE(result.has_content);
+  EXPECT_TRUE(result.elements.empty());
   EXPECT_TRUE(result.stop_reason.empty());
   EXPECT_TRUE(result.complete);
   OcrLoadOptions options;
@@ -537,11 +977,13 @@ TEST(DocVlmSmoke, EnHello) {
   std::fprintf(stderr, "[SherpaOnnx:ocr] doc_vlm smoke wall_ms=%lld\n",
                static_cast<long long>(ms));
 
-  EXPECT_NE(result.doctags_utf8.find("<doctag"), std::string::npos);
-  EXPECT_NE(result.doctags_utf8.find("</doctag>"), std::string::npos);
+  EXPECT_NE(result.raw_utf8.find("<doctag"), std::string::npos);
+  EXPECT_NE(result.raw_utf8.find("</doctag>"), std::string::npos);
   EXPECT_FALSE(result.text_utf8.empty());
   EXPECT_NE(FoldAlnum(result.text_utf8).find("hello"), std::string::npos) << result.text_utf8;
-  EXPECT_FALSE(result.markdown_utf8.empty());
+  EXPECT_TRUE(result.has_content);
+  EXPECT_EQ(result.content.format, OcrContentFormat::kMarkdown);
+  EXPECT_FALSE(result.content.value.empty());
   ASSERT_GE(result.spans.size(), 1u);
   for (const OcrSpan& span : result.spans) {
     EXPECT_FLOAT_EQ(span.confidence, 1.f);
@@ -576,7 +1018,7 @@ TEST(DocVlmStrict, EnHello) {
   frame.frame_index = 0;
   const OcrResult result = backend.Recognize(frame);
   const std::string golden = ReadWholeFile(golden_path);
-  EXPECT_EQ(result.doctags_utf8, JsonStringField(golden, "doctags"));
+  EXPECT_EQ(result.raw_utf8, JsonStringField(golden, "doctags"));
   EXPECT_EQ(result.text_utf8, JsonStringField(golden, "text"));
-  EXPECT_EQ(result.markdown_utf8, JsonStringField(golden, "markdown"));
+  EXPECT_EQ(result.content.value, JsonStringField(golden, "markdown"));
 }

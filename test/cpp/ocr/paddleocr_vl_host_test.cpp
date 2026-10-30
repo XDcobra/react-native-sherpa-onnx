@@ -21,12 +21,18 @@
 #include "OcrOrtEnv.h"
 #include "OcrOrtHelpers.h"
 #include "OcrTypes.h"
+#include "ocr_elements_json.h"
 #include "PaddleocrVlBackend.h"
 #include "PaddleocrVlImageOps.h"
 #include "PaddleocrVlMarkup.h"
+#include "PaddleocrVlPrompt.h"
 #include "PaddleocrVlRope.h"
+#include "PaddleocrVlTaskProfile.h"
 #include "PaddleocrVlTokenizer.h"
 #include "ocr_test_image.h"
+
+#include <fstream>
+#include <iterator>
 
 namespace fs = std::filesystem;
 using namespace sherpa_onnx::ocr;
@@ -71,6 +77,71 @@ std::string ResolvePackDir() {
   return {};
 }
 
+std::string TokenizerDirOrEmpty() {
+  const std::string pack = ResolvePackDir();
+  if (!pack.empty()) return pack;
+  const char* candidates[] = {
+      "example/.model-cache/paddleocr-vl-1.6-fp16",
+      "build/ocr-models/paddleocr-vl-1.6/onnx-fp16",
+      "build/ocr-models/paddleocr-vl-1.6/hf-src",
+  };
+  for (const char* candidate : candidates) {
+    if (fs::is_regular_file(fs::path(candidate) / "tokenizer.json")) {
+      return candidate;
+    }
+  }
+  return {};
+}
+
+std::string RepoRelativeFixture(const char* relative_from_test_fixtures) {
+  const char* env = std::getenv("TEST_FIXTURES_DIR");
+  if (env && env[0] != '\0') {
+    std::string base = env;
+    if (base.back() != '/') base += '/';
+    return base + relative_from_test_fixtures;
+  }
+  return std::string("test/fixtures/") + relative_from_test_fixtures;
+}
+
+std::string ReadWholeFile(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) throw std::runtime_error("missing fixture: " + path);
+  return std::string((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+}
+
+std::vector<int32_t> ParseIntArrayJson(const std::string& json) {
+  std::vector<int32_t> ids;
+  size_t i = 0;
+  while (i < json.size() && json[i] != '[') ++i;
+  if (i >= json.size()) throw std::runtime_error("prompt_ids.json is not an array");
+  ++i;
+  while (i < json.size()) {
+    while (i < json.size() && (json[i] == ' ' || json[i] == '\n' || json[i] == '\t' ||
+                               json[i] == '\r' || json[i] == ',')) {
+      ++i;
+    }
+    if (i < json.size() && json[i] == ']') break;
+    if (i >= json.size()) break;
+    char* end = nullptr;
+    const long value = std::strtol(json.c_str() + i, &end, 10);
+    if (end == json.c_str() + i) {
+      throw std::runtime_error("prompt_ids.json has a non-integer");
+    }
+    ids.push_back(static_cast<int32_t>(value));
+    i = static_cast<size_t>(end - json.c_str());
+  }
+  return ids;
+}
+
+int CountId(const std::vector<int32_t>& ids, int32_t want) {
+  int n = 0;
+  for (int32_t id : ids) {
+    if (id == want) ++n;
+  }
+  return n;
+}
+
 }  // namespace
 
 TEST(OcrCreateOrtSession, MissingOnnxThrowsRuntimeError) {
@@ -85,12 +156,50 @@ TEST(OcrCreateOrtSession, MissingOnnxThrowsRuntimeError) {
       std::runtime_error);
 }
 
+TEST(PaddleocrVlMarkup, TableOtslToGfm) {
+  PaddleocrVlParseOptions opt;
+  opt.task = "table";
+  const PaddleocrVlMarkup parsed = ParsePaddleocrVlMarkup(
+      "<fcel>Item<fcel>Qty<nl><fcel>Bolts<fcel>120</s>", opt);
+  EXPECT_EQ(parsed.markdown_utf8, "| Item | Qty |\n| --- | --- |\n| Bolts | 120 |");
+  EXPECT_EQ(parsed.text_utf8, "Item | Qty\nBolts | 120");
+  EXPECT_TRUE(parsed.elements.empty());
+}
+
+TEST(PaddleocrVlMarkup, FormulaPassthroughLatex) {
+  PaddleocrVlParseOptions opt;
+  opt.task = "formula";
+  const PaddleocrVlMarkup parsed = ParsePaddleocrVlMarkup("\\[E=mc^2\\]</s>", opt);
+  EXPECT_EQ(parsed.markdown_utf8, "\\[E=mc^2\\]");
+  EXPECT_TRUE(parsed.elements.empty());
+}
+
+TEST(PaddleocrVlMarkup, ChartGfmPipes) {
+  PaddleocrVlParseOptions opt;
+  opt.task = "chart";
+  const PaddleocrVlMarkup parsed =
+      ParsePaddleocrVlMarkup("Month | Units\nMon | 12\nTue | 18</s>", opt);
+  EXPECT_EQ(parsed.markdown_utf8,
+            "| Month | Units |\n| --- | --- |\n| Mon | 12 |\n| Tue | 18 |");
+  EXPECT_TRUE(parsed.elements.empty());
+}
+
+TEST(PaddleocrVlMarkup, SealPlain) {
+  PaddleocrVlParseOptions opt;
+  opt.task = "seal";
+  const PaddleocrVlMarkup parsed = ParsePaddleocrVlMarkup("CITY HALL\nSEAL 01</s>", opt);
+  EXPECT_EQ(parsed.markdown_utf8, "CITY HALL\nSEAL 01");
+  EXPECT_TRUE(parsed.elements.empty());
+}
+
 TEST(PaddleocrVlMarkup, HelloWorld) {
   const PaddleocrVlMarkup parsed = ParsePaddleocrVlMarkup("Hello World</s>");
   EXPECT_EQ(parsed.raw_utf8, "Hello World");
   EXPECT_EQ(parsed.markdown_utf8, "Hello World");
   EXPECT_EQ(parsed.text_utf8, "Hello World");
   EXPECT_TRUE(parsed.spans.empty());
+  EXPECT_EQ(ocr_test::ElementsToJson(parsed.elements),
+            ocr_test::ReadElementsGolden("paddle_ocr_hello.json"));
 }
 
 TEST(PaddleocrVlMarkup, StripsHtmlAndMarkdownTicks) {
@@ -170,6 +279,41 @@ TEST(PaddleocrVlMarkup, SpottingJoinsInstancesAndKeepsLocInRaw) {
   EXPECT_FLOAT_EQ(parsed.spans[1].quad.xy[1], 20.f);
 }
 
+TEST(PaddleocrVlImageOps, EffectiveMaxPixelsCapsTaskDefault) {
+  EXPECT_EQ(EffectiveMaxPixels(0, kOfficialMaxPixels), kOfficialMaxPixels);
+  EXPECT_EQ(EffectiveMaxPixels(0, kSpottingMaxPixels), kSpottingMaxPixels);
+  EXPECT_EQ(EffectiveMaxPixels(kMobileMaxPixels, kSpottingMaxPixels),
+            kMobileMaxPixels);
+  EXPECT_EQ(EffectiveMaxPixels(kSpottingMaxPixels, kOfficialMaxPixels),
+            kOfficialMaxPixels);
+}
+
+TEST(PaddleocrVlImageOps, SpottingUpscalesWhenBothSidesSmall) {
+  const int w = 80;
+  const int h = 60;
+  std::vector<uint8_t> rgb(static_cast<size_t>(w) * h * 3, 128);
+  PaddleocrVlPreprocessOptions opt;
+  opt.task_max_pixels = kSpottingMaxPixels;
+  opt.upscale_small_2x = true;
+  const PaddleocrVlPatches page = PreprocessRgb(rgb.data(), w, h, opt);
+  EXPECT_TRUE(page.upscaled);
+  EXPECT_EQ(page.effective_max_pixels, kSpottingMaxPixels);
+  EXPECT_EQ(page.src_w, w);
+  EXPECT_EQ(page.src_h, h);
+}
+
+TEST(PaddleocrVlImageOps, OcrDoesNotUpscale) {
+  const int w = 80;
+  const int h = 60;
+  std::vector<uint8_t> rgb(static_cast<size_t>(w) * h * 3, 128);
+  PaddleocrVlPreprocessOptions opt;
+  opt.task_max_pixels = kOfficialMaxPixels;
+  opt.upscale_small_2x = false;
+  const PaddleocrVlPatches page = PreprocessRgb(rgb.data(), w, h, opt);
+  EXPECT_FALSE(page.upscaled);
+  EXPECT_EQ(page.effective_max_pixels, kOfficialMaxPixels);
+}
+
 TEST(PaddleocrVlImageOps, SmartResizeTinyPage) {
   const SmartResizeSize size = SmartResize(24, 32);
   EXPECT_EQ(size.height % 28, 0);
@@ -220,6 +364,38 @@ TEST(PaddleocrVlRope, ImageBlockIndices) {
   EXPECT_EQ(rope.position_ids[1], 1);
   EXPECT_EQ(rope.position_ids[2], 2);  // t plane, first vision
   EXPECT_GE(rope.position_ids[4], 0);  // remaining text
+}
+
+TEST(PaddleocrVlPrompt, TaskIdsMatchGoldens) {
+  const std::string dir = TokenizerDirOrEmpty();
+  if (dir.empty()) GTEST_SKIP() << kUnpackHint;
+  const auto tok =
+      PaddleocrVlTokenizer::Load((fs::path(dir) / "tokenizer.json").string());
+  struct Case {
+    PaddleocrVlTask task;
+    const char* rel;
+  };
+  const Case cases[] = {
+      {PaddleocrVlTask::kOcr, "ocr/instructions/paddleocr_vl/ocr/page_01/prompt_ids.json"},
+      {PaddleocrVlTask::kTable,
+       "ocr/instructions/paddleocr_vl/table/table_01/prompt_ids.json"},
+      {PaddleocrVlTask::kFormula,
+       "ocr/instructions/paddleocr_vl/formula/formula_01/prompt_ids.json"},
+      {PaddleocrVlTask::kChart,
+       "ocr/instructions/paddleocr_vl/chart/chart_01/prompt_ids.json"},
+      {PaddleocrVlTask::kSeal, "ocr/instructions/paddleocr_vl/seal/seal_01/prompt_ids.json"},
+      {PaddleocrVlTask::kSpotting,
+       "ocr/instructions/paddleocr_vl/spotting/spotting_01/prompt_ids.json"},
+  };
+  constexpr int32_t kImagePlaceholder = 100295;
+  for (const auto& c : cases) {
+    const auto golden =
+        ParseIntArrayJson(ReadWholeFile(RepoRelativeFixture(c.rel)));
+    const int n = CountId(golden, kImagePlaceholder);
+    ASSERT_GT(n, 0) << c.rel;
+    const auto ids = tok.Encode(BuildPaddleocrVlPrompt(n, ProfileFor(c.task)));
+    EXPECT_EQ(ids, golden) << c.rel;
+  }
 }
 
 TEST(PaddleocrVlBackend, Family) {
@@ -283,6 +459,109 @@ TEST(PaddleocrVlTokenizer, AsciiRoundTrip) {
   const std::string decoded = tok.Decode(ids);
   EXPECT_NE(decoded.find("Hello"), std::string::npos);
   EXPECT_NE(decoded.find("World"), std::string::npos);
+}
+
+TEST(PaddleocrVlMarkup, InstructionGoldenRawsParse) {
+  struct Case {
+    const char* task;
+    const char* fixture;
+    const char* needle;
+  };
+  const Case cases[] = {
+      {"ocr", "ocr/page_01", "Quarterly"},
+      {"ocr", "ocr/page_02", nullptr},
+      {"ocr", "ocr/page_03", nullptr},
+      {"table", "table/table_01", "| Item |"},
+      {"table", "table/table_02", "|"},
+      {"table", "table/table_03", "|"},
+      {"formula", "formula/formula_01", "\\["},
+      {"formula", "formula/formula_02", "\\["},
+      {"formula", "formula/formula_03", "\\["},
+      {"chart", "chart/chart_01", "| Month |"},
+      {"chart", "chart/chart_02", "|"},
+      {"chart", "chart/chart_03", "|"},
+      {"seal", "seal/seal_01", "CITY HALL"},
+      {"seal", "seal/seal_02", nullptr},
+      {"seal", "seal/seal_03", nullptr},
+  };
+  for (const auto& c : cases) {
+    const std::string rel =
+        std::string("ocr/instructions/paddleocr_vl/") + c.fixture + "/raw.txt";
+    const std::string raw = ReadWholeFile(RepoRelativeFixture(rel.c_str()));
+    PaddleocrVlParseOptions opt;
+    opt.task = c.task;
+    const PaddleocrVlMarkup parsed = ParsePaddleocrVlMarkup(raw, opt);
+    const auto& profile = ProfileForId(c.task);
+    EXPECT_TRUE(parsed.elements.empty()) << c.fixture;
+    EXPECT_TRUE(parsed.spans.empty()) << c.fixture;
+    EXPECT_FALSE(parsed.markdown_utf8.empty()) << c.fixture;
+    EXPECT_FALSE(parsed.text_utf8.empty()) << c.fixture;
+    OcrResult result;
+    SetOcrContent(result, profile.content_format, parsed.markdown_utf8);
+    EXPECT_EQ(result.content.format, profile.content_format) << c.fixture;
+    if (c.needle != nullptr) {
+      EXPECT_NE(parsed.markdown_utf8.find(c.needle), std::string::npos)
+          << c.fixture << " markdown=" << parsed.markdown_utf8;
+    }
+    if (profile.parser == PaddleocrVlParser::kOtsl ||
+        profile.parser == PaddleocrVlParser::kGfmTable) {
+      EXPECT_NE(parsed.markdown_utf8.find("| --- |"), std::string::npos)
+          << c.fixture;
+    }
+  }
+}
+
+TEST(PaddleocrVlMarkup, InstructionSpottingGoldenRawsParseAndIdentity) {
+  struct Case {
+    const char* id;
+    const char* needle;
+  };
+  const Case cases[] = {
+      {"spotting_01", "Hello World"},
+      {"spotting_02", "Lot 44"},
+      {"spotting_03", "Alpha"},
+  };
+  int identical = 0;
+  for (const auto& c : cases) {
+    const std::string dir =
+        std::string("ocr/instructions/paddleocr_vl/spotting/") + c.id;
+    const std::string meta_path =
+        RepoRelativeFixture((dir + "/meta.json").c_str());
+    const std::string raw_path = RepoRelativeFixture((dir + "/raw.txt").c_str());
+    if (!fs::is_regular_file(meta_path) || !fs::is_regular_file(raw_path)) {
+      GTEST_SKIP() << "instruction spotting golden missing: " << dir;
+    }
+  }
+  for (const auto& c : cases) {
+    const std::string dir =
+        std::string("ocr/instructions/paddleocr_vl/spotting/") + c.id;
+    const std::string meta_path =
+        RepoRelativeFixture((dir + "/meta.json").c_str());
+    const std::string raw_path = RepoRelativeFixture((dir + "/raw.txt").c_str());
+    const std::string meta = ReadWholeFile(meta_path);
+    const bool meta_identical =
+        meta.find("\"token_identical\": true") != std::string::npos;
+    EXPECT_TRUE(meta_identical) << c.id;
+    if (meta_identical) ++identical;
+    EXPECT_NE(meta.find("\"upscaled\": true"), std::string::npos) << c.id;
+    EXPECT_NE(meta.find("1605632"), std::string::npos) << c.id;
+    const std::string raw = ReadWholeFile(raw_path);
+    ASSERT_FALSE(raw.empty()) << c.id;
+    EXPECT_NE(raw.find(c.needle), std::string::npos) << c.id << " raw=" << raw;
+    EXPECT_NE(raw.find("<|LOC_"), std::string::npos) << c.id;
+    PaddleocrVlParseOptions opt;
+    opt.task = "spotting";
+    opt.frame_width = 800;
+    opt.frame_height = 600;
+    const PaddleocrVlMarkup parsed = ParsePaddleocrVlMarkup(raw, opt);
+    EXPECT_TRUE(parsed.elements.empty()) << c.id;
+    ASSERT_EQ(parsed.spans.size(), 3u) << c.id << " text=" << parsed.text_utf8;
+    EXPECT_NE(parsed.text_utf8.find(c.needle), std::string::npos) << c.id;
+    EXPECT_EQ(parsed.spans[0].level, OcrSpanLevel::kLine);
+    EXPECT_GT(parsed.spans[0].quad.xy[2], parsed.spans[0].quad.xy[0]);
+    EXPECT_GT(parsed.spans[0].quad.xy[5], parsed.spans[0].quad.xy[1]);
+  }
+  EXPECT_EQ(identical, 3);
 }
 
 TEST(PaddleocrVlBackend, EnHelloSmoke) {
