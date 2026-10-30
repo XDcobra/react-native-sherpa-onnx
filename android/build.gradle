@@ -187,7 +187,7 @@ def kotlin_version = getExtOrDefault("kotlinVersion")
 dependencies {
   // React Native dependency: explicit version for IDE (VS Code Kotlin LSP). When consumed by a React Native app,
   // Gradle's dependency resolution picks the app's react-android version (typically higher).
-  implementation "com.facebook.react:react-android:0.83.0"
+  implementation "com.facebook.react:react-android:0.83.10"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
   // Versions from prebuilt-versions.gradle; AARs used by prebuilt-download.gradle tasks.
