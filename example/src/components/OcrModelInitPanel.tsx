@@ -89,9 +89,8 @@ export function OcrModelInitPanel({
       <Text style={styles.sectionHint}>
         Pick a pack — section 1 then shows only that family’s public createOCR
         and recognize fields (instruction.task, maxNewTokens, detector, …).
-        Smallest published: ppocrv6-tiny, doctr-mobile,
-        docvlm-granite-258m-q4f16, nemotron-3.5-parse-int8,
-        paddleocr-vl-1.6-fp16.
+        Bundled example pack: ppocrv6-tiny. Other families via the download
+        manager.
       </Text>
 
       <View style={styles.sectionBody}>
