@@ -55,14 +55,53 @@ Status DecodeSession::Flush() {
   return Status::Ok();
 }
 
-CacheKey DecodeSession::Nv12Key(int64_t pres, const FrameRequest& req) const {
+CacheKey DecodeSession::StoredNv12Key(int64_t pres) {
   CacheKey k;
   k.presentationIndex = pres;
-  k.maxSideBucket = AnalysisSizeBucket(req.maxSide);
+  k.maxSideBucket = 0;
   k.format = VideoPixelFormat::Nv12;
-  k.applyTransform = false;
-  k.packed = false;
   return k;
+}
+
+int64_t DecodeSession::PresentationOf(const DecodedRawFrame& raw) const {
+  if (raw.presentationIndex >= 0) {
+    return raw.presentationIndex;
+  }
+  if (timeline_ == nullptr) {
+    return -1;
+  }
+  return timeline_->SampleAtPts(raw.ptsUs);
+}
+
+bool DecodeSession::CacheHasNv12(int64_t pres) const {
+  return cache_ && cache_->Contains(StoredNv12Key(pres));
+}
+
+Status DecodeSession::InsertDecoded(const DecodedRawFrame& raw,
+                                    bool cacheAlongWay, int64_t targetPres) {
+  const int64_t pres = PresentationOf(raw);
+  const bool isTarget = pres == targetPres;
+  VIDEO_LOGI(
+      "video.decode drain rawPres=%lld ptsUs=%lld mapped=%lld target=%lld "
+      "along=%d",
+      static_cast<long long>(raw.presentationIndex),
+      static_cast<long long>(raw.ptsUs), static_cast<long long>(pres),
+      static_cast<long long>(targetPres), cacheAlongWay ? 1 : 0);
+  if (pres < 0) {
+    VIDEO_LOGW("video.decode drain unmapped ptsUs=%lld target=%lld",
+               static_cast<long long>(raw.ptsUs),
+               static_cast<long long>(targetPres));
+    return Status::Ok();
+  }
+  if (!isTarget && !cacheAlongWay) {
+    return Status::Ok();
+  }
+  CacheKey k = StoredNv12Key(pres);
+  auto st = cache_->InsertNv12(k, raw.view, raw.ptsUs, track_);
+  if (!st.ok && isTarget) {
+    return st;
+  }
+  return Status::Ok();
 }
 
 Status DecodeSession::DrainToCache(bool cacheAlongWay, int64_t targetPres) {
@@ -74,19 +113,52 @@ Status DecodeSession::DrainToCache(bool cacheAlongWay, int64_t targetPres) {
     if (generationFn_ && generationFn_() != generationAtStart_) {
       return Status::Fail(kErrCancelled, "buffer released mid-decode");
     }
-    CacheKey k;
-    k.presentationIndex = raw.presentationIndex;
-    k.maxSideBucket = 0;
-    k.format = VideoPixelFormat::Nv12;
-    const bool isTarget = raw.presentationIndex == targetPres;
-    if (isTarget || cacheAlongWay) {
-      auto st = cache_->InsertNv12(k, raw.view, raw.ptsUs, track_);
-      if (!st.ok && isTarget) {
-        return st;
-      }
+    auto st = InsertDecoded(raw, cacheAlongWay, targetPres);
+    if (!st.ok) {
+      return st;
     }
   }
   return Status::Ok();
+}
+
+Status DecodeSession::DrainUntilCached(int64_t targetPres, bool cacheAlongWay) {
+  auto st = DrainToCache(cacheAlongWay, targetPres);
+  if (!st.ok) {
+    return st;
+  }
+  if (CacheHasNv12(targetPres)) {
+    return Status::Ok();
+  }
+  constexpr int64_t kOutputWaitUs = 20000;
+  constexpr int kOutputWaitTries = 100;
+  VIDEO_LOGI(
+      "video.decode wait-output target=%lld submits=%d cached=%d",
+      static_cast<long long>(targetPres),
+      decoder_ ? decoder_->submitCount() : 0,
+      cache_ ? cache_->cachedCount() : 0);
+  for (int i = 0; i < kOutputWaitTries; ++i) {
+    if (generationFn_ && generationFn_() != generationAtStart_) {
+      return Status::Fail(kErrCancelled, "buffer released mid-decode");
+    }
+    DecodedRawFrame raw;
+    if (decoder_->ReceiveWait(&raw, kOutputWaitUs)) {
+      st = InsertDecoded(raw, cacheAlongWay, targetPres);
+      if (!st.ok) {
+        return st;
+      }
+    }
+    if (CacheHasNv12(targetPres)) {
+      VIDEO_LOGI("video.decode wait-output hit target=%lld tries=%d",
+                 static_cast<long long>(targetPres), i + 1);
+      return Status::Ok();
+    }
+  }
+  VIDEO_LOGW(
+      "video.decode wait-output timeout target=%lld cached=%d submits=%d",
+      static_cast<long long>(targetPres),
+      cache_ ? cache_->cachedCount() : 0,
+      decoder_ ? decoder_->submitCount() : 0);
+  return Status::Fail(kErrDecodeFailed, "decoder produced no target frame");
 }
 
 Status DecodeSession::SeekToKeyframe(int64_t keyPres) {
@@ -108,7 +180,7 @@ Status DecodeSession::SeekToKeyframe(int64_t keyPres) {
     return st;
   }
   lastDecodeIndex_ = keyDec;
-  return DrainToCache(true, keyPres);
+  return DrainUntilCached(keyPres, true);
 }
 
 Status DecodeSession::DecodeThrough(int64_t targetPres, bool cacheAlongWay) {
@@ -132,7 +204,7 @@ Status DecodeSession::DecodeThrough(int64_t targetPres, bool cacheAlongWay) {
       return st;
     }
   }
-  return DrainToCache(cacheAlongWay, targetPres);
+  return DrainUntilCached(targetPres, cacheAlongWay);
 }
 
 Result<VideoFrameLease> DecodeSession::SeekAndAcquire(const FrameRequest& req) {
@@ -175,12 +247,8 @@ Result<VideoFrameLease> DecodeSession::SeekAndAcquire(const FrameRequest& req) {
     // sample timestamp match when VFR has gaps.
   }
 
-  CacheKey wantNv12 = Nv12Key(pres, req);
   // Full-size NV12 is stored under bucket 0; derived sizes convert later.
-  CacheKey stored;
-  stored.presentationIndex = pres;
-  stored.maxSideBucket = 0;
-  stored.format = VideoPixelFormat::Nv12;
+  CacheKey stored = StoredNv12Key(pres);
   auto hit = cache_->Lookup(stored);
   if (hit.ok() && hit.value.valid()) {
     VIDEO_LOGI("video.decode cache hit idx=%lld",
@@ -234,9 +302,13 @@ Result<VideoFrameLease> DecodeSession::SeekAndAcquire(const FrameRequest& req) {
 
   hit = cache_->Lookup(stored);
   if (!hit.ok() || !hit.value.valid()) {
-    r.status = hit.status.ok
-                   ? Status::Fail(kErrDecodeFailed, "decoded frame missing")
-                   : hit.status;
+    VIDEO_LOGE(
+        "video.decode acquire miss idx=%lld ptsUs=%lld cached=%d submits=%d "
+        "code=%s msg=%s",
+        static_cast<long long>(pres), static_cast<long long>(req.ptsUs),
+        cache_->cachedCount(), decoder_->submitCount(),
+        hit.status.errorCode.c_str(), hit.status.errorMessage.c_str());
+    r.status = Status::Fail(kErrDecodeFailed, "decoded frame missing");
     return r;
   }
   if (req.mode == SeekMode::Accurate) {

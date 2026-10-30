@@ -16,6 +16,7 @@ class VideoToolboxDecoder : public DecoderBackend {
   Status Submit(const EncodedPacket& packet) override;
   Status Flush() override;
   bool Receive(DecodedRawFrame* out) override;
+  bool ReceiveWait(DecodedRawFrame* out, int64_t timeoutUs) override;
   void Close() override;
   int submitCount() const override { return submitCount_; }
   int flushCount() const override { return flushCount_; }

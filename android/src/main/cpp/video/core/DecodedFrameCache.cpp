@@ -127,6 +127,11 @@ Result<VideoFrameLease> DecodedFrameCache::Lookup(const CacheKey& key) {
   return MakeLeaseUnlocked(key);
 }
 
+bool DecodedFrameCache::Contains(const CacheKey& key) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return map_.find(key) != map_.end();
+}
+
 Result<VideoFrameLease> DecodedFrameCache::Pin(const CacheKey& key) {
   return Lookup(key);
 }

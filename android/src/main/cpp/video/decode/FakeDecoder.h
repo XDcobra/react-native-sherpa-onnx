@@ -27,6 +27,8 @@ class FakeDecoderBackend : public DecoderBackend {
   void Close() override;
   int submitCount() const override { return submitCount_; }
   int flushCount() const override { return flushCount_; }
+  /** HW decoders only set ptsUs. Tests the DecodeSession PTS→index map. */
+  void setOmitPresentationIndex(bool omit) { omitPresentationIndex_ = omit; }
 
  private:
   Status Emit(int64_t presentationIndex, int64_t ptsUs, int width, int height);
@@ -37,6 +39,7 @@ class FakeDecoderBackend : public DecoderBackend {
   bool hasRef_ = false;
   int submitCount_ = 0;
   int flushCount_ = 0;
+  bool omitPresentationIndex_ = false;
   std::deque<DecodedRawFrame> out_;
 };
 

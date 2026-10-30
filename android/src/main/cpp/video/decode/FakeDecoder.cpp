@@ -94,7 +94,7 @@ Status FakeDecoderBackend::Emit(int64_t presentationIndex, int64_t ptsUs,
   fr.view.width = width;
   fr.view.height = height;
   fr.ptsUs = ptsUs;
-  fr.presentationIndex = presentationIndex;
+  fr.presentationIndex = omitPresentationIndex_ ? -1 : presentationIndex;
   out_.push_back(std::move(fr));
   return Status::Ok();
 }

@@ -69,6 +69,16 @@ TEST_F(DecodeSessionTest, AccurateReturnsExactPts) {
   EXPECT_EQ(lease.value.view().plane[0][0], FakeDecoderBackend::IdentityLuma(5));
 }
 
+TEST_F(DecodeSessionTest, PtsOnlyOutputMapsViaTimeline) {
+  SessionBundle b;
+  b.decoder->setOmitPresentationIndex(true);
+  auto lease = b.session->SeekAndAcquire(Acc(5 * 33333));
+  ASSERT_TRUE(lease.ok()) << lease.status.errorCode << " "
+                          << lease.status.errorMessage;
+  EXPECT_EQ(lease.value.view().ptsUs, 5 * 33333);
+  EXPECT_EQ(lease.value.view().frameIndex, 5);
+}
+
 TEST_F(DecodeSessionTest, KeyframeModeDecodesOneFrame) {
   SessionBundle b;
   FrameRequest r;

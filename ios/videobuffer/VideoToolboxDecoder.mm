@@ -196,6 +196,18 @@ bool VideoToolboxDecoder::Receive(DecodedRawFrame* out) {
   return true;
 }
 
+bool VideoToolboxDecoder::ReceiveWait(DecodedRawFrame* out, int64_t timeoutUs) {
+  (void)timeoutUs;
+  if (Receive(out)) {
+    return true;
+  }
+  if (session_) {
+    VTDecompressionSessionWaitForAsynchronousFrames(
+        (VTDecompressionSessionRef)session_);
+  }
+  return Receive(out);
+}
+
 void VideoToolboxDecoder::Close() {
   if (session_) {
     VTDecompressionSessionInvalidate((VTDecompressionSessionRef)session_);

@@ -8,6 +8,9 @@
 #include "libyuv/convert.h"
 #include "libyuv/convert_from.h"
 
+#include <media/NdkMediaError.h>
+
+#include <chrono>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -73,11 +76,14 @@ Status AMediaCodecDecoder::Configure(const VideoTrackInfo& track) {
   AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, track.codedHeight);
   ApplyCsd(fmt, track.codec, track.codecConfig);
   media_status_t ms = AImageReader_new(track.codedWidth, track.codedHeight,
-                                       AIMAGE_FORMAT_YUV_420_888, 4, &reader_);
+                                       AIMAGE_FORMAT_YUV_420_888, 8, &reader_);
   if (ms != AMEDIA_OK || reader_ == nullptr) {
     AMediaFormat_delete(fmt);
     return Status::Fail(kErrDecoderUnavailable, "AImageReader");
   }
+  listener_.context = this;
+  listener_.onImageAvailable = &AMediaCodecDecoder::OnImageAvailable;
+  AImageReader_setImageListener(reader_, &listener_);
   AImageReader_getWindow(reader_, &window_);
   codec_ = AMediaCodec_createCodecByName(allowedName_.c_str());
   if (codec_ == nullptr) {
@@ -130,35 +136,196 @@ Status AMediaCodecDecoder::Submit(const EncodedPacket& packet) {
   }
   AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(ix), 0, size,
                                static_cast<uint64_t>(packet.ptsUs), flags);
+  queuedSinceStart_ = true;
   ++submitCount_;
   return Status::Ok();
 }
 
 Status AMediaCodecDecoder::Flush() {
-  if (codec_) {
+  imageGen_.fetch_add(1);
+  if (codec_ && queuedSinceStart_) {
     AMediaCodec_flush(codec_);
+    queuedSinceStart_ = false;
+  }
+  {
+    std::lock_guard<std::mutex> lock(outMu_);
+    pendingPtsUs_.clear();
+    out_.clear();
   }
   ++flushCount_;
   return Status::Ok();
 }
 
-bool AMediaCodecDecoder::Receive(DecodedRawFrame* out) {
-  if (!configured_ || codec_ == nullptr || out == nullptr) {
-    return false;
+void AMediaCodecDecoder::OnImageAvailable(void* context, AImageReader* reader) {
+  (void)reader;
+  auto* self = static_cast<AMediaCodecDecoder*>(context);
+  if (self == nullptr) {
+    return;
   }
-  AMediaCodecBufferInfo info;
-  const ssize_t ix = AMediaCodec_dequeueOutputBuffer(codec_, &info, 0);
-  if (ix < 0) {
-    return false;
+  self->DrainImages();
+}
+
+void AMediaCodecDecoder::PumpCodec(int64_t timeoutUs) {
+  if (!configured_ || codec_ == nullptr) {
+    return;
   }
-  AImage* image = nullptr;
-  if (reader_ && AImageReader_acquireLatestImage(reader_, &image) == AMEDIA_OK &&
-      image != nullptr) {
-    CopyImageToFrame(image, out, static_cast<int64_t>(info.presentationTimeUs));
+  int64_t waitUs = timeoutUs < 0 ? 0 : timeoutUs;
+  for (int spin = 0; spin < 8; ++spin) {
+    AMediaCodecBufferInfo info;
+    const ssize_t ix =
+        AMediaCodec_dequeueOutputBuffer(codec_, &info, waitUs);
+    if (ix == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED ||
+        ix == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
+      VIDEO_LOGI("video.decode amc info ix=%zd spin=%d",
+                 static_cast<ssize_t>(ix), spin);
+      waitUs = 0;
+      continue;
+    }
+    if (ix < 0) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(outMu_);
+      pendingPtsUs_.push_back(static_cast<int64_t>(info.presentationTimeUs));
+    }
+    // Surface/ImageReader mode: render=true delivers the buffer to AImageReader.
+    AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(ix), true);
+    VIDEO_LOGI("video.decode amc render ix=%zd ptsUs=%lld flags=%u",
+               static_cast<ssize_t>(ix),
+               static_cast<long long>(info.presentationTimeUs),
+               static_cast<unsigned>(info.flags));
+    DrainImages();
+    {
+      std::unique_lock<std::mutex> lock(outMu_);
+      if (pendingPtsUs_.size() > 2) {
+        VIDEO_LOGI("video.decode amc backpressure pending=%zu out=%zu",
+                   pendingPtsUs_.size(), out_.size());
+        outCv_.wait_for(lock, std::chrono::milliseconds(50), [this] {
+          return pendingPtsUs_.size() <= 2;
+        });
+      }
+    }
+    return;
+  }
+}
+
+void AMediaCodecDecoder::DrainImages() {
+  if (reader_ == nullptr) {
+    return;
+  }
+  const uint64_t gen = imageGen_.load();
+  for (;;) {
+    AImage* image = nullptr;
+    const media_status_t acq = AImageReader_acquireNextImage(reader_, &image);
+    if (acq != AMEDIA_OK || image == nullptr) {
+      if (acq != AMEDIA_IMGREADER_NO_BUFFER_AVAILABLE) {
+        VIDEO_LOGW("video.decode amc acquire acq=%d", static_cast<int>(acq));
+      }
+      return;
+    }
+    if (gen != imageGen_.load()) {
+      AImage_delete(image);
+      continue;
+    }
+    int64_t ptsUs = 0;
+    {
+      std::lock_guard<std::mutex> lock(outMu_);
+      if (!pendingPtsUs_.empty()) {
+        ptsUs = pendingPtsUs_.front();
+        pendingPtsUs_.pop_front();
+      } else {
+        int64_t tsNs = 0;
+        AImage_getTimestamp(image, &tsNs);
+        ptsUs = tsNs / 1000;
+      }
+    }
+    DecodedRawFrame fr;
+    auto st = CopyImageToFrame(image, &fr, ptsUs);
     AImage_delete(image);
+    if (!st.ok || fr.view.y.data == nullptr) {
+      VIDEO_LOGW("video.decode amc copy failed ptsUs=%lld",
+                 static_cast<long long>(ptsUs));
+      continue;
+    }
+    {
+      std::lock_guard<std::mutex> lock(outMu_);
+      out_.push_back(std::move(fr));
+    }
+    VIDEO_LOGI("video.decode amc image ptsUs=%lld",
+               static_cast<long long>(ptsUs));
+    outCv_.notify_one();
   }
-  AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(ix), false);
+}
+
+bool AMediaCodecDecoder::PopDecoded(DecodedRawFrame* out) {
+  if (out == nullptr) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(outMu_);
+  if (out_.empty()) {
+    return false;
+  }
+  *out = std::move(out_.front());
+  out_.pop_front();
   return out->view.y.data != nullptr;
+}
+
+bool AMediaCodecDecoder::Receive(DecodedRawFrame* out) {
+  PumpCodec(0);
+  DrainImages();
+  return PopDecoded(out);
+}
+
+bool AMediaCodecDecoder::ReceiveWait(DecodedRawFrame* out, int64_t timeoutUs) {
+  if (out == nullptr) {
+    return false;
+  }
+  if (timeoutUs < 0) {
+    timeoutUs = 0;
+  }
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::microseconds(timeoutUs);
+  for (;;) {
+    PumpCodec(0);
+    DrainImages();
+    if (PopDecoded(out)) {
+      return true;
+    }
+    auto now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      PumpCodec(0);
+      DrainImages();
+      return PopDecoded(out);
+    }
+    const auto remainUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                              deadline - now)
+                              .count();
+    const int64_t codecWait =
+        remainUs > 20000 ? 20000 : static_cast<int64_t>(remainUs);
+    PumpCodec(codecWait);
+    DrainImages();
+    if (PopDecoded(out)) {
+      return true;
+    }
+    now = std::chrono::steady_clock::now();
+    if (now >= deadline) {
+      return false;
+    }
+    const auto waitLeft = std::chrono::duration_cast<std::chrono::microseconds>(
+        deadline - now);
+    std::unique_lock<std::mutex> lock(outMu_);
+    if (!out_.empty()) {
+      *out = std::move(out_.front());
+      out_.pop_front();
+      return out->view.y.data != nullptr;
+    }
+    outCv_.wait_for(lock, waitLeft);
+    if (!out_.empty()) {
+      *out = std::move(out_.front());
+      out_.pop_front();
+      return out->view.y.data != nullptr;
+    }
+  }
 }
 
 Status AMediaCodecDecoder::CopyImageToFrame(AImage* image, DecodedRawFrame* out,
@@ -213,6 +380,10 @@ Status AMediaCodecDecoder::CopyImageToFrame(AImage* image, DecodedRawFrame* out,
 }
 
 void AMediaCodecDecoder::Close() {
+  imageGen_.fetch_add(1);
+  if (reader_) {
+    AImageReader_setImageListener(reader_, nullptr);
+  }
   if (codec_) {
     AMediaCodec_stop(codec_);
     AMediaCodec_delete(codec_);
@@ -223,6 +394,12 @@ void AMediaCodecDecoder::Close() {
     reader_ = nullptr;
     window_ = nullptr;
   }
+  {
+    std::lock_guard<std::mutex> lock(outMu_);
+    pendingPtsUs_.clear();
+    out_.clear();
+  }
+  queuedSinceStart_ = false;
   configured_ = false;
 }
 

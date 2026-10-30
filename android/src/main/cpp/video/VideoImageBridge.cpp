@@ -1,6 +1,7 @@
 #include "VideoImageBridge.h"
 
 #include "VideoFrameAccess.h"
+#include "VideoLog.h"
 #include "VideoRegistry.h"
 #include "image/ImageRegistry.h"
 #include "image/ImageTypes.h"
@@ -29,8 +30,15 @@ ImageBridgeResult VideoImageBridge::CreateImageBuffer(
   ir.maxSide = req.maxSide;
   ir.applyTransform = true;
   ir.packed = true;
+  VIDEO_LOGI(
+      "video.image bridge start id=%s sampling=%d fps=%g maxSide=%d",
+      videoBufferId.c_str(), static_cast<int>(req.sampling), req.fps,
+      req.maxSide);
   auto itRes = VideoFrameAccess::Iterate(videoBufferId, ir);
   if (!itRes.ok()) {
+    VIDEO_LOGE("video.image bridge iterate failed code=%s msg=%s",
+               itRes.status.errorCode.c_str(),
+               itRes.status.errorMessage.c_str());
     r.status = itRes.status;
     return r;
   }
@@ -40,6 +48,9 @@ ImageBridgeResult VideoImageBridge::CreateImageBuffer(
   while (!it.done()) {
     auto lease = it.Next();
     if (!lease.ok() || !lease.value.valid()) {
+      VIDEO_LOGE(
+          "video.image bridge frame fail i=%d code=%s msg=%s", count,
+          lease.status.errorCode.c_str(), lease.status.errorMessage.c_str());
       image::ImageRegistry::Instance().Release(img);
       r.status = lease.status;
       return r;
@@ -68,6 +79,7 @@ ImageBridgeResult VideoImageBridge::CreateImageBuffer(
   }
   r.imageBufferId = img;
   r.frameCount = count;
+  VIDEO_LOGI("video.image bridge done frames=%d id=%s", count, img.c_str());
   return r;
 }
 

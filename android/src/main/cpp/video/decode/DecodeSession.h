@@ -37,7 +37,12 @@ class DecodeSession {
   Status SeekToKeyframe(int64_t keyPres);
   Status DecodeThrough(int64_t targetPres, bool cacheAlongWay);
   Status DrainToCache(bool cacheAlongWay, int64_t targetPres);
-  CacheKey Nv12Key(int64_t pres, const FrameRequest& req) const;
+  Status DrainUntilCached(int64_t targetPres, bool cacheAlongWay);
+  Status InsertDecoded(const DecodedRawFrame& raw, bool cacheAlongWay,
+                       int64_t targetPres);
+  int64_t PresentationOf(const DecodedRawFrame& raw) const;
+  bool CacheHasNv12(int64_t pres) const;
+  static CacheKey StoredNv12Key(int64_t pres);
   Status MaybeConvert(const VideoFrameLease& nv12, const FrameRequest& req,
                       VideoFrameLease* out);
 

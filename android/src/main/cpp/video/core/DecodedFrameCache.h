@@ -49,6 +49,7 @@ class DecodedFrameCache : public std::enable_shared_from_this<DecodedFrameCache>
   void SetRamThreshold(int64_t bytes);
 
   Result<VideoFrameLease> Lookup(const CacheKey& key);
+  bool Contains(const CacheKey& key) const;
   Status InsertNv12(const CacheKey& key, const Nv12View& src, int64_t ptsUs,
                     const VideoTrackInfo& track);
   Status InsertView(const CacheKey& key, const VideoFrameView& view,

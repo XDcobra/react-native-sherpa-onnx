@@ -25,6 +25,15 @@ class DecoderBackend {
   virtual Status Flush() = 0;
   /** Pop one decoded frame; returns false if the output queue is empty. */
   virtual bool Receive(DecodedRawFrame* out) = 0;
+  /**
+   * Pop one decoded frame, blocking up to `timeoutUs` for decoder output.
+   * Default: non-blocking `Receive`. HW backends override (MediaCodec dequeue
+   * timeout / VideoToolbox wait-for-async).
+   */
+  virtual bool ReceiveWait(DecodedRawFrame* out, int64_t timeoutUs) {
+    (void)timeoutUs;
+    return Receive(out);
+  }
   virtual void Close() = 0;
   virtual int submitCount() const = 0;
   virtual int flushCount() const = 0;

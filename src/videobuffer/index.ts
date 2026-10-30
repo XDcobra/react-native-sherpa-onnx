@@ -323,6 +323,15 @@ export async function createOfflineImageBufferFromVideo(
         (options?.timesUs && options.timesUs.length > 0)
       ? 5
       : 0;
+  if (__DEV__) {
+    console.log(
+      '[SherpaOnnx:video] createOfflineImageBufferFromVideo',
+      id,
+      options?.sampling ?? 'all',
+      options?.fps ?? 0,
+      options?.maxSide ?? 0
+    );
+  }
   const raw = await getNative().createOfflineImageBufferFromVideo(id, {
     sampling,
     uniformCount: options?.uniformCount ?? 0,
@@ -331,6 +340,13 @@ export async function createOfflineImageBufferFromVideo(
     timesUs: options?.timesUs,
   });
   if (raw.errorCode) {
+    if (__DEV__) {
+      console.log(
+        '[SherpaOnnx:video] createOfflineImageBufferFromVideo fail',
+        raw.errorCode,
+        raw.errorMessage
+      );
+    }
     throw new Error(`${raw.errorCode}: ${raw.errorMessage ?? ''}`);
   }
   return {
