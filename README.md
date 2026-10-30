@@ -121,7 +121,7 @@ What you can decode in and write out. Details: [Audio save](./docs/audio-convers
 | **Images** | JPEG, PNG, BMP, GIF; WebP *(opt-in)*; HEIC/HEIF | JPEG, PNG; WebP *(opt-in)* |
 | **PDF** | PDF *(opt-in PDFium)* | Text layer · page images |
 | **E-documents** | EPUB, FB2, MOBI, CBZ, CBR | Markup text · page/section images |
-| **Video** | MP4 / MOV / MKV / WebM (H.264, HEVC) | JPEG / PNG stills · PCM audio extract |
+| **Video** | MP4 / MOV / MKV / WebM (H.264, HEVC) | MP4 / MOV / MKV / WebM (H.264, HEVC) · JPEG / PNG stills · PCM audio extract |
 
 ## How to start
 
