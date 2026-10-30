@@ -135,6 +135,8 @@ All signatures below are exported from `react-native-sherpa-onnx/videobuffer`. L
 
 Ref-first usage is recommended. Malformed ids reject early with `VIDEO_INVALID_ARGUMENT`.
 
+Tables under each function are labeled **Parameters** (arguments), **`options`** (fields of the options object), or **Returns** (resolved value).
+
 ### General
 
 #### `getVideoBufferInfo(buffer)`
@@ -147,12 +149,33 @@ function getVideoBufferInfo(
 
 ```ts
 const info = await getVideoBufferInfo(live);
-console.log(info.kind, info.state, info.liveEdgeUs);
+// info ≈ {
+//   bufferId: 'vid_live_4e21…',
+//   kind: 'liveVideoBuffer',
+//   state: 'recording',
+//   frameCount: 120,
+//   totalFramesWritten: 180,
+//   ringEvictedFrames: 60,
+//   hasActiveSpool: true,
+//   liveEdgeUs: 5_999_000,
+//   seekableStartUs: 2_000_000,
+//   seekableEndUs: 5_999_000,
+//   audio: {
+//     codec: 'aac',
+//     decodable: true,
+//     sampleRate: 48000,
+//     channels: 2,
+//     startMs: 0,
+//     durationMs: 6000,
+//   },
+// }
 ```
 
 For live buffers, `ref.info` from create/finalize is a snapshot — see [`info` lifecycle](#info-lifecycle-live-buffers).
 
-| Live field | Meaning |
+**Returns** (`LiveVideoBufferInfo`)
+
+| Field | Meaning |
 | --- | --- |
 | `kind` / `state` | `'liveVideoBuffer'` / `'recording'` \| `'finished'`. |
 | `frameCount` | Frames currently indexed in the **window** (ring + spool). |
@@ -175,6 +198,7 @@ function getVideoKeyframeTimes(
 
 ```ts
 const ptsUs = await getVideoKeyframeTimes(live, { fromUs: 0, toUs: info.liveEdgeUs ?? 0 }, 64);
+// ptsUs ≈ [2_000_000, 2_500_000, 3_000_000, 3_500_000]  // µs in the current window
 ```
 
 Keys in `[fromUs, toUs]` of the **currently seekable** range, capped by `maxCount` (default `64`). After finalize, the window is the finished session (subject to retention).
@@ -203,11 +227,27 @@ function createEmptyLiveVideoBuffer(
 
 ```ts
 const live = await createEmptyLiveVideoBuffer({ ringSeconds: 10, retention: 'session' });
+// live ≈ {
+//   bufferId: 'vid_live_4e21…',
+//   unsubscribeEvents: () => {},
+//   info: {
+//     bufferId: 'vid_live_4e21…',
+//     kind: 'liveVideoBuffer',
+//     state: 'recording',
+//     frameCount: 0,
+//     totalFramesWritten: 0,
+//     ringEvictedFrames: 0,
+//     hasActiveSpool: true,
+//     audio: null,
+//   },
+// }
 ```
 
 Creates `state: 'recording'` with no packets yet. A native camera/producer or `ingestFileToLiveVideoBuffer` appends afterwards.
 
-| Option | Default | Effect |
+**`options`** (`CreateEmptyLiveVideoBufferOptions`)
+
+| Field | Default | Meaning |
 | --- | --- | --- |
 | `ringSeconds` | `10` | Seconds of **encoded** video kept in the RAM ring. Smaller → less RAM, more `VIDEO_FRAME_EVICTED` if retention does not spool. |
 | `retention: 'session'` | default | Spool for the JS session so finalize / OCR can see more than the ring. |
@@ -229,11 +269,33 @@ function ingestFileToLiveVideoBuffer(
 
 ```ts
 const info = await ingestFileToLiveVideoBuffer('/tmp/clip.mp4', live, { pacing: 'realtime' });
+// info ≈ {
+//   bufferId: 'vid_live_4e21…',
+//   kind: 'liveVideoBuffer',
+//   state: 'recording',
+//   frameCount: 300,
+//   totalFramesWritten: 300,
+//   ringEvictedFrames: 0,
+//   hasActiveSpool: true,
+//   liveEdgeUs: 9_966_667,
+//   seekableStartUs: 0,
+//   seekableEndUs: 10_000_000,
+//   audio: {
+//     codec: 'aac',
+//     decodable: true,
+//     sampleRate: 48000,
+//     channels: 2,
+//     startMs: 0,
+//     durationMs: 10000,
+//   },
+// }
 ```
 
 Remuxes a file into a **recording** live buffer. Needs FFmpeg. Resolves with a fresh `LiveVideoBufferInfo` when ingest completes. Finished / unknown buffer → `VIDEO_BUFFER_INVALID_STATE` / `VIDEO_BUFFER_NOT_FOUND`.
 
-| Option | Default | Effect |
+**`options`** (`IngestFileToLiveOptions`)
+
+| Field | Default | Meaning |
 | --- | --- | --- |
 | `pacing: 'asFast'` | default | Writes packets as fast as demux allows (tests, catch-up). |
 | `pacing: 'realtime'` | — | Sleeps so ingest tracks file duration (preview looks like playback). |
@@ -250,9 +312,18 @@ function subscribeLiveVideoBufferEvents(
 
 ```ts
 const stop = subscribeLiveVideoBufferEvents(live, (e) => console.log(e.type, e.liveEdgeUs));
+// e ≈ {
+//   type: 'packetsAppended',
+//   liveBufferId: 'vid_live_4e21…',
+//   liveEdgeUs: 333_333,
+//   frameCount: 10,
+//   totalFramesWritten: 10,
+// }
 ```
 
 Returns an unsubscribe function. Events for other live ids are ignored.
+
+**`onEvent`** (`LiveVideoBufferEvent`)
 
 | `event.type` | When | Fields to read |
 | --- | --- | --- |
@@ -274,6 +345,29 @@ function finalizeLiveVideoBuffer(
 
 ```ts
 const finished = await finalizeLiveVideoBuffer(live);
+// finished ≈ {
+//   bufferId: 'vid_live_4e21…',
+//   info: {
+//     bufferId: 'vid_live_4e21…',
+//     kind: 'liveVideoBuffer',
+//     state: 'finished',
+//     frameCount: 300,
+//     totalFramesWritten: 300,
+//     ringEvictedFrames: 0,
+//     hasActiveSpool: true,
+//     liveEdgeUs: 9_966_667,
+//     seekableStartUs: 0,
+//     seekableEndUs: 10_000_000,
+//     audio: {
+//       codec: 'aac',
+//       decodable: true,
+//       sampleRate: 48000,
+//       channels: 2,
+//       startMs: 0,
+//       durationMs: 10000,
+//     },
+//   },
+// }
 ```
 
 Stops ingest, `state: 'finished'`. The returned ref is an `OfflineVideoBufferIdSource`: use [offline](videobuffer-offline.md) `createOfflineImageBufferFromVideo`, `createOfflineAudioBufferFromVideo`, `exportVideoFrame`, and preview.
@@ -291,11 +385,33 @@ function createLiveAudioBufferFromLiveVideo(
 
 ```ts
 const tap = await createLiveAudioBufferFromLiveVideo(live, { targetSampleRateHz: 16000 });
+// tap ≈ {
+//   audio: {
+//     bufferId: 'live_7c88…',
+//     unsubscribeEvents: () => {},
+//     info: {
+//       bufferId: 'live_7c88…',
+//       kind: 'livePcmBuffer',
+//       state: 'recording',
+//       sampleRate: 16000,
+//       channelCount: 1,
+//       numSamples: 0,
+//       durationMs: 0,
+//       totalSamplesWritten: 0,
+//       ringEvictedSamples: 0,
+//       hasActiveSpool: true,
+//     },
+//   },
+//   mediaStartMs: 0,
+//   stop: async () => { … },
+// }
 ```
 
 Taps the **recording** live buffer’s audio into a [live AudioBuffer](audiobuffer-streaming.md) (streaming STT / waveform). Needs FFmpeg. Finished live → use `createOfflineAudioBufferFromVideo` instead (`VIDEO_BUFFER_INVALID_STATE` here).
 
-| Option | Default | Effect |
+**`options`**
+
+| Field | Default | Meaning |
 | --- | --- | --- |
 | `targetSampleRateHz` omitted | `16000` | Resample tap to 16 kHz. |
 | `targetSampleRateHz: 0` | — | Keep source rate. |
@@ -303,13 +419,49 @@ Taps the **recording** live buffer’s audio into a [live AudioBuffer](audiobuff
 
 `windowSeconds` and `startAt` are accepted on the options object; only `targetSampleRateHz` changes the tap today.
 
-| Result | Meaning |
+**Returns**
+
+| Field | Meaning |
 | --- | --- |
 | `audio` | Live AudioBuffer ref. Release with `releasePipelineAudioBuffer` after `stop()`. |
 | `mediaStartMs` | Video-timeline time of PCM sample 0. |
 | `stop()` | Ends the tap and finalizes the live AudioBuffer. |
 
 No audio / unsupported codec → `VIDEO_NO_AUDIO_TRACK` / `VIDEO_AUDIO_CODEC_UNSUPPORTED`.
+
+---
+
+## JS Events
+
+Live video does **not** push pixels to JS. Native emits metadata on `SherpaOnnxVideoEvent`; subscribe with `subscribeLiveVideoBufferEvents`. Events for other live ids are ignored. Call the returned function to unsubscribe.
+
+`LiveVideoBufferRef.unsubscribeEvents` is currently a no-op (create does not attach listeners). Always keep the unsubscribe from `subscribeLiveVideoBufferEvents`.
+
+**`onEvent`** (`LiveVideoBufferEvent`)
+
+| `event.type` | When | Fields |
+| --- | --- | --- |
+| `packetsAppended` | Encoded packets appended to the ring | `liveEdgeUs`, `frameCount`, `totalFramesWritten` |
+| `gopCommitted` | A GOP became seekable | `liveEdgeUs`, `frameCount` |
+| `spoolOverflow` | Spool hit its cap (`maxSeconds`) | `totalFramesWritten` |
+| `spoolError` | Spool I/O failed | — (a later call may reject `VIDEO_SPOOL_IO`) |
+| `finished` | After a successful `finalizeLiveVideoBuffer` | `frameCount` |
+
+Shared on every event: `liveBufferId`.
+
+```ts
+const stop = subscribeLiveVideoBufferEvents(live, (e) => {
+  if (e.type === 'packetsAppended') {
+    console.log(e.liveEdgeUs, e.totalFramesWritten);
+  }
+});
+// …
+stop();
+```
+
+While recording, prefer these events for UI over the create-time `info` snapshot (it goes stale). After finalize, use the returned `LiveVideoBufferFinishedRef.info`.
+
+Audio extract from a **finished** clip uses the offline `onProgress` / `signal` path — see [videobuffer-offline.md — JS Events](videobuffer-offline.md#js-events). Preview: [videopreview.md](videopreview.md) (`player.addListener`).
 
 ---
 

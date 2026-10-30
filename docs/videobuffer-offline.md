@@ -113,6 +113,8 @@ All signatures below are exported from `react-native-sherpa-onnx/videobuffer`. B
 
 Ref-first usage is recommended. Malformed ids reject early with `VIDEO_INVALID_ARGUMENT`.
 
+Tables under each function are labeled **Parameters** (arguments), **`options`** (fields of the options object), or **Returns** (resolved value).
+
 ### General
 
 #### `getVideoBufferInfo(buffer)`
@@ -125,18 +127,38 @@ function getVideoBufferInfo(
 
 ```ts
 const info = await getVideoBufferInfo(video);
+// info ≈ {
+//   bufferId: 'vid_off_8f3a…',
+//   kind: 'offlineVideoBuffer',
+//   state: 'immutable',
+//   frameCount: 300,
+//   seekableStartUs: 0,
+//   seekableEndUs: 10_000_000,
+//   audio: {
+//     codec: 'aac',
+//     decodable: true,
+//     sampleRate: 48000,
+//     channels: 2,
+//     startMs: 0,
+//     durationMs: 10000,
+//   },
+// }
 ```
 
 Works for **live** buffers too (`kind: 'liveVideoBuffer'`). For a recording live buffer, `ref.info` from create is only a snapshot — see [info lifecycle](videobuffer-streaming.md#info-lifecycle-live-buffers).
 
-| Field (offline) | Meaning |
+**Returns** (`OfflineVideoBufferInfo`)
+
+| Field | Meaning |
 | --- | --- |
 | `kind` / `state` | `'offlineVideoBuffer'` / `'immutable'`. |
 | `frameCount` | Indexed presentation frames. |
 | `seekableStartUs` / `seekableEndUs` | Inclusive seek window (µs). Use these for `getVideoKeyframeTimes` and `timesUs`. |
 | `audio` | `null` if no track. Otherwise codec, rate, channels, `decodable`. Missing audio is not an error. |
 
-| `audio` field | Meaning |
+**Returns** `audio` (`VideoAudioTrackInfo | null`)
+
+| Field | Meaning |
 | --- | --- |
 | `codec` | Container codec name (`aac`, `opus`, `ac3`, …). |
 | `decodable` | `false` → extract / preview audio will fail (`VIDEO_AUDIO_CODEC_UNSUPPORTED`). Typical for AC-3, DTS, ALAC. |
@@ -155,11 +177,14 @@ function getVideoKeyframeTimes(
 
 ```ts
 const ptsUs = await getVideoKeyframeTimes(video, { fromUs: 0, toUs: 10_000_000 }, 256);
+// ptsUs ≈ [0, 500_000, 1_000_000, 1_500_000, 2_000_000]  // µs, ascending, ≤ maxCount
 ```
 
 PTS of keyframes in **microseconds**, ascending, clipped to `[fromUs, toUs]`.
 
-| Parameter | Default | Effect |
+**Parameters**
+
+| Argument | Default | Meaning |
 | --- | --- | --- |
 | `range.fromUs` / `range.toUs` | required | Inclusive window. Outside the seekable range yields fewer / no keys. |
 | `maxCount` | `64` | Hard cap. Raise it for long clips if you need a denser key list (scrub, `sampling: 'times'`). |
@@ -188,7 +213,9 @@ await configureVideoBuffer({ decoderBudget: { cpu: 2, display: 1 } });
 
 Process-wide HW decoder slots. Values are integers **1–4**. Omitted fields keep the current value. Default is `{ cpu: 1, display: 1 }`.
 
-| Class | Used by | When the budget is exhausted |
+**`options.decoderBudget`** (`ConfigureVideoBufferOptions`)
+
+| Field | Used by | When the budget is exhausted |
 | --- | --- | --- |
 | `cpu` | `createOfflineImageBufferFromVideo`, `exportVideoFrame`, OCR decode | Decode fails (`VIDEO_DECODE_FAILED` / related). |
 | `display` | [Video preview](videopreview.md) | `VIDEO_PREVIEW_DECODER_BUSY` (audio-only play still allowed). |
@@ -205,14 +232,35 @@ function createOfflineVideoBufferFromFile(path: string): Promise<OfflineVideoBuf
 
 ```ts
 const video = await createOfflineVideoBufferFromFile('/tmp/clip.mp4');
+// video ≈ {
+//   bufferId: 'vid_off_8f3a…',
+//   info: {
+//     bufferId: 'vid_off_8f3a…',
+//     kind: 'offlineVideoBuffer',
+//     state: 'immutable',
+//     frameCount: 300,
+//     seekableStartUs: 0,
+//     seekableEndUs: 10_000_000,
+//     audio: {
+//       codec: 'aac',
+//       decodable: true,
+//       sampleRate: 48000,
+//       channels: 2,
+//       startMs: 0,
+//       durationMs: 10000,
+//     },
+//   },
+// }
 ```
 
 `path` is a local filesystem path (not a content URI). Needs FFmpeg. Does not decode pixels at create time.
 
-| Result | Notes |
+**Returns** (`OfflineVideoBufferRef`)
+
+| Field | Meaning |
 | --- | --- |
-| `video.bufferId` | Branded id (`vid_off_…`). Pass the **ref** into other APIs. |
-| `video.info` | Creation snapshot (`kind`, `frameCount`, seekable window, `audio`). |
+| `bufferId` | Branded id (`vid_off_…`). Pass the **ref** into other APIs. |
+| `info` | Creation snapshot (`kind`, `frameCount`, seekable window, `audio`). Same shape as `getVideoBufferInfo`. |
 
 #### `createOfflineImageBufferFromVideo(video, options?)`
 
@@ -225,13 +273,16 @@ function createOfflineImageBufferFromVideo(
 
 ```ts
 const images = await createOfflineImageBufferFromVideo(video, { sampling: 'fps', fps: 2, maxSide: 1280 });
+// images ≈ { imageBufferId: 'img_off_1c2d…', frameCount: 20 }
 ```
 
 Copies sampled frames into an [offline ImageBuffer](imagebuffer-offline.md). Pass `images.imageBufferId` to OCR / `getOfflineImageBufferFrameInfo`. Each frame may include `source: { videoBufferId, ptsUs, frameIndex }` — OCR fills `TextSpatialSpan.ptsMs` from that PTS. Accepts **offline** and **finished live**. Recording live → `VIDEO_BUFFER_INVALID_STATE`.
 
 Release with `releaseOfflineImageBuffer` from `react-native-sherpa-onnx/imagebuffer`.
 
-| `sampling` | Extra fields | Frames taken |
+**`options.sampling`** (`CreateOfflineImageFromVideoOptions`)
+
+| Value | Extra fields | Frames taken |
 | --- | --- | --- |
 | `'all'` (default) | — | Every decoded frame. |
 | `'keyframes'` | — | Keyframes only. |
@@ -239,7 +290,9 @@ Release with `releaseOfflineImageBuffer` from `react-native-sherpa-onnx/imagebuf
 | `'uniform'` | `uniformCount` (required) | `uniformCount` frames spread across the duration. |
 | `'times'` | `timesUs` (required) | Nearest frame at each PTS (µs). |
 
-| Option | Default | Effect |
+**`options`** (`CreateOfflineImageFromVideoOptions`)
+
+| Field | Default | Meaning |
 | --- | --- | --- |
 | `maxSide` | no cap (`0`) | Longest edge of the RGB copy; use to bound OCR / RAM. |
 
@@ -256,11 +309,14 @@ function exportVideoFrame(
 
 ```ts
 const file = await exportVideoFrame(video, 0, { kind: 'fs', path: '/tmp/frame.jpg' }, { format: 'jpeg' });
+// file ≈ { kind: 'fs', path: '/tmp/frame.jpg' }
 ```
 
 Decodes the nearest frame at `ptsUs` and writes it via [fileio](fileio.md). Accepts **offline** and **finished live**. `ptsUs` outside the clip → `VIDEO_FRAME_OUT_OF_RANGE`.
 
-| Option | Default | Effect |
+**`options`** (`ExportVideoFrameOptions`)
+
+| Field | Default | Meaning |
 | --- | --- | --- |
 | `format` | `'jpeg'` | `'jpeg'` \| `'png'` \| `'webp'`. WebP needs libwebp enabled ([imagebuffer-offline.md](imagebuffer-offline.md)). |
 | `quality` | encoder default | JPEG/WebP quality. |
@@ -277,13 +333,34 @@ function createOfflineAudioBufferFromVideo(
 
 ```ts
 const { audio, mediaStartMs } = await createOfflineAudioBufferFromVideo(video, { targetSampleRateHz: 16000 });
+// ≈ {
+//   audio: {
+//     bufferId: 'off_9ab0…',
+//     info: {
+//       bufferId: 'off_9ab0…',
+//       kind: 'offlinePcmBuffer',
+//       state: 'immutable',
+//       sampleRate: 16000,
+//       channelCount: 1,
+//       numSamples: 160000,
+//       durationMs: 10000,
+//       storageKind: 'ram',
+//     },
+//   },
+//   mediaStartMs: 0,
+//   sourceCodec: 'aac',
+//   sourceSampleRate: 48000,
+//   sourceChannels: 2,
+// }
 ```
 
 Decodes the container audio track into an [offline AudioBuffer](audiobuffer-offline.md). Needs FFmpeg. Accepts **offline** and **finished live**. Recording live → `VIDEO_BUFFER_INVALID_STATE` (use `createLiveAudioBufferFromLiveVideo`).
 
 No audio track → `VIDEO_NO_AUDIO_TRACK`. `info.audio.decodable === false` → `VIDEO_AUDIO_CODEC_UNSUPPORTED`.
 
-| Option | Default | Effect |
+**`options`** (`CreateOfflineAudioFromVideoOptions`)
+
+| Field | Default | Meaning |
 | --- | --- | --- |
 | `targetSampleRateHz` omitted | `16000` | Resample to 16 kHz (STT default). |
 | `targetSampleRateHz: 0` | — | Keep the source rate. |
@@ -292,13 +369,40 @@ No audio track → `VIDEO_NO_AUDIO_TRACK`. `info.audio.decodable === false` → 
 | `onProgress` | — | `{ percent, decodedMs }`. |
 | `signal` | — | Abort → `VIDEO_CANCELLED`. |
 
-| Result field | Meaning |
+**Returns** (`VideoAudioExtractResult`)
+
+| Field | Meaning |
 | --- | --- |
 | `audio` | Offline AudioBuffer ref to pass into STT / enhancement. Release with `releasePipelineAudioBuffer`. |
 | `mediaStartMs` | Video-timeline time of PCM sample 0 (edit list, late audio, or `rangeMs.startMs`). |
 | `sourceCodec` / `sourceSampleRate` / `sourceChannels` | Container track before resample. |
 
 Preview playback of the same track is a separate API (`react-native-sherpa-onnx/videopreview`); it does not play through this AudioBuffer.
+
+---
+
+## JS Events
+
+Offline video buffers have **no subscribe API**. Opening a file (`createOfflineVideoBufferFromFile`) and sampling frames (`createOfflineImageBufferFromVideo` / `exportVideoFrame`) are one-shot native calls.
+
+Create-time callbacks exist only on **audio extract**:
+
+| Callback / control | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onProgress` | `{ percent, decodedMs }` | during `createOfflineAudioBufferFromVideo` | Native channel `decodeProgress`, filtered by `operationId`. `decodedMs` is audio time decoded, not video PTS. |
+| `signal` | `AbortSignal` | caller aborts | rejects with `VIDEO_CANCELLED` |
+
+```ts
+const controller = new AbortController();
+const { audio } = await createOfflineAudioBufferFromVideo(video, {
+  targetSampleRateHz: 16000,
+  onProgress: (e) => console.log(e.percent, e.decodedMs),
+  signal: controller.signal,
+});
+// controller.abort();
+```
+
+Live ingest / ring updates: [videobuffer-streaming.md — JS Events](videobuffer-streaming.md#js-events). Preview playback events: [videopreview.md](videopreview.md) (`player.addListener`).
 
 ---
 

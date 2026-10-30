@@ -32,7 +32,7 @@ const player = await createVideoPreviewPlayer(video, {
 | Pause | `player.pause()` |
 | Seek | `player.seekTo(ms)` / `player.seekBy(deltaMs)` |
 | Scrub | `seekTo(ms, { mode: 'closestKeyframe' })` while dragging, `seekTo(ms)` on release |
-| Frame step (paused) | `player.stepFrame(1)` / `player.stepFrame(-1)` |
+| Frame step | `player.stepFrame(1)` / `player.stepFrame(-1)` (playing pauses) |
 | Live edge | `player.seekToLiveEdge()` |
 
 ## Audio unavailable
@@ -60,6 +60,40 @@ Strict mode: `audio: { source: 'track', required: true }` rejects create instead
 ## Export audio into AudioBuffer
 
 Use `createOfflineAudioBufferFromVideo` / `createLiveAudioBufferFromLiveVideo` from `react-native-sherpa-onnx/videobuffer` for STT and other pipeline features ([offline](videobuffer-offline.md), [live](videobuffer-streaming.md)). Preview does not play through an AudioBuffer.
+
+## JS Events
+
+Native channel `SherpaOnnxVideoPreviewEvent`. Subscribe with `player.addListener(type, handler)` (returns an unsubscribe). `useVideoPreviewStatus(player)` already listens for UI state.
+
+Create-time (no listener race): `onAudioUnavailable`, `onError` on `createVideoPreviewPlayer`.
+
+| `type` | When | Notes |
+| --- | --- | --- |
+| `stateChanged` | idle → preparing → ready / playing / paused / seeking / buffering / ended / error / released | `state`, `previousState`, `positionMs` |
+| `progress` | while playing (interval `progressIntervalMs`, default 250) | `positionMs`, `seekableRange`, `liveEdgeMs` |
+| `firstFrameRendered` | first decoded frame after create or seek | `positionMs` |
+| `seekCompleted` | seek finished | `result`, `mode` |
+| `seekClamped` | request was clamped to the seekable window | `requestedMs`, `actualMs`, `reason` |
+| `positionEvicted` | live ring dropped the current PTS | `previousMs`, `newMs` |
+| `liveEdgeResync` | live play jumped to stay near the edge | `lagMs`, `newMs` |
+| `audioUnavailable` | no track / unsupported codec / decode or output failed | video continues; also `onAudioUnavailable` |
+| `audioInterrupted` | focus / session interruption | `reason` |
+| `ended` | playhead reached EOS and `loop` is off | with `loop: true` the player seeks to start instead |
+| `error` | renderer / invalid state | `code`, `message`; also `onError` |
+
+```ts
+const off = player.addListener('progress', (e) => {
+  console.log(e.positionMs, e.seekableRange);
+});
+const offEnded = player.addListener('ended', () => {
+  /* show Restart; loop already handled natively when setLoop(true) */
+});
+// …
+off();
+offEnded();
+```
+
+Buffer ingest events (live ring) are on the videobuffer API: [videobuffer-streaming.md — JS Events](videobuffer-streaming.md#js-events).
 
 ## Decoder budget
 
