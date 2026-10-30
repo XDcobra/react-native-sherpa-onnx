@@ -129,6 +129,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Offline OCR demo',
     body: 'Showcase for extractPdfTextLayer and createOCR / recognize over OfflineImageBuffer → OfflineTextBuffer. Switch ppocr, doctr, doc_vlm, nemotron_parse, or paddleocr_vl packs, pick bundled images or PDFs, and inspect text plus spatial boxes (ocr pixels or mapped text-layer quads) on OfflineImageBufferAnnotatedView.',
   },
+  VideoPreview: {
+    title: 'Video preview player',
+    body: 'Loads a bundled H.264 + AAC clip from test_videos/ into an OfflineVideoBuffer, then attaches VideoPreviewView. Use play, pause, seek, and frame step to smoke-test the preview player. Unsupported audio keeps video playing and surfaces audioUnavailable.',
+  },
   Documents: {
     title: 'Read documents aloud',
     body: 'This screen shows document-to-speech with the SDK: extract text, then speak it with offline TTS. Supported formats are EPUB, FB2, MOBI, AZW3, PDF, and image-based mixed EPUB or CBZ via OCR.',

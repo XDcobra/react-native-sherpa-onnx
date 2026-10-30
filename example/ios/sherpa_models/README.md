@@ -28,6 +28,9 @@ In the app, use e.g. `resolveModelPath({ type: 'asset', path: 'models/my-whisper
 
 If the folder is empty, the example app’s sample-audio options will show “Path not found” until you add the WAV files (you can obtain test files from the same source as in `example/scripts/download-models.js` or record your own).
 
+- **`test_videos/` folder**  
+  Bundled clip for the Video Preview screen (e.g. `preview_h264_aac.mp4`). Copied to `App.app/test_videos/` and resolved as `test_videos/preview_h264_aac.mp4`.
+
 ## Layout
 
 ```
@@ -42,4 +45,6 @@ sherpa_models/
     0-en.wav         --> App.app/test_wavs/0-en.wav
     1-en.wav
     ...
+  test_videos/
+    preview_h264_aac.mp4 --> App.app/test_videos/preview_h264_aac.mp4
 ```

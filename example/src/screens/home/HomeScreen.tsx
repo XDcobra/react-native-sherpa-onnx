@@ -90,6 +90,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'video_preview',
+    sectionTitle: 'Vision',
+    title: 'Video Preview',
+    description:
+      'Play a bundled H.264 + AAC clip through OfflineVideoBuffer and VideoPreviewView',
+    icon: 'play-circle-outline',
+    screen: 'VideoPreview',
+    implemented: true,
+  },
+  {
     id: 'documents',
     sectionTitle: 'Documents (EPUB, MOBI, PDF, …)',
     title: 'Read aloud',

@@ -25,6 +25,7 @@ export type RootStackParamList = {
   FileIO: undefined;
   AudioVisualization: undefined;
   OCR: undefined;
+  VideoPreview: undefined;
   Documents: undefined;
 };
 
@@ -53,6 +54,7 @@ export type FeatureId =
   | 'fileio'
   | 'audio_visualization'
   | 'ocr'
+  | 'video_preview'
   | 'documents';
 
 export interface Feature {
