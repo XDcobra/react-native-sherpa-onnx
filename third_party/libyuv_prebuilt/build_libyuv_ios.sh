@@ -66,7 +66,10 @@ build_slice() {
     exit 1
   fi
   mkdir -p "$prefix/lib"
-  cp -f "$yuv_lib" "$prefix/lib/libyuv.a"
+  # cmake --install already writes libyuv.a here; macOS `cp` errors on identical paths.
+  if [ ! "$yuv_lib" -ef "$prefix/lib/libyuv.a" ]; then
+    cp -f "$yuv_lib" "$prefix/lib/libyuv.a"
+  fi
 
   if [ ! -d "$prefix/include/libyuv" ]; then
     mkdir -p "$prefix/include"
