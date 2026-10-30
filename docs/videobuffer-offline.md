@@ -11,7 +11,7 @@ For rolling ingest (`recording` → `finished`), see [Pipeline video buffers —
 | Constraint | Effect on API use |
 | --- | --- |
 | **HW decode only** | Frame access (image bridge, export, preview) needs a device HW codec (H.264 / HEVC). Typical Android emulator has none → `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. Opening the file still succeeds. |
-| **FFmpeg required to open a file** | `createOfflineVideoBufferFromFile` and `exportVideo` (mux) reject with `VIDEO_FFMPEG_DISABLED` when FFmpeg is compiled out. See [disable-ffmpeg.md](disable-ffmpeg.md). |
+| **FFmpeg required to open a file** | `probeVideoFileDuration`, `probeVideoFileContainer`, `createOfflineVideoBufferFromFile`, and `exportVideo` (mux) reject with `VIDEO_FFMPEG_DISABLED` when FFmpeg is compiled out. JS probe wrappers return `null`. See [disable-ffmpeg.md](disable-ffmpeg.md). |
 | **Time axis** | Video times are **microseconds** (`ptsUs`, `fromUs` / `toUs`, `timesUs`, `seekableStartUs`). Audio extract uses **milliseconds** (`rangeMs`). OCR spans use **milliseconds** (`ptsMs`, derived from the frame’s `source.ptsUs`). |
 
 ---
@@ -43,6 +43,8 @@ import {
   exportVideoFrame,
   getVideoBufferInfo,
   getVideoKeyframeTimes,
+  probeVideoFileContainer,
+  probeVideoFileDuration,
   releaseVideoBuffer,
 } from 'react-native-sherpa-onnx/videobuffer';
 import {
@@ -54,11 +56,14 @@ import { releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer
 // Global HW decode slots: `cpu` = OCR / export; `display` = preview. Each 1–4 (default 1).
 await configureVideoBuffer({ decoderBudget: { cpu: 1, display: 1 } });
 
+const source = { kind: 'fs' as const, path: '/tmp/clip.mp4' };
+// Cheap sniff: duration + container/codec from file bytes. No VideoBuffer, no pixel decode.
+const duration = await probeVideoFileDuration(source);
+const container = await probeVideoFileContainer(source);
+console.log(duration?.durationUs, container?.inputFormatName, container?.codecName);
+
 // Open a FileSource. Needs FFmpeg. Pixels are not decoded yet.
-const video = await createOfflineVideoBufferFromFile({
-  kind: 'fs',
-  path: '/tmp/clip.mp4',
-});
+const video = await createOfflineVideoBufferFromFile(source);
 
 // Fresh native metadata. Offline clips are immutable; `video.info` from create is enough,
 // but this is the same call you use for live buffers.
@@ -232,6 +237,45 @@ Process-wide HW decoder slots. Values are integers **1–4**. Omitted fields kee
 Raise `cpu` if you run OCR sampling and export in parallel. Raise `display` only if several preview players decode at once.
 
 ### Offline buffer
+
+#### `probeVideoFileDuration(source)`
+
+```ts
+function probeVideoFileDuration(
+  source: FileSource
+): Promise<VideoFileDurationProbe | null>;
+```
+
+```ts
+const probe = await probeVideoFileDuration({ kind: 'fs', path: '/tmp/clip.mp4' });
+// probe ≈ { durationUs: 8_000_000, isExact: true }
+```
+
+Duration from container metadata only (no sample index, no `vid_off_`, no HW decode). Returns `null` on failure (wrapper swallows native `VIDEO_*` rejections). `isExact` is `true` for stream/format duration; `false` when estimated from frame count or bitrate × file size.
+
+#### `probeVideoFileContainer(source)`
+
+```ts
+function probeVideoFileContainer(
+  source: FileSource
+): Promise<VideoFileContainerProbe | null>;
+```
+
+```ts
+const probe = await probeVideoFileContainer({ kind: 'fs', path: '/tmp/clip.webm' });
+// probe ≈ { inputFormatName: 'matroska,webm', codecName: 'vp9', codedWidth: 16, codedHeight: 16 }
+```
+
+Content sniff only (extension is not used as a demuxer hint). Compare `inputFormatName` / `codecName` to a filename extension **in your app** — the SDK does not. Unsupported codecs such as VP9 still return metadata here; `createOfflineVideoBufferFromFile` would reject `VIDEO_CODEC_UNSUPPORTED`.
+
+| Field | Meaning |
+| --- | --- |
+| `inputFormatName` | FFmpeg `iformat->name`, e.g. `mov,mp4,…` / `matroska,webm`. |
+| `codecName` | Primary **video** codec short name (`h264`, `hevc`, `vp9`, …). |
+| `codedWidth` / `codedHeight` | Coded frame size from the video stream. |
+| `audioCodecName` | Present when a primary audio track exists (`aac`, `opus`, …). |
+
+A string path is rejected (`VIDEO_INVALID_ARGUMENT`). Same `FileSource` resolver as open (including `fileio_nofd` copy + unpin when the call returns).
 
 #### `createOfflineVideoBufferFromFile(source)`
 
@@ -438,7 +482,7 @@ Preview playback of the same track is a separate API (`react-native-sherpa-onnx/
 
 ## Formats
 
-FFmpeg is **demux-only**. Pixels: **HW only** (Android MediaCodec / iOS VideoToolbox). Open without HW still indexes; frame APIs fail `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. No FFmpeg → `VIDEO_FFMPEG_DISABLED`. Sniff is by container, not extension.
+FFmpeg is **demux-only**. Pixels: **HW only** (Android MediaCodec / iOS VideoToolbox). Open without HW still indexes; frame APIs fail `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. No FFmpeg → `VIDEO_FFMPEG_DISABLED`. Sniff is by container, not extension (`probeVideoFileContainer`).
 
 | | Import | Export (`exportVideo`) |
 | --- | --- | --- |
@@ -500,6 +544,8 @@ Canonical TypeScript types: [`src/videobuffer/types.ts`](../src/videobuffer/type
 | `CreateOfflineAudioFromVideoOptions` | `targetSampleRateHz`, `rangeMs`, `onProgress`, `signal`. |
 | `VideoAudioExtractResult` | `{ audio, mediaStartMs, sourceCodec, sourceSampleRate, sourceChannels }`. |
 | `ConfigureVideoBufferOptions` | `{ decoderBudget?: { cpu?, display? } }`. |
+| `VideoFileDurationProbe` | `{ durationUs, isExact }` from `probeVideoFileDuration`. |
+| `VideoFileContainerProbe` | `{ inputFormatName, codecName, codedWidth, codedHeight, audioCodecName? }`. |
 
 ---
 
@@ -513,7 +559,8 @@ Thrown / rejected as `VIDEO_…` (`Error` message `VIDEO_…: …`, native rejec
 | `VIDEO_BUFFER_NOT_FOUND` | Released or unknown id. |
 | `VIDEO_BUFFER_KIND_MISMATCH` | Live recording passed where an offline/finished clip is required. |
 | `VIDEO_BUFFER_INVALID_STATE` | Offline extract/export on a **recording** live buffer. |
-| `VIDEO_FFMPEG_DISABLED` | File open, audio extract, or `exportVideo` mux with FFmpeg compiled out. |
+| `VIDEO_FFMPEG_DISABLED` | File open, probe, audio extract, or `exportVideo` mux with FFmpeg compiled out. |
+| `VIDEO_DURATION_UNKNOWN` | Probe could not read or estimate duration. JS wrappers return `null`. |
 | `VIDEO_CONTAINER_UNSUPPORTED` | Container not in the v1 set. |
 | `VIDEO_NO_VIDEO_TRACK` | Audio-only file. |
 | `VIDEO_NO_AUDIO_TRACK` | Extract audio but the clip has no audio. |

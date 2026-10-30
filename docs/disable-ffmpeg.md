@@ -47,6 +47,8 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 |-----|-------------|
 | **`saveAudioAsWav16k(input, output)`** | Saves a buffer or `FileSource` as 16 kHz mono WAV. Builds without FFmpeg may reject when a backend path requires FFmpeg. |
 | **`saveAudioAsFile(input, output, format, options?)`** | Saves a buffer or `FileSource` to the requested output format. Non-WAV formats require FFmpeg. |
+| **`probeVideoFileDuration(source)`** | Reads clip duration from container metadata. Rejects with `VIDEO_FFMPEG_DISABLED` (JS wrapper returns `null`). |
+| **`probeVideoFileContainer(source)`** | Sniffs container + video codec from file content. Rejects with `VIDEO_FFMPEG_DISABLED` (JS wrapper returns `null`). |
 | **`createOfflineVideoBufferFromFile(source)`** | Opens a `FileSource` container (`mov` / `matroska`) via libavformat. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 | **`ingestFileToLiveVideoBuffer(source, live)`** | Remuxes a `FileSource` into a live video buffer. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 | **`createOfflineAudioBufferFromVideo(video)`** | Decodes the container audio track through FFmpeg. Rejects with `VIDEO_FFMPEG_DISABLED`. |
