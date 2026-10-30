@@ -33,7 +33,7 @@ jobs:
         run: |
           TAG_FILE=third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG
           if [ ! -f "$TAG_FILE" ]; then
-            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. libwebp-android-v1.5.0)"
+            echo "::error::Missing $TAG_FILE (add a line with the release tag, e.g. libwebp-android-v1.6.0-1)"
             exit 1
           fi
           RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')

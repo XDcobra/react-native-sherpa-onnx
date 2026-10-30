@@ -32,17 +32,17 @@ Release asset `pdfium-ios.zip` contains that XCFramework. With `SHERPA_ONNX_ENAB
 ## Fetch / package scripts
 
 ```sh
-# Download pdfium-binaries (chromium/<version>) and rearrange into android/ layout
+# Download pdfium-binaries (chromium/<N>, rebuild suffix stripped) and rearrange into android/ layout
 ./fetch_pdfium_android.sh 8100
 
-# Build AAR for Maven publish
-./create_pdfium_aar.sh ./pdfium-android-layout 8100 pdfium-8100.aar
+# Build AAR for Maven publish (Maven version keeps our -N rebuild counter)
+./create_pdfium_aar.sh ./pdfium-android-layout 8100-1 pdfium-8100-1.aar
 
 # Assemble a real iOS XCFramework (device + universal simulator) from pdfium-binaries
 ./create_pdfium_ios_xcframework.sh 8100
 ```
 
-Upstream source of truth: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) tags `chromium/<N>` (latest checked: `chromium/8100`). Our tag files use `pdfium-android-v<N>` / `pdfium-ios-v<N>` so Maven/GitHub Release pins stay aligned.
+Upstream source of truth: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) tags `chromium/<N>` (latest checked: `chromium/8100`). Our tag files use `pdfium-android-v<N>-X` / `pdfium-ios-v<N>-X`; fetch scripts strip trailing `-X` before hitting `chromium/<N>`.
 
 ## CI
 
@@ -57,6 +57,6 @@ Until the workflow YAML exists on the default branch, `--ref` to a branch that c
 
 ## Pin
 
-- Android tag file: `ANDROID_RELEASE_TAG` (prefix `pdfium-android-v`, e.g. `pdfium-android-v8100`)
-- iOS tag file: `IOS_RELEASE_TAG` (prefix `pdfium-ios-v`, e.g. `pdfium-ios-v8100`)
-- Upstream fetch uses `chromium/<suffix>` on pdfium-binaries (suffix = `8100` above)
+- Android tag file: `ANDROID_RELEASE_TAG` (prefix `pdfium-android-v`, e.g. `pdfium-android-v8100-1`)
+- iOS tag file: `IOS_RELEASE_TAG` (prefix `pdfium-ios-v`, e.g. `pdfium-ios-v8100-1`)
+- Trailing `-N` is our rebuild counter. Upstream fetch uses `chromium/<chromium>` on pdfium-binaries (chromium = `8100` above, suffix stripped).

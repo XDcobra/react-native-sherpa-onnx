@@ -3,13 +3,15 @@
 # (device arm64 + universal simulator arm64/x86_64) as pdfium.framework.
 #
 # Usage: ./create_pdfium_ios_xcframework.sh [chromium-version]
-# Default version matches IOS_RELEASE_TAG suffix (pdfium-ios-v8100 → 8100).
+# Default version reads IOS_RELEASE_TAG (pdfium-ios-v8100-1 → chromium/8100).
+# Trailing -N is our rebuild counter and is stripped for the upstream fetch.
 #
 # Output: third_party/pdfium_prebuilt/pdfium.xcframework
 # Requires: macOS with Xcode (lipo, install_name_tool, xcodebuild).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+strip_rebuild() { echo "$1" | sed 's/-[0-9][0-9]*$//'; }
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then
   TAG_FILE="$ROOT/IOS_RELEASE_TAG"
@@ -18,7 +20,7 @@ if [[ -z "$VERSION" ]]; then
     VERSION="${RELEASE_TAG#pdfium-ios-v}"
   fi
 fi
-VERSION="${VERSION:-8100}"
+VERSION="$(strip_rebuild "${VERSION:-8100}")"
 
 BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${VERSION}"
 WORK="$ROOT/.ios-xc-build"

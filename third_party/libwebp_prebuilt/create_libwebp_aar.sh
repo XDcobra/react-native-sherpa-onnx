@@ -2,14 +2,14 @@
 # Create a libwebp AAR from the prebuilt layout.
 # Layout: <layout_dir>/arm64-v8a/, armeabi-v7a/, x86/, x86_64/ (.so) and include/ (headers).
 # Usage: ./create_libwebp_aar.sh <layout_dir> <version> [output_path]
-# Example: ./create_libwebp_aar.sh libwebp-android-layout 1.6.0
+# Example: ./create_libwebp_aar.sh libwebp-android-layout 1.6.0-1
 
 set -e
 
 if [ $# -lt 2 ]; then
   echo "Usage: $0 <layout_dir> <version> [output_path]"
   echo "  layout_dir  e.g. libwebp-android-layout (has arm64-v8a/, …, include/)"
-  echo "  version     Maven-style version, e.g. 1.6.0"
+  echo "  version     Maven-style version, e.g. 1.6.0-1"
   echo "  output_path optional; default libwebp-<version>.aar"
   exit 1
 fi

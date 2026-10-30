@@ -36,14 +36,16 @@ jobs:
           fi
           echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
           MAVEN_VERSION=$(echo "$RELEASE_TAG" | sed 's/^pdfium-android-v//')
+          CHROMIUM_VERSION=$(echo "$MAVEN_VERSION" | sed 's/-[0-9][0-9]*$//')
           echo "maven_version=$MAVEN_VERSION" >> $GITHUB_OUTPUT
-          echo "Using release tag: $RELEASE_TAG (Maven version: $MAVEN_VERSION)"
+          echo "chromium_version=$CHROMIUM_VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (Maven: $MAVEN_VERSION, chromium/$CHROMIUM_VERSION)"
 
       - name: Fetch pdfium-binaries
         run: |
           cd third_party/pdfium_prebuilt
           chmod +x fetch_pdfium_android.sh
-          ./fetch_pdfium_android.sh "${{ steps.tag.outputs.maven_version }}"
+          ./fetch_pdfium_android.sh "${{ steps.tag.outputs.chromium_version }}"
 
       - name: Package jniLibs layout
         run: |
@@ -90,7 +92,7 @@ jobs:
             - **pdfium-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (`libpdfium.so`) and `include/` (C headers, e.g. `fpdfview.h`). Gradle extracts `.so` to jniLibs and headers to `android/src/main/cpp/include/pdfium`.
             - **pdfium-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:pdfium`.
 
-            Upstream binaries: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) `chromium/${{ steps.tag.outputs.maven_version }}`.
+            Upstream binaries: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) `chromium/${{ steps.tag.outputs.chromium_version }}`.
 
             ## Maven
             The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:pdfium` when `MAVEN_REPO_PAT` is set.

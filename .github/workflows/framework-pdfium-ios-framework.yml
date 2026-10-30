@@ -30,13 +30,15 @@ jobs:
           RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
           echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
           VERSION=$(echo "$RELEASE_TAG" | sed 's/^pdfium-ios-v//')
+          CHROMIUM_VERSION=$(echo "$VERSION" | sed 's/-[0-9][0-9]*$//')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Using release tag: $RELEASE_TAG (chromium/$VERSION)"
+          echo "chromium_version=$CHROMIUM_VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (Maven: $VERSION, chromium/$CHROMIUM_VERSION)"
 
       - name: Assemble pdfium.xcframework
         run: |
           chmod +x third_party/pdfium_prebuilt/create_pdfium_ios_xcframework.sh
-          third_party/pdfium_prebuilt/create_pdfium_ios_xcframework.sh "${{ steps.tag.outputs.version }}"
+          third_party/pdfium_prebuilt/create_pdfium_ios_xcframework.sh "${{ steps.tag.outputs.chromium_version }}"
           find third_party/pdfium_prebuilt/pdfium.xcframework -maxdepth 3 | head -40
 
       - name: Zip XCFramework
@@ -57,7 +59,7 @@ jobs:
             Prebuilt **PDFium** XCFramework for iOS (device + simulator). Used by offline PDF text-layer extract in `react-native-sherpa-onnx` (`react-native-sherpa-onnx/pdf`).
             - **pdfium-ios.zip** – Contains `pdfium.xcframework` (arm64 device; arm64 + x86_64 simulator; embeddable `pdfium.framework` + headers).
 
-            Upstream binaries: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) `chromium/${{ steps.tag.outputs.version }}`.
+            Upstream binaries: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) `chromium/${{ steps.tag.outputs.chromium_version }}`.
 
             ## Automatic Installation
 
