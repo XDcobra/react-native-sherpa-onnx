@@ -1,17 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  ScrollView,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
-  type GestureResponderEvent,
-  type LayoutChangeEvent,
-} from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   createOfflineVideoBufferFromFile,
   releaseVideoBuffer,
@@ -20,27 +9,18 @@ import {
 import {
   createVideoPreviewPlayer,
   useVideoPreviewStatus,
-  VideoPreviewView,
   type VideoPreviewAudioStatus,
   type VideoPreviewAudioUnavailableEvent,
   type VideoPreviewError,
   type VideoPreviewPlayer,
 } from 'react-native-sherpa-onnx/videopreview';
+import { ExampleVideoPreviewPlayer } from '../../components/ExampleVideoPreviewPlayer';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import { fileSourceFromBundledPath } from '../../utils/fileSourceFromUri';
 import { TEST_VIDEO_FILES } from '../../videoConfig';
 import { styles } from './VideoPreviewScreen.styles';
 
 const BUNDLED_VIDEO = TEST_VIDEO_FILES.PREVIEW_H264_AAC;
-const SEEK_STEP_MS = 2000;
-
-function formatClock(ms: number): string {
-  const clamped = Math.max(0, Math.floor(ms));
-  const totalSec = Math.floor(clamped / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
 
 function describeAudio(audio: VideoPreviewAudioStatus | undefined): string {
   if (audio == null) return '—';
@@ -62,9 +42,6 @@ export default function VideoPreviewScreen() {
   const [playError, setPlayError] = useState<string | null>(null);
   const [audioHint, setAudioHint] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [loop, setLoop] = useState(false);
-  const [muted, setMuted] = useState(false);
-  const [seekWidth, setSeekWidth] = useState(0);
   const [player, setPlayer] = useState<VideoPreviewPlayer | null>(null);
 
   const onError = useCallback((error: VideoPreviewError) => {
@@ -155,92 +132,6 @@ export default function VideoPreviewScreen() {
     };
   }, [onAudioUnavailable, onError]);
 
-  const durationMs = status?.durationMs ?? 0;
-  const positionMs = status?.positionMs ?? 0;
-  const playing = status?.state === 'playing';
-  const ended = status?.state === 'ended';
-  const ready = player != null && status != null && status.state !== 'released';
-  const playLabel = playing ? 'Pause' : ended ? 'Restart' : 'Play';
-  const playIcon = playing ? 'pause' : ended ? 'refresh' : 'play';
-  const fillRatio =
-    durationMs > 0 ? Math.max(0, Math.min(1, positionMs / durationMs)) : 0;
-
-  const run = useCallback(
-    async (fn: () => Promise<unknown>) => {
-      if (!player) return;
-      try {
-        await fn();
-      } catch (e) {
-        const code =
-          e && typeof e === 'object' && 'code' in e
-            ? String((e as { code?: unknown }).code ?? '')
-            : '';
-        const message = e instanceof Error ? e.message : String(e);
-        setPlayError(code ? `${code}: ${message}` : message);
-      }
-    },
-    [player]
-  );
-
-  const onPlayPause = useCallback(() => {
-    if (!player) return;
-    if (playing) {
-      void run(() => player.pause());
-      return;
-    }
-    void run(() => player.play());
-  }, [player, playing, run]);
-
-  const onSeekBy = useCallback(
-    (deltaMs: number) => {
-      if (!player) return;
-      void run(() => player.seekBy(deltaMs));
-    },
-    [player, run]
-  );
-
-  const onStep = useCallback(
-    (direction: 1 | -1) => {
-      if (!player) return;
-      void run(() => player.stepFrame(direction));
-    },
-    [player, run]
-  );
-
-  const onSeekTrackLayout = useCallback((event: LayoutChangeEvent) => {
-    setSeekWidth(event.nativeEvent.layout.width);
-  }, []);
-
-  const onSeekTrackPress = useCallback(
-    (event: GestureResponderEvent) => {
-      if (!player || durationMs <= 0 || seekWidth <= 0) return;
-      const x = event.nativeEvent.locationX;
-      const ratio = Math.max(0, Math.min(1, x / seekWidth));
-      const targetMs = Math.round(ratio * durationMs);
-      void run(() => player.seekTo(targetMs));
-    },
-    [durationMs, player, run, seekWidth]
-  );
-
-  useEffect(() => {
-    if (!player) return;
-    void player.setLoop(loop).catch(() => undefined);
-  }, [loop, player]);
-
-  const onToggleLoop = useCallback((next: boolean) => {
-    setLoop(next);
-  }, []);
-
-  const onToggleMuted = useCallback(
-    (next: boolean) => {
-      setMuted(next);
-      if (player) {
-        void run(() => player.setMuted(next));
-      }
-    },
-    [player, run]
-  );
-
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScreenIntroModal screenId="VideoPreview" />
@@ -277,115 +168,11 @@ export default function VideoPreviewScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preview</Text>
-          <View style={styles.playerFrame}>
-            {player ? (
-              <VideoPreviewView
-                player={player}
-                resizeMode="contain"
-                style={styles.player}
-              />
-            ) : (
-              <View style={styles.playerPlaceholder}>
-                {loading ? <ActivityIndicator color="#94a3b8" /> : null}
-                <Text style={styles.playerPlaceholderText}>
-                  {loading
-                    ? 'Creating OfflineVideoBuffer…'
-                    : 'No player — check the load error above.'}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.clockRow}>
-            <Text style={styles.clock}>{formatClock(positionMs)}</Text>
-            <Text style={styles.clock}>
-              {durationMs > 0 ? formatClock(durationMs) : '—'}
-            </Text>
-          </View>
-          <Pressable
-            style={styles.seekTrack}
-            onLayout={onSeekTrackLayout}
-            onPress={onSeekTrackPress}
-            disabled={!ready || durationMs <= 0}
-          >
-            <View style={styles.seekTrackBg}>
-              <View
-                style={[styles.seekTrackFill, { width: `${fillRatio * 100}%` }]}
-              />
-            </View>
-          </Pressable>
-
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                !ready && styles.primaryButtonDisabled,
-              ]}
-              onPress={onPlayPause}
-              disabled={!ready}
-              activeOpacity={0.7}
-            >
-              <Ionicons name={playIcon} size={20} color="#fff" />
-              <Text style={styles.primaryButtonText}>{playLabel}</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => onSeekBy(-SEEK_STEP_MS)}
-              disabled={!ready}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="play-back" size={18} color="#0f172a" />
-              <Text style={styles.secondaryButtonText}>-2s</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => onSeekBy(SEEK_STEP_MS)}
-              disabled={!ready}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.secondaryButtonText}>+2s</Text>
-              <Ionicons name="play-forward" size={18} color="#0f172a" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => onStep(-1)}
-              disabled={!ready}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.secondaryButtonText}>Prev frame</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => onStep(1)}
-              disabled={!ready}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.secondaryButtonText}>Next frame</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>Loop</Text>
-            <Switch
-              value={loop}
-              onValueChange={onToggleLoop}
-              disabled={!ready}
-            />
-          </View>
-          <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>Mute</Text>
-            <Switch
-              value={muted}
-              onValueChange={onToggleMuted}
-              disabled={!ready}
-            />
-          </View>
+          <ExampleVideoPreviewPlayer
+            player={player}
+            loading={loading}
+            onPlayError={(message) => setPlayError(message)}
+          />
         </View>
 
         <View style={styles.section}>

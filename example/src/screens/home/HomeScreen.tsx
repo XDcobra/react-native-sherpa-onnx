@@ -130,6 +130,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'video_ocr_pipeline',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'Video → OCR',
+    description:
+      'Preview a subtitled clip, sample frames into an ImageBuffer, then run OCR on every frame',
+    icon: 'film-outline',
+    screen: 'VideoOcrPipeline',
+    implemented: true,
+  },
+  {
     id: 'fileio',
     sectionTitle: 'Pipelines & Demos',
     title: 'File I/O',

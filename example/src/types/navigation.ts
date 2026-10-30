@@ -26,6 +26,7 @@ export type RootStackParamList = {
   AudioVisualization: undefined;
   OCR: undefined;
   VideoPreview: undefined;
+  VideoOcrPipeline: undefined;
   Documents: undefined;
 };
 
@@ -55,6 +56,7 @@ export type FeatureId =
   | 'audio_visualization'
   | 'ocr'
   | 'video_preview'
+  | 'video_ocr_pipeline'
   | 'documents';
 
 export interface Feature {

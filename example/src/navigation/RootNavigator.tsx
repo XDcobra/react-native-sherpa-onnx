@@ -28,6 +28,7 @@ import FileIOScreen from '../screens/fileio/FileIOScreen';
 import AudioVisualizationScreen from '../screens/audio-visualization/AudioVisualizationScreen';
 import OCRScreen from '../screens/ocr/OCRScreen';
 import VideoPreviewScreen from '../screens/video-preview/VideoPreviewScreen';
+import VideoOcrPipelineScreen from '../screens/video-ocr-pipeline/VideoOcrPipelineScreen';
 import DocumentsScreen from '../screens/documents/DocumentsScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
@@ -233,6 +234,13 @@ export default function RootNavigator() {
         component={VideoPreviewScreen}
         options={{
           title: 'Video Preview',
+        }}
+      />
+      <Stack.Screen
+        name="VideoOcrPipeline"
+        component={VideoOcrPipelineScreen}
+        options={{
+          title: 'Video → OCR',
         }}
       />
       <Stack.Screen

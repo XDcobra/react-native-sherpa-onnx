@@ -133,6 +133,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Video preview player',
     body: 'Loads a bundled H.264 + AAC clip from test_videos/ into an OfflineVideoBuffer, then attaches VideoPreviewView. Use play, pause, seek, and frame step to smoke-test the preview player. Unsupported audio keeps video playing and surfaces audioUnavailable.',
   },
+  VideoOcrPipeline: {
+    title: 'Video to OCR pipeline',
+    body: 'Developer pipeline for createOfflineImageBufferFromVideo: play a bundled clip with burned-in captions, sample frames (default fps=1), preview the ImageBuffer, initialize OCR, then recognize every frame into a TextBuffer.',
+  },
   Documents: {
     title: 'Read documents aloud',
     body: 'This screen shows document-to-speech with the SDK: extract text, then speak it with offline TTS. Supported formats are EPUB, FB2, MOBI, AZW3, PDF, and image-based mixed EPUB or CBZ via OCR.',
