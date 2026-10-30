@@ -387,7 +387,7 @@ const finished = await finalizeLiveVideoBuffer(live);
 // }
 ```
 
-Stops ingest, `state: 'finished'`. The returned ref is an `OfflineVideoBufferIdSource`: use [offline](videobuffer-offline.md) `createOfflineImageBufferFromVideo`, `createOfflineAudioBufferFromVideo`, `exportVideoFrame`, and preview.
+Stops ingest, `state: 'finished'`. The returned ref is an `OfflineVideoBufferIdSource`: use [offline](videobuffer-offline.md) `createOfflineImageBufferFromVideo`, `createOfflineAudioBufferFromVideo`, `exportVideoFrame`, `exportVideo`, and preview.
 
 Calling finalize twice → `VIDEO_BUFFER_INVALID_STATE`.
 
@@ -451,6 +451,8 @@ No audio / unsupported codec → `VIDEO_NO_AUDIO_TRACK` / `VIDEO_AUDIO_CODEC_UNS
 ## Formats
 
 File ingest uses the same container/codec table as [offline](videobuffer-offline.md#formats). Packets stay encoded; HW H.264 / HEVC is required later for preview / OCR. A native live producer (no file) still works with FFmpeg compiled out.
+
+After **`finalizeLiveVideoBuffer`**, clip export is the same [`exportVideo`](videobuffer-offline.md) call as offline (HW transcode + FFmpeg mux). Recording live is rejected (`VIDEO_BUFFER_INVALID_STATE`).
 
 Out of scope: public JS packet-append of VP8 / AV1; camera MIME is not a JS API.
 

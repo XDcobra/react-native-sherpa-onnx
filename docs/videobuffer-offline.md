@@ -11,7 +11,7 @@ For rolling ingest (`recording` → `finished`), see [Pipeline video buffers —
 | Constraint | Effect on API use |
 | --- | --- |
 | **HW decode only** | Frame access (image bridge, export, preview) needs a device HW codec (H.264 / HEVC). Typical Android emulator has none → `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. Opening the file still succeeds. |
-| **FFmpeg required to open a file** | `createOfflineVideoBufferFromFile` rejects with `VIDEO_FFMPEG_DISABLED` when FFmpeg is compiled out. See [disable-ffmpeg.md](disable-ffmpeg.md). |
+| **FFmpeg required to open a file** | `createOfflineVideoBufferFromFile` and `exportVideo` (mux) reject with `VIDEO_FFMPEG_DISABLED` when FFmpeg is compiled out. See [disable-ffmpeg.md](disable-ffmpeg.md). |
 | **Time axis** | Video times are **microseconds** (`ptsUs`, `fromUs` / `toUs`, `timesUs`, `seekableStartUs`). Audio extract uses **milliseconds** (`rangeMs`). OCR spans use **milliseconds** (`ptsMs`, derived from the frame’s `source.ptsUs`). |
 
 ---
@@ -23,7 +23,7 @@ For rolling ingest (`recording` → `finished`), see [Pipeline video buffers —
 | **[Offline buffer](videobuffer-offline.md)** | `vid_off_<uuid>` | `immutable` | Batch OCR/STT, frame export, preview of a completed take. |
 | **[Live buffer](videobuffer-streaming.md)** | `vid_live_<uuid>` | `recording` → `finished` | Camera / file ingest, live preview, then **finalize** and reuse as offline. |
 
-**Offline and live work together:** both use **stable buffer ids**. Pass a **finished** live ref (`LiveVideoBufferFinishedRef`) into `createOfflineImageBufferFromVideo` / `createOfflineAudioBufferFromVideo` / `exportVideoFrame` / preview. While `recording`, use the [live](videobuffer-streaming.md) APIs.
+**Offline and live work together:** both use **stable buffer ids**. Pass a **finished** live ref (`LiveVideoBufferFinishedRef`) into `createOfflineImageBufferFromVideo` / `createOfflineAudioBufferFromVideo` / `exportVideoFrame` / `exportVideo` / preview. While `recording`, use the [live](videobuffer-streaming.md) APIs.
 
 **Why this is fast:** apps pass **ids**; frames and PCM stay native. Decode happens on demand, not as a full RGB dump through the JS bridge.
 
@@ -39,6 +39,7 @@ import {
   createOfflineAudioBufferFromVideo,
   createOfflineImageBufferFromVideo,
   createOfflineVideoBufferFromFile,
+  exportVideo,
   exportVideoFrame,
   getVideoBufferInfo,
   getVideoKeyframeTimes,
@@ -96,6 +97,15 @@ const extract = await createOfflineAudioBufferFromVideo(video, {
 });
 console.log(extract.mediaStartMs, extract.sourceCodec, extract.audio.info.sampleRate);
 // pass extract.audio into offline STT / enhancement
+
+// Whole-clip HW transcode to a FileDestination. Always re-encodes (no packet-copy remux).
+const clip = await exportVideo(
+  video,
+  { kind: 'fs', path: '/tmp/clip.webm' },
+  'webm',
+  { codec: 'h264', bitrate: 2_000_000, maxSide: 1280 }
+);
+console.log(clip.path);
 
 await releaseVideoBuffer(video);
 await releaseOfflineImageBuffer(images.imageBufferId);
@@ -216,7 +226,7 @@ Process-wide HW decoder slots. Values are integers **1–4**. Omitted fields kee
 
 | Field | Used by | When the budget is exhausted |
 | --- | --- | --- |
-| `cpu` | `createOfflineImageBufferFromVideo`, `exportVideoFrame`, OCR decode | Decode fails (`VIDEO_DECODE_FAILED` / related). |
+| `cpu` | `createOfflineImageBufferFromVideo`, `exportVideoFrame`, `exportVideo`, OCR decode | Decode fails (`VIDEO_DECODE_FAILED` / related). |
 | `display` | [Video preview](videopreview.md) | `VIDEO_PREVIEW_DECODER_BUSY` (audio-only play still allowed). |
 
 Raise `cpu` if you run OCR sampling and export in parallel. Raise `display` only if several preview players decode at once.
@@ -335,6 +345,38 @@ Decodes the nearest frame at `ptsUs` and writes it via [fileio](fileio.md). Acce
 | `quality` | encoder default | JPEG/WebP quality. |
 | `maxSide` | no cap | Longest-edge cap before encode. |
 
+#### `exportVideo(video, output, format, options?)`
+
+```ts
+function exportVideo(
+  video: OfflineVideoBufferIdSource,
+  output: FileDestination,
+  format: 'mp4' | 'mov' | 'mkv' | 'webm',
+  options?: ExportVideoOptions
+): Promise<ResolvedFileRef>;
+```
+
+```ts
+const file = await exportVideo(video, { kind: 'fs', path: '/tmp/out.mp4' }, 'mp4');
+// file ≈ { kind: 'fs', path: '/tmp/out.mp4' }
+```
+
+HW-transcodes the clip (decode NV12 → MediaCodec / VideoToolbox → FFmpeg mux). Accepts **offline** and **finished live**. Recording live → `VIDEO_BUFFER_INVALID_STATE`. The buffer is not mutated. Always transcodes (no packet-copy remux). FFmpeg compiled out → `VIDEO_FFMPEG_DISABLED` (mux only; encode stays HW).
+
+**`format` / `options`** (`ExportVideoOptions`)
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `format` | required | `'mp4'` \| `'mov'` \| `'mkv'` \| `'webm'`. WebM here is H.264/HEVC in a Matroska/WebM shell (not VP9). |
+| `codec` | `'h264'` | `'h264'` \| `'hevc'`. |
+| `bitrate` | `2_000_000` | Video encoder bitrate (bits/s). |
+| `fromUs` / `toUs` | seekable start / end | Inclusive range on the video timeline (µs). `toUs` must be `> fromUs` when both are set. |
+| `maxSide` | no cap (`0`) | Longest-edge cap before encode. |
+| `onProgress` | — | `{ percent, encodedUs }`. |
+| `signal` | — | Abort → `VIDEO_CANCELLED`. |
+
+Audio follows the container: **mp4/mov → AAC**, **mkv/webm → Opus**. No audio track → video-only file. Missing HW encoder → `VIDEO_ENCODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. CPU decoder busy → `VIDEO_DECODER_UNAVAILABLE`.
+
 #### `createOfflineAudioBufferFromVideo(video, options?)`
 
 ```ts
@@ -398,30 +440,32 @@ Preview playback of the same track is a separate API (`react-native-sherpa-onnx/
 
 FFmpeg is **demux-only**. Pixels: **HW only** (Android MediaCodec / iOS VideoToolbox). Open without HW still indexes; frame APIs fail `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. No FFmpeg → `VIDEO_FFMPEG_DISABLED`. Sniff is by container, not extension.
 
-| Containers | Video codecs | Else |
+| | Import | Export (`exportVideo`) |
 | --- | --- | --- |
-| MP4 / MOV / M4V / 3GP (`mov`) | **H.264**, **HEVC** | Other video codecs → `VIDEO_CODEC_UNSUPPORTED` |
-| MKV / WebM (`matroska`) | same | WebM+VP9 still rejected (video codec) |
-| | | no video stream → `VIDEO_NO_VIDEO_TRACK`; other containers → `VIDEO_CONTAINER_UNSUPPORTED` |
+| **Containers** | MP4 / MOV / M4V / 3GP (`mov`); MKV / WebM (`matroska`) | `'mp4'` \| `'mov'` \| `'mkv'` \| `'webm'` |
+| **Video codecs** | **H.264**, **HEVC** | `'h264'` (default) \| `'hevc'` (MediaCodec / VideoToolbox) |
+| **Audio** | AAC, MP3, Opus, Vorbis, FLAC, pcm_s16le, pcm_f32le (`decodable: true`) | mp4/mov → AAC; mkv/webm → Opus. No track → video-only |
+| **Else** | Other video codecs → `VIDEO_CODEC_UNSUPPORTED`. WebM+VP9 still rejected. No video stream → `VIDEO_NO_VIDEO_TRACK`; other containers → `VIDEO_CONTAINER_UNSUPPORTED` | VP8/VP9/AV1 encode is out of scope. WebM export is H.264/HEVC in a Matroska/WebM shell, not VP9 WebM. Current FFmpeg prebuilts may mux `mov` via the `mp4` muxer until rebuilt with `--enable-muxer=mov`. |
 
 | Audio in container | |
 | --- | --- |
 | AAC, MP3, Opus, Vorbis, FLAC, pcm_s16le, pcm_f32le | `decodable: true` — extract / preview |
 | AC-3 and anything else | extract → `VIDEO_AUDIO_CODEC_UNSUPPORTED`; preview continues muted (`unsupportedCodec`) |
 
-Extract → `OfflineAudioBuffer` float32. Image bridge / `exportVideoFrame`: RGB stills `jpeg` \| `png` \| `webp` (WebP = libwebp opt-in). Internal decode planes: NV12 / Gray8 / RGB24.
+Extract → `OfflineAudioBuffer` float32. Image bridge / `exportVideoFrame`: RGB stills `jpeg` \| `png` \| `webp` (WebP = libwebp opt-in). Clip export: `exportVideo` (HW encode + FFmpeg mux). Internal decode planes: NV12 / Gray8 / RGB24.
 
-Out of scope: AVI, MPEG-TS, FLV, AV1 / VP8 / VP9 decode, software H.264, mux/export of video files.
+Out of scope: AVI, MPEG-TS, FLV, AV1 / VP8 / VP9 decode or encode, FFmpeg software video encoders (no libx264 / libvpx), packet-copy remux.
 
 ## JS Events
 
-Offline video buffers have **no subscribe API**. Opening a file (`createOfflineVideoBufferFromFile`) and sampling frames (`createOfflineImageBufferFromVideo` / `exportVideoFrame`) are one-shot native calls.
+Offline video buffers have **no subscribe API**. Opening a file (`createOfflineVideoBufferFromFile`), sampling frames (`createOfflineImageBufferFromVideo` / `exportVideoFrame`), and clip export (`exportVideo`) are one-shot native calls.
 
-Create-time callbacks exist only on **audio extract**:
+Create-time callbacks exist on **audio extract** and **clip export**:
 
 | Callback / control | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
 | `onProgress` | `{ percent, decodedMs }` | during `createOfflineAudioBufferFromVideo` | Native channel `decodeProgress`, filtered by `operationId`. `decodedMs` is audio time decoded, not video PTS. |
+| `onProgress` | `{ percent, encodedUs }` | during `exportVideo` | Same native channel `decodeProgress`. `encodedUs` is last encoded video PTS. |
 | `signal` | `AbortSignal` | caller aborts | rejects with `VIDEO_CANCELLED` |
 
 ```ts
@@ -452,6 +496,7 @@ Canonical TypeScript types: [`src/videobuffer/types.ts`](../src/videobuffer/type
 | `VideoAudioTrackInfo` | `codec`, `decodable`, `sampleRate`, `channels`, `startMs`, `durationMs`. |
 | `CreateOfflineImageFromVideoOptions` | `sampling`, `fps`, `uniformCount`, `timesUs`, `maxSide`. |
 | `ExportVideoFrameOptions` | `format`, `maxSide`, `quality`. |
+| `ExportVideoOptions` | `codec`, `bitrate`, `fromUs`, `toUs`, `maxSide`, `onProgress`, `signal`. |
 | `CreateOfflineAudioFromVideoOptions` | `targetSampleRateHz`, `rangeMs`, `onProgress`, `signal`. |
 | `VideoAudioExtractResult` | `{ audio, mediaStartMs, sourceCodec, sourceSampleRate, sourceChannels }`. |
 | `ConfigureVideoBufferOptions` | `{ decoderBudget?: { cpu?, display? } }`. |
@@ -468,18 +513,20 @@ Thrown / rejected as `VIDEO_…` (`Error` message `VIDEO_…: …`, native rejec
 | `VIDEO_BUFFER_NOT_FOUND` | Released or unknown id. |
 | `VIDEO_BUFFER_KIND_MISMATCH` | Live recording passed where an offline/finished clip is required. |
 | `VIDEO_BUFFER_INVALID_STATE` | Offline extract/export on a **recording** live buffer. |
-| `VIDEO_FFMPEG_DISABLED` | File open or audio extract with FFmpeg compiled out. |
+| `VIDEO_FFMPEG_DISABLED` | File open, audio extract, or `exportVideo` mux with FFmpeg compiled out. |
 | `VIDEO_CONTAINER_UNSUPPORTED` | Container not in the v1 set. |
 | `VIDEO_NO_VIDEO_TRACK` | Audio-only file. |
 | `VIDEO_NO_AUDIO_TRACK` | Extract audio but the clip has no audio. |
-| `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC, or no HW decoder. |
+| `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC, or no HW decoder/encoder. |
+| `VIDEO_ENCODER_UNAVAILABLE` | No HW video encoder for the requested `codec`. |
+| `VIDEO_ENCODE_FAILED` | HW encode or mux error during `exportVideo`. |
 | `VIDEO_AUDIO_CODEC_UNSUPPORTED` | Audio codec not in the SDK FFmpeg build. |
 | `VIDEO_DECODER_UNAVAILABLE` | No HW video decoder (emulator). |
 | `VIDEO_DECODE_FAILED` | HW decode error on a frame. |
 | `VIDEO_AUDIO_DECODE_FAILED` | Audio extract produced no PCM in range / decode error. |
 | `VIDEO_FRAME_OUT_OF_RANGE` | `ptsUs` / `timesUs` outside the clip. |
 | `VIDEO_FILE_CORRUPT` | Demux/index failed. |
-| `VIDEO_CANCELLED` | `signal` aborted audio extract. |
+| `VIDEO_CANCELLED` | `signal` aborted audio extract or `exportVideo`. |
 | `VIDEO_MEMORY_BUDGET_EXCEEDED` | Decode/RGB copy exceeded the process budget. |
 
 Preview-only codes (`VIDEO_PREVIEW_…`) are documented in [videopreview.md](videopreview.md).
