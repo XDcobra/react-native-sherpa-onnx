@@ -38,6 +38,14 @@ class BitstreamUtil {
       const std::vector<uint8_t>& hvcc, std::vector<std::vector<uint8_t>>* vps,
       std::vector<std::vector<uint8_t>>* sps,
       std::vector<std::vector<uint8_t>>* pps);
+
+  /** Annex-B CSD for AMediaCodec (`csd-0` / optional `csd-1`). */
+  struct AnnexBCsd {
+    std::vector<uint8_t> csd0;
+    std::vector<uint8_t> csd1;
+  };
+  static Status MakeAnnexBCsd(VideoCodec codec, const std::vector<uint8_t>& config,
+                              AnnexBCsd* out);
 };
 
 }  // namespace video

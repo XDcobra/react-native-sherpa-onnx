@@ -69,3 +69,38 @@ TEST(Clock, MonotonicWhilePlaying) {
   int64_t g = e.ApplyGuards(500, 0, &snapped);
   EXPECT_GE(g, 1000);
 }
+
+TEST(Clock, PlayElapsedBeforeHeadMoves) {
+  AudioClockEstimator e;
+  e.sampleRate = 48000;
+  e.rate = 1;
+  e.ResetSegment(0, 0, 1'000'000'000);
+  e.framesWritten = 48000;
+  int64_t m = e.Media(1'400'000'000);
+  EXPECT_NEAR(m, 400000, 1);
+  EXPECT_STREQ(e.lastSource, "play");
+}
+
+TEST(Clock, StaleTimestampDoesNotFreezeClock) {
+  AudioClockEstimator e;
+  e.sampleRate = 48000;
+  e.rate = 1;
+  e.ResetSegment(0, 0, 1'000'000'000);
+  e.framesWritten = 48000;
+  e.OnTimestamp(0, 1'250'000'000);
+  int64_t m = e.Media(1'250'000'000);
+  EXPECT_NEAR(m, 250000, 1);
+  EXPECT_STREQ(e.lastSource, "play");
+}
+
+TEST(Clock, PlayElapsedCappedByWritten) {
+  AudioClockEstimator e;
+  e.sampleRate = 48000;
+  e.rate = 1;
+  e.ResetSegment(0, 0, 1'000'000'000);
+  e.framesWritten = 4800;
+  bool snapped = false;
+  int64_t cand = e.Media(1'400'000'000);
+  int64_t g = e.ApplyGuards(cand, 1'400'000'000, &snapped);
+  EXPECT_LE(g, 100000);
+}

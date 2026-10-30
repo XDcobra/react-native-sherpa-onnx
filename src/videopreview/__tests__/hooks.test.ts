@@ -26,7 +26,7 @@ function snap(over: Partial<VideoPreviewSnapshot> = {}): VideoPreviewSnapshot {
 }
 
 describe('snapshotForStatusHook', () => {
-  it('returns the same object on repeated paused getSnapshot calls', () => {
+  it('returns the same object on repeated getSnapshot calls', () => {
     const base = snap({ state: 'paused', positionMs: 1200 });
     const cache = { base: null, out: null };
     const a = snapshotForStatusHook(base, 0, 10_000, true, cache);
@@ -35,22 +35,14 @@ describe('snapshotForStatusHook', () => {
     expect(b).toBe(a);
   });
 
-  it('returns the same interpolated object when now is unchanged', () => {
-    const base = snap({ state: 'playing', positionMs: 100 });
+  it('returns a new identity when the event-sourced snap reference changes', () => {
+    const first = snap({ state: 'playing', positionMs: 100 });
+    const second = snap({ state: 'paused', positionMs: 100 });
     const cache = { base: null, out: null };
-    const a = snapshotForStatusHook(base, 1000, 1100, true, cache);
-    const b = snapshotForStatusHook(base, 1000, 1100, true, cache);
-    expect(a).not.toBe(base);
-    expect(a?.positionMs).toBe(200);
-    expect(b).toBe(a);
-  });
-
-  it('emits a new object when interpolated position advances', () => {
-    const base = snap({ state: 'playing', positionMs: 100 });
-    const cache = { base: null, out: null };
-    const a = snapshotForStatusHook(base, 1000, 1100, true, cache);
-    const b = snapshotForStatusHook(base, 1000, 1116, true, cache);
+    const a = snapshotForStatusHook(first, 1000, 1100, true, cache);
+    const b = snapshotForStatusHook(second, 1000, 1500, true, cache);
+    expect(a).toBe(first);
+    expect(b).toBe(second);
     expect(b).not.toBe(a);
-    expect(b?.positionMs).toBe(216);
   });
 });

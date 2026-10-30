@@ -55,6 +55,7 @@ function mapNative(raw: NativeVideoPreviewEvent): VideoPreviewEvent | null {
           ? S
           : never,
         previousState: String(p.previousState) as never,
+        positionMs: Number(p.positionMs ?? 0),
       };
     case 'progress':
       return {
@@ -186,6 +187,20 @@ export function addTypedListener<T extends VideoPreviewEventType>(
       listener(e as Extract<VideoPreviewEvent, { type: T }>);
     }
   });
+}
+
+/** JS-thread events (command results). Native events can lag if the JS queue is busy. */
+export function emitLocalPreviewEvent(
+  playerId: string,
+  event: VideoPreviewEvent
+): void {
+  const set = perPlayer.get(playerId);
+  if (!set) {
+    return;
+  }
+  for (const fn of set) {
+    fn(event);
+  }
 }
 
 export function __resetVideoPreviewEventsForTests(): void {

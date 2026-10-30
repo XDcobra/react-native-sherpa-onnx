@@ -85,6 +85,12 @@ void InstallPreviewSink(SherpaOnnx *mod) {
   popts.controller.pauseOnBackground = options[@"pauseOnBackground"] == nil ||
                                        [options[@"pauseOnBackground"] boolValue];
   popts.muted = [options[@"muted"] boolValue];
+  if (options[@"progressIntervalMs"] != nil) {
+    int interval = [options[@"progressIntervalMs"] intValue];
+    if (interval < 50) interval = 50;
+    if (interval > 5000) interval = 5000;
+    popts.progressIntervalMs = interval;
+  }
   if (required && popts.audioDecision != AudioDecision::Track) {
     reject(@"VIDEO_PREVIEW_AUDIO_UNSUPPORTED", @"audio required but not playable",
            nil);
@@ -131,7 +137,7 @@ void InstallPreviewSink(SherpaOnnx *mod) {
     reject(@(r.status.errorCode.c_str()), @(r.status.errorMessage.c_str()), nil);
     return;
   }
-  resolve(nil);
+  resolve(JsonToId([NSString stringWithUTF8String:p->SnapshotJson().c_str()]));
 }
 
 - (void)videoPreviewPause:(NSString *)playerId
@@ -150,7 +156,7 @@ void InstallPreviewSink(SherpaOnnx *mod) {
     reject(@(r.status.errorCode.c_str()), @(r.status.errorMessage.c_str()), nil);
     return;
   }
-  resolve(nil);
+  resolve(JsonToId([NSString stringWithUTF8String:p->SnapshotJson().c_str()]));
 }
 
 - (void)videoPreviewSeek:(NSString *)playerId

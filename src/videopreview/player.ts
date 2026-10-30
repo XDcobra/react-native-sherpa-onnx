@@ -5,7 +5,7 @@ import type {
   PipelineVideoBufferKind,
 } from '../videobuffer/types';
 import { resolvePipelineVideoBufferId } from '../videobuffer';
-import { addTypedListener } from './events';
+import { addTypedListener, emitLocalPreviewEvent } from './events';
 import type {
   VideoPreviewEventOf,
   VideoPreviewEventType,
@@ -78,6 +78,45 @@ function wrapPlayer(
 ): VideoPreviewPlayer {
   let released = false;
   const id = snapshot.playerId;
+  let lastState = snapshot.state;
+  let loopEnabled = options?.loop === true;
+  let lastLoopReplayMs = 0;
+
+  const snapshotFromCommand = async (
+    raw: unknown
+  ): Promise<VideoPreviewSnapshot> => {
+    if (raw && typeof raw === 'object' && 'state' in (raw as object)) {
+      return parseSnapshot(raw as Record<string, unknown>);
+    }
+    return parseSnapshot(
+      (await NativeSherpaOnnx.videoPreviewSnapshot(id)) as Record<
+        string,
+        unknown
+      >
+    );
+  };
+
+  const publishSnapshot = async (
+    _reason: string,
+    raw?: unknown
+  ): Promise<void> => {
+    const s = await snapshotFromCommand(raw);
+    const previousState = lastState;
+    lastState = s.state;
+    emitLocalPreviewEvent(id, {
+      type: 'stateChanged',
+      state: s.state,
+      previousState,
+      positionMs: s.positionMs,
+    });
+    emitLocalPreviewEvent(id, {
+      type: 'progress',
+      positionMs: s.positionMs,
+      seekableRange: s.seekableRange,
+      liveEdgeMs: s.liveEdgeMs,
+      nativeTimestampMs: Date.now(),
+    });
+  };
 
   const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
     if (released) {
@@ -100,43 +139,54 @@ function wrapPlayer(
     bufferId: snapshot.bufferId,
     initialSnapshot: snapshot,
     play: () =>
-      guard(() => NativeSherpaOnnx.videoPreviewPlay(id, nextRequestId())),
+      guard(async () => {
+        const r = await NativeSherpaOnnx.videoPreviewPlay(id, nextRequestId());
+        await publishSnapshot('play', r as unknown);
+        return r;
+      }),
     pause: () =>
-      guard(() => NativeSherpaOnnx.videoPreviewPause(id, nextRequestId())),
+      guard(async () => {
+        const r = await NativeSherpaOnnx.videoPreviewPause(id, nextRequestId());
+        await publishSnapshot('pause', r as unknown);
+        return r;
+      }),
     seekTo: (positionMs, opts) => {
       validateSeekMs(positionMs);
-      return guard(
-        () =>
-          NativeSherpaOnnx.videoPreviewSeek(
-            id,
-            positionMs,
-            opts?.mode ?? 'exact',
-            false,
-            nextRequestId()
-          ) as Promise<VideoPreviewSeekResult>
-      );
+      return guard(async () => {
+        const r = (await NativeSherpaOnnx.videoPreviewSeek(
+          id,
+          positionMs,
+          opts?.mode ?? 'exact',
+          false,
+          nextRequestId()
+        )) as VideoPreviewSeekResult;
+        await publishSnapshot('seekTo');
+        return r;
+      });
     },
     seekBy: (deltaMs, opts) => {
       validateSeekMs(deltaMs);
-      return guard(
-        () =>
-          NativeSherpaOnnx.videoPreviewSeek(
-            id,
-            deltaMs,
-            opts?.mode ?? 'exact',
-            true,
-            nextRequestId()
-          ) as Promise<VideoPreviewSeekResult>
-      );
+      return guard(async () => {
+        const r = (await NativeSherpaOnnx.videoPreviewSeek(
+          id,
+          deltaMs,
+          opts?.mode ?? 'exact',
+          true,
+          nextRequestId()
+        )) as VideoPreviewSeekResult;
+        await publishSnapshot('seekBy');
+        return r;
+      });
     },
     seekToLiveEdge: () =>
-      guard(
-        () =>
-          NativeSherpaOnnx.videoPreviewSeekToLiveEdge(
-            id,
-            nextRequestId()
-          ) as Promise<VideoPreviewSeekResult>
-      ),
+      guard(async () => {
+        const r = (await NativeSherpaOnnx.videoPreviewSeekToLiveEdge(
+          id,
+          nextRequestId()
+        )) as VideoPreviewSeekResult;
+        await publishSnapshot('seekToLiveEdge');
+        return r;
+      }),
     stepFrame: (direction) => {
       if (direction !== 1 && direction !== -1) {
         return Promise.reject(
@@ -146,14 +196,15 @@ function wrapPlayer(
           )
         );
       }
-      return guard(
-        () =>
-          NativeSherpaOnnx.videoPreviewStepFrame(
-            id,
-            direction,
-            nextRequestId()
-          ) as Promise<VideoPreviewSeekResult>
-      );
+      return guard(async () => {
+        const r = (await NativeSherpaOnnx.videoPreviewStepFrame(
+          id,
+          direction,
+          nextRequestId()
+        )) as VideoPreviewSeekResult;
+        await publishSnapshot('stepFrame');
+        return r;
+      });
     },
     setVolume: (volume) => {
       validateVolume(volume);
@@ -162,7 +213,15 @@ function wrapPlayer(
     setMuted: (muted) =>
       guard(() => NativeSherpaOnnx.videoPreviewSetMuted(id, muted)),
     setLoop: (loop) =>
-      guard(() => NativeSherpaOnnx.videoPreviewSetLoop(id, loop)),
+      guard(async () => {
+        loopEnabled = loop;
+        await NativeSherpaOnnx.videoPreviewSetLoop(id, loop);
+        if (loop && lastState === 'ended') {
+          lastLoopReplayMs = Date.now();
+          await NativeSherpaOnnx.videoPreviewPlay(id, nextRequestId());
+          await publishSnapshot('loop_replay_from_setLoop');
+        }
+      }),
     getSnapshot: () =>
       guard(async () =>
         parseSnapshot(
@@ -193,6 +252,7 @@ function wrapPlayer(
         return;
       }
       released = true;
+      offEnded();
       await NativeSherpaOnnx.releaseVideoPreviewPlayer(id);
     },
   };
@@ -205,6 +265,16 @@ function wrapPlayer(
       options.onError?.(new VideoPreviewError(e.code, e.message));
     });
   }
+  const offEnded = addTypedListener(id, 'ended', () => {
+    lastState = 'ended';
+    const now = Date.now();
+    const tooSoon = now - lastLoopReplayMs < 400;
+    if (!loopEnabled || released || tooSoon) {
+      return;
+    }
+    lastLoopReplayMs = now;
+    player.play().catch(() => undefined);
+  });
   return player;
 }
 

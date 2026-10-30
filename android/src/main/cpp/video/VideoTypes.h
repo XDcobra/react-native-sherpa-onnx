@@ -41,6 +41,7 @@ inline const char* kErrPreviewInvalidArgument = "VIDEO_PREVIEW_INVALID_ARGUMENT"
 inline const char* kErrPreviewRenderFailed = "VIDEO_PREVIEW_RENDER_FAILED";
 inline const char* kErrPreviewAudioUnsupported = "VIDEO_PREVIEW_AUDIO_UNSUPPORTED";
 inline const char* kErrPreviewAudioOutputFailed = "VIDEO_PREVIEW_AUDIO_OUTPUT_FAILED";
+inline const char* kErrTryAgain = "VIDEO_TRY_AGAIN";
 inline const char* kErrNoAudioTrack = "VIDEO_NO_AUDIO_TRACK";
 inline const char* kErrAudioCodecUnsupported = "VIDEO_AUDIO_CODEC_UNSUPPORTED";
 inline const char* kErrAudioDecodeFailed = "VIDEO_AUDIO_DECODE_FAILED";

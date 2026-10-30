@@ -72,64 +72,75 @@ export function useVideoPreviewStatus(
     player?.initialSnapshot ?? null
   );
   const nativeTsRef = useRef(Date.now());
+  const nowRef = useRef(nativeTsRef.current);
   const cacheRef = useRef<{
     base: VideoPreviewSnapshot | null;
     out: VideoPreviewSnapshot | null;
   }>({ base: null, out: null });
-  const [, bump] = useState(0);
 
-  useEffect(() => {
-    if (!player) {
+  if (player == null) {
+    if (snapRef.current != null) {
       snapRef.current = null;
       cacheRef.current = { base: null, out: null };
-      bump((n) => n + 1);
-      return;
     }
+  } else if (snapRef.current?.playerId !== player.playerId) {
     snapRef.current = player.initialSnapshot;
-    const offs = [
-      player.addListener('stateChanged', () => {
-        void player.getSnapshot().then((s) => {
-          snapRef.current = s;
-          nativeTsRef.current = Date.now();
-          bump((n) => n + 1);
-        });
-      }),
-      player.addListener('progress', (e) => {
-        if (snapRef.current) {
-          snapRef.current = {
-            ...snapRef.current,
-            positionMs: e.positionMs,
-            seekableRange: e.seekableRange,
-            liveEdgeMs: e.liveEdgeMs,
-          };
-          nativeTsRef.current = e.nativeTimestampMs || Date.now();
-          bump((n) => n + 1);
-        }
-      }),
-      player.addListener('ended', () => {
-        void player.getSnapshot().then((s) => {
-          snapRef.current = s;
-          bump((n) => n + 1);
-        });
-      }),
-    ];
-    return () => {
-      for (const off of offs) off();
-    };
-  }, [player]);
+    nativeTsRef.current = Date.now();
+    nowRef.current = nativeTsRef.current;
+    cacheRef.current = { base: null, out: null };
+  }
 
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
-      if (!smoothPosition || !player) return () => undefined;
-      let raf = 0;
-      const loop = () => {
+      if (!player) {
+        snapRef.current = null;
+        cacheRef.current = { base: null, out: null };
+        return () => undefined;
+      }
+      if (!snapRef.current || snapRef.current.playerId !== player.playerId) {
+        snapRef.current = player.initialSnapshot;
+      }
+      const notify = () => {
+        nowRef.current = Date.now();
         onStoreChange();
-        raf = requestAnimationFrame(loop);
       };
-      raf = requestAnimationFrame(loop);
-      return () => cancelAnimationFrame(raf);
+      const patchSnap = (patch: Partial<VideoPreviewSnapshot>) => {
+        if (!snapRef.current) return;
+        snapRef.current = { ...snapRef.current, ...patch };
+        nativeTsRef.current = Date.now();
+        notify();
+      };
+      const offs = [
+        player.addListener('stateChanged', (e) => {
+          patchSnap({
+            state: e.state,
+            positionMs: e.positionMs,
+          });
+        }),
+        player.addListener('progress', (e) => {
+          patchSnap({
+            positionMs: e.positionMs,
+            seekableRange: e.seekableRange,
+            liveEdgeMs: e.liveEdgeMs,
+          });
+        }),
+        player.addListener('firstFrameRendered', (e) => {
+          patchSnap({ positionMs: e.positionMs });
+        }),
+        player.addListener('seekCompleted', (e) => {
+          if (e.result?.actualMs != null) {
+            patchSnap({ positionMs: e.result.actualMs });
+          }
+        }),
+        player.addListener('ended', () => {
+          patchSnap({ state: 'ended' });
+        }),
+      ];
+      return () => {
+        for (const off of offs) off();
+      };
     },
-    [player, smoothPosition]
+    [player]
   );
 
   return useSyncExternalStore(
@@ -138,7 +149,7 @@ export function useVideoPreviewStatus(
       snapshotForStatusHook(
         snapRef.current,
         nativeTsRef.current,
-        Date.now(),
+        nowRef.current,
         smoothPosition,
         cacheRef.current
       ),

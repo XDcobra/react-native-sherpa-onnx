@@ -3,6 +3,7 @@
 #include "VideoLog.h"
 
 #include <algorithm>
+#include <string>
 
 namespace sherpa_onnx {
 namespace video {
@@ -15,10 +16,15 @@ PreviewEffect Eff(PreviewEffectKind k) {
   return e;
 }
 
-HandleResult Illegal(const ControllerState& s) {
+HandleResult Illegal(const ControllerState& s, PreviewInputKind kind) {
   HandleResult r;
   r.state = s;
-  r.status = Status::Fail(kErrPreviewInvalidState, PreviewStateName(s.state));
+  const std::string msg =
+      std::string("cannot ") + PreviewInputKindName(kind) + " in state " +
+      PreviewStateName(s.state);
+  VIDEO_LOGW("video.preview.reject input=%s state=%s", PreviewInputKindName(kind),
+             PreviewStateName(s.state));
+  r.status = Status::Fail(kErrPreviewInvalidState, msg);
   return r;
 }
 
@@ -74,6 +80,7 @@ HandleResult BeginSeek(ControllerState s, int64_t t, SeekMode mode,
   s.videoEos = false;
   s.audioEos = false;
   s.atLiveEdge = false;
+  s.positionUs = clamped;
   std::vector<PreviewEffect> fx;
   if (reason) {
     PreviewEffect c = Eff(PreviewEffectKind::EmitSeekClamped);
@@ -84,7 +91,7 @@ HandleResult BeginSeek(ControllerState s, int64_t t, SeekMode mode,
   }
   PreviewEffect clk = Eff(PreviewEffectKind::ClockSetRate);
   clk.rate = 0;
-  clk.tUs = s.positionUs;
+  clk.tUs = clamped;
   fx.push_back(clk);
   PreviewEffect flush = Eff(PreviewEffectKind::FlushAll);
   flush.gen = s.gen;
@@ -114,12 +121,12 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
     return r;
   }
   if (from == PreviewState::Error && input.kind != PreviewInputKind::Release) {
-    return Illegal(s);
+    return Illegal(s, input.kind);
   }
 
   switch (input.kind) {
     case PreviewInputKind::Prepare: {
-      if (from != PreviewState::Idle) return Illegal(s);
+      if (from != PreviewState::Idle) return Illegal(s, input.kind);
       s.state = PreviewState::Preparing;
       std::vector<PreviewEffect> fx;
       fx.push_back(Eff(PreviewEffectKind::OpenReaders));
@@ -130,7 +137,7 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       return Ok(s, std::move(fx), from);
     }
     case PreviewInputKind::Prepared: {
-      if (from != PreviewState::Preparing) return Illegal(s);
+      if (from != PreviewState::Preparing) return Illegal(s, input.kind);
       s.state = PreviewState::Ready;
       std::vector<PreviewEffect> fx;
       if (s.videoAttached) {
@@ -143,8 +150,14 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       if (from == PreviewState::Ended) {
         return BeginSeek(s, s.seekableStartUs, SeekMode::Accurate, true, from);
       }
+      if (from == PreviewState::Seeking || from == PreviewState::Buffering) {
+        s.resumeAfter = true;
+        std::vector<PreviewEffect> fx;
+        fx.push_back(Eff(PreviewEffectKind::ResolvePlay));
+        return Ok(s, std::move(fx), from);
+      }
       if (from != PreviewState::Ready && from != PreviewState::Paused) {
-        return Illegal(s);
+        return Illegal(s, input.kind);
       }
       s.state = PreviewState::Playing;
       s.atLiveEdge = s.isRecording;
@@ -158,7 +171,13 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       return Ok(s, std::move(fx), from);
     }
     case PreviewInputKind::Pause: {
-      if (from != PreviewState::Playing) return Illegal(s);
+      if (from == PreviewState::Seeking || from == PreviewState::Buffering) {
+        s.resumeAfter = false;
+        std::vector<PreviewEffect> fx;
+        fx.push_back(Eff(PreviewEffectKind::ResolvePause));
+        return Ok(s, std::move(fx), from);
+      }
+      if (from != PreviewState::Playing) return Illegal(s, input.kind);
       s.state = PreviewState::Paused;
       s.atLiveEdge = false;
       std::vector<PreviewEffect> fx;
@@ -173,7 +192,7 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
     case PreviewInputKind::Seek: {
       if (from == PreviewState::Idle || from == PreviewState::Preparing ||
           from == PreviewState::Released) {
-        return Illegal(s);
+        return Illegal(s, input.kind);
       }
       const bool resume = from == PreviewState::Playing ||
                           (from == PreviewState::Seeking && s.resumeAfter) ||
@@ -188,7 +207,7 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       return BeginSeek(s, input.tUs, input.mode, resume, from);
     }
     case PreviewInputKind::SeekLiveEdge: {
-      if (!s.isLive) return Illegal(s);
+      if (!s.isLive) return Illegal(s, input.kind);
       const int64_t t = s.liveEdgeUs - s.liveTargetLatencyUs;
       const bool resume = from == PreviewState::Playing || s.resumeAfter;
       auto inner = BeginSeek(s, t, SeekMode::Accurate, resume, from);
@@ -197,7 +216,7 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
     }
     case PreviewInputKind::FirstFrameShown: {
       if (from != PreviewState::Seeking && from != PreviewState::Preparing) {
-        return Illegal(s);
+        return Illegal(s, input.kind);
       }
       if (input.gen != s.gen) {
         HandleResult r;
@@ -213,6 +232,8 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
         return Ok(s, std::move(fx), from);
       }
       s.state = s.resumeAfter ? PreviewState::Playing : PreviewState::Paused;
+      s.videoEos = false;
+      s.audioEos = false;
       PreviewEffect clk = Eff(PreviewEffectKind::ClockSetRate);
       clk.rate = s.resumeAfter ? 1 : 0;
       clk.tUs = s.positionUs;
@@ -228,7 +249,7 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       return Ok(s, std::move(fx), from);
     }
     case PreviewInputKind::DataStarved: {
-      if (from != PreviewState::Playing) return Illegal(s);
+      if (from != PreviewState::Playing) return Illegal(s, input.kind);
       s.state = PreviewState::Buffering;
       s.resumeAfter = true;
       std::vector<PreviewEffect> fx;
@@ -240,7 +261,7 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       return Ok(s, std::move(fx), from);
     }
     case PreviewInputKind::DataAvailable: {
-      if (from != PreviewState::Buffering) return Illegal(s);
+      if (from != PreviewState::Buffering) return Illegal(s, input.kind);
       s.state = PreviewState::Playing;
       std::vector<PreviewEffect> fx;
       PreviewEffect clk = Eff(PreviewEffectKind::ClockSetRate);
@@ -257,16 +278,24 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       s.audioEos = true;
       break;
     case PreviewInputKind::StepFrame: {
-      if (from != PreviewState::Paused && from != PreviewState::Ready) {
-        return Illegal(s);
+      if (from != PreviewState::Paused && from != PreviewState::Ready &&
+          from != PreviewState::Playing && from != PreviewState::Seeking) {
+        return Illegal(s, input.kind);
       }
-      if (input.stepDir < 0) {
-        return BeginSeek(s, nowMediaUs - 1, SeekMode::Accurate, false, from);
+      const int64_t target =
+          input.hasTarget
+              ? input.tUs
+              : (input.stepDir < 0 ? nowMediaUs - 1 : nowMediaUs + 1);
+      HandleResult inner =
+          BeginSeek(s, target, SeekMode::Accurate, false, from);
+      if (from == PreviewState::Seeking) {
+        inner.effects.insert(inner.effects.begin(),
+                             Eff(PreviewEffectKind::EmitSuperseded));
       }
-      return BeginSeek(s, nowMediaUs + 1, SeekMode::Accurate, false, from);
+      return inner;
     }
     case PreviewInputKind::AudioFailed: {
-      if (!Active(from)) return Illegal(s);
+      if (!Active(from)) return Illegal(s, input.kind);
       s.audioPlayable = false;
       s.noAudio = true;
       std::vector<PreviewEffect> fx;
@@ -282,7 +311,7 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       return Ok(s, std::move(fx), from);
     }
     case PreviewInputKind::Evicted: {
-      if (!Active(from)) return Illegal(s);
+      if (!Active(from)) return Illegal(s, input.kind);
       const int64_t prev = nowMediaUs;
       const bool resume = from == PreviewState::Playing || s.resumeAfter;
       HandleResult inner =
@@ -294,14 +323,14 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       return inner;
     }
     case PreviewInputKind::SurfaceDetached: {
-      if (!Active(from)) return Illegal(s);
+      if (!Active(from)) return Illegal(s, input.kind);
       s.videoAttached = false;
       std::vector<PreviewEffect> fx;
       fx.push_back(Eff(PreviewEffectKind::ReleaseDecoder));
       return Ok(s, std::move(fx), from);
     }
     case PreviewInputKind::SurfaceAttached: {
-      if (!Active(from)) return Illegal(s);
+      if (!Active(from)) return Illegal(s, input.kind);
       s.videoAttached = true;
       const bool resume = from == PreviewState::Playing || s.resumeAfter;
       HandleResult inner =
@@ -321,7 +350,7 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
       return Handle(s, pause, nowMediaUs, nowNs);
     }
     case PreviewInputKind::RendererFailed: {
-      if (!Active(from)) return Illegal(s);
+      if (!Active(from)) return Illegal(s, input.kind);
       const bool recent =
           s.lastRendererFailNs > 0 &&
           nowNs > 0 && nowNs - s.lastRendererFailNs < 5'000'000'000LL;
@@ -380,6 +409,12 @@ HandleResult PlaybackController::Handle(const ControllerState& in,
 
   HandleResult r;
   r.state = s;
+  if (s.audioEos && !s.videoEos && from == PreviewState::Playing) {
+    PreviewEffect clk = Eff(PreviewEffectKind::ClockSetRate);
+    clk.rate = 1;
+    clk.tUs = nowMediaUs;
+    r.effects.push_back(clk);
+  }
   return r;
 }
 

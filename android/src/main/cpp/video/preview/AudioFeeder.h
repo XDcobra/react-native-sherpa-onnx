@@ -2,12 +2,14 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include "audio/AudioPacketReader.h"
 #include "audio/FfmpegAudioDecoder.h"
 #include "preview/PcmRing.h"
 #include "preview/Renderers.h"
+#include "VideoTypes.h"
 
 namespace sherpa_onnx {
 namespace video {
@@ -29,20 +31,29 @@ class AudioFeeder {
   void Start(int64_t tUs, uint64_t gen) {
     gen_ = gen;
     targetUs_ = tUs;
+    pendingFrames_ = 0;
+    pendingOffset_ = 0;
+    packetsEos_ = false;
+    eosNotified_ = false;
     (void)reader_.SeekTo(tUs);
     decoder_.Flush();
     (void)decoder_.Configure(*reader_.track(), 2);
     ring_.Clear();
   }
 
+  std::function<void()> onEos;
+
   void Pump() {
     if (!renderer_) return;
     while (ring_.availableWrite() > 1024) {
+      if (packetsEos_) break;
       auto pkt = reader_.Next(0);
       if (!pkt.ok()) {
+        if (pkt.status.errorCode == kErrTryAgain) break;
         EncodedPacket eos;
         decoder_.Submit(eos);
         Drain(true);
+        packetsEos_ = true;
         break;
       }
       if (pkt.value.ptsUs + 30000 < targetUs_ && lastPtsUs_ > 0 &&
@@ -53,11 +64,29 @@ class AudioFeeder {
       Drain(false);
       lastPtsUs_ = pkt.value.ptsUs;
     }
-    float tmp[2048];
-    int64_t pts = 0;
-    const int n = ring_.Read(tmp, 512, &pts);
-    if (n > 0) {
-      renderer_->Write(tmp, n, pts);
+    if (pendingFrames_ == 0) {
+      pendingOffset_ = 0;
+      pendingFrames_ = ring_.Read(pending_, 512, &pendingPtsUs_);
+    }
+    if (pendingFrames_ > 0 && renderer_) {
+      const int ch = std::max(ring_.channels(), 1);
+      const int remain = pendingFrames_ - pendingOffset_;
+      const int w = renderer_->Write(pending_ + pendingOffset_ * ch, remain,
+                                     pendingPtsUs_);
+      if (w > 0) {
+        pendingPtsUs_ += (static_cast<int64_t>(w) * 1000000LL) /
+                         std::max(ring_.sampleRate(), 1);
+        pendingOffset_ += w;
+        if (pendingOffset_ >= pendingFrames_) {
+          pendingFrames_ = 0;
+          pendingOffset_ = 0;
+        }
+      }
+    }
+    if (packetsEos_ && !eosNotified_ && pendingFrames_ == 0 &&
+        ring_.availableRead() == 0 && onEos) {
+      eosNotified_ = true;
+      onEos();
     }
   }
 
@@ -65,6 +94,10 @@ class AudioFeeder {
     gen_ = gen;
     decoder_.Flush();
     ring_.Clear();
+    pendingFrames_ = 0;
+    pendingOffset_ = 0;
+    packetsEos_ = false;
+    eosNotified_ = false;
     if (renderer_) renderer_->Flush(gen);
   }
 
@@ -99,6 +132,12 @@ class AudioFeeder {
   uint64_t gen_ = 0;
   int64_t targetUs_ = 0;
   int64_t lastPtsUs_ = 0;
+  float pending_[2048]{};
+  int pendingFrames_ = 0;
+  int pendingOffset_ = 0;
+  int64_t pendingPtsUs_ = 0;
+  bool packetsEos_ = false;
+  bool eosNotified_ = false;
 };
 
 }  // namespace preview

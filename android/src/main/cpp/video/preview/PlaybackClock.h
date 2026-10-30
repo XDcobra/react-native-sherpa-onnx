@@ -39,8 +39,12 @@ struct AudioClockEstimator {
   double rate = 0;
   int64_t lastMediaUs = 0;
   bool haveTs = false;
+  int64_t playNs = -1;
+  int64_t playPtsUs = 0;
+  int64_t playHeadFrame = 0;
+  mutable const char* lastSource = "head";
 
-  void ResetSegment(int64_t ptsUs, int64_t writtenAtStart);
+  void ResetSegment(int64_t ptsUs, int64_t writtenAtStart, int64_t nowNs = -1);
   void OnTimestamp(int64_t framePosition, int64_t nanoTime);
   void OnHead(int64_t playbackHeadFrames);
   int64_t Media(int64_t nowNs, int64_t* correctionUs = nullptr) const;

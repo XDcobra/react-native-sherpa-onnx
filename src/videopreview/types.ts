@@ -81,6 +81,7 @@ export type VideoPreviewEvent =
       type: 'stateChanged';
       state: VideoPreviewState;
       previousState: VideoPreviewState;
+      positionMs: number;
     }
   | {
       type: 'progress';

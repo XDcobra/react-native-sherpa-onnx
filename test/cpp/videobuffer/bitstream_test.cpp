@@ -43,6 +43,18 @@ TEST(BitstreamUtil, AvcCSpsPps) {
   ASSERT_EQ(pps.size(), 1u);
   EXPECT_EQ(sps[0].size(), 3u);
   EXPECT_EQ(pps[0].size(), 4u);
+
+  sherpa_onnx::video::BitstreamUtil::AnnexBCsd csd;
+  ASSERT_TRUE(
+      BitstreamUtil::MakeAnnexBCsd(sherpa_onnx::video::VideoCodec::H264, avcc,
+                                   &csd)
+          .ok);
+  ASSERT_EQ(csd.csd0.size(), 7u);
+  ASSERT_EQ(csd.csd1.size(), 8u);
+  EXPECT_EQ(csd.csd0[0], 0);
+  EXPECT_EQ(csd.csd0[3], 1);
+  EXPECT_EQ(csd.csd0[4], 0x67);
+  EXPECT_EQ(csd.csd1[4], 0x68);
 }
 
 TEST(BitstreamUtil, HevcIrapIsKey) {

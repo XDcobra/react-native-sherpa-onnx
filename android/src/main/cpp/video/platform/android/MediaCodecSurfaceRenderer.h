@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 namespace sherpa_onnx {
 namespace video {
@@ -32,6 +33,7 @@ class MediaCodecSurfaceRenderer : public IVideoRenderer {
                 uint64_t gen) override;
   bool ReadyForMore() const override;
   void Flush(uint64_t gen) override;
+  void SetPrerollUntil(int64_t tUs) override;
   void SignalEos(uint64_t gen) override;
   void Drain(int64_t clockUs, int64_t nowNs, int64_t vsyncNs) override;
   VideoRenderStats stats() const override;
@@ -48,12 +50,15 @@ class MediaCodecSurfaceRenderer : public IVideoRenderer {
   bool configured_ = false;
   bool firstShown_ = false;
   bool eosQueued_ = false;
+  bool queuedSinceStart_ = false;
   std::atomic<int64_t> vsyncNs_{16'666'666};
   VideoRenderStats stats_{};
   mutable std::mutex mu_;
   int heldOutput_ = -1;
   int64_t heldPtsUs_ = 0;
   bool heldDisplay_ = true;
+  int64_t prerollUntilUs_ = 0;
+  std::unordered_map<int64_t, bool> displayByPts_;
   int inputBusy_ = 0;
 };
 

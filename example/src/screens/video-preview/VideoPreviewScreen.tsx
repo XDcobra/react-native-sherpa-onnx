@@ -41,12 +41,6 @@ function resolveBundledAssetPath(relativePath: string): Promise<string> {
   return native.resolveBundledAssetPath(relativePath);
 }
 
-function log(phase: string, extra?: Record<string, unknown>): void {
-  if (__DEV__) {
-    console.log('[VideoPreviewExample]', { phase, ...extra });
-  }
-}
-
 function formatClock(ms: number): string {
   const clamped = Math.max(0, Math.floor(ms));
   const totalSec = Math.floor(clamped / 1000);
@@ -81,17 +75,11 @@ export default function VideoPreviewScreen() {
   const [player, setPlayer] = useState<VideoPreviewPlayer | null>(null);
 
   const onError = useCallback((error: VideoPreviewError) => {
-    log('player_error', { code: error.code, message: error.message });
     setPlayError(`${error.code}: ${error.message}`);
   }, []);
 
   const onAudioUnavailable = useCallback(
     (event: VideoPreviewAudioUnavailableEvent) => {
-      log('audio_unavailable', {
-        reason: event.reason,
-        code: event.code,
-        codec: event.codec,
-      });
       setAudioHint(
         `Video continues without sound (${event.reason}: ${event.code}${
           event.codec ? ` ${event.codec}` : ''
@@ -101,36 +89,30 @@ export default function VideoPreviewScreen() {
     []
   );
 
-  const status = useVideoPreviewStatus(player, { smoothPosition: true });
+  const status = useVideoPreviewStatus(player);
 
   useEffect(() => {
     let cancelled = false;
     let playerLocal: VideoPreviewPlayer | null = null;
     let bufferLocal: OfflineVideoBufferRef | null = null;
 
-    const releaseAll = async (reason: string) => {
+    const releaseAll = async () => {
       if (playerLocal) {
         const currentPlayer = playerLocal;
         playerLocal = null;
-        log('release_player', { reason, playerId: currentPlayer.playerId });
         try {
           await currentPlayer.release();
-        } catch (e) {
-          log('release_player_failed', {
-            message: e instanceof Error ? e.message : String(e),
-          });
+        } catch {
+          // ignore
         }
       }
       if (bufferLocal) {
         const currentBuffer = bufferLocal;
         bufferLocal = null;
-        log('release_buffer', { reason, bufferId: currentBuffer.bufferId });
         try {
           await releaseVideoBuffer(currentBuffer);
-        } catch (e) {
-          log('release_buffer_failed', {
-            message: e instanceof Error ? e.message : String(e),
-          });
+        } catch {
+          // ignore
         }
       }
     };
@@ -142,23 +124,15 @@ export default function VideoPreviewScreen() {
 
     void (async () => {
       try {
-        log('resolve_asset', { relativePath: BUNDLED_VIDEO });
         const path = await resolveBundledAssetPath(BUNDLED_VIDEO);
         if (cancelled) return;
-        log('create_buffer', { path });
         const created = await createOfflineVideoBufferFromFile(path);
         bufferLocal = created;
         if (cancelled) {
-          await releaseAll('create_buffer_cancelled');
+          await releaseAll();
           return;
         }
         setBuffer(created);
-        log('buffer_ready', {
-          bufferId: created.bufferId,
-          durationUs: created.info.seekableEndUs,
-          frameCount: created.info.frameCount,
-          audio: created.info.audio,
-        });
         const createdPlayer = await createVideoPreviewPlayer(created, {
           audio: { source: 'track', required: false },
           progressIntervalMs: 250,
@@ -167,23 +141,16 @@ export default function VideoPreviewScreen() {
         });
         playerLocal = createdPlayer;
         if (cancelled) {
-          await releaseAll('create_player_cancelled');
+          await releaseAll();
           return;
         }
         setPlayer(createdPlayer);
-        log('player_ready', {
-          playerId: createdPlayer.playerId,
-          bufferId: createdPlayer.bufferId,
-          state: createdPlayer.initialSnapshot.state,
-          audio: createdPlayer.initialSnapshot.audio,
-        });
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        log('load_failed', { message });
         if (!cancelled) {
           setLoadError(message);
         }
-        await releaseAll('load_failed');
+        await releaseAll();
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -191,43 +158,50 @@ export default function VideoPreviewScreen() {
 
     return () => {
       cancelled = true;
-      void releaseAll('unmount');
+      void releaseAll();
     };
   }, [onAudioUnavailable, onError]);
 
   const durationMs = status?.durationMs ?? 0;
   const positionMs = status?.positionMs ?? 0;
   const playing = status?.state === 'playing';
+  const ended = status?.state === 'ended';
   const ready = player != null && status != null && status.state !== 'released';
+  const playLabel = playing ? 'Pause' : ended ? 'Restart' : 'Play';
+  const playIcon = playing ? 'pause' : ended ? 'refresh' : 'play';
+  const fillRatio =
+    durationMs > 0 ? Math.max(0, Math.min(1, positionMs / durationMs)) : 0;
 
   const run = useCallback(
-    async (label: string, fn: () => Promise<unknown>) => {
+    async (fn: () => Promise<unknown>) => {
       if (!player) return;
       try {
-        log(label, { playerId: player.playerId, state: status?.state });
         await fn();
       } catch (e) {
+        const code =
+          e && typeof e === 'object' && 'code' in e
+            ? String((e as { code?: unknown }).code ?? '')
+            : '';
         const message = e instanceof Error ? e.message : String(e);
-        log(`${label}_failed`, { message });
-        setPlayError(message);
+        setPlayError(code ? `${code}: ${message}` : message);
       }
     },
-    [player, status?.state]
+    [player]
   );
 
   const onPlayPause = useCallback(() => {
     if (!player) return;
     if (playing) {
-      void run('pause', () => player.pause());
+      void run(() => player.pause());
       return;
     }
-    void run('play', () => player.play());
+    void run(() => player.play());
   }, [player, playing, run]);
 
   const onSeekBy = useCallback(
     (deltaMs: number) => {
       if (!player) return;
-      void run('seek_by', () => player.seekBy(deltaMs));
+      void run(() => player.seekBy(deltaMs));
     },
     [player, run]
   );
@@ -235,7 +209,7 @@ export default function VideoPreviewScreen() {
   const onStep = useCallback(
     (direction: 1 | -1) => {
       if (!player) return;
-      void run('step_frame', () => player.stepFrame(direction));
+      void run(() => player.stepFrame(direction));
     },
     [player, run]
   );
@@ -250,33 +224,29 @@ export default function VideoPreviewScreen() {
       const x = event.nativeEvent.locationX;
       const ratio = Math.max(0, Math.min(1, x / seekWidth));
       const targetMs = Math.round(ratio * durationMs);
-      void run('seek_to', () => player.seekTo(targetMs));
+      void run(() => player.seekTo(targetMs));
     },
     [durationMs, player, run, seekWidth]
   );
 
-  const onToggleLoop = useCallback(
-    (next: boolean) => {
-      setLoop(next);
-      if (player) {
-        void run('set_loop', () => player.setLoop(next));
-      }
-    },
-    [player, run]
-  );
+  useEffect(() => {
+    if (!player) return;
+    void player.setLoop(loop).catch(() => undefined);
+  }, [loop, player]);
+
+  const onToggleLoop = useCallback((next: boolean) => {
+    setLoop(next);
+  }, []);
 
   const onToggleMuted = useCallback(
     (next: boolean) => {
       setMuted(next);
       if (player) {
-        void run('set_muted', () => player.setMuted(next));
+        void run(() => player.setMuted(next));
       }
     },
     [player, run]
   );
-
-  const fillRatio =
-    durationMs > 0 ? Math.max(0, Math.min(1, positionMs / durationMs)) : 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -362,14 +332,8 @@ export default function VideoPreviewScreen() {
               disabled={!ready}
               activeOpacity={0.7}
             >
-              <Ionicons
-                name={playing ? 'pause' : 'play'}
-                size={20}
-                color="#fff"
-              />
-              <Text style={styles.primaryButtonText}>
-                {playing ? 'Pause' : 'Play'}
-              </Text>
+              <Ionicons name={playIcon} size={20} color="#fff" />
+              <Text style={styles.primaryButtonText}>{playLabel}</Text>
             </TouchableOpacity>
           </View>
 

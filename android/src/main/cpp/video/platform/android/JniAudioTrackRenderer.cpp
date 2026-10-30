@@ -118,9 +118,15 @@ int JniAudioTrackRenderer::Write(const float* data, int frames, int64_t) {
     }
     return n;
   }
-  written_.fetch_add(frames);
-  queued_.store(frames);
-  return frames;
+  if (n == 0) {
+    return 0;
+  }
+  const int ch = std::max(channels_, 1);
+  const int got = n / (static_cast<int>(sizeof(float)) * ch);
+  if (got <= 0) return 0;
+  written_.fetch_add(got);
+  queued_.store(got);
+  return got;
 }
 
 bool JniAudioTrackRenderer::Timestamp(int64_t* framePosition, int64_t* nanoTime) {

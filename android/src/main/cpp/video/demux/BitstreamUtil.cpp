@@ -298,5 +298,51 @@ Status BitstreamUtil::ExtractHevcParameterSets(
   return Status::Ok();
 }
 
+namespace {
+
+void AppendStartCoded(const std::vector<uint8_t>& nal, std::vector<uint8_t>* out) {
+  static const uint8_t kSc[] = {0, 0, 0, 1};
+  out->insert(out->end(), kSc, kSc + 4);
+  out->insert(out->end(), nal.begin(), nal.end());
+}
+
+}  // namespace
+
+Status BitstreamUtil::MakeAnnexBCsd(VideoCodec codec,
+                                    const std::vector<uint8_t>& config,
+                                    AnnexBCsd* out) {
+  if (out == nullptr) {
+    return Status::Fail(kErrInvalidArgument, "MakeAnnexBCsd");
+  }
+  out->csd0.clear();
+  out->csd1.clear();
+  if (config.empty()) {
+    return Status::Fail(kErrInvalidArgument, "empty codec config");
+  }
+  if (codec == VideoCodec::Hevc) {
+    std::vector<std::vector<uint8_t>> vps, sps, pps;
+    auto st = ExtractHevcParameterSets(config, &vps, &sps, &pps);
+    if (!st.ok || (vps.empty() && sps.empty())) {
+      out->csd0 = config;
+      return Status::Ok();
+    }
+    for (const auto& n : vps) AppendStartCoded(n, &out->csd0);
+    for (const auto& n : sps) AppendStartCoded(n, &out->csd0);
+    for (const auto& n : pps) AppendStartCoded(n, &out->csd0);
+    return Status::Ok();
+  }
+  std::vector<std::vector<uint8_t>> sps, pps;
+  auto st = ExtractH264ParameterSets(config, &sps, &pps);
+  if (!st.ok || sps.empty()) {
+    out->csd0 = config;
+    return Status::Ok();
+  }
+  AppendStartCoded(sps[0], &out->csd0);
+  if (!pps.empty()) {
+    AppendStartCoded(pps[0], &out->csd1);
+  }
+  return Status::Ok();
+}
+
 }  // namespace video
 }  // namespace sherpa_onnx

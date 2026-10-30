@@ -7,6 +7,7 @@
 #include "platform/android/AMediaCodecDecoder.h"
 
 #include <cstring>
+#include <functional>
 
 namespace sherpa_onnx {
 namespace video {
@@ -45,10 +46,7 @@ Status MediaCodecSurfaceRenderer::EnsureCodec() {
     AMediaFormat_setInt32(fmt, "rotation-degrees",
                           track_.transform.rotationDegrees);
   }
-  if (!track_.codecConfig.empty()) {
-    AMediaFormat_setBuffer(fmt, "csd-0", track_.codecConfig.data(),
-                           track_.codecConfig.size());
-  }
+  AMediaCodecDecoder::ApplyCsd(fmt, track_.codec, track_.codecConfig);
   codec_ = AMediaCodec_createCodecByName(allowedName_.c_str());
   if (codec_ == nullptr) {
     AMediaFormat_delete(fmt);
@@ -64,6 +62,7 @@ Status MediaCodecSurfaceRenderer::EnsureCodec() {
   }
   AMediaCodec_start(codec_);
   configured_ = true;
+  queuedSinceStart_ = false;
   VIDEO_LOGI("video.preview amc surface %s %dx%d", allowedName_.c_str(),
              track_.codedWidth, track_.codedHeight);
   return Status::Ok();
@@ -80,7 +79,6 @@ Status MediaCodecSurfaceRenderer::Configure(const VideoTrackInfo& track) {
 Status MediaCodecSurfaceRenderer::Submit(const EncodedPacket& pkt,
                                          bool displayFlag, uint64_t gen) {
   std::lock_guard<std::mutex> lock(mu_);
-  (void)displayFlag;
   gen_ = gen;
   auto st = EnsureCodec();
   if (!st.ok) return st;
@@ -95,7 +93,7 @@ Status MediaCodecSurfaceRenderer::Submit(const EncodedPacket& pkt,
   }
   const ssize_t ix = AMediaCodec_dequeueInputBuffer(codec_, 0);
   if (ix < 0) {
-    return Status::Ok();
+    return Status::Fail(kErrTryAgain, "input buffer");
   }
   size_t bufSize = 0;
   uint8_t* buf = AMediaCodec_getInputBuffer(codec_, static_cast<size_t>(ix),
@@ -110,7 +108,9 @@ Status MediaCodecSurfaceRenderer::Submit(const EncodedPacket& pkt,
   }
   AMediaCodec_queueInputBuffer(codec_, static_cast<size_t>(ix), 0, size,
                                static_cast<uint64_t>(pkt.ptsUs), flags);
+  displayByPts_[pkt.ptsUs] = displayFlag;
   ++inputBusy_;
+  queuedSinceStart_ = true;
   return Status::Ok();
 }
 
@@ -119,14 +119,36 @@ bool MediaCodecSurfaceRenderer::ReadyForMore() const {
   return codec_ != nullptr && inputBusy_ < 4 && heldOutput_ < 0;
 }
 
+void MediaCodecSurfaceRenderer::SetPrerollUntil(int64_t tUs) {
+  std::lock_guard<std::mutex> lock(mu_);
+  prerollUntilUs_ = tUs;
+}
+
 void MediaCodecSurfaceRenderer::Flush(uint64_t gen) {
   std::lock_guard<std::mutex> lock(mu_);
   gen_ = gen;
   firstShown_ = false;
+  displayByPts_.clear();
+  prerollUntilUs_ = 0;
+  const bool afterEos = eosQueued_;
   eosQueued_ = false;
   heldOutput_ = -1;
   inputBusy_ = 0;
-  if (codec_) AMediaCodec_flush(codec_);
+  if (!codec_) return;
+  // After BUFFER_FLAG_END_OF_STREAM, flush is not enough on some devices —
+  // recreate so the next loop/seek can decode from the start again.
+  if (afterEos) {
+    VIDEO_LOGW("video.preview.flush recreate_after_eos gen=%llu",
+               static_cast<unsigned long long>(gen));
+    Close();
+    (void)EnsureCodec();
+    queuedSinceStart_ = false;
+    return;
+  }
+  if (queuedSinceStart_) {
+    AMediaCodec_flush(codec_);
+    queuedSinceStart_ = false;
+  }
 }
 
 void MediaCodecSurfaceRenderer::SignalEos(uint64_t gen) {
@@ -142,60 +164,113 @@ void MediaCodecSurfaceRenderer::SignalEos(uint64_t gen) {
 
 void MediaCodecSurfaceRenderer::Drain(int64_t clockUs, int64_t nowNs,
                                       int64_t vsyncNs) {
-  std::lock_guard<std::mutex> lock(mu_);
-  if (!codec_) return;
-  const int64_t vs = vsyncNs > 0 ? vsyncNs : vsyncNs_.load();
-  auto releaseHeld = [&](bool render, int64_t atNs) {
-    if (heldOutput_ < 0) return;
-    if (render) {
-      AMediaCodec_releaseOutputBufferAtTime(codec_,
-                                            static_cast<size_t>(heldOutput_),
-                                            atNs);
-      ++stats_.rendered;
-      if (!firstShown_) {
-        firstShown_ = true;
-        if (onFirstFrameShown) onFirstFrameShown(gen_, heldPtsUs_);
+  std::function<void(uint64_t, int64_t)> firstCb;
+  std::function<void(uint64_t, int64_t)> frameCb;
+  std::function<void(uint64_t)> eosCb;
+  uint64_t cbGen = 0;
+  int64_t cbPts = 0;
+  bool fireFirst = false;
+  bool fireFrame = false;
+  bool fireEos = false;
+
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (!codec_) return;
+    const int64_t vs = vsyncNs > 0 ? vsyncNs : vsyncNs_.load();
+    auto releaseHeld = [&](bool render, int64_t atNs) {
+      if (heldOutput_ < 0) return;
+      if (render) {
+        AMediaCodec_releaseOutputBufferAtTime(codec_,
+                                              static_cast<size_t>(heldOutput_),
+                                              atNs);
+        ++stats_.rendered;
+        if (!firstShown_) {
+          firstShown_ = true;
+          fireFirst = true;
+          cbGen = gen_;
+          cbPts = heldPtsUs_;
+          firstCb = onFirstFrameShown;
+        }
+        fireFrame = true;
+        frameCb = onFrameShown;
+        stats_.avOffsetMsMean =
+            stats_.avOffsetMsMean * 0.9 + (heldPtsUs_ - clockUs) / 10000.0;
+      } else {
+        AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(heldOutput_),
+                                        false);
+        ++stats_.dropped;
       }
-      if (onFrameShown) onFrameShown(gen_, heldPtsUs_);
-      stats_.avOffsetMsMean =
-          stats_.avOffsetMsMean * 0.9 + (heldPtsUs_ - clockUs) / 10000.0;
-    } else {
-      AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(heldOutput_),
-                                      false);
-      ++stats_.dropped;
-    }
-    heldOutput_ = -1;
-    if (inputBusy_ > 0) --inputBusy_;
-  };
+      heldOutput_ = -1;
+      if (inputBusy_ > 0) --inputBusy_;
+    };
 
-  if (heldOutput_ >= 0) {
-    auto d = FrameScheduler::Decide(heldPtsUs_, clockUs, nowNs, vs, 33333);
-    if (d.decision == FrameDecision::Drop) {
-      releaseHeld(false, 0);
-    } else if (d.decision == FrameDecision::Release) {
-      releaseHeld(heldDisplay_, d.releaseAtNs);
+    auto decide = [&](int64_t ptsUs) {
+      // Clock is frozen (rate 0) while seeking. Waiting for pts≈clock would
+      // hold the first frame forever and never leave PreviewState::Seeking.
+      if (!firstShown_) {
+        FrameScheduleResult r;
+        r.decision = FrameDecision::Release;
+        r.releaseAtNs = nowNs;
+        return r;
+      }
+      return FrameScheduler::Decide(ptsUs, clockUs, nowNs, vs, 33333);
+    };
+
+    if (heldOutput_ >= 0) {
+      auto d = decide(heldPtsUs_);
+      if (d.decision == FrameDecision::Drop) {
+        releaseHeld(false, 0);
+      } else if (d.decision == FrameDecision::Release) {
+        releaseHeld(heldDisplay_, d.releaseAtNs);
+      } else {
+        return;
+      }
+    }
+
+    AMediaCodecBufferInfo info;
+    ssize_t ix = -1;
+    for (int n = 0; n < 4; ++n) {
+      ix = AMediaCodec_dequeueOutputBuffer(codec_, &info, n == 0 ? 5000 : 0);
+      if (ix == AMEDIACODEC_INFO_TRY_AGAIN_LATER) {
+        return;
+      }
+      if (ix == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED ||
+          ix == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
+        continue;
+      }
+      break;
+    }
+    if (ix < 0) return;
+      if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) {
+      AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(ix), false);
+      fireEos = true;
+      cbGen = gen_;
+      eosCb = onEos;
     } else {
-      return;
+      heldOutput_ = static_cast<int>(ix);
+      heldPtsUs_ = info.presentationTimeUs;
+      heldDisplay_ = true;
+      auto it = displayByPts_.find(info.presentationTimeUs);
+      if (it != displayByPts_.end()) {
+        heldDisplay_ = it->second;
+        displayByPts_.erase(it);
+      } else if (prerollUntilUs_ > 0 &&
+                 info.presentationTimeUs < prerollUntilUs_) {
+        heldDisplay_ = false;
+      }
+      auto d = decide(heldPtsUs_);
+      if (d.decision == FrameDecision::Drop) {
+        releaseHeld(false, 0);
+      } else if (d.decision == FrameDecision::Release) {
+        releaseHeld(heldDisplay_, d.releaseAtNs);
+      }
     }
   }
 
-  AMediaCodecBufferInfo info;
-  const ssize_t ix = AMediaCodec_dequeueOutputBuffer(codec_, &info, 5000);
-  if (ix < 0) return;
-  if (info.flags & AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM) {
-    AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(ix), false);
-    if (onEos) onEos(gen_);
-    return;
-  }
-  heldOutput_ = static_cast<int>(ix);
-  heldPtsUs_ = info.presentationTimeUs;
-  heldDisplay_ = info.size > 0;
-  auto d = FrameScheduler::Decide(heldPtsUs_, clockUs, nowNs, vs, 33333);
-  if (d.decision == FrameDecision::Drop) {
-    releaseHeld(false, 0);
-  } else if (d.decision == FrameDecision::Release) {
-    releaseHeld(heldDisplay_, d.releaseAtNs);
-  }
+  // Callbacks must run without mu_: loop seek Flushes the codec (same mutex).
+  if (fireEos && eosCb) eosCb(cbGen);
+  if (fireFirst && firstCb) firstCb(cbGen, cbPts);
+  if (fireFrame && frameCb) frameCb(cbGen, cbPts);
 }
 
 VideoRenderStats MediaCodecSurfaceRenderer::stats() const {
@@ -210,6 +285,7 @@ void MediaCodecSurfaceRenderer::Close() {
     codec_ = nullptr;
   }
   configured_ = false;
+  queuedSinceStart_ = false;
   heldOutput_ = -1;
   inputBusy_ = 0;
 }

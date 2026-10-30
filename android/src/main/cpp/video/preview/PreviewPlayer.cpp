@@ -1,6 +1,7 @@
 #include "preview/PreviewPlayer.h"
 
 #include "VideoLog.h"
+#include "core/Timeline.h"
 #include "core/Uuid.h"
 
 #ifdef __ANDROID__
@@ -90,6 +91,7 @@ PreviewPlayer::PreviewPlayer(std::string id, std::shared_ptr<VideoEntry> entry,
   state_.audioRequired = opts_.controller.audioRequired;
   state_.audioOff = opts_.controller.audioOff;
   state_.loop = opts_.controller.loop;
+  desiredLoop_.store(opts_.controller.loop);
   state_.pauseOnBackground = opts_.controller.pauseOnBackground;
   state_.isLive = opts_.controller.isLive;
   state_.liveTargetLatencyUs = opts_.controller.liveTargetLatencyUs;
@@ -116,19 +118,50 @@ int64_t PreviewPlayer::NowNs() const { return HostNowNs(); }
 HandleResult PreviewPlayer::Post(const PreviewInput& input, int64_t nowMediaUs,
                                  int64_t nowNs) {
   std::lock_guard<std::recursive_mutex> lock(mu_);
-  auto r = PlaybackController::Handle(state_, input, nowMediaUs, nowNs);
+  // Apply the latest setLoop even if it raced with this Post (JS can enable
+  // loop while Playing; the pump may already be inside Handle/EOS).
+  state_.loop = desiredLoop_.load();
+  PreviewInput resolved = input;
+  if (input.kind == PreviewInputKind::StepFrame) {
+    bool atEdge = false;
+    int64_t toIdx = -1;
+    int64_t targetUs =
+        input.stepDir < 0 ? nowMediaUs - 1 : nowMediaUs + 1;
+    const Timeline* tl = entry_ ? entry_->timeline() : nullptr;
+    if (tl) {
+      toIdx = tl->NeighborSample(nowMediaUs, input.stepDir, &atEdge);
+      SampleEntry s;
+      if (toIdx >= 0 && tl->Get(toIdx, &s).ok) {
+        targetUs = s.ptsUs;
+      }
+    }
+    if (atEdge) {
+      HandleResult edge;
+      edge.state = state_;
+      return edge;
+    }
+    resolved.tUs = targetUs;
+    resolved.hasTarget = true;
+  }
+  auto r = PlaybackController::Handle(state_, resolved, nowMediaUs, nowNs);
   if (r.status.ok) {
     const PreviewState prev = state_.state;
+    r.state.loop = desiredLoop_.load();
     state_ = r.state;
     lastEffects_ = r.effects;
     ExecuteEffects(r.effects);
     if (prev != state_.state) {
       std::ostringstream j;
       j << "{\"state\":\"" << PreviewStateName(state_.state)
-        << "\",\"previousState\":\"" << PreviewStateName(prev) << "\"}";
+        << "\",\"previousState\":\"" << PreviewStateName(prev)
+        << "\",\"positionMs\":" << (state_.positionUs / 1000) << "}";
       Emit("stateChanged", j.str());
     }
   } else {
+    VIDEO_LOGW("video.preview.reject id=%s input=%s state=%s code=%s msg=%s",
+               id_.c_str(), PreviewInputKindName(input.kind),
+               PreviewStateName(state_.state), r.status.errorCode.c_str(),
+               r.status.errorMessage.c_str());
     lastEffects_.clear();
   }
   return r;
@@ -136,6 +169,39 @@ HandleResult PreviewPlayer::Post(const PreviewInput& input, int64_t nowMediaUs,
 
 void PreviewPlayer::Emit(const std::string& type, const std::string& json) {
   PreviewRegistry::Instance().Emit(type, id_, json);
+}
+
+void PreviewPlayer::EmitProgress(bool force) {
+  const int64_t posMs = state_.positionUs / 1000;
+  const int intervalMs =
+      opts_.progressIntervalMs < 50
+          ? 50
+          : (opts_.progressIntervalMs > 5000 ? 5000 : opts_.progressIntervalMs);
+  const int64_t intervalNs = static_cast<int64_t>(intervalMs) * 1'000'000LL;
+  const int64_t nowNs = NowNs();
+  if (!force) {
+    if (posMs == lastEmittedPosMs_) return;
+    if (lastProgressEmitNs_ > 0 && nowNs - lastProgressEmitNs_ < intervalNs) {
+      return;
+    }
+  }
+  lastEmittedPosMs_ = posMs;
+  lastProgressEmitNs_ = nowNs;
+  const int64_t wallMs =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count();
+  std::ostringstream j;
+  j << "{\"positionMs\":" << posMs << ",\"seekableRange\":{\"startMs\":"
+    << (state_.seekableStartUs / 1000) << ",\"endMs\":"
+    << (state_.seekableEndUs / 1000) << "},\"liveEdgeMs\":";
+  if (state_.isLive) {
+    j << (state_.liveEdgeUs / 1000);
+  } else {
+    j << "null";
+  }
+  j << ",\"nativeTimestampMs\":" << wallMs << "}";
+  Emit("progress", j.str());
 }
 
 void PreviewPlayer::SetVolume(float v) {
@@ -148,7 +214,17 @@ void PreviewPlayer::SetMuted(bool muted) {
   if (audio_) audio_->SetVolume(muted_ ? 0.f : volume_);
 }
 
-void PreviewPlayer::SetLoop(bool loop) { state_.loop = loop; }
+void PreviewPlayer::SetLoop(bool loop) {
+  desiredLoop_.store(loop);
+  std::lock_guard<std::recursive_mutex> lock(mu_);
+  state_.loop = loop;
+  opts_.controller.loop = loop;
+  if (loop && state_.state == PreviewState::Ended) {
+    PreviewInput in;
+    in.kind = PreviewInputKind::Play;
+    Post(in, state_.positionUs, NowNs());
+  }
+}
 
 std::string PreviewPlayer::SnapshotJson() const {
   VideoBufferInfo info;
@@ -189,6 +265,7 @@ void PreviewPlayer::StartFeeds(const PreviewEffect& e) {
   if (video_ && entry_) {
     vfeed_ = std::make_unique<VideoFeeder>(entry_, video_);
     vfeed_->Start(e.tUs, e.mode, e.gen);
+    video_->SetPrerollUntil(e.tUs);
     video_->onFirstFrameShown = [this](uint64_t g, int64_t pts) {
       PreviewInput in;
       in.kind = PreviewInputKind::FirstFrameShown;
@@ -199,7 +276,11 @@ void PreviewPlayer::StartFeeds(const PreviewEffect& e) {
       j << "{\"positionMs\":" << (pts / 1000) << "}";
       Emit("firstFrameRendered", j.str());
     };
-    video_->onEos = [this](uint64_t) {
+    video_->onEos = [this](uint64_t g) {
+      const uint64_t current = gen_.load();
+      if (g != 0 && g != current) {
+        return;
+      }
       PreviewInput in;
       in.kind = PreviewInputKind::VideoEos;
       Post(in, state_.positionUs, NowNs());
@@ -213,7 +294,15 @@ void PreviewPlayer::StartFeeds(const PreviewEffect& e) {
   if (audio_ && entry_ && state_.audioPlayable && entry_->audioTrack()) {
     afeed_ = std::make_unique<AudioFeeder>(entry_, audio_);
     (void)afeed_->Configure(*entry_->audioTrack());
+    if (entry_->audioTrack()->sampleRate > 0) {
+      audioClock_.sampleRate = entry_->audioTrack()->sampleRate;
+    }
     afeed_->Start(e.tUs, e.gen);
+    afeed_->onEos = [this]() {
+      PreviewInput in;
+      in.kind = PreviewInputKind::AudioEos;
+      Post(in, state_.positionUs, NowNs());
+    };
     audio_->SetVolume(muted_ ? 0.f : volume_);
     audio_->onFailed = [this](Status st) {
       PreviewInput in;
@@ -245,9 +334,21 @@ void PreviewPlayer::ExecuteEffects(const std::vector<PreviewEffect>& fx) {
         displaySlot_.Reset();
         break;
       case PreviewEffectKind::ClockSetRate:
+        clockRate_ = e.rate;
         if (clock_) clock_->SetRate(e.rate, e.tUs);
-        if (e.rate > 0 && audio_) {
-          audioClock_.ResetSegment(e.tUs, audio_->FramesWritten());
+        if (e.rate > 0 && audio_ && !state_.audioEos) {
+          int64_t head = audio_->HeadPosition();
+          int64_t fp = 0;
+          int64_t nt = 0;
+          if (audio_->Timestamp(&fp, &nt)) {
+            head = fp;
+          }
+          if (entry_ && entry_->audioTrack() &&
+              entry_->audioTrack()->sampleRate > 0) {
+            audioClock_.sampleRate = entry_->audioTrack()->sampleRate;
+          }
+          audioClock_.ResetSegment(e.tUs, head, NowNs());
+          audioClock_.framesWritten = audio_->FramesWritten();
           audioClock_.rate = e.rate;
         }
         break;
@@ -273,6 +374,22 @@ void PreviewPlayer::ExecuteEffects(const std::vector<PreviewEffect>& fx) {
           haveShown = true;
         }
         break;
+      case PreviewEffectKind::EmitSeekCompleted: {
+        const char* mode = "exact";
+        if (e.mode == ::sherpa_onnx::video::SeekMode::Keyframe) {
+          mode = "keyframe";
+        }
+        if (e.mode == ::sherpa_onnx::video::SeekMode::ClosestKeyframe) {
+          mode = "closestKeyframe";
+        }
+        std::ostringstream j;
+        j << "{\"result\":{\"status\":\"completed\",\"requestedMs\":"
+          << (e.tUs / 1000) << ",\"actualMs\":" << (e.actualUs / 1000)
+          << "},\"mode\":\"" << mode << "\"}";
+        Emit("seekCompleted", j.str());
+        EmitProgress(true);
+        break;
+      }
       case PreviewEffectKind::EmitEnded:
         Emit("ended", "{}");
         break;
@@ -332,7 +449,7 @@ void PreviewPlayer::PumpOnce() {
   std::lock_guard<std::recursive_mutex> lock(mu_);
   int64_t clockUs = state_.positionUs;
   if (clock_) clockUs = clock_->NowMediaUs();
-  if (audio_ && state_.audioPlayable &&
+  if (audio_ && state_.audioPlayable && !state_.audioEos &&
       state_.state == PreviewState::Playing) {
     int64_t fp = 0, nt = 0;
     if (audio_->Timestamp(&fp, &nt)) {
@@ -347,6 +464,9 @@ void PreviewPlayer::PumpOnce() {
     state_.positionUs = clockUs;
   } else if (clock_) {
     state_.positionUs = clockUs;
+  }
+  if (state_.state == PreviewState::Playing) {
+    EmitProgress(false);
   }
   if (vfeed_) vfeed_->Pump();
   if (afeed_) afeed_->Pump();

@@ -3935,7 +3935,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (!err.isNullOrEmpty()) {
         promise.reject(err, if (map.hasKey("message")) map.getString("message") else err)
       } else {
-        promise.resolve(null)
+        promise.resolve(map)
       }
     } catch (e: Exception) {
       promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)
@@ -3950,7 +3950,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (!err.isNullOrEmpty()) {
         promise.reject(err, if (map.hasKey("message")) map.getString("message") else err)
       } else {
-        promise.resolve(null)
+        promise.resolve(map)
       }
     } catch (e: Exception) {
       promise.reject("VIDEO_PREVIEW_INVALID_STATE", e.message, e)

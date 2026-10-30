@@ -32,6 +32,7 @@ struct PreviewPlayerOptions {
   std::string codecName;
   float volume = 1.f;
   bool muted = false;
+  int progressIntervalMs = 250;
 };
 
 class PreviewPlayer {
@@ -87,6 +88,7 @@ class PreviewPlayer {
 
  private:
   void Emit(const std::string& type, const std::string& json);
+  void EmitProgress(bool force);
   void StartFeeds(const PreviewEffect& e);
   int64_t NowNs() const;
 
@@ -104,12 +106,16 @@ class PreviewPlayer {
   std::unique_ptr<AudioFeeder> afeed_;
   DecoderSlot displaySlot_;
   std::atomic<uint64_t> gen_{0};
+  std::atomic<bool> desiredLoop_{false};
   float volume_ = 1.f;
   bool muted_ = false;
   AudioClockEstimator audioClock_;
   std::atomic<bool> pumpRun_{false};
   std::thread pump_;
   mutable std::recursive_mutex mu_;
+  double clockRate_ = 0;
+  int64_t lastProgressEmitNs_ = 0;
+  int64_t lastEmittedPosMs_ = -1;
 #ifdef __ANDROID__
   double refreshHz_ = 60.0;
 #endif

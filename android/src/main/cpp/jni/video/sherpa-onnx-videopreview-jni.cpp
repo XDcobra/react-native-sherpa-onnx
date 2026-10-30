@@ -9,6 +9,7 @@
 
 #include <jni.h>
 
+#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -20,6 +21,7 @@ using sherpa_onnx::video::preview::PreviewInputKind;
 using sherpa_onnx::video::preview::PreviewPlayer;
 using sherpa_onnx::video::preview::PreviewPlayerOptions;
 using sherpa_onnx::video::preview::PreviewRegistry;
+using sherpa_onnx::video::preview::PreviewStateName;
 using sherpa_onnx::video::SeekMode;
 
 #define TAG "SherpaOnnx:video.preview"
@@ -136,6 +138,16 @@ jobject ErrorMap(JNIEnv* env, const char* code, const char* msg) {
   return map;
 }
 
+int ParseProgressIntervalMs(const std::string& opt) {
+  const std::string key = "\"progressIntervalMs\":";
+  const auto pos = opt.find(key);
+  if (pos == std::string::npos) return 250;
+  const int v = std::atoi(opt.c_str() + pos + key.size());
+  if (v < 50) return 50;
+  if (v > 5000) return 5000;
+  return v == 0 ? 250 : v;
+}
+
 AudioDecision DecideAudio(const sherpa_onnx::video::VideoBufferInfo& info,
                           bool off) {
   if (off) return AudioDecision::Off;
@@ -170,6 +182,7 @@ Java_com_sherpaonnx_video_preview_VideoPreviewNative_nativeCreate(
   popts.controller.pauseOnBackground =
       opt.find("\"pauseOnBackground\":false") == std::string::npos;
   popts.muted = opt.find("\"muted\":true") != std::string::npos;
+  popts.progressIntervalMs = ParseProgressIntervalMs(opt);
   if (info.audio) {
     popts.codecName = info.audio->codecName.empty()
                           ? sherpa_onnx::video::AudioCodecName(info.audio->codec)

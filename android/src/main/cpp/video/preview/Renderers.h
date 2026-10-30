@@ -23,6 +23,8 @@ class IVideoRenderer {
                         uint64_t gen) = 0;
   virtual bool ReadyForMore() const = 0;
   virtual void Flush(uint64_t gen) = 0;
+  /** Hide decoded frames with pts < tUs until the first displayable frame. */
+  virtual void SetPrerollUntil(int64_t tUs) { (void)tUs; }
   virtual void SignalEos(uint64_t gen) = 0;
   virtual void Drain(int64_t clockUs, int64_t nowNs, int64_t vsyncNs) {
     (void)clockUs;

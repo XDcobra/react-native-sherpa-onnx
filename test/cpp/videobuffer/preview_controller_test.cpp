@@ -112,13 +112,42 @@ TEST(PreviewController, EndedPlayRestarts) {
 TEST(PreviewController, LoopOnEos) {
   auto s = Playing();
   s.loop = true;
+  s.positionUs = 7'000'000;
   PreviewInput in;
   in.kind = PreviewInputKind::VideoEos;
-  auto r = PlaybackController::Handle(s, in, 0);
+  auto r = PlaybackController::Handle(s, in, 7'000'000);
   in.kind = PreviewInputKind::AudioEos;
-  r = PlaybackController::Handle(r.state, in, 0);
+  r = PlaybackController::Handle(r.state, in, 7'000'000);
   EXPECT_EQ(r.state.state, PreviewState::Seeking);
   EXPECT_TRUE(r.state.resumeAfter);
+  EXPECT_EQ(r.state.positionUs, 0);
+  EXPECT_FALSE(r.state.videoEos);
+  EXPECT_FALSE(r.state.audioEos);
+}
+
+TEST(PreviewController, FirstFrameShownClearsStaleEos) {
+  auto s = Playing();
+  s.loop = true;
+  PreviewInput in;
+  in.kind = PreviewInputKind::Seek;
+  in.tUs = 0;
+  auto r = PlaybackController::Handle(s, in, 0);
+  EXPECT_EQ(r.state.state, PreviewState::Seeking);
+  in.kind = PreviewInputKind::VideoEos;
+  r = PlaybackController::Handle(r.state, in, 0);
+  in.kind = PreviewInputKind::AudioEos;
+  r = PlaybackController::Handle(r.state, in, 0);
+  EXPECT_TRUE(r.state.videoEos);
+  EXPECT_TRUE(r.state.audioEos);
+  EXPECT_EQ(r.state.state, PreviewState::Seeking);
+  PreviewInput shown;
+  shown.kind = PreviewInputKind::FirstFrameShown;
+  shown.gen = r.state.gen;
+  shown.shownPtsUs = 0;
+  r = PlaybackController::Handle(r.state, shown, 0);
+  EXPECT_EQ(r.state.state, PreviewState::Playing);
+  EXPECT_FALSE(r.state.videoEos);
+  EXPECT_FALSE(r.state.audioEos);
 }
 
 TEST(PreviewController, EosEnds) {
@@ -131,15 +160,48 @@ TEST(PreviewController, EosEnds) {
   EXPECT_TRUE(Has(r, PreviewEffectKind::EmitEnded));
 }
 
-TEST(PreviewController, StepWhilePlayingIllegal) {
+TEST(PreviewController, StepWhilePlayingSeeksPaused) {
   auto s = Playing();
   PreviewInput in;
   in.kind = PreviewInputKind::StepFrame;
   in.stepDir = 1;
+  in.tUs = 33333;
+  in.hasTarget = true;
   auto r = PlaybackController::Handle(s, in, 0);
-  EXPECT_FALSE(r.status.ok);
-  EXPECT_EQ(r.status.errorCode, kErrPreviewInvalidState);
-  EXPECT_EQ(r.state.state, PreviewState::Playing);
+  EXPECT_TRUE(r.status.ok);
+  EXPECT_EQ(r.state.state, PreviewState::Seeking);
+  EXPECT_FALSE(r.state.resumeAfter);
+  EXPECT_EQ(r.state.pendingSeekUs, 33333);
+}
+
+TEST(PreviewController, PlayWhileSeekingSetsResume) {
+  auto s = Playing();
+  PreviewInput in;
+  in.kind = PreviewInputKind::Seek;
+  in.tUs = 1'000'000;
+  auto r = PlaybackController::Handle(s, in, 0);
+  EXPECT_EQ(r.state.state, PreviewState::Seeking);
+  in.kind = PreviewInputKind::Play;
+  r = PlaybackController::Handle(r.state, in, 0);
+  EXPECT_TRUE(r.status.ok);
+  EXPECT_EQ(r.state.state, PreviewState::Seeking);
+  EXPECT_TRUE(r.state.resumeAfter);
+  EXPECT_TRUE(Has(r, PreviewEffectKind::ResolvePlay));
+}
+
+TEST(PreviewController, PauseWhileSeekingClearsResume) {
+  auto s = Playing();
+  PreviewInput in;
+  in.kind = PreviewInputKind::Seek;
+  in.tUs = 1'000'000;
+  auto r = PlaybackController::Handle(s, in, 0);
+  EXPECT_TRUE(r.state.resumeAfter);
+  in.kind = PreviewInputKind::Pause;
+  r = PlaybackController::Handle(r.state, in, 0);
+  EXPECT_TRUE(r.status.ok);
+  EXPECT_EQ(r.state.state, PreviewState::Seeking);
+  EXPECT_FALSE(r.state.resumeAfter);
+  EXPECT_TRUE(Has(r, PreviewEffectKind::ResolvePause));
 }
 
 TEST(PreviewController, StepWhilePaused) {
@@ -147,9 +209,31 @@ TEST(PreviewController, StepWhilePaused) {
   PreviewInput in;
   in.kind = PreviewInputKind::StepFrame;
   in.stepDir = 1;
+  in.tUs = 33333;
+  in.hasTarget = true;
   auto r = PlaybackController::Handle(s, in, 1000);
   EXPECT_TRUE(r.status.ok);
   EXPECT_EQ(r.state.state, PreviewState::Seeking);
+  EXPECT_FALSE(r.state.resumeAfter);
+  EXPECT_EQ(r.state.pendingSeekUs, 33333);
+}
+
+TEST(PreviewController, StepWhileSeekingSupersedes) {
+  auto s = ReadyPaused();
+  PreviewInput in;
+  in.kind = PreviewInputKind::StepFrame;
+  in.stepDir = 1;
+  in.tUs = 33333;
+  in.hasTarget = true;
+  auto r = PlaybackController::Handle(s, in, 0);
+  EXPECT_EQ(r.state.state, PreviewState::Seeking);
+  in.tUs = 66666;
+  auto r2 = PlaybackController::Handle(r.state, in, 33333);
+  EXPECT_TRUE(r2.status.ok);
+  EXPECT_EQ(r2.state.state, PreviewState::Seeking);
+  EXPECT_TRUE(Has(r2, PreviewEffectKind::EmitSuperseded));
+  EXPECT_EQ(r2.state.pendingSeekUs, 66666);
+  EXPECT_FALSE(r2.state.resumeAfter);
 }
 
 TEST(PreviewController, ReleaseIdempotent) {

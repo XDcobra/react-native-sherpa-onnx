@@ -68,8 +68,11 @@ Status SampleBufferVideoRenderer::Submit(const EncodedPacket& pkt, bool displayF
   gen_ = gen;
   auto* layer = (__bridge AVSampleBufferDisplayLayer*)layer_;
   CMFormatDescriptionRef fmt = (CMFormatDescriptionRef)formatDesc_;
-  if (layer == nil || fmt == nullptr || pkt.payload.empty()) {
-    return Status::Ok();
+  if (layer == nil || fmt == nullptr) {
+    return Status::Fail(kErrTryAgain, "layer not ready");
+  }
+  if (pkt.payload.empty()) {
+    return Status::Fail(kErrPreviewRenderFailed, "empty packet");
   }
   CMBlockBufferRef block = nullptr;
   OSStatus os = CMBlockBufferCreateWithMemoryBlock(

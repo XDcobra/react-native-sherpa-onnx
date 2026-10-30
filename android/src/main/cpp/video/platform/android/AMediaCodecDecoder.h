@@ -9,6 +9,8 @@
 #include <media/NdkMediaCodec.h>
 #include <media/NdkMediaFormat.h>
 
+#include <vector>
+
 namespace sherpa_onnx {
 namespace video {
 
@@ -27,6 +29,8 @@ class AMediaCodecDecoder : public DecoderBackend {
 
   static void SetGlobalHwDecoderName(VideoCodec codec, std::string name);
   static std::string GlobalHwDecoderName(VideoCodec codec);
+  static void ApplyCsd(AMediaFormat* fmt, VideoCodec codec,
+                       const std::vector<uint8_t>& config);
 
  private:
   Status CopyImageToFrame(AImage* image, DecodedRawFrame* out, int64_t ptsUs);

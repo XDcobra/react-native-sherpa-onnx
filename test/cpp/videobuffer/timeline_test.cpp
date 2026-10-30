@@ -40,6 +40,22 @@ TEST(Timeline, SampleAtPtsBoundaries) {
   EXPECT_EQ(t.SampleAtPts(9 * 33333 + 1000), 9);
 }
 
+TEST(Timeline, NeighborSample) {
+  Timeline t;
+  CfrGop(&t, 10, 5, 33333);
+  bool atEdge = true;
+  EXPECT_EQ(t.NeighborSample(0, 1, &atEdge), 1);
+  EXPECT_FALSE(atEdge);
+  EXPECT_EQ(t.NeighborSample(33333, -1, &atEdge), 0);
+  EXPECT_FALSE(atEdge);
+  EXPECT_EQ(t.NeighborSample(0, -1, &atEdge), 0);
+  EXPECT_TRUE(atEdge);
+  EXPECT_EQ(t.NeighborSample(9 * 33333, 1, &atEdge), 9);
+  EXPECT_TRUE(atEdge);
+  EXPECT_EQ(t.NeighborSample(33332, 1, &atEdge), 1);
+  EXPECT_FALSE(atEdge);
+}
+
 TEST(Timeline, KeyframeAtOrBefore) {
   Timeline t;
   CfrGop(&t, 12, 4, 1000);

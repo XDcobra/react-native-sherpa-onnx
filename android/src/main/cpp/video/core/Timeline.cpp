@@ -111,6 +111,28 @@ int64_t Timeline::SampleAtPts(int64_t tUs) const {
   return lo;
 }
 
+int64_t Timeline::NeighborSample(int64_t tUs, int dir, bool* atEdge) const {
+  if (atEdge) {
+    *atEdge = false;
+  }
+  const int64_t at = SampleAtPts(tUs);
+  if (at < 0) {
+    if (atEdge) {
+      *atEdge = true;
+    }
+    return -1;
+  }
+  const int64_t n = frameCount();
+  const int64_t next = at + (dir < 0 ? -1 : 1);
+  if (next < 0 || next >= n) {
+    if (atEdge) {
+      *atEdge = true;
+    }
+    return at;
+  }
+  return next;
+}
+
 int64_t Timeline::KeyframeAtOrBefore(int64_t sampleIdx) const {
   std::lock_guard<std::mutex> lock(mu_);
   auto snap = Snap();

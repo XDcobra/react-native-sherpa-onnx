@@ -45,13 +45,19 @@ void MonotonicClock::SetRate(double rate, int64_t atMediaUs) {
   rate_ = rate;
 }
 
-void AudioClockEstimator::ResetSegment(int64_t ptsUs, int64_t writtenAtStart) {
+void AudioClockEstimator::ResetSegment(int64_t ptsUs, int64_t writtenAtStart,
+                                       int64_t nowNs) {
   anchorPtsUs = ptsUs;
   anchorFrame = writtenAtStart;
   framesWritten = writtenAtStart;
   tsFrame = -1;
+  tsNanoTime = 0;
   haveTs = false;
   lastMediaUs = ptsUs;
+  playPtsUs = ptsUs;
+  playHeadFrame = writtenAtStart;
+  playNs = nowNs;
+  lastSource = nowNs >= 0 ? "play" : "head";
 }
 
 void AudioClockEstimator::OnTimestamp(int64_t framePosition, int64_t nanoTime) {
@@ -68,6 +74,7 @@ void AudioClockEstimator::OnHead(int64_t playbackHeadFrames) {
 
 int64_t AudioClockEstimator::Media(int64_t nowNs, int64_t* correctionUs) const {
   if (sampleRate <= 0 || rate <= 0) {
+    lastSource = "paused";
     return lastMediaUs;
   }
   int64_t frame = haveTs ? tsFrame : (tsFrame >= 0 ? tsFrame : anchorFrame);
@@ -77,10 +84,25 @@ int64_t AudioClockEstimator::Media(int64_t nowNs, int64_t* correctionUs) const {
   if (frame > framesWritten) {
     frame = framesWritten;
   }
-  int64_t media = anchorPtsUs +
-                  ((frame - anchorFrame) * 1000000LL) / sampleRate;
+  int64_t deviceUs = anchorPtsUs +
+                     ((frame - anchorFrame) * 1000000LL) / sampleRate;
+  const char* deviceSrc = "head";
   if (haveTs && rate > 0) {
-    media += (nowNs - tsNanoTime) / 1000;
+    deviceUs += (nowNs - tsNanoTime) / 1000;
+    deviceSrc = "ts";
+  } else if (tsFrame < 0) {
+    deviceSrc = "play";
+  }
+  int64_t media = deviceUs;
+  lastSource = deviceSrc;
+  if (playNs >= 0) {
+    const int64_t elapsedUs = (nowNs - playNs) / 1000;
+    const int64_t playUs =
+        playPtsUs + static_cast<int64_t>(elapsedUs * rate);
+    if (playUs > media) {
+      media = playUs;
+      lastSource = "play";
+    }
   }
   if (correctionUs) {
     *correctionUs = media - lastMediaUs;

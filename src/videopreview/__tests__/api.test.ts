@@ -63,7 +63,7 @@ import {
   VideoPreviewError,
   VideoPreviewErrorCode,
 } from '../index';
-import { mapNative } from '../events';
+import { __resetVideoPreviewEventsForTests, mapNative } from '../events';
 
 const rn = jest.requireMock('react-native') as {
   __mockNative: {
@@ -79,6 +79,7 @@ const rn = jest.requireMock('react-native') as {
     videoPreviewSnapshot: jest.Mock;
     releaseVideoPreviewPlayer: jest.Mock;
   };
+  __emit: (e: unknown) => void;
 };
 const mockNative = rn.__mockNative;
 
@@ -111,6 +112,7 @@ function snapshot(over: Record<string, unknown> = {}) {
 describe('videopreview api', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    __resetVideoPreviewEventsForTests();
     mockNative.createVideoPreviewPlayer.mockResolvedValue(snapshot());
     mockNative.videoPreviewSnapshot.mockResolvedValue(snapshot());
   });
@@ -137,6 +139,11 @@ describe('videopreview api', () => {
     expect(p.initialSnapshot.state).toBe('ready');
     await p.play();
     expect(mockNative.videoPreviewPlay).toHaveBeenCalled();
+    await p.setLoop(true);
+    expect(mockNative.videoPreviewSetLoop).toHaveBeenCalledWith(
+      'vprev_1',
+      true
+    );
     await p.release();
     await expect(p.play()).rejects.toMatchObject({
       code: VideoPreviewErrorCode.VIDEO_PREVIEW_RELEASED,
@@ -166,6 +173,41 @@ describe('videopreview api', () => {
     );
     expect(p.initialSnapshot.audio.status).toBe('unavailable');
   });
+
+  it('replays play on ended after setLoop(true) mid-playback', async () => {
+    const p = await createVideoPreviewPlayer(OFF);
+    await p.play();
+    mockNative.videoPreviewPlay.mockClear();
+    await p.setLoop(true);
+    expect(mockNative.videoPreviewSetLoop).toHaveBeenCalledWith(
+      'vprev_1',
+      true
+    );
+    rn.__emit({
+      playerId: 'vprev_1',
+      type: 'ended',
+      payload: {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockNative.videoPreviewPlay).toHaveBeenCalled();
+    await p.release();
+  });
+
+  it('does not replay on ended when loop is off', async () => {
+    const p = await createVideoPreviewPlayer(OFF);
+    await p.play();
+    mockNative.videoPreviewPlay.mockClear();
+    rn.__emit({
+      playerId: 'vprev_1',
+      type: 'ended',
+      payload: {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockNative.videoPreviewPlay).not.toHaveBeenCalled();
+    await p.release();
+  });
 });
 
 describe('videopreview events', () => {
@@ -181,7 +223,7 @@ describe('videopreview events', () => {
       mapNative({
         playerId: 'p',
         type: 'stateChanged',
-        payload: { state: 'playing', previousState: 'ready' },
+        payload: { state: 'playing', previousState: 'ready', positionMs: 0 },
       })
     ).toMatchObject({ type: 'stateChanged', state: 'playing' });
     expect(

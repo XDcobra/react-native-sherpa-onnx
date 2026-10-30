@@ -1,25 +1,14 @@
 import type { VideoPreviewSnapshot } from './types';
 
-function interpolate(
-  snap: VideoPreviewSnapshot,
-  nativeTs: number,
-  now: number
-): number {
-  if (snap.state !== 'playing') return snap.positionMs;
-  return snap.positionMs + Math.max(0, now - nativeTs);
-}
-
 /**
- * useSyncExternalStore compares snapshots with Object.is. A new `{ ...snap }`
- * on every getSnapshot call looks like a store change and React throws
- * "Maximum update depth exceeded". Reuse the last object when the visible
- * fields did not change.
+ * useSyncExternalStore compares snapshots with Object.is. Always return the
+ * same object while the event-sourced snap reference is unchanged.
  */
 export function snapshotForStatusHook(
   snap: VideoPreviewSnapshot | null,
-  nativeTs: number,
-  now: number,
-  smoothPosition: boolean,
+  _nativeTs: number,
+  _now: number,
+  _smoothPosition: boolean,
   cache: {
     base: VideoPreviewSnapshot | null;
     out: VideoPreviewSnapshot | null;
@@ -30,17 +19,10 @@ export function snapshotForStatusHook(
     cache.out = null;
     return null;
   }
-  if (!smoothPosition) {
-    cache.base = snap;
-    cache.out = snap;
-    return snap;
-  }
-  const positionMs = interpolate(snap, nativeTs, now);
-  if (cache.out && cache.base === snap && cache.out.positionMs === positionMs) {
+  if (cache.out && cache.base === snap) {
     return cache.out;
   }
-  const out = positionMs === snap.positionMs ? snap : { ...snap, positionMs };
   cache.base = snap;
-  cache.out = out;
-  return out;
+  cache.out = snap;
+  return snap;
 }

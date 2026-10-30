@@ -72,6 +72,52 @@ enum class PreviewInputKind : uint8_t {
   Release,
 };
 
+inline const char* PreviewInputKindName(PreviewInputKind k) {
+  switch (k) {
+    case PreviewInputKind::Prepare:
+      return "prepare";
+    case PreviewInputKind::Prepared:
+      return "prepared";
+    case PreviewInputKind::Play:
+      return "play";
+    case PreviewInputKind::Pause:
+      return "pause";
+    case PreviewInputKind::Seek:
+      return "seek";
+    case PreviewInputKind::FirstFrameShown:
+      return "firstFrameShown";
+    case PreviewInputKind::DataStarved:
+      return "dataStarved";
+    case PreviewInputKind::DataAvailable:
+      return "dataAvailable";
+    case PreviewInputKind::VideoEos:
+      return "videoEos";
+    case PreviewInputKind::AudioEos:
+      return "audioEos";
+    case PreviewInputKind::StepFrame:
+      return "stepFrame";
+    case PreviewInputKind::AudioFailed:
+      return "audioFailed";
+    case PreviewInputKind::Evicted:
+      return "evicted";
+    case PreviewInputKind::SurfaceDetached:
+      return "surfaceDetached";
+    case PreviewInputKind::SurfaceAttached:
+      return "surfaceAttached";
+    case PreviewInputKind::AppBackground:
+      return "appBackground";
+    case PreviewInputKind::RendererFailed:
+      return "rendererFailed";
+    case PreviewInputKind::BufferFinished:
+      return "bufferFinished";
+    case PreviewInputKind::SeekLiveEdge:
+      return "seekToLiveEdge";
+    case PreviewInputKind::Release:
+      return "release";
+  }
+  return "unknown";
+}
+
 enum class PreviewEffectKind : uint8_t {
   OpenReaders = 0,
   ConfigureAudio,
@@ -108,6 +154,7 @@ enum class AudioDecision : uint8_t {
 struct PreviewInput {
   PreviewInputKind kind = PreviewInputKind::Prepare;
   int64_t tUs = 0;
+  bool hasTarget = false;
   SeekMode mode = SeekMode::Accurate;
   uint64_t gen = 0;
   int stepDir = 0;

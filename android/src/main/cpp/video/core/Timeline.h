@@ -28,6 +28,9 @@ class Timeline {
   Status Get(int64_t presentationIndex, SampleEntry* out) const;
   /** Frame whose [pts_i, pts_{i+1}) contains t. Last frame if t == end. */
   int64_t SampleAtPts(int64_t tUs) const;
+  /** Presentation index of the next (`dir>0`) or previous (`dir<0`) frame.
+   *  Clamps to [0, n-1]. Sets *atEdge when the neighbor does not exist. */
+  int64_t NeighborSample(int64_t tUs, int dir, bool* atEdge) const;
   int64_t KeyframeAtOrBefore(int64_t sampleIdx) const;
   int64_t ClosestKeyframe(int64_t tUs) const;
   std::vector<int64_t> KeyframeTimes(int64_t fromUs, int64_t toUs,

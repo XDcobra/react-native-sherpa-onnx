@@ -33,6 +33,25 @@ std::string AMediaCodecDecoder::GlobalHwDecoderName(VideoCodec codec) {
   return codec == VideoCodec::Hevc ? gHwHevc : gHwH264;
 }
 
+void AMediaCodecDecoder::ApplyCsd(AMediaFormat* fmt, VideoCodec codec,
+                                  const std::vector<uint8_t>& config) {
+  if (fmt == nullptr || config.empty()) return;
+  BitstreamUtil::AnnexBCsd csd;
+  auto st = BitstreamUtil::MakeAnnexBCsd(codec, config, &csd);
+  if (!st.ok || csd.csd0.empty()) {
+    AMediaFormat_setBuffer(fmt, "csd-0", config.data(), config.size());
+    VIDEO_LOGW("video.decode csd fallback raw=%zu code=%s", config.size(),
+               st.errorMessage.c_str());
+    return;
+  }
+  AMediaFormat_setBuffer(fmt, "csd-0", csd.csd0.data(), csd.csd0.size());
+  if (!csd.csd1.empty()) {
+    AMediaFormat_setBuffer(fmt, "csd-1", csd.csd1.data(), csd.csd1.size());
+  }
+  VIDEO_LOGI("video.decode csd codec=%d csd0=%zu csd1=%zu",
+             static_cast<int>(codec), csd.csd0.size(), csd.csd1.size());
+}
+
 AMediaCodecDecoder::AMediaCodecDecoder() = default;
 
 AMediaCodecDecoder::~AMediaCodecDecoder() { Close(); }
@@ -52,10 +71,7 @@ Status AMediaCodecDecoder::Configure(const VideoTrackInfo& track) {
   AMediaFormat_setString(fmt, AMEDIAFORMAT_KEY_MIME, mime);
   AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, track.codedWidth);
   AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, track.codedHeight);
-  if (!track.codecConfig.empty()) {
-    AMediaFormat_setBuffer(fmt, "csd-0", track.codecConfig.data(),
-                           track.codecConfig.size());
-  }
+  ApplyCsd(fmt, track.codec, track.codecConfig);
   media_status_t ms = AImageReader_new(track.codedWidth, track.codedHeight,
                                        AIMAGE_FORMAT_YUV_420_888, 4, &reader_);
   if (ms != AMEDIA_OK || reader_ == nullptr) {

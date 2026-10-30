@@ -58,7 +58,7 @@ internal class VideoPreviewAudioTrack(
     buf.position(0)
     buf.limit(bytes)
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-      t.write(buf, bytes, AudioTrack.WRITE_BLOCKING)
+      t.write(buf, bytes, AudioTrack.WRITE_NON_BLOCKING)
     } else {
       AudioTrack.ERROR_INVALID_OPERATION
     }
