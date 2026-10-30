@@ -237,6 +237,15 @@ Status FfmpegDemuxer::Open(const std::string& path) {
                  std::strstr(name, "mp4") != nullptr;
   usesPread_ = impl_->isMov;
 
+  if (!impl_->isMov) {
+    // MOV gets a full sample table from moov. Matroska Cues are optional and
+    // often at EOF; find_stream_info walks clusters without a codec open
+    // (pass nullptr — this is not format probesize).
+    if (avformat_find_stream_info(impl_->fmt, nullptr) < 0) {
+      VIDEO_LOGW("video.demux stream info incomplete format=%s", name);
+    }
+  }
+
   impl_->videoStream = -1;
   for (unsigned i = 0; i < impl_->fmt->nb_streams; ++i) {
     if (impl_->fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
@@ -305,6 +314,10 @@ Status FfmpegDemuxer::Open(const std::string& path) {
       audio_.reset();
     }
   }
+  auto scanned = EnsurePacketIndex();
+  if (!scanned.ok) {
+    return scanned;
+  }
   impl_->counting = false;
   openBytes_ = impl_->bytes;
   VIDEO_LOGI("video.demux open %s codec=%s frames=%lld keys index_ms bytes=%lld",
@@ -367,6 +380,131 @@ Status FfmpegDemuxer::BuildIndex() {
     indexState_ = IndexState::Building;
   }
   timeline_.AssignImmutable(std::move(samples));
+  return Status::Ok();
+#endif
+}
+
+Status FfmpegDemuxer::ScanContainerPackets(std::vector<SampleEntry>* video,
+                                           std::vector<AudioPacketEntry>* audio) {
+#ifndef HAVE_FFMPEG
+  (void)video;
+  (void)audio;
+  return Status::Fail(kErrFfmpegDisabled, "FFmpeg disabled");
+#else
+  if (impl_->fmt == nullptr || impl_->videoStream < 0) {
+    return Status::Fail(kErrFileCorrupt, "scan: no format");
+  }
+  AVStream* vst = impl_->fmt->streams[impl_->videoStream];
+  AVStream* ast = impl_->audioStream >= 0
+                      ? impl_->fmt->streams[impl_->audioStream]
+                      : nullptr;
+  // After find_stream_info the demuxer is often at EOF. Seek by timestamp
+  // (not byte 0 — that rewinds past the EBML header).
+  const int seekErr =
+      av_seek_frame(impl_->fmt, impl_->videoStream, 0, AVSEEK_FLAG_BACKWARD);
+  VIDEO_LOGI("video.demux scan seek err=%d stream=%d", seekErr,
+             impl_->videoStream);
+  AVPacket* pkt = av_packet_alloc();
+  if (pkt == nullptr) {
+    return Status::Fail(kErrFileCorrupt, "scan: packet alloc");
+  }
+  while (true) {
+    const int err = av_read_frame(impl_->fmt, pkt);
+    if (err == AVERROR_EOF) {
+      break;
+    }
+    if (err < 0) {
+      av_packet_free(&pkt);
+      return Status::Fail(kErrFileCorrupt, "scan: av_read_frame");
+    }
+    if (video && pkt->stream_index == impl_->videoStream) {
+      const int64_t ts =
+          pkt->pts != AV_NOPTS_VALUE ? pkt->pts : pkt->dts;
+      SampleEntry s;
+      s.ptsUs = TbToUs(vst->time_base, ts);
+      s.dtsUs = TbToUs(vst->time_base, pkt->dts);
+      s.fileOffset = pkt->pos;
+      s.size = static_cast<uint32_t>(pkt->size > 0 ? pkt->size : 0);
+      if (pkt->flags & AV_PKT_FLAG_KEY) {
+        s.flags |= kSampleKey;
+      }
+      video->push_back(s);
+    } else if (audio && ast && pkt->stream_index == impl_->audioStream) {
+      const int64_t ts =
+          pkt->pts != AV_NOPTS_VALUE ? pkt->pts : pkt->dts;
+      AudioPacketEntry a;
+      a.ptsUs = TbToUs(ast->time_base, ts);
+      a.fileOffset = pkt->pos;
+      a.size = static_cast<uint32_t>(pkt->size > 0 ? pkt->size : 0);
+      audio->push_back(a);
+    }
+    av_packet_unref(pkt);
+  }
+  av_packet_free(&pkt);
+  (void)av_seek_frame(impl_->fmt, impl_->videoStream, INT64_MIN,
+                      AVSEEK_FLAG_BACKWARD);
+  return Status::Ok();
+#endif
+}
+
+Status FfmpegDemuxer::EnsurePacketIndex() {
+#ifndef HAVE_FFMPEG
+  return Status::Ok();
+#else
+  if (impl_->isMov) {
+    return Status::Ok();
+  }
+  // Cues are keyframes only. One cue → timeline size 1, which is enough for
+  // decode-one-still but MediaCodec encode needs several frames for CSD.
+  const bool needVideo =
+      timeline_.empty() || indexState_ == IndexState::Building ||
+      !frameCountExact_;
+  const bool needAudio = impl_->audioStream >= 0 && audio_.has_value() &&
+                         audioTimeline_.empty();
+  if (!needVideo && !needAudio) {
+    return Status::Ok();
+  }
+  std::vector<SampleEntry> video;
+  std::vector<AudioPacketEntry> audio;
+  auto st = ScanContainerPackets(needVideo ? &video : nullptr,
+                                 needAudio ? &audio : nullptr);
+  if (!st.ok) {
+    return st;
+  }
+  if (needVideo) {
+    std::sort(video.begin(), video.end(),
+              [](const SampleEntry& a, const SampleEntry& b) {
+                return a.ptsUs < b.ptsUs;
+              });
+    VIDEO_LOGI("video.demux scan packets=%zu had=%lld", video.size(),
+               static_cast<long long>(timeline_.frameCount()));
+    if (video.size() > static_cast<size_t>(std::max<int64_t>(0, timeline_.frameCount()))) {
+      timeline_.AssignImmutable(std::move(video));
+      frameCountExact_ = true;
+      indexState_ = IndexState::Complete;
+    } else if (timeline_.empty()) {
+      return Status::Fail(kErrFileCorrupt, "no video samples");
+    }
+  }
+  if (needAudio) {
+    std::sort(audio.begin(), audio.end(),
+              [](const AudioPacketEntry& a, const AudioPacketEntry& b) {
+                return a.ptsUs < b.ptsUs;
+              });
+    const int frameSize = audio_->frameSize;
+    const int sampleRate = audio_->sampleRate;
+    for (size_t i = 0; i < audio.size(); ++i) {
+      if (i + 1 < audio.size()) {
+        audio[i].durationUs =
+            static_cast<int32_t>(audio[i + 1].ptsUs - audio[i].ptsUs);
+      } else if (sampleRate > 0 && frameSize > 0) {
+        audio[i].durationUs =
+            static_cast<int32_t>((1000000LL * frameSize) / sampleRate);
+      }
+    }
+    VIDEO_LOGI("video.audio scan packets=%zu", audio.size());
+    audioTimeline_.AssignImmutable(std::move(audio));
+  }
   return Status::Ok();
 #endif
 }

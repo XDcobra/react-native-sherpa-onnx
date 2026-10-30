@@ -42,6 +42,9 @@ class FfmpegDemuxer : public PacketSource {
  private:
   Status BuildIndex();
   Status BuildAudioIndex();
+  Status EnsurePacketIndex();
+  Status ScanContainerPackets(std::vector<SampleEntry>* video,
+                              std::vector<AudioPacketEntry>* audio);
   Status ReadMovByPread(int64_t decodeIndex, EncodedPacket* out);
   Status ReadMatroska(int64_t decodeIndex, EncodedPacket* out);
   Status ReadAudioMov(int64_t index, EncodedPacket* out);

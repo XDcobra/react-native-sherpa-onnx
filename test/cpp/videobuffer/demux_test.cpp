@@ -72,6 +72,33 @@ TEST(FfmpegDemuxer, MkvOpens) {
   EXPECT_EQ(d.track().codec, VideoCodec::H264);
 }
 
+TEST(FfmpegDemuxer, MkvWithoutCuesBuildsPacketIndex) {
+  FfmpegDemuxer d;
+  auto st = d.Open(
+      "example/android/app/src/main/assets/test_videos/sample.mkv");
+  ASSERT_TRUE(st.ok) << st.errorMessage;
+  EXPECT_EQ(d.track().codec, VideoCodec::H264);
+  EXPECT_GE(d.timeline().frameCount(), 10)
+      << "matroska cues-only must expand to every packet";
+  EXPECT_TRUE(d.frameCountExact());
+  SampleEntry s;
+  ASSERT_TRUE(d.timeline().Get(0, &s).ok);
+  EncodedPacket pkt;
+  ASSERT_TRUE(d.ReadPacket(0, &pkt).ok) << "first packet after scan";
+  EXPECT_FALSE(pkt.payload.empty());
+}
+
+TEST(FfmpegDemuxer, WebmWithoutCuesBuildsPacketIndex) {
+  FfmpegDemuxer d;
+  auto st = d.Open(
+      "example/android/app/src/main/assets/test_videos/sample.webm");
+  ASSERT_TRUE(st.ok) << st.errorMessage;
+  EXPECT_EQ(d.track().codec, VideoCodec::H264);
+  EXPECT_GE(d.timeline().frameCount(), 10)
+      << "webm cues-only must expand to every packet";
+  EXPECT_TRUE(d.frameCountExact());
+}
+
 TEST(FfmpegDemuxer, AudioOnly) {
   FfmpegDemuxer d;
   auto st = d.Open(Fixture("audio_only.m4a"));
