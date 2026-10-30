@@ -286,6 +286,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/pdf\"",
     "\"#{pod_root}/ios/pdf/bridge\"",
     "\"#{pod_root}/ios\"",
+    "\"#{pod_root}/ios/videobuffer\"",
+    "\"#{pod_root}/ios/videobuffer/preview\"",
     "\"#{pod_root}/ios/archive\"",
     "\"#{pod_root}/ios/stt\"",
     "\"#{pod_root}/ios/tts\"",

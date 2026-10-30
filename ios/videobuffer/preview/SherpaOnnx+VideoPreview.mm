@@ -1,5 +1,6 @@
 #import "SherpaOnnx.h"
 #import "PaAudioSessionCoordinator.h"
+#import "videobuffer/SherpaOnnx+VideoModule.h"
 
 #include "SampleBufferAudioRenderer.h"
 #include "VideoRegistry.h"
@@ -17,8 +18,6 @@ using sherpa_onnx::video::preview::PreviewRegistry;
 using sherpa_onnx::video::preview::SampleBufferAudioRenderer;
 using sherpa_onnx::video::preview::SynchronizerClock;
 using sherpa_onnx::video::SeekMode;
-
-extern void BindVideoModule(SherpaOnnx *mod);
 
 namespace {
 

@@ -2,6 +2,8 @@
 #import <UIKit/UIKit.h>
 #import <dispatch/dispatch.h>
 
+#import "VideoMemoryPressure.h"
+
 #include "VideoRegistry.h"
 
 #if !TARGET_OS_OSX

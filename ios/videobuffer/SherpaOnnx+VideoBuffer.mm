@@ -12,6 +12,8 @@
 #include "live/LiveIngest.h"
 #include "live/LiveVideoEntry.h"
 
+#import "SherpaOnnx+VideoModule.h"
+#import "VideoMemoryPressure.h"
 #import "VideoToolboxDecoder.h"
 
 #include <atomic>
@@ -35,8 +37,6 @@ using sherpa_onnx::video::VideoBufferState;
 using sherpa_onnx::video::VideoKind;
 using sherpa_onnx::video::VideoRegistry;
 using sherpa_onnx::video::VideoToolboxDecoder;
-
-extern "C" void SherpaVideoInstallMemoryPressureObserver(void);
 
 namespace {
 
@@ -82,11 +82,6 @@ void EnsureVideoInit() {
                         }];
     });
   });
-}
-
-void BindVideoModule(SherpaOnnx *mod) {
-  gVideoModule = mod;
-  EnsureVideoInit();
 }
 
 NSDictionary *VideoInfoDict(const VideoBufferInfo &info) {
@@ -135,6 +130,11 @@ NSDictionary *VideoError(const char *code, const std::string &msg) {
 }
 
 }  // namespace
+
+void BindVideoModule(SherpaOnnx *mod) {
+  gVideoModule = mod;
+  EnsureVideoInit();
+}
 
 @implementation SherpaOnnx (VideoBuffer)
 

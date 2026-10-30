@@ -26,7 +26,7 @@ class SampleBufferVideoRenderer : public IVideoRenderer {
 
  private:
   void* layer_ = nullptr;
-  void* formatDesc_ = nullptr;
+  const void* formatDesc_ = nullptr;  // CMVideoFormatDescriptionRef
   VideoTrackInfo track_;
   uint64_t gen_ = 0;
   bool firstShown_ = false;

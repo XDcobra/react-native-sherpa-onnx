@@ -26,7 +26,7 @@ class SampleBufferAudioRenderer : public IAudioRenderer {
  private:
   void* renderer_ = nullptr;
   void* synchronizer_ = nullptr;
-  void* formatDesc_ = nullptr;
+  const void* formatDesc_ = nullptr;  // CMAudioFormatDescriptionRef
   int sampleRate_ = 0;
   int channels_ = 0;
   int64_t queued_ = 0;
