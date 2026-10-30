@@ -1,7 +1,7 @@
 # VideoBuffer — implementation plan
 
 **Status:** plan, not implemented. Branch `feat/videobuffer` (base `origin/feat/add-ocr-support`).
-**Evidence:** device/simulator benches on branch `exp/videobuffer-bench-harness` (`docs/internal/videobuffer-device-bench-results.md`, `docs/future-work/videobuffer-perf-future-work.md`). The harness code is reference only; nothing is ported from it except lessons.
+**Evidence:** device/simulator benches (`docs/internal/videobuffer/performance/videobuffer-android-ios-ranking.md`, `docs/internal/videobuffer/performance/videobuffer-device-bench-results.md`, `docs/future-work/videobuffer-perf-future-work.md`). Harness code on `exp/videobuffer-bench-harness` is reference only; nothing is ported from it except lessons.
 
 ## 0. Requirements this plan answers
 
@@ -395,7 +395,7 @@ Each phase ends green on host tests and hooks; one commit series per phase.
 5. **Live** — `EncodedPacketRing`, `PacketSpool`, `LiveVideoEntry`, cursors, `LiveIngest`, `VideoPacketReader`; tests incl. TSan.
 6. **Platform backends** — Android `AMediaCodecDecoder`/`Encoder` + `VideoCodecCatalog`; iOS `VideoToolboxDecoder`/`Encoder`; optional macOS VT host test. Compile-verified for all ABIs + iOS device/sim; runtime verification is §12.5.
 7. **Bridges + TS** — JNI, Kotlin service (incl. `onTrimMemory`), module overrides; ObjC++ category + memory pressure; TurboModule spec; `src/videobuffer`; jest tests; package exports.
-8. **Pipeline integration + docs** — image bridge API, OCR `ptsMs`, `docs/videobuffer.md` (public), `docs/internal/videobuffer-internal.md` (storage, spool format, invariants), licenses, disable-ffmpeg table.
+8. **Pipeline integration + docs** — image bridge API, OCR `ptsMs`, `docs/videobuffer-offline.md` + `docs/videobuffer-streaming.md` (public), `docs/internal/videobuffer/videobuffer-internal.md` (storage, spool format, invariants), licenses, disable-ffmpeg table.
 
 ## 15. Closed 2026-10-29 (was: open points before phase 6)
 

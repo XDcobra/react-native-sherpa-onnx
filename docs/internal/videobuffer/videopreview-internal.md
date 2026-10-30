@@ -1,6 +1,6 @@
 # VideoPreview — internal notes
 
-Public API: [../videopreview.md](../videopreview.md). Implementation plan: [videopreview-implementation-plan.md](videopreview-implementation-plan.md).
+Public API: [videopreview.md](../../videopreview.md). Implementation plan: [videopreview-implementation-plan.md](videopreview-implementation-plan.md).
 
 ## Layout
 

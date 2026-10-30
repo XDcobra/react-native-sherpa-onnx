@@ -1,6 +1,20 @@
 # VideoBuffer — internal notes
 
-Public API: [docs/videobuffer.md](../videobuffer.md). Implementation plan: [videobuffer-implementation-plan.md](./videobuffer-implementation-plan.md).
+Public API: [videobuffer-offline.md](../../videobuffer-offline.md), [videobuffer-streaming.md](../../videobuffer-streaming.md). Implementation plan: [videobuffer-implementation-plan.md](./videobuffer-implementation-plan.md).
+
+## Performance evidence
+
+Device/simulator benches (2026-10-29). Harness code was throwaway (`exp/videobuffer-bench-harness`); these files are the keep.
+
+| Doc | What |
+| --- | --- |
+| [videobuffer-android-ios-ranking.md](./performance/videobuffer-android-ios-ranking.md) | Cross-platform ranking (durable copy of the Cursor canvas) |
+| [videobuffer-device-bench-results.md](./performance/videobuffer-device-bench-results.md) | Android A142P + iOS sim verdicts (360p / 1080p) |
+| [videobuffer-bench-results.md](./performance/videobuffer-bench-results.md) / [large](./performance/videobuffer-bench-results-large.md) | Host RGB-layout benches (no decoder) |
+| [videobuffer-experiment-findings.md](./performance/videobuffer-experiment-findings.md) | Host experiment write-up |
+| [videobuffer-bench-android-live-capture-1080p/](./performance/videobuffer-bench-android-live-capture-1080p/) | Raw Android 1080p + live-capture JSON |
+| [videobuffer-bench-ios-sim-360p/](./performance/videobuffer-bench-ios-sim-360p/) / [1080p](./performance/videobuffer-bench-ios-sim-1080p/) | Raw iOS simulator JSON |
+| [videobuffer-perf-future-work.md](../../future-work/videobuffer-perf-future-work.md) | Candidate list that the benches ranked |
 
 ## Storage
 

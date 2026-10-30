@@ -814,7 +814,7 @@ Each phase ends green on host tests + lefthook (lint, types, commitlint); one co
 
 ### Phase 2 — Audio decode + export
 
-- `FfmpegAudioDecoder`, `VideoAudioExtractor`, `createOfflineAudioBufferFromVideo` on both platforms (progress, cancel), docs section in `docs/videobuffer.md`.
+- `FfmpegAudioDecoder`, `VideoAudioExtractor`, `createOfflineAudioBufferFromVideo` on both platforms (progress, cancel), docs section in `docs/videobuffer-offline.md` / `docs/videobuffer-streaming.md`.
 - Accept: `audio_decode_test`, `audio_extract_test`; ASan; compile-verified Android ABIs + iOS.
 
 ### Phase 3 — Preview core (C++)
@@ -834,7 +834,7 @@ Each phase ends green on host tests + lefthook (lint, types, commitlint); one co
 
 ### Phase 6 — TS + docs
 
-- `src/videopreview` (types, validate, events, player, hooks, view), Jest + type tests, `package.json` export `./videopreview` + tsconfig paths (lib + example), `docs/videopreview.md` (public, incl. §9 recipe), `docs/internal/videopreview-internal.md`, `docs/disable-ffmpeg.md` rows, `docs/README.md` index.
+- `src/videopreview` (types, validate, events, player, hooks, view), Jest + type tests, `package.json` export `./videopreview` + tsconfig paths (lib + example), `docs/videopreview.md` (public, incl. §9 recipe), `docs/internal/videobuffer/videopreview-internal.md`, `docs/disable-ffmpeg.md` rows, `docs/README.md` index.
 - Accept: Jest green; `yarn typecheck`; docs reviewed. → **Device test possible** (offline A/V, live video-only) via a separate example-screen step.
 
 ### Phase 7 — Live audio
