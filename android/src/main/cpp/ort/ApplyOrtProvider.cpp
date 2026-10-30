@@ -15,14 +15,14 @@
 #if __has_include(<onnxruntime/core/providers/coreml/coreml_provider_factory.h>)
 #include <onnxruntime/core/providers/coreml/coreml_provider_factory.h>
 #define SHERPA_ONNX_HAS_COREML_FACTORY 1
-#elif __has_include(<onnxruntime/coreml_provider_factory.h>)
-#include <onnxruntime/coreml_provider_factory.h>
-#define SHERPA_ONNX_HAS_COREML_FACTORY 1
 #elif __has_include(<coreml_provider_factory.h>)
 #include <coreml_provider_factory.h>
 #define SHERPA_ONNX_HAS_COREML_FACTORY 1
 #elif __has_include("coreml_provider_factory.h")
 #include "coreml_provider_factory.h"
+#define SHERPA_ONNX_HAS_COREML_FACTORY 1
+#elif __has_include(<onnxruntime/coreml_provider_factory.h>)
+#include <onnxruntime/coreml_provider_factory.h>
 #define SHERPA_ONNX_HAS_COREML_FACTORY 1
 #endif
 #endif

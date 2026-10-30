@@ -1,12 +1,17 @@
 #include "OcrEngine.h"
 
+#include "OcrCapabilities.h"
+#include "OcrCrop.h"
 #include "OcrDetect.h"
 #include "OcrFactory.h"
+#include "OcrRecognizeSpec.h"
 #include "OcrTextUtils.h"
 #include "ImageRegistry.h"
 #include "ImageTypes.h"
 
+#include <optional>
 #include <stdexcept>
+#include <string>
 
 #ifndef OCR_LOG_TAG
 #define OCR_LOG_TAG "SherpaOnnx:ocr"
@@ -127,14 +132,11 @@ void OcrEngine::Load(const std::string& model_type, const std::string& model_dir
   }
   OCR_LOGI(
       "loaded family=%s provider=%s threads=%d maxSide=%d maxNew=%d maxPixels=%d "
-      "paddleocr_vl_task=%s dir=%s",
+      "dir=%s",
       backend_->Family(),
       options_.provider.empty() ? "cpu" : options_.provider.c_str(),
       options_.num_threads, options_.max_side_len, options_.max_new_tokens,
-      options_.max_pixels,
-      options_.paddleocr_vl_task.empty() ? "ocr"
-                                         : options_.paddleocr_vl_task.c_str(),
-      model_dir.c_str());
+      options_.max_pixels, model_dir.c_str());
 }
 
 const char* OcrEngine::Family() const {
@@ -160,17 +162,26 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
   }
   out.family = backend_->Family() ? backend_->Family() : "";
 
-  if (options.has_paddleocr_vl && out.family != "paddleocr_vl") {
-    out.errorCode = "OCR_INVALID_ARGUMENT";
-    out.errorMessage = "paddleocrVl is only valid for paddleocr_vl";
-    return out;
-  }
-  if (!options.paddleocr_vl_task.empty() &&
-      options.paddleocr_vl_task != "ocr" &&
-      options.paddleocr_vl_task != "spotting") {
-    out.errorCode = "OCR_INVALID_ARGUMENT";
-    out.errorMessage = "paddleocrVl.task must be 'ocr' or 'spotting'";
-    return out;
+  OcrRecognizeRequest request;
+  if (options.recognize_spec.empty()) {
+    request.instruction = DefaultInstructionForFamily(out.family);
+  } else {
+    const auto parsed = ParseOcrRecognizeSpec(options.recognize_spec);
+    if (!parsed.ok) {
+      out.errorCode = parsed.error_code;
+      out.errorMessage = parsed.error_message;
+      OCR_LOGI("instruction reject code=%s reason=%s", parsed.error_code.c_str(),
+               parsed.error_message.c_str());
+      return out;
+    }
+    if (parsed.family != out.family) {
+      out.errorCode = kOcrErrInstructionFamilyMismatch;
+      out.errorMessage = "instruction family does not match loaded backend";
+      OCR_LOGI("instruction reject code=%s reason=%s", out.errorCode.c_str(),
+               out.errorMessage.c_str());
+      return out;
+    }
+    request = parsed.request;
   }
 
   image::ImageBufferInfo info;
@@ -238,25 +249,49 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
     view.height = height;
     view.frame_index = frame_index;
 
+    const auto valid = ValidateRequest(out.family, request, options.granularity,
+                                       width, height);
+    if (!valid.ok) {
+      out.errorCode = valid.error_code;
+      out.errorMessage = valid.error_message;
+      OCR_LOGI("instruction reject code=%s reason=%s", valid.error_code.c_str(),
+               valid.error_message.c_str());
+      return out;
+    }
+
+    std::optional<OcrCroppedFrame> cropped;
+    const OcrFrameView* backend_view = &view;
+    if (request.crop) {
+      cropped.emplace(view, *request.crop);
+      backend_view = &cropped->view();
+    }
+
     OcrRecognizeContext ctx;
     ctx.progress = options.progress;
     ctx.cancel = options.cancel;
     ctx.frame_index = frame_index;
     ctx.frame_count = total;
     ctx.progress_min_interval_ms = options.progress_min_interval_ms;
-    ctx.paddleocr_vl_task = options.paddleocr_vl_task.empty()
-                                ? options_.paddleocr_vl_task
-                                : options.paddleocr_vl_task;
+    ctx.request = request;
 
     OcrResult frame_result;
     try {
       // Backend may run for a while; keep lock so unload cannot race Release.
-      frame_result = backend_->Recognize(view, ctx);
+      frame_result = backend_->Recognize(*backend_view, ctx);
+      if (cropped) {
+        cropped->TranslateResult(frame_result);
+      }
     } catch (const OcrCancelled&) {
       out.cancelled = true;
       out.errorCode = "OCR_CANCELLED";
       out.errorMessage = "OCR recognize cancelled";
       OCR_LOGI("recognize cancelled in backend after %d/%d", done, total);
+      return out;
+    } catch (const OcrCodedError& e) {
+      out.errorCode = e.code();
+      out.errorMessage = e.what() ? e.what() : e.code();
+      OCR_LOGI("recognize coded error code=%s reason=%s", e.code().c_str(),
+               out.errorMessage.c_str());
       return out;
     } catch (const std::exception& e) {
       out.errorCode = "OCR_RECOGNIZE_FAILED";
@@ -275,33 +310,49 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
       span.frame_index = frame_index;
       merged.spans.push_back(span);
     }
+    for (auto element : frame_result.elements) {
+      if (element.has_utf16) {
+        element.utf16_start += utf16_cursor;
+        element.utf16_end += utf16_cursor;
+      }
+      element.frame_index = frame_index;
+      merged.elements.push_back(element);
+    }
     merged.text_utf8 += frame_result.text_utf8;
     utf16_cursor += Utf8ToUtf16Length(frame_result.text_utf8);
-    appendField(merged.doctags_utf8, frame_result.doctags_utf8);
     appendField(merged.raw_utf8, frame_result.raw_utf8);
-    appendField(merged.markdown_utf8, frame_result.markdown_utf8);
+    if (frame_result.has_content) {
+      if (!merged.has_content) {
+        merged.has_content = true;
+        merged.content = frame_result.content;
+      } else if (!frame_result.content.value.empty()) {
+        if (!merged.content.value.empty()) merged.content.value.push_back('\n');
+        merged.content.value += frame_result.content.value;
+      }
+    }
     merged.stop_reason = frame_result.stop_reason;
     merged.complete = frame_result.complete;
     OCR_LOGI(
-        "recognize extras frame=%d stop=%s complete=%d doctags=%zu raw=%zu "
-        "markdown=%zu",
+        "recognize extras frame=%d stop=%s complete=%d raw=%zu "
+        "content=%zu elements=%zu",
         frame_index, frame_result.stop_reason.c_str(),
-        frame_result.complete ? 1 : 0, frame_result.doctags_utf8.size(),
-        frame_result.raw_utf8.size(), frame_result.markdown_utf8.size());
+        frame_result.complete ? 1 : 0, frame_result.raw_utf8.size(),
+        frame_result.content.value.size(), frame_result.elements.size());
 
     ++done;
   }
 
   FilterSpansByGranularity(merged, options.granularity);
+  merged.instruction_spec = SerializeOcrRecognizeSpec(out.family, request);
   out.ok = true;
   out.result = std::move(merged);
   OCR_LOGI(
-      "recognize done buffer=%s spans=%zu textUtf16≈%d doctags=%zu raw=%zu "
-      "markdown=%zu stop=%s complete=%d",
+      "recognize done buffer=%s spans=%zu textUtf16≈%d raw=%zu "
+      "content=%zu elements=%zu stop=%s complete=%d",
       image_buffer_id.c_str(), out.result.spans.size(), utf16_cursor,
-      out.result.doctags_utf8.size(), out.result.raw_utf8.size(),
-      out.result.markdown_utf8.size(),
-      out.result.stop_reason.c_str(), out.result.complete ? 1 : 0);
+      out.result.raw_utf8.size(), out.result.content.value.size(),
+      out.result.elements.size(), out.result.stop_reason.c_str(),
+      out.result.complete ? 1 : 0);
   return out;
 }
 

@@ -13,8 +13,12 @@ namespace sherpa_onnx {
 namespace ocr {
 namespace doc_vlm {
 
+enum class DocTagsPrefixKind { kPage, kElement };
+
 class DocTagsPrefix {
  public:
+  explicit DocTagsPrefix(DocTagsPrefixKind kind = DocTagsPrefixKind::kPage)
+      : kind_(kind) {}
   /** Commit `piece` if the accumulated string stays a legal prefix. */
   bool Feed(std::string_view piece);
   bool closed_doctag() const { return closed_; }
@@ -26,6 +30,7 @@ class DocTagsPrefix {
   bool ApplyClose(const std::string& name);
   bool ApplyLoc();
 
+  DocTagsPrefixKind kind_ = DocTagsPrefixKind::kPage;
   std::string pending_;
   std::vector<std::string> stack_;
   bool seen_doctag_ = false;

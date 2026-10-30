@@ -24,18 +24,20 @@ internal object OcrNative {
     provider: String?,
     maxSideLen: Int,
     useOrientationCls: Boolean,
-    detBoxThresh: Float = 0.3f,
-    detBoxScoreThresh: Float = 0.5f,
+    detBoxThresh: Float = -1f,
+    detBoxScoreThresh: Float = -1f,
     detUnclipRatio: Float = 1.5f,
     maxNewTokens: Int = 0,
     maxPixels: Int = 0,
     quantization: String? = null,
     /** Absolute path overrides keyed like ValidateOcrPaths (`det`, `rec`, …). */
     pathOverrides: HashMap<String, String>? = null,
-    paddleocrVlTask: String? = null,
   )
 
   @JvmStatic external fun nativeUnload(instanceId: String)
+
+  @JvmStatic
+  external fun nativeGetCapabilities(instanceId: String): HashMap<String, Any>?
 
   @JvmStatic
   external fun nativeRecognize(
@@ -45,8 +47,7 @@ internal object OcrNative {
     granularity: String?,
     operationId: String?,
     progressMinIntervalMs: Int,
-    hasPaddleocrVl: Boolean,
-    paddleocrVlTask: String?,
+    recognizeSpec: String?,
   ): HashMap<String, Any>?
 
   @JvmStatic external fun nativeCancelRecognize(operationId: String)

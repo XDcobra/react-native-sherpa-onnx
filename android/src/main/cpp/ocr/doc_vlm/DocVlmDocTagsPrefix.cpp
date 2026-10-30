@@ -65,6 +65,21 @@ bool IsOtslVoidTag(const std::string& name) {
          name == "srow";
 }
 
+/** Code language tags (`<_Python_>`) are void — they are not closed. */
+bool IsLanguageTag(const std::string& name) {
+  return name.size() >= 3 && name.front() == '_' && name.back() == '_';
+}
+
+bool IsVoidTag(const std::string& name) {
+  return IsOtslVoidTag(name) || IsLanguageTag(name);
+}
+
+bool IsElementRoot(const std::string& name) {
+  return name == "otsl" || name == "table" || name == "formula" ||
+         name == "code" || name == "chart" || name == "text" ||
+         name == "picture";
+}
+
 }  // namespace
 
 bool DocTagsPrefix::Feed(std::string_view piece) {
@@ -123,19 +138,22 @@ bool DocTagsPrefix::ApplyText(std::string_view text) {
 bool DocTagsPrefix::ApplyOpen(const std::string& name) {
   if (closed_) return false;
   if (!seen_doctag_) {
-    if (name != "doctag") return false;
-    seen_doctag_ = true;
-    stack_.push_back(name);
-    return true;
+    if (name == "doctag" ||
+        (kind_ == DocTagsPrefixKind::kElement && IsElementRoot(name))) {
+      seen_doctag_ = true;
+      stack_.push_back(name);
+      return true;
+    }
+    return false;
   }
-  if (IsOtslVoidTag(name)) return true;
+  if (IsVoidTag(name)) return true;
   stack_.push_back(name);
   return true;
 }
 
 bool DocTagsPrefix::ApplyClose(const std::string& name) {
   if (closed_ || !seen_doctag_ || stack_.empty()) return false;
-  if (IsOtslVoidTag(name)) return true;
+  if (IsVoidTag(name)) return true;
   if (name == "doctag") {
     closed_ = true;
     stack_.clear();

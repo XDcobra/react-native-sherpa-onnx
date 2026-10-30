@@ -1,6 +1,9 @@
 #include "DocVlmDocTags.h"
 
+#include "../OcrGeometry.h"
 #include "../OcrTextUtils.h"
+#include "../markup/OcrElementKind.h"
+#include "../markup/OcrOtsl.h"
 
 #include <algorithm>
 #include <cctype>
@@ -28,9 +31,21 @@ bool IsNameChar(char c) {
 
 bool IsTextTag(const std::string& tag) {
   static const char* kNames[] = {
-      "text",        "paragraph", "title",      "list_item",
-      "caption",     "footnote",  "formula",    "code",
-      "page_header", "page_footer"};
+      "text",
+      "paragraph",
+      "title",
+      "list_item",
+      "caption",
+      "footnote",
+      "formula",
+      "code",
+      "page_header",
+      "page_footer",
+      "form",
+      "key_value_region",
+      "references",
+      "checkbox_selected",
+      "checkbox_unselected"};
   for (const char* name : kNames) {
     if (tag == name) return true;
   }
@@ -45,10 +60,7 @@ bool IsTextTag(const std::string& tag) {
 
 bool IsMediaTag(const std::string& tag) { return tag == "picture" || tag == "chart"; }
 
-bool IsOtslCell(const std::string& tag) {
-  return tag == "fcel" || tag == "ched" || tag == "rhed" || tag == "ecel" ||
-         tag == "lcel" || tag == "ucel" || tag == "xcel" || tag == "nl" || tag == "srow";
-}
+bool IsOtslCell(const std::string& tag) { return IsOtslCellToken(tag); }
 
 bool IsContentCell(const std::string& tag) {
   return tag == "fcel" || tag == "ched" || tag == "rhed";
@@ -193,6 +205,35 @@ std::string InnerText(const std::vector<Tok>& toks, size_t begin, size_t end) {
   return CleanInner(raw);
 }
 
+std::string InnerTextKeepWs(const std::vector<Tok>& toks, size_t begin, size_t end) {
+  std::string raw;
+  for (size_t i = begin; i < end && i < toks.size(); ++i) {
+    if (toks[i].kind == TokKind::Text) raw += toks[i].text;
+  }
+  return TrimAsciiWs(raw);
+}
+
+bool IsCodeLanguageTag(const std::string& name) {
+  return name.size() >= 3 && name.front() == '_' && name.back() == '_';
+}
+
+std::string CodeLanguageFromTag(const std::string& name) {
+  return name.substr(1, name.size() - 2);
+}
+
+bool IsKnownOpenName(const std::string& name) {
+  return IsTextTag(name) || IsMediaTag(name) || name == "otsl" ||
+         name == "table" || name == "doctag" || IsOtslCell(name) ||
+         IsCodeLanguageTag(name);
+}
+
+void ThrowIfUnknownOpen(const Tok& tok) {
+  if (tok.kind != TokKind::Open) return;
+  if (IsKnownOpenName(tok.name)) return;
+  throw OcrCodedError(kOcrErrParseUnknownKind,
+                      "unknown DocTags tag: " + tok.name);
+}
+
 bool TryTakeLocs(const std::vector<Tok>& toks, size_t& i, int locs[4]) {
   if (i + 4 > toks.size()) return false;
   for (int k = 0; k < 4; ++k) {
@@ -205,39 +246,16 @@ bool TryTakeLocs(const std::vector<Tok>& toks, size_t& i, int locs[4]) {
   return true;
 }
 
-int ClampLoc(int loc) {
-  if (loc < 0) return 0;
-  if (loc > 499) return 499;
-  return loc;
-}
-
-float LocToPx(int loc, int extent) {
-  return static_cast<float>(ClampLoc(loc)) / 500.f * static_cast<float>(extent);
-}
-
 OcrQuad MakeQuad(bool has_loc, const int locs[4], int frame_w, int frame_h) {
-  OcrQuad quad;
-  float x0 = 0.f;
-  float y0 = 0.f;
-  float x1 = static_cast<float>(frame_w);
-  float y1 = static_cast<float>(frame_h);
-  if (has_loc) {
-    x0 = LocToPx(locs[0], frame_w);
-    y0 = LocToPx(locs[1], frame_h);
-    x1 = LocToPx(locs[2], frame_w);
-    y1 = LocToPx(locs[3], frame_h);
-    if (x1 < x0) std::swap(x0, x1);
-    if (y1 < y0) std::swap(y0, y1);
+  if (!has_loc) {
+    return RectToQuad(OcrPixelRect{0, 0, std::max(1, frame_w), std::max(1, frame_h)});
   }
-  quad.xy[0] = x0;
-  quad.xy[1] = y0;
-  quad.xy[2] = x1;
-  quad.xy[3] = y0;
-  quad.xy[4] = x1;
-  quad.xy[5] = y1;
-  quad.xy[6] = x0;
-  quad.xy[7] = y1;
-  return quad;
+  OcrGridRect grid;
+  grid.x1 = locs[0];
+  grid.y1 = locs[1];
+  grid.x2 = locs[2];
+  grid.y2 = locs[3];
+  return RectToQuad(GridToPixels(grid, frame_w, frame_h, kOcrGridGranite));
 }
 
 OcrSpanLevel LevelFor(const std::string&) { return OcrSpanLevel::kLine; }
@@ -296,7 +314,9 @@ struct ItemSpan {
 };
 
 struct Item {
+  std::string tag;
   std::string text;
+  std::string language;
   bool in_text = false;
   std::string markdown;
   std::vector<ItemSpan> spans;
@@ -333,14 +353,27 @@ void ParseTextLike(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& i
     const Tok& t = toks[i];
     if (t.kind == TokKind::Close && t.name == tag) break;
     if (t.kind == TokKind::Open && IsStructuralOpen(t.name) && t.name != tag) break;
+    ThrowIfUnknownOpen(t);
     ++i;
   }
-  const std::string text = InnerText(toks, inner_begin, i);
+  const std::string text = tag == "code" ? InnerTextKeepWs(toks, inner_begin, i)
+                                        : InnerText(toks, inner_begin, i);
+  std::string language;
+  if (tag == "code") {
+    for (size_t k = inner_begin; k < i; ++k) {
+      if (toks[k].kind == TokKind::Open && IsCodeLanguageTag(toks[k].name)) {
+        language = CodeLanguageFromTag(toks[k].name);
+        break;
+      }
+    }
+  }
   SkipMatchingClose(toks, i, tag);
-  if (text.empty()) return;
+  if (text.empty() && tag.find("checkbox_") != 0) return;
   Item item;
+  item.tag = tag;
   item.text = text;
-  item.in_text = true;
+  item.language = std::move(language);
+  item.in_text = !text.empty();
   item.markdown = MarkdownFor(tag, text);
   item.spans.push_back(MakeItemSpan(0, Utf8ToUtf16Length(text), has_loc, locs,
                                    LevelFor(tag)));
@@ -356,10 +389,12 @@ void ParseMedia(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& item
     const Tok& t = toks[i];
     if (t.kind == TokKind::Close && t.name == tag) break;
     if (t.kind == TokKind::Open && IsStructuralOpen(t.name) && t.name != tag) break;
+    ThrowIfUnknownOpen(t);
     ++i;
   }
   SkipMatchingClose(toks, i, tag);
   Item item;
+  item.tag = tag;
   item.markdown = MarkdownFor(tag, "");
   if (has_loc) {
     item.spans.push_back(
@@ -415,6 +450,7 @@ void EmitTable(const std::vector<std::vector<TableCell>>& rows,
   }
 
   Item item;
+  item.tag = "otsl";
   item.text = text;
   item.in_text = true;
   item.markdown = markdown;
@@ -458,6 +494,7 @@ void ParseOtsl(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& items
       break;
     }
     if (t.kind != TokKind::Open || !IsOtslCell(t.name)) {
+      ThrowIfUnknownOpen(t);
       ++i;
       continue;
     }
@@ -484,6 +521,7 @@ void ParseOtsl(const std::vector<Tok>& toks, size_t& i, std::vector<Item>& items
         break;
       }
       if (n.kind == TokKind::Close && (n.name == "otsl" || n.name == cell)) break;
+      ThrowIfUnknownOpen(n);
       ++i;
     }
     parsed_cell.text = InnerText(toks, inner_begin, i);
@@ -521,6 +559,7 @@ void Walk(const std::vector<Tok>& toks, std::vector<Item>& items) {
       ParseOtsl(toks, i, items);
       continue;
     }
+    ThrowIfUnknownOpen(t);
     ++i;
   }
 }
@@ -570,8 +609,54 @@ DocTagsParse ParseDocTags(const std::string& doctags, int frame_w, int frame_h,
       span.level = spec.level;
       parsed.spans.push_back(span);
     }
+    if (parsed.language.empty() && !item.language.empty()) {
+      parsed.language = item.language;
+    }
+    if (item.tag.empty()) continue;
+    const auto kind = FromDocTagsTag(item.tag);
+    if (!kind.ok) {
+      throw OcrCodedError(kind.error_code.c_str(), kind.error_message);
+    }
+    OcrLayoutElement element;
+    element.kind = kind.kind;
+    element.frame_index = frame_index;
+    element.heading_level = kind.level;
+    element.checked = kind.checked;
+    if (!item.spans.empty() && item.spans[0].has_loc) {
+      element.has_quad = true;
+      element.quad = MakeQuad(true, item.spans[0].locs, frame_w, frame_h);
+    }
+    if (item.in_text) {
+      element.has_utf16 = true;
+      element.utf16_start = utf16_at;
+      element.utf16_end = utf16_at + Utf8ToUtf16Length(item.text);
+    }
+    parsed.elements.push_back(element);
   }
   return parsed;
+}
+
+void AdoptBareProse(DocTagsParse& parsed, const std::string& raw) {
+  if (!parsed.elements.empty() || !parsed.text_utf8.empty()) return;
+  std::string plain = raw;
+  const char* eos = "<|end_of_text|>";
+  const auto eos_at = plain.find(eos);
+  if (eos_at != std::string::npos) plain.resize(eos_at);
+  while (!plain.empty() &&
+         (plain.back() == ' ' || plain.back() == '\t' || plain.back() == '\n' ||
+          plain.back() == '\r')) {
+    plain.pop_back();
+  }
+  size_t i = 0;
+  while (i < plain.size() &&
+         (plain[i] == ' ' || plain[i] == '\t' || plain[i] == '\n' ||
+          plain[i] == '\r')) {
+    ++i;
+  }
+  if (i > 0) plain.erase(0, i);
+  if (plain.empty() || plain.find('<') != std::string::npos) return;
+  parsed.text_utf8 = plain;
+  parsed.markdown_utf8 = plain;
 }
 
 }  // namespace doc_vlm

@@ -37,20 +37,31 @@ import {
   type DetectedModelEntry,
   type OcrDetectModelResult,
 } from '../types/modelDetect';
+import { buildOcrInitBridgeOptions } from './ocrNativeBridge';
 import {
-  assertOcrPaddleocrVlTask,
-  buildOcrInitBridgeOptions,
-} from './ocrNativeBridge';
+  decodeOcrRecognizeSpec,
+  encodeOcrRecognizeSpec,
+} from './ocrRecognizeSpec';
 import type {
-  OcrDocVlmStopReason,
+  OcrContent,
+  OcrElement,
+  OcrElementKind,
   OcrEngine,
+  OcrFamily,
+  OcrEngineForInit,
   OcrInitializeOptions,
+  OcrInstructionFamily,
+  OcrInstructionOf,
   OcrModelType,
   OcrProgressNativeEvent,
   OcrRecognizeOptions,
   OcrRecognizeResult,
 } from './types';
-import { OCR_PROGRESS_MIN_INTERVAL_MS, OcrErrorCode } from './types';
+import {
+  OCR_CAPABILITIES,
+  OCR_PROGRESS_MIN_INTERVAL_MS,
+  OcrErrorCode,
+} from './types';
 
 type NativeSubscription = { remove: () => void };
 
@@ -59,6 +70,53 @@ const getNative = (): Spec =>
 
 let ocrInstanceCounter = 0;
 let opIdCounter = 0;
+
+function asOcrFamily(raw: string | undefined): OcrFamily {
+  if (
+    raw === 'ppocr' ||
+    raw === 'doctr' ||
+    raw === 'doc_vlm' ||
+    raw === 'nemotron_parse' ||
+    raw === 'paddleocr_vl'
+  ) {
+    return raw;
+  }
+  throw Object.assign(new Error(`OCR family unresolved: ${raw ?? '(empty)'}`), {
+    code: OcrErrorCode.INTERNAL_ERROR,
+  });
+}
+
+function assertNativeCapabilities(
+  family: OcrFamily,
+  reported: {
+    tasks?: string[];
+    granularities?: string[];
+  }
+): void {
+  const known = OCR_CAPABILITIES[family];
+  const knownTasks = new Set(known.tasks as readonly string[]);
+  for (const task of reported.tasks ?? []) {
+    if (!knownTasks.has(task)) {
+      throw Object.assign(
+        new Error(
+          `native reported unknown ${family} task ${task} (OCR_CAPABILITIES_MISMATCH)`
+        ),
+        { code: OcrErrorCode.CAPABILITIES_MISMATCH }
+      );
+    }
+  }
+  const knownGran = new Set(known.granularities as readonly string[]);
+  for (const gran of reported.granularities ?? []) {
+    if (!knownGran.has(gran)) {
+      throw Object.assign(
+        new Error(
+          `native reported unknown ${family} granularity ${gran} (OCR_CAPABILITIES_MISMATCH)`
+        ),
+        { code: OcrErrorCode.CAPABILITIES_MISMATCH }
+      );
+    }
+  }
+}
 
 function cancelledError(): Error & { code: typeof OcrErrorCode.CANCELLED } {
   const err = new Error('OCR recognize cancelled') as Error & {
@@ -104,12 +162,6 @@ function beginRecognizeProgressCancel(options?: OcrRecognizeOptions): {
   }
   if (options?.granularity !== undefined) {
     nativeOptions.granularity = options.granularity;
-  }
-  if (options?.paddleocrVl !== undefined) {
-    nativeOptions.paddleocrVl = {};
-    if (options.paddleocrVl.task !== undefined) {
-      nativeOptions.paddleocrVl.task = options.paddleocrVl.task;
-    }
   }
 
   let progressSubscription: NativeSubscription | null = null;
@@ -333,6 +385,142 @@ export async function detectOcrModel(
   };
 }
 
+const OCR_VLM_STOP_REASONS = {
+  doc_vlm: ['doctag_end', 'eos', 'max_new_tokens', 'invalid_sequence'],
+  nemotron_parse: ['eos', 'max_new_tokens'],
+  paddleocr_vl: ['eos', 'max_new_tokens'],
+} as const;
+
+const OCR_ELEMENT_KINDS = new Set<string>([
+  'text',
+  'title',
+  'sectionHeader',
+  'listItem',
+  'caption',
+  'footnote',
+  'pageHeader',
+  'pageFooter',
+  'formula',
+  'code',
+  'table',
+  'picture',
+  'chart',
+  'tableOfContents',
+  'bibliography',
+  'checkbox',
+  'form',
+  'keyValueRegion',
+]);
+
+function missingExtras(): never {
+  throw Object.assign(new Error('OCR recognize result missing extras'), {
+    code: OcrErrorCode.INTERNAL_ERROR,
+  });
+}
+
+function readVlmBase(
+  raw: OcrRecognizeNativeResult,
+  family: OcrInstructionFamily
+): {
+  rawText: string;
+  complete: boolean;
+  stopReason: string;
+} {
+  const rawText = typeof raw.raw === 'string' ? raw.raw : undefined;
+  const allowed = OCR_VLM_STOP_REASONS[family] as readonly string[];
+  if (
+    typeof rawText !== 'string' ||
+    typeof raw.complete !== 'boolean' ||
+    typeof raw.stopReason !== 'string' ||
+    !allowed.includes(raw.stopReason)
+  ) {
+    missingExtras();
+  }
+  return {
+    rawText,
+    complete: raw.complete,
+    stopReason: raw.stopReason,
+  };
+}
+
+function readInstruction<F extends OcrInstructionFamily>(
+  raw: OcrRecognizeNativeResult,
+  family: F
+): OcrInstructionOf<F> {
+  const spec =
+    typeof raw.instructionSpec === 'string' && raw.instructionSpec.length > 0
+      ? raw.instructionSpec
+      : encodeOcrRecognizeSpec(family);
+  const decoded = decodeOcrRecognizeSpec(spec);
+  if (decoded.family !== family) {
+    throw Object.assign(
+      new Error(
+        `instructionSpec family ${decoded.family} does not match ${family}`
+      ),
+      { code: OcrErrorCode.INSTRUCTION_FAMILY_MISMATCH }
+    );
+  }
+  return decoded.instruction as OcrInstructionOf<F>;
+}
+
+function readContent(raw: OcrRecognizeNativeResult): OcrContent | null {
+  if (raw.content == null) {
+    return null;
+  }
+  const format = raw.content.format;
+  const value = raw.content.value;
+  if (typeof value !== 'string') missingExtras();
+  if (format === 'markdown' || format === 'plain' || format === 'latex') {
+    return { format, value };
+  }
+  if (format === 'code') {
+    return {
+      format,
+      value,
+      language:
+        typeof raw.content.language === 'string' ? raw.content.language : null,
+    };
+  }
+  missingExtras();
+}
+
+function readQuad(raw: unknown): OcrElement['quad'] {
+  if (!Array.isArray(raw) || raw.length !== 8) return null;
+  const xy: number[] = [];
+  for (const n of raw) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+    xy.push(n);
+  }
+  return {
+    xy: [xy[0]!, xy[1]!, xy[2]!, xy[3]!, xy[4]!, xy[5]!, xy[6]!, xy[7]!],
+  };
+}
+
+function readElements(raw: OcrRecognizeNativeResult): OcrElement[] {
+  if (raw.elements == null) return [];
+  if (!Array.isArray(raw.elements)) missingExtras();
+  return raw.elements.map((item) => {
+    if (!item || !OCR_ELEMENT_KINDS.has(item.kind)) {
+      throw Object.assign(new Error(`OCR parse unknown kind: ${item?.kind}`), {
+        code: OcrErrorCode.PARSE_UNKNOWN_KIND,
+      });
+    }
+    const utf16Start =
+      typeof item.utf16Start === 'number' ? item.utf16Start : null;
+    const utf16End = typeof item.utf16End === 'number' ? item.utf16End : null;
+    return {
+      kind: item.kind as OcrElementKind,
+      frameIndex: typeof item.frameIndex === 'number' ? item.frameIndex : 0,
+      quad: readQuad(item.quad),
+      utf16Start,
+      utf16End,
+      headingLevel:
+        typeof item.headingLevel === 'number' ? item.headingLevel : null,
+      checked: typeof item.checked === 'boolean' ? item.checked : null,
+    };
+  });
+}
+
 function readRecognizeResult(
   raw: OcrRecognizeNativeResult
 ): OcrRecognizeResult {
@@ -353,84 +541,22 @@ function readRecognizeResult(
       code: OcrErrorCode.INTERNAL_ERROR,
     });
   }
-  if (family === 'paddleocr_vl') {
-    if (typeof raw.raw !== 'string' || typeof raw.markdown !== 'string') {
-      throw Object.assign(new Error('OCR recognize result missing extras'), {
-        code: OcrErrorCode.INTERNAL_ERROR,
-      });
-    }
-    const stopReason = raw.stopReason;
-    if (stopReason !== 'eos' && stopReason !== 'max_new_tokens') {
-      throw Object.assign(new Error('OCR recognize result missing extras'), {
-        code: OcrErrorCode.INTERNAL_ERROR,
-      });
-    }
-    if (typeof raw.complete !== 'boolean') {
-      throw Object.assign(new Error('OCR recognize result missing extras'), {
-        code: OcrErrorCode.INTERNAL_ERROR,
-      });
-    }
+  if (
+    family === 'paddleocr_vl' ||
+    family === 'nemotron_parse' ||
+    family === 'doc_vlm'
+  ) {
+    const vlm = readVlmBase(raw, family);
     return {
       family,
+      instruction: readInstruction(raw, family),
       spanCount: raw.spanCount,
-      raw: raw.raw,
-      markdown: raw.markdown,
-      complete: raw.complete,
-      stopReason,
-    };
-  }
-  if (family === 'doc_vlm' || family === 'nemotron_parse') {
-    const markup = typeof raw.raw === 'string' ? raw.raw : undefined;
-    if (family === 'nemotron_parse' && markup === undefined) {
-      throw Object.assign(new Error('OCR recognize result missing extras'), {
-        code: OcrErrorCode.INTERNAL_ERROR,
-      });
-    }
-    const rawText =
-      markup ?? (typeof raw.doctags === 'string' ? raw.doctags : undefined);
-    if (typeof rawText !== 'string' || typeof raw.markdown !== 'string') {
-      throw Object.assign(new Error('OCR recognize result missing extras'), {
-        code: OcrErrorCode.INTERNAL_ERROR,
-      });
-    }
-    const stopReason = raw.stopReason;
-    const graniteStops =
-      stopReason === 'doctag_end' ||
-      stopReason === 'eos' ||
-      stopReason === 'max_new_tokens' ||
-      stopReason === 'invalid_sequence';
-    const nemotronStops =
-      stopReason === 'eos' || stopReason === 'max_new_tokens';
-    if (family === 'doc_vlm' ? !graniteStops : !nemotronStops) {
-      throw Object.assign(new Error('OCR recognize result missing extras'), {
-        code: OcrErrorCode.INTERNAL_ERROR,
-      });
-    }
-    if (typeof raw.complete !== 'boolean') {
-      throw Object.assign(new Error('OCR recognize result missing extras'), {
-        code: OcrErrorCode.INTERNAL_ERROR,
-      });
-    }
-    if (family === 'nemotron_parse') {
-      return {
-        family,
-        spanCount: raw.spanCount,
-        raw: rawText,
-        markdown: raw.markdown,
-        complete: raw.complete,
-        stopReason: stopReason as 'eos' | 'max_new_tokens',
-      };
-    }
-    const doctags = typeof raw.doctags === 'string' ? raw.doctags : rawText;
-    return {
-      family,
-      spanCount: raw.spanCount,
-      raw: rawText,
-      doctags,
-      markdown: raw.markdown,
-      complete: raw.complete,
-      stopReason: stopReason as OcrDocVlmStopReason,
-    };
+      raw: vlm.rawText,
+      content: readContent(raw),
+      elements: readElements(raw),
+      complete: vlm.complete,
+      stopReason: vlm.stopReason,
+    } as OcrRecognizeResult;
   }
   return { family, spanCount: raw.spanCount };
 }
@@ -438,61 +564,84 @@ function readRecognizeResult(
 /**
  * Create an offline OCR engine. Call `destroy()` when finished.
  */
-export async function createOCR(
-  options: OcrInitializeOptions
-): Promise<OcrEngine> {
+export async function createOCR<O extends OcrInitializeOptions>(
+  options: O
+): Promise<OcrEngineForInit<O>> {
   const instanceId = `ocr_${++ocrInstanceCounter}`;
   const bridge = await buildOcrInitBridgeOptions(options);
   if (__DEV__) {
     console.log(
       `[SherpaOnnx:ocr] createOCR instance=${instanceId} mode=${
         bridge.initMode ?? 'auto'
-      } type=${bridge.modelType} dir=${bridge.modelDir ?? '(custom paths)'}${
-        bridge.modelType === 'paddleocr_vl' || bridge.paddleocrVlTask
-          ? ` task=${bridge.paddleocrVlTask ?? 'ocr'}`
-          : ''
-      }`
+      } type=${bridge.modelType} dir=${bridge.modelDir ?? '(custom paths)'}`
     );
   }
   const initResult = await getNative().initializeOcr(instanceId, bridge);
-  const returnedFamily = (initResult as { modelType?: string } | undefined)
-    ?.modelType;
-  const resolvedFamily =
+  const returnedFamily = initResult?.modelType;
+  const resolvedFamily = asOcrFamily(
     bridge.modelType && bridge.modelType !== 'auto'
       ? bridge.modelType
-      : returnedFamily ?? bridge.modelType;
+      : returnedFamily && returnedFamily !== 'auto'
+      ? returnedFamily
+      : bridge.modelType
+  );
+  assertNativeCapabilities(resolvedFamily, {
+    tasks: initResult?.tasks,
+    granularities: initResult?.granularities,
+  });
 
   let destroyed = false;
 
-  const engine: OcrEngine = {
+  const engine = {
     instanceId,
-    async recognize(imageBuffer, textOut, recognizeOptions) {
+    family: resolvedFamily,
+    capabilities: OCR_CAPABILITIES[resolvedFamily],
+    async recognize(
+      imageBuffer: Parameters<OcrEngine['recognize']>[0],
+      textOut: Parameters<OcrEngine['recognize']>[1],
+      recognizeOptions?: OcrRecognizeOptions
+    ) {
       if (destroyed) {
         throw Object.assign(new Error('OCR engine destroyed'), {
           code: OcrErrorCode.INSTANCE_NOT_FOUND,
         });
       }
-      if (recognizeOptions?.paddleocrVl !== undefined) {
-        if (resolvedFamily !== 'paddleocr_vl' && resolvedFamily !== 'auto') {
-          throw Object.assign(
-            new Error('paddleocrVl is only valid for paddleocr_vl'),
-            { code: OcrErrorCode.INVALID_ARGUMENT }
-          );
-        }
-        if (recognizeOptions.paddleocrVl.task !== undefined) {
-          assertOcrPaddleocrVlTask(recognizeOptions.paddleocrVl.task);
-        }
-      }
       const imageId = resolveOfflineImageBufferId(imageBuffer);
       const textId = resolveOfflineTextBufferId(textOut);
+      if (recognizeOptions?.granularity) {
+        const allowed = OCR_CAPABILITIES[resolvedFamily]
+          .granularities as readonly string[];
+        if (!allowed.includes(recognizeOptions.granularity)) {
+          throw Object.assign(
+            new Error(
+              `granularity is not produced by ${resolvedFamily}: ${recognizeOptions.granularity}`
+            ),
+            { code: OcrErrorCode.UNSUPPORTED_GRANULARITY }
+          );
+        }
+      }
+      if (recognizeOptions?.instruction) {
+        const allowed = OCR_CAPABILITIES[resolvedFamily]
+          .tasks as readonly string[];
+        const task = recognizeOptions.instruction.task;
+        if (!allowed.includes(task)) {
+          throw Object.assign(
+            new Error(`instruction.task is not enabled: ${task}`),
+            { code: OcrErrorCode.INSTRUCTION_UNSUPPORTED }
+          );
+        }
+      }
+      const recognizeSpec = encodeOcrRecognizeSpec(
+        resolvedFamily,
+        recognizeOptions
+      );
       const { nativeOptions, cleanup } =
         beginRecognizeProgressCancel(recognizeOptions);
+      nativeOptions.recognizeSpec = recognizeSpec;
       try {
         if (__DEV__) {
           console.log(
-            `[SherpaOnnx:ocr] recognize instance=${instanceId} image=${imageId} textOut=${textId} paddleocrVl.task=${
-              recognizeOptions?.paddleocrVl?.task ?? '(init default)'
-            }`
+            `[SherpaOnnx:ocr] recognize instance=${instanceId} image=${imageId} textOut=${textId} spec=${recognizeSpec}`
           );
         }
         const raw = await getNative().ocrRecognize(
@@ -514,9 +663,9 @@ export async function createOCR(
         console.log(`[SherpaOnnx:ocr] destroy instance=${instanceId}`);
       }
     },
-  };
+  } as OcrEngine;
 
-  return engine;
+  return engine as OcrEngineForInit<O>;
 }
 
 export type {
@@ -524,9 +673,22 @@ export type {
   OcrConcreteModelType,
   OcrFamily,
   OcrGranularity,
+  OcrPixelRect,
+  OcrInstructionFamily,
+  OcrInstructionOf,
+  OcrTaskOf,
+  OcrDocVlmElement,
+  OcrDocVlmInstruction,
+  OcrNemotronParseInstruction,
+  OcrPaddleocrVlInstruction,
+  OcrRecognizeOptionsOf,
+  OcrVlmRawMode,
+  OcrCapabilitiesOf,
+  OcrEngineOf,
   OcrProgress,
   OcrProgressNativeEvent,
   OcrProgressPhase,
+  OcrDbDetectorOptions,
   OcrPpocrOptions,
   OcrDoctrOptions,
   OcrDocVlmOptions,
@@ -543,9 +705,16 @@ export type {
   OcrInitializeOptionsPaddleocrVl,
   OcrCustomInitializeOptions,
   OcrRecognizeOptions,
+  OcrContent,
+  OcrElement,
+  OcrElementKind,
+  OcrQuad,
+  OcrStopReasonOf,
   OcrRecognizeResult,
+  OcrRecognizeResultOf,
   OcrDetectResult,
   OcrEngine,
+  OcrEngineForInit,
   OcrErrorCodeValue,
 } from './types';
 
@@ -567,11 +736,19 @@ export type { OcrDetectModelResult } from '../types/modelDetect';
 
 export {
   OcrErrorCode,
+  OCR_CAPABILITIES,
+  OCR_DEFAULT_INSTRUCTIONS,
   OCR_MODEL_TYPES,
   OCR_PROGRESS_MIN_INTERVAL_MS,
   OCR_PROGRESS_PHASES,
   PADDLEOCR_VL_MIN_PIXELS,
   PADDLEOCR_VL_MOBILE_MAX_PIXELS,
   PADDLEOCR_VL_OFFICIAL_MAX_PIXELS,
+  PADDLEOCR_VL_SPOTTING_MAX_PIXELS,
   isOcrModelType,
 } from './types';
+
+export {
+  decodeOcrRecognizeSpec,
+  encodeOcrRecognizeSpec,
+} from './ocrRecognizeSpec';

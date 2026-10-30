@@ -4,6 +4,9 @@
 #include "PaddleocrVlLog.h"
 #include "PaddleocrVlMarkup.h"
 #include "PaddleocrVlRope.h"
+#include "PaddleocrVlPrompt.h"
+#include "PaddleocrVlTaskProfile.h"
+#include "../OcrInstruction.h"
 #include "../OcrOrtEnv.h"
 #include "../OcrOrtHelpers.h"
 
@@ -18,6 +21,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -40,31 +44,10 @@ constexpr int kDecoderWidth = 1024;
 constexpr int kSpatialMerge = 2;
 constexpr const char* kWho = "PaddleocrVlBackend";
 
-std::string ResolveTask(const OcrRecognizeContext& ctx,
-                        const OcrLoadOptions& options) {
-  const std::string& raw =
-      ctx.paddleocr_vl_task.empty() ? options.paddleocr_vl_task
-                                    : ctx.paddleocr_vl_task;
-  if (raw.empty() || raw == "ocr") return "ocr";
-  if (raw == "spotting") return "spotting";
-  throw std::runtime_error(
-      "PaddleocrVlBackend: paddleocrVl.task must be 'ocr' or 'spotting'");
-}
-
-std::string BuildPrompt(int n_placeholders, const std::string& task) {
-  if (n_placeholders <= 0) {
-    throw std::runtime_error("PaddleocrVlBackend: need at least one image token");
-  }
-  const char* suffix = task == "spotting" ? "Spotting:" : "OCR:";
-  std::string prompt = "<|begin_of_sentence|>User: <|IMAGE_START|>";
-  prompt.reserve(static_cast<size_t>(n_placeholders) * 22 + 80);
-  for (int i = 0; i < n_placeholders; ++i) {
-    prompt += "<|IMAGE_PLACEHOLDER|>";
-  }
-  prompt += "<|IMAGE_END|>";
-  prompt += suffix;
-  prompt += "\nAssistant:\n";
-  return prompt;
+const PaddleocrVlTaskProfile& ResolveProfile(const OcrRecognizeContext& ctx) {
+  const auto* inst =
+      std::get_if<PaddleocrVlInstruction>(&ctx.request.instruction);
+  return ProfileFor(inst ? inst->task : PaddleocrVlTask::kOcr);
 }
 
 std::unordered_set<std::string> IoNames(Ort::Session& session, bool input) {
@@ -228,18 +211,22 @@ OcrResult PaddleocrVlBackend::Recognize(const OcrFrameView& frame,
     throw std::invalid_argument("PaddleocrVlBackend: invalid frame");
   }
 
+  const auto& profile = ResolveProfile(ctx);
   PaddleocrVlPatches page;
-  const int max_pixels = ResolveMaxPixels(options_.max_pixels);
   ctx.RunPhase(kOcrPhasePreprocess, [&] {
-    page = PreprocessRgb(frame.rgb, frame.width, frame.height, max_pixels);
+    PaddleocrVlPreprocessOptions prep;
+    prep.init_max_pixels = options_.max_pixels;
+    prep.task_max_pixels = profile.default_max_pixels;
+    prep.upscale_small_2x = profile.upscale_small_2x;
+    page = PreprocessRgb(frame.rgb, frame.width, frame.height, prep);
   });
   const int n_image = page.num_patches / (kSpatialMerge * kSpatialMerge);
   OCR_LOGI(
       "paddleocr_vl image src=%dx%d resized=%dx%d max_pixels=%d area=%d grid=%d,%d,%d "
       "patches=%d N=%d",
-      page.src_w, page.src_h, page.resized_w, page.resized_h, max_pixels,
-      page.resized_w * page.resized_h, page.grid_t, page.grid_h, page.grid_w,
-      page.num_patches, n_image);
+      page.src_w, page.src_h, page.resized_w, page.resized_h,
+      page.effective_max_pixels, page.resized_w * page.resized_h, page.grid_t,
+      page.grid_h, page.grid_w, page.num_patches, n_image);
   LogPhaseRss("preprocess");
 
   Ort::MemoryInfo mem = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
@@ -271,14 +258,11 @@ OcrResult PaddleocrVlBackend::Recognize(const OcrFrameView& frame,
   page.pixel_values.clear();
   LogPhaseRss("vision");
 
-  const std::string task = ResolveTask(ctx, options_);
-  const std::string prompt_text = BuildPrompt(n_image, task);
+  const std::string prompt_text = BuildPaddleocrVlPrompt(n_image, profile);
   const std::vector<int32_t> prompt = tokenizer_.Encode(prompt_text);
   if (prompt.empty()) {
     throw std::runtime_error("PaddleocrVlBackend: empty prompt encode");
   }
-  OCR_LOGI("paddleocr_vl prompt_len=%zu task=%s", prompt.size(), task.c_str());
-
   std::vector<float> text_embeds;
   ctx.RunPhase(kOcrPhaseEmbed, [&] {
     std::vector<int64_t> ids64(prompt.begin(), prompt.end());
@@ -440,29 +424,41 @@ OcrResult PaddleocrVlBackend::Recognize(const OcrFrameView& frame,
                              std::chrono::steady_clock::now() - t_decode)
                              .count();
 
-  PaddleocrVlMarkup parsed;
+  OcrResult result;
   ctx.RunPhase(kOcrPhaseParse, [&] {
     const std::string decoded = tokenizer_.Decode(generated);
-    PaddleocrVlParseOptions parse_opts;
-    parse_opts.task = task;
-    parse_opts.frame_width = frame.width;
-    parse_opts.frame_height = frame.height;
-    parse_opts.frame_index = frame.frame_index;
-    parsed = ParsePaddleocrVlMarkup(decoded, parse_opts);
+    result.raw_utf8 = decoded;
+    try {
+      PaddleocrVlParseOptions parse_opts;
+      parse_opts.task = profile.id;
+      parse_opts.frame_width = frame.width;
+      parse_opts.frame_height = frame.height;
+      parse_opts.frame_index = frame.frame_index;
+      PaddleocrVlMarkup parsed = ParsePaddleocrVlMarkup(decoded, parse_opts);
+      result.raw_utf8 = std::move(parsed.raw_utf8);
+      result.text_utf8 = std::move(parsed.text_utf8);
+      result.spans = std::move(parsed.spans);
+      result.elements = std::move(parsed.elements);
+      SetOcrContent(result, profile.content_format, std::move(parsed.markdown_utf8));
+    } catch (const OcrCodedError& e) {
+      OCR_LOGW("paddleocr_vl parse failed code=%s raw=%zu — keeping raw",
+               e.code().c_str(), result.raw_utf8.size());
+    }
   });
-  OcrResult result;
-  result.raw_utf8 = std::move(parsed.raw_utf8);
-  result.markdown_utf8 = std::move(parsed.markdown_utf8);
-  result.text_utf8 = std::move(parsed.text_utf8);
-  result.spans = std::move(parsed.spans);
+  const OcrContentFormat format = profile.content_format;
   result.stop_reason = stop_reason;
   result.complete = (stop_reason == "eos");
   OCR_LOGI(
+      "paddleocr_vl parse content_format=%s elements=%zu spans=%zu unknown=0 "
+      "stop=%s",
+      OcrContentFormatName(format), result.elements.size(), result.spans.size(),
+      stop_reason.c_str());
+  OCR_LOGI(
       "paddleocr_vl decode_perf prefill_ms=%lld decode_ms=%lld generated=%zu "
-      "stop=%s complete=%d text=%zu raw=%zu markdown=%zu",
+      "stop=%s complete=%d text=%zu raw=%zu content=%zu",
       static_cast<long long>(prefill_ms), static_cast<long long>(decode_ms), generated.size(),
       stop_reason.c_str(), result.complete ? 1 : 0, result.text_utf8.size(),
-      result.raw_utf8.size(), result.markdown_utf8.size());
+      result.raw_utf8.size(), result.content.value.size());
   return result;
 }
 

@@ -47,6 +47,108 @@ export function isOcrModelType(s: string): s is OcrModelType {
  */
 export type OcrGranularity = TextSpatialSpanLevel;
 
+/** Axis-aligned rectangle in decoded-frame pixels (same space as span quads). */
+export interface OcrPixelRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export type OcrInstructionFamily =
+  | 'doc_vlm'
+  | 'nemotron_parse'
+  | 'paddleocr_vl';
+
+/** Phase 0 lock: Granite `element/chart` emits `<unknown>` on 3/3 HF fixtures. */
+export type OcrDocVlmElement = 'table' | 'formula' | 'code';
+export type OcrDocVlmInstruction =
+  | { task: 'page' }
+  | { task: 'element'; element: OcrDocVlmElement }
+  | { task: 'regionText'; region: OcrPixelRect }
+  | { task: 'identifyElement'; region: OcrPixelRect };
+
+/** Phase 0 lock: only `markdown_none_pic` is in the public union. */
+export type OcrNemotronParseLayout = 'none';
+export type OcrNemotronParseOutput = {
+  text: 'markdown';
+  layout: 'none';
+  textInPictures: true;
+};
+export type OcrNemotronParseInstruction = {
+  task: 'page';
+  output: OcrNemotronParseOutput;
+};
+
+export type OcrPaddleocrVlInstruction = { task: OcrPaddleocrVlTask };
+
+export type OcrInstructionOf<F extends OcrInstructionFamily> = {
+  doc_vlm: OcrDocVlmInstruction;
+  nemotron_parse: OcrNemotronParseInstruction;
+  paddleocr_vl: OcrPaddleocrVlInstruction;
+}[F];
+
+export type OcrTaskOf<F extends OcrInstructionFamily> =
+  OcrInstructionOf<F>['task'];
+
+export const OCR_DEFAULT_INSTRUCTIONS: {
+  [F in OcrInstructionFamily]: OcrInstructionOf<F>;
+} = {
+  doc_vlm: { task: 'page' },
+  nemotron_parse: {
+    task: 'page',
+    output: { text: 'markdown', layout: 'none', textInPictures: true },
+  },
+  paddleocr_vl: { task: 'ocr' },
+};
+
+export interface OcrCapabilitiesOf<F extends OcrFamily> {
+  family: F;
+  tasks: F extends OcrInstructionFamily ? readonly OcrTaskOf<F>[] : readonly [];
+  granularities: readonly OcrGranularity[];
+  supportsCrop: true;
+  producesElements: boolean;
+}
+
+/** Phase 1 native table. createOCR checks native reports a subset of these. */
+export const OCR_CAPABILITIES = {
+  ppocr: {
+    family: 'ppocr',
+    tasks: [] as const,
+    granularities: ['line'] as const,
+    supportsCrop: true,
+    producesElements: false,
+  },
+  doctr: {
+    family: 'doctr',
+    tasks: [] as const,
+    granularities: ['line'] as const,
+    supportsCrop: true,
+    producesElements: false,
+  },
+  doc_vlm: {
+    family: 'doc_vlm',
+    tasks: ['page', 'element', 'regionText', 'identifyElement'] as const,
+    granularities: ['line', 'block'] as const,
+    supportsCrop: true,
+    producesElements: true,
+  },
+  nemotron_parse: {
+    family: 'nemotron_parse',
+    tasks: ['page'] as const,
+    granularities: ['line'] as const,
+    supportsCrop: true,
+    producesElements: true,
+  },
+  paddleocr_vl: {
+    family: 'paddleocr_vl',
+    tasks: ['ocr', 'table', 'formula', 'chart', 'seal', 'spotting'] as const,
+    granularities: ['line'] as const,
+    supportsCrop: true,
+    producesElements: false,
+  },
+} as const satisfies { [F in OcrFamily]: OcrCapabilitiesOf<F> };
+
 /** Known OCR recognize phases. Families may emit additional strings. */
 export const OCR_PROGRESS_PHASES = [
   'preprocess',
@@ -86,24 +188,19 @@ export type OcrProgressNativeEvent = {
   frameCount?: number;
 };
 
-export type OcrPpocrOptions = {
+/** Shared by ppocr and doctr (both DB detectors). */
+export interface OcrDbDetectorOptions {
+  detBoxThresh?: number;
+  detBoxScoreThresh?: number;
+  detUnclipRatio?: number;
+}
+
+export interface OcrPpocrOptions extends OcrDbDetectorOptions {
   maxSideLen?: number;
   useOrientationCls?: boolean;
-  /**
-   * Unclip ratio for DB postprocessing (default 1.5).
-   * Lower values tighten detection boxes around glyphs.
-   */
-  detUnclipRatio?: number;
-};
+}
 
-export type OcrDoctrOptions = {
-  /** Detection box binary threshold (default 0.15). */
-  detBoxThresh?: number;
-  /** Detection box score threshold (default 0.15). */
-  detBoxScoreThresh?: number;
-  /** Unclip ratio for DB postprocessing (default 1.5). */
-  detUnclipRatio?: number;
-};
+export type OcrDoctrOptions = OcrDbDetectorOptions;
 
 /**
  * Shared VLM generation cap (`doc_vlm` / `nemotron_parse` / `paddleocr_vl`).
@@ -119,24 +216,27 @@ export type OcrDocVlmOptions = OcrVlmOptions;
 /** Official PaddleOCR-VL `smart_resize` pixel bounds. */
 export const PADDLEOCR_VL_MIN_PIXELS = 112896;
 export const PADDLEOCR_VL_OFFICIAL_MAX_PIXELS = 1003520;
+export const PADDLEOCR_VL_SPOTTING_MAX_PIXELS = 1605632;
 /** Phone-oriented cap (512 visual tokens). Pass via `paddleocrVl.maxPixels`. */
 export const PADDLEOCR_VL_MOBILE_MAX_PIXELS = 401408;
 
 /** Official PaddleOCR-VL control-prompt task. Omit → `'ocr'`. */
-export type OcrPaddleocrVlTask = 'ocr' | 'spotting';
+export type OcrPaddleocrVlTask =
+  | 'ocr'
+  | 'table'
+  | 'formula'
+  | 'chart'
+  | 'seal'
+  | 'spotting';
 
 export type OcrPaddleocrVlOptions = {
   /**
-   * `smart_resize` area cap. Omit or `0` → {@link PADDLEOCR_VL_OFFICIAL_MAX_PIXELS}.
-   * Clamped to `[PADDLEOCR_VL_MIN_PIXELS, PADDLEOCR_VL_OFFICIAL_MAX_PIXELS]`.
+   * `smart_resize` area cap applied as `min(cap, taskDefault)`.
+   * Omit or `0` → the task default (`PADDLEOCR_VL_OFFICIAL_MAX_PIXELS`, or
+   * {@link PADDLEOCR_VL_SPOTTING_MAX_PIXELS} for spotting).
+   * Recognize-time task lives on {@link OcrRecognizeOptionsOf} `instruction`.
    */
   maxPixels?: number;
-  /**
-   * Control-prompt task. Omit → `'ocr'`. `'spotting'` returns instance
-   * text plus `<|LOC_n|>` quads on `textOut` spans. Same loaded session;
-   * override per recognize via {@link OcrRecognizeOptions.paddleocrVl}.
-   */
-  task?: OcrPaddleocrVlTask;
 };
 
 type OcrInitShared = {
@@ -248,18 +348,13 @@ export type OcrInitializeOptions =
   | OcrInitializeOptionsPaddleocrVl
   | OcrCustomInitializeOptions;
 
-export type OcrRecognizeOptions = {
+export type OcrRecognizeOptionsBase = {
   /** Frame indices to run; default = all frames in the image buffer. */
   frames?: number[];
   /** Span level filter (default `'line'`). */
   granularity?: OcrGranularity;
-  /**
-   * paddleocr_vl-only recognize override. Omit → init `paddleocrVl.task`
-   * (default `'ocr'`). Session stays loaded. Rejected on other families.
-   */
-  paddleocrVl?: {
-    task?: OcrPaddleocrVlTask;
-  };
+  /** Engine-level crop applied before family preprocessing. */
+  crop?: OcrPixelRect;
   onProgress?: (progress: OcrProgress) => void;
   /**
    * Minimum ms between native progress events. Default
@@ -274,7 +369,32 @@ export type OcrRecognizeOptions = {
   signal?: AbortSignal;
 };
 
-/** Why a VLM greedy decode stopped. */
+/** Granite decode after a DocTags prefix / prompt-only reject.
+ *  Default `'accepted'` stops so the SDK parser does not wait on a stream it
+ *  will not use. `'full'` keeps generating through EOS / `maxNewTokens` so a
+ *  custom parser can read the complete model answer on `result.raw`. */
+export type OcrVlmRawMode = 'accepted' | 'full';
+
+export type OcrRecognizeOptionsOf<F extends OcrFamily> =
+  F extends OcrInstructionFamily
+    ? OcrRecognizeOptionsBase & {
+        instruction?: OcrInstructionOf<F>;
+        raw?: OcrVlmRawMode;
+      }
+    : OcrRecognizeOptionsBase;
+
+/** Untyped recognize options (union engines / JS). */
+export type OcrRecognizeOptions = OcrRecognizeOptionsBase & {
+  instruction?:
+    | OcrDocVlmInstruction
+    | OcrNemotronParseInstruction
+    | OcrPaddleocrVlInstruction;
+  raw?: OcrVlmRawMode;
+};
+
+/** Why a VLM greedy decode stopped. `invalid_sequence` is Granite-only: the
+ *  stream left the DocTags grammar. Default `raw: 'accepted'` stops decode
+ *  there; `raw: 'full'` continues so `result.raw` is the complete stream. */
 export type OcrVlmStopReason =
   | 'doctag_end'
   | 'eos'
@@ -284,52 +404,108 @@ export type OcrVlmStopReason =
 /** @deprecated Use {@link OcrVlmStopReason}. */
 export type OcrDocVlmStopReason = OcrVlmStopReason;
 
-type OcrVlmRecognizeShared = {
+export type OcrStopReasonOf<F extends OcrInstructionFamily> = {
+  doc_vlm: 'doctag_end' | 'eos' | 'max_new_tokens' | 'invalid_sequence';
+  nemotron_parse: 'eos' | 'max_new_tokens';
+  paddleocr_vl: 'eos' | 'max_new_tokens';
+}[F];
+
+export type OcrContent =
+  | { format: 'markdown'; value: string }
+  | { format: 'plain'; value: string }
+  | { format: 'latex'; value: string }
+  | { format: 'code'; value: string; language: string | null };
+
+export type OcrElementKind =
+  | 'text'
+  | 'title'
+  | 'sectionHeader'
+  | 'listItem'
+  | 'caption'
+  | 'footnote'
+  | 'pageHeader'
+  | 'pageFooter'
+  | 'formula'
+  | 'code'
+  | 'table'
+  | 'picture'
+  | 'chart'
+  | 'tableOfContents'
+  | 'bibliography'
+  | 'checkbox'
+  | 'form'
+  | 'keyValueRegion';
+
+export type OcrQuad = {
+  xy: [number, number, number, number, number, number, number, number];
+};
+
+export interface OcrElement {
+  kind: OcrElementKind;
+  frameIndex: number;
+  quad: OcrQuad | null;
+  utf16Start: number | null;
+  utf16End: number | null;
+  headingLevel: number | null;
+  checked: boolean | null;
+}
+
+type OcrVlmRecognizeShared<F extends OcrInstructionFamily> = {
+  family: F;
+  instruction: OcrInstructionOf<F>;
   spanCount: number;
-  /** Native model stream (DocTags, or Nemotron xy/class tags plus body). */
+  /** Decoded model stream. Present even when `content` / `elements` stay empty. */
   raw: string;
-  /** GFM we produce: granite from DocTags, Nemotron from native body (`tabular` → pipe tables). */
-  markdown: string;
+  content: OcrContent | null;
+  elements: OcrElement[];
   complete: boolean;
+  stopReason: OcrStopReasonOf<F>;
 };
 
 /**
  * Result of `OcrEngine.recognize`. Plain text and spans live on `textOut`.
- * Discriminated on `family`. VLM families share `raw` / `markdown` /
- * `complete` / `stopReason`. `doc_vlm` also keeps `doctags` (same as `raw`).
+ * Discriminated on `family`.
  */
 export type OcrRecognizeResult =
-  | {
-      family: 'ppocr' | 'doctr';
-      spanCount: number;
-    }
-  | (OcrVlmRecognizeShared & {
-      family: 'doc_vlm';
-      doctags: string;
-      stopReason: OcrVlmStopReason;
-    })
-  | (OcrVlmRecognizeShared & {
-      family: 'nemotron_parse';
-      stopReason: 'eos' | 'max_new_tokens';
-    })
-  | (OcrVlmRecognizeShared & {
-      family: 'paddleocr_vl';
-      stopReason: 'eos' | 'max_new_tokens';
-    });
+  | { family: 'ppocr'; spanCount: number }
+  | { family: 'doctr'; spanCount: number }
+  | OcrVlmRecognizeShared<'doc_vlm'>
+  | OcrVlmRecognizeShared<'nemotron_parse'>
+  | OcrVlmRecognizeShared<'paddleocr_vl'>;
+
+export type OcrRecognizeResultOf<F extends OcrFamily> =
+  F extends OcrInstructionFamily
+    ? OcrVlmRecognizeShared<F>
+    : F extends 'ppocr' | 'doctr'
+    ? { family: F; spanCount: number }
+    : never;
 
 /** @deprecated Use {@link OcrDetectModelResult} from `../types/modelDetect`. */
 export type OcrDetectResult = OcrDetectModelResult;
 
-export type OcrEngine = {
+export interface OcrEngineOf<F extends OcrFamily> {
   readonly instanceId: string;
-  /** OCR image → empty text buffer (text + spatial spans). */
+  readonly family: F;
+  readonly capabilities: OcrCapabilitiesOf<F>;
   recognize(
     imageBuffer: OfflineImageBufferIdSource,
     textOut: OfflineTextBufferIdSource,
-    options?: OcrRecognizeOptions
-  ): Promise<OcrRecognizeResult>;
+    options?: OcrRecognizeOptionsOf<F>
+  ): Promise<OcrRecognizeResultOf<F>>;
   destroy(): Promise<void>;
-};
+}
+
+/** A real union so `engine.family === …` narrows. */
+export type OcrEngine = { [F in OcrFamily]: OcrEngineOf<F> }[OcrFamily];
+
+/** Maps `createOCR({ modelType })` onto a family-typed engine. */
+export type OcrEngineForInit<O extends OcrInitializeOptions> = O extends {
+  modelType: infer T;
+}
+  ? T extends OcrFamily
+    ? OcrEngineOf<T>
+    : OcrEngine
+  : OcrEngine;
 
 export const OcrErrorCode = {
   INSTANCE_NOT_FOUND: 'OCR_INSTANCE_NOT_FOUND',
@@ -345,6 +521,13 @@ export const OcrErrorCode = {
   ALREADY_POPULATED: 'OCR_ALREADY_POPULATED',
   INTERNAL_ERROR: 'OCR_INTERNAL_ERROR',
   BUSY: 'OCR_BUSY',
+  INSTRUCTION_FAMILY_MISMATCH: 'OCR_INSTRUCTION_FAMILY_MISMATCH',
+  INSTRUCTION_UNSUPPORTED: 'OCR_INSTRUCTION_UNSUPPORTED',
+  INVALID_REGION: 'OCR_INVALID_REGION',
+  UNSUPPORTED_GRANULARITY: 'OCR_UNSUPPORTED_GRANULARITY',
+  INVALID_RECOGNIZE_SPEC: 'OCR_INVALID_RECOGNIZE_SPEC',
+  PARSE_UNKNOWN_KIND: 'OCR_PARSE_UNKNOWN_KIND',
+  CAPABILITIES_MISMATCH: 'OCR_CAPABILITIES_MISMATCH',
 } as const;
 
 export type OcrErrorCodeValue =

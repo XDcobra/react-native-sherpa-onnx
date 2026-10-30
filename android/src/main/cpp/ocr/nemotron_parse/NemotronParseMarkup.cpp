@@ -1,6 +1,8 @@
 #include "NemotronParseMarkup.h"
 
+#include "../OcrGeometry.h"
 #include "../OcrTextUtils.h"
+#include "../markup/OcrElementKind.h"
 #include "NemotronParseLog.h"
 
 #include <algorithm>
@@ -44,30 +46,23 @@ bool ParseTaggedFloat(const std::string& s, size_t& i, const char* open, float& 
   return true;
 }
 
-bool ConsumeClass(const std::string& s, size_t& i) {
+bool ConsumeClass(const std::string& s, size_t& i, std::string* token = nullptr) {
   if (!StartsWith(s, i, "<class_")) return false;
   size_t end = i + 7;
   while (end < s.size() && s[end] != '>') ++end;
   if (end >= s.size()) return false;
+  if (token) *token = s.substr(i, end + 1 - i);
   i = end + 1;
   return true;
 }
 
 OcrQuad BoxQuad(float x0, float y0, float x1, float y1, int w, int h) {
-  const float l = std::min(x0, x1) * static_cast<float>(w);
-  const float t = std::min(y0, y1) * static_cast<float>(h);
-  const float r = std::max(x0, x1) * static_cast<float>(w);
-  const float b = std::max(y0, y1) * static_cast<float>(h);
-  OcrQuad q;
-  q.xy[0] = l;
-  q.xy[1] = t;
-  q.xy[2] = r;
-  q.xy[3] = t;
-  q.xy[4] = r;
-  q.xy[5] = b;
-  q.xy[6] = l;
-  q.xy[7] = b;
-  return q;
+  OcrNormRect norm;
+  norm.x0 = x0;
+  norm.y0 = y0;
+  norm.x1 = x1;
+  norm.y1 = y1;
+  return NormToQuad(norm, w, h);
 }
 
 std::string StripTags(const std::string& raw) {
@@ -386,7 +381,8 @@ NemotronParseMarkup ParseNemotronMarkup(const std::string& generated, int frame_
       size_t look = scan;
       if (ParseTaggedFloat(s, look, "<x_", x1) && ParseTaggedFloat(s, look, "<y_", y1)) {
         size_t after = look;
-        ConsumeClass(s, after);
+        std::string class_token;
+        ConsumeClass(s, after, &class_token);
         found_end = true;
         const std::string body = s.substr(body_begin, scan - body_begin);
         const BodyViews prefix_v =
@@ -411,6 +407,23 @@ NemotronParseMarkup ParseNemotronMarkup(const std::string& generated, int frame_
         span.frame_index = frame_index;
         span.level = OcrSpanLevel::kLine;
         out.spans.push_back(span);
+        if (!class_token.empty()) {
+          const auto kind = FromNemotronClass(class_token);
+          if (!kind.ok) {
+            throw OcrCodedError(kind.error_code.c_str(), kind.error_message);
+          }
+          OcrLayoutElement element;
+          element.kind = kind.kind;
+          element.frame_index = frame_index;
+          element.has_quad = true;
+          element.quad = span.quad;
+          if (!body_v.text.empty()) {
+            element.has_utf16 = true;
+            element.utf16_start = span.utf16_start;
+            element.utf16_end = span.utf16_end;
+          }
+          out.elements.push_back(element);
+        }
         (void)utf16;
         i = after;
         found_end = true;
@@ -420,10 +433,51 @@ NemotronParseMarkup ParseNemotronMarkup(const std::string& generated, int frame_
     }
     if (!found_end) break;
   }
-  OCR_LOGI("nemotron markup tables=%d markdown=%zu text=%zu spans=%zu",
+  OCR_LOGI("nemotron markup tables=%d markdown=%zu text=%zu spans=%zu elements=%zu",
            views.tables, out.markdown_utf8.size(), out.text_utf8.size(),
-           out.spans.size());
+           out.spans.size(), out.elements.size());
   return out;
+}
+
+void ApplyNemotronOutput(OcrResult& result, const NemotronParseMarkup& parsed,
+                         const NemotronParseOutput& output) {
+  result.raw_utf8 = parsed.raw_utf8;
+  result.text_utf8 = parsed.text_utf8;
+  result.spans = parsed.spans;
+  result.elements = parsed.elements;
+
+  if (output.layout == NemotronParseLayout::kNone) {
+    result.spans.clear();
+    result.elements.clear();
+  } else if (output.layout == NemotronParseLayout::kBoxes) {
+    result.elements.clear();
+  }
+
+  if (output.text == NemotronParseText::kNone) {
+    result.has_content = false;
+    result.content = {};
+    result.text_utf8.clear();
+    for (auto& span : result.spans) {
+      span.utf16_start = 0;
+      span.utf16_end = 0;
+    }
+    for (auto& element : result.elements) {
+      element.has_utf16 = false;
+      element.utf16_start = 0;
+      element.utf16_end = 0;
+    }
+    // boxesAndClasses: geometry lives on elements. boxes: keep zero-length spans.
+    if (output.layout != NemotronParseLayout::kBoxes) {
+      result.spans.clear();
+    }
+    return;
+  }
+
+  if (output.text == NemotronParseText::kPlain) {
+    SetOcrContent(result, OcrContentFormat::kPlain, parsed.text_utf8);
+    return;
+  }
+  SetOcrContent(result, OcrContentFormat::kMarkdown, parsed.markdown_utf8);
 }
 
 }  // namespace nemotron_parse

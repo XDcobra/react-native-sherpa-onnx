@@ -13,6 +13,8 @@ struct PaddleocrVlMarkup {
   std::string markdown_utf8;
   std::string text_utf8;
   std::vector<OcrSpan> spans;
+  /** PaddleOCR-VL does not emit layout elements. Always empty. */
+  std::vector<OcrLayoutElement> elements;
 };
 
 /** `ocr` (default) or `spotting`. Other values are treated as `ocr`. */

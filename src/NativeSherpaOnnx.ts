@@ -314,19 +314,30 @@ export type OcrInitBridgeOptions = {
   maxNewTokens?: number;
   /** paddleocr_vl smart_resize cap. Omit → native 0 → 1003520. */
   maxPixels?: number;
-  /** paddleocr_vl control-prompt task (`ocr` | `spotting`). Omit → native `ocr`. */
-  paddleocrVlTask?: string;
   quantization?: string;
 };
 
 export type OcrRecognizeNativeResult = {
   family: string;
   spanCount: number;
-  doctags?: string;
   raw?: string;
-  markdown: string;
   stopReason?: string;
   complete?: boolean;
+  instructionSpec?: string;
+  content?: {
+    format: string;
+    value: string;
+    language?: string;
+  };
+  elements?: Array<{
+    kind: string;
+    frameIndex: number;
+    quad?: number[];
+    utf16Start?: number;
+    utf16End?: number;
+    headingLevel?: number;
+    checked?: boolean;
+  }>;
 };
 
 /** `ocrRecognize(..., options)`. */
@@ -336,10 +347,8 @@ export type OcrRecognizeBridgeOptions = {
   operationId?: string;
   /** Native coalesce interval. Default 200. `0` = unthrottled. */
   progressMinIntervalMs?: number;
-  /** paddleocr_vl-only. Presence on a non-paddleocr_vl family is `OCR_INVALID_ARGUMENT`. */
-  paddleocrVl?: {
-    task?: string;
-  };
+  /** Wire spec from `encodeOcrRecognizeSpec`. Kotlin/ObjC forward unchanged. */
+  recognizeSpec?: string;
 };
 
 /** Native result from `detectOcrModel`. */
@@ -1150,7 +1159,14 @@ export interface Spec extends TurboModule {
   initializeOcr(
     instanceId: string,
     options: OcrInitBridgeOptions
-  ): Promise<{ instanceId: string; modelType: string }>;
+  ): Promise<{
+    instanceId: string;
+    modelType: string;
+    tasks?: string[];
+    granularities?: string[];
+    supportsCrop?: boolean;
+    producesElements?: boolean;
+  }>;
 
   /**
    * Recognize frames from an offline ImageBuffer into an empty OfflineTextBuffer.

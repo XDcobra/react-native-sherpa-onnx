@@ -1,6 +1,7 @@
 #import "../../SherpaOnnx.h"
 
 #include "ImageRegistry.h"
+#include "OcrCapabilities.h"
 #include "OcrDetect.h"
 #include "OcrEngine.h"
 #include "OcrTypes.h"
@@ -15,7 +16,9 @@
 #include <vector>
 
 using sherpa_onnx::image::ImageRegistry;
+using sherpa_onnx::ocr::CapabilitiesForFamily;
 using sherpa_onnx::ocr::DetectOcrModel;
+using sherpa_onnx::ocr::GranularityName;
 using sherpa_onnx::ocr::OcrCancelRegistry;
 using sherpa_onnx::ocr::OcrEngine;
 using sherpa_onnx::ocr::OcrEngineRegistry;
@@ -33,6 +36,14 @@ static NSString *kOcrInternal = @"OCR_INTERNAL_ERROR";
 static NSString *kOcrCancelled = @"OCR_CANCELLED";
 static NSString *kOcrRecognizeFailed = @"OCR_RECOGNIZE_FAILED";
 static NSString *kOcrAlreadyPopulated = @"OCR_ALREADY_POPULATED";
+static NSString *kOcrInstructionFamilyMismatch =
+    @"OCR_INSTRUCTION_FAMILY_MISMATCH";
+static NSString *kOcrInstructionUnsupported = @"OCR_INSTRUCTION_UNSUPPORTED";
+static NSString *kOcrInvalidRegion = @"OCR_INVALID_REGION";
+static NSString *kOcrUnsupportedGranularity = @"OCR_UNSUPPORTED_GRANULARITY";
+static NSString *kOcrInvalidRecognizeSpec = @"OCR_INVALID_RECOGNIZE_SPEC";
+static NSString *kOcrParseUnknownKind = @"OCR_PARSE_UNKNOWN_KIND";
+static NSString *kOcrCapabilitiesMismatch = @"OCR_CAPABILITIES_MISMATCH";
 
 static void EmitOcrProgress(SherpaOnnx *bridge, NSString *operationId, int done,
                             int total, NSString *phase, int frameIndex,
@@ -347,16 +358,16 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
                         ? [options[@"useOrientationCls"] boolValue]
                         : YES;
       float detBoxThresh =
-          options[@"detBoxThresh"] ? [options[@"detBoxThresh"] floatValue] : 0.3f;
+          options[@"detBoxThresh"] ? [options[@"detBoxThresh"] floatValue] : -1.f;
       float detBoxScoreThresh =
-          options[@"detBoxScoreThresh"] ? [options[@"detBoxScoreThresh"] floatValue] : 0.5f;
+          options[@"detBoxScoreThresh"] ? [options[@"detBoxScoreThresh"] floatValue]
+                                        : -1.f;
       float detUnclipRatio =
           options[@"detUnclipRatio"] ? [options[@"detUnclipRatio"] floatValue] : 1.5f;
       int maxNewTokens =
           options[@"maxNewTokens"] ? [options[@"maxNewTokens"] intValue] : 0;
       int maxPixels =
           options[@"maxPixels"] ? [options[@"maxPixels"] intValue] : 0;
-      NSString *paddleocrVlTask = options[@"paddleocrVlTask"];
 
       std::string idStr = instanceId ? [instanceId UTF8String] : "";
       auto &engine = OcrEngineRegistry::Instance().Create(idStr);
@@ -369,10 +380,6 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       opts.det_unclip_ratio = detUnclipRatio;
       opts.max_new_tokens = maxNewTokens;
       opts.max_pixels = maxPixels;
-      if ([paddleocrVlTask isKindOfClass:[NSString class]] &&
-          paddleocrVlTask.length > 0) {
-        opts.paddleocr_vl_task = [paddleocrVlTask UTF8String];
-      }
       opts.provider = provider ? [provider UTF8String] : "cpu";
       NSString *quantization = options[@"quantization"];
       if ([quantization isKindOfClass:[NSString class]] && quantization.length > 0) {
@@ -404,9 +411,28 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       }
       engine.Load(modelType ? [modelType UTF8String] : "auto",
                   [modelDir UTF8String], opts);
+      const char *familyC = engine.Family();
+      NSString *family =
+          (familyC && familyC[0] != '\0')
+              ? [NSString stringWithUTF8String:familyC]
+              : (modelType ?: @"auto");
+      auto caps = CapabilitiesForFamily(family.UTF8String);
+      NSMutableArray *tasks = [NSMutableArray array];
+      for (const auto &task : caps.tasks) {
+        [tasks addObject:[NSString stringWithUTF8String:task.c_str()]];
+      }
+      NSMutableArray *granularities = [NSMutableArray array];
+      for (const auto g : caps.granularities) {
+        [granularities
+            addObject:[NSString stringWithUTF8String:GranularityName(g)]];
+      }
       resolve(@{
         @"instanceId" : instanceId ?: @"",
-        @"modelType" : modelType ?: @"auto",
+        @"modelType" : family,
+        @"tasks" : tasks,
+        @"granularities" : granularities,
+        @"supportsCrop" : @(caps.supports_crop),
+        @"producesElements" : @(caps.produces_elements),
       });
     } catch (const std::exception &e) {
       reject(kOcrInternal, [NSString stringWithUTF8String:e.what()], nil);
@@ -461,13 +487,9 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       OcrEngine::RecognizeOptions ropts;
       ropts.granularity = ParseGranularity(granularity);
       ropts.progress_min_interval_ms = progressMinIntervalMs;
-      id paddleocrVlObj = options[@"paddleocrVl"];
-      if ([paddleocrVlObj isKindOfClass:[NSDictionary class]]) {
-        ropts.has_paddleocr_vl = true;
-        NSString *task = ((NSDictionary *)paddleocrVlObj)[@"task"];
-        if ([task isKindOfClass:[NSString class]] && task.length > 0) {
-          ropts.paddleocr_vl_task = [task UTF8String];
-        }
+      NSString *recognizeSpec = options[@"recognizeSpec"];
+      if ([recognizeSpec isKindOfClass:[NSString class]] && recognizeSpec.length > 0) {
+        ropts.recognize_spec = [recognizeSpec UTF8String];
       }
       id framesObj = options[@"frames"];
       if ([framesObj isKindOfClass:[NSArray class]]) {
@@ -530,18 +552,59 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       NSMutableDictionary *payload = [@{
         @"family" : [NSString stringWithUTF8String:outcome.family.c_str()] ?: @"",
         @"spanCount" : @(static_cast<NSInteger>(spans.size())),
-        @"doctags" : [NSString stringWithUTF8String:outcome.result.doctags_utf8.c_str()]
-            ?: @"",
         @"raw" : [NSString stringWithUTF8String:outcome.result.raw_utf8.c_str()]
             ?: @"",
-        @"markdown" :
-            [NSString stringWithUTF8String:outcome.result.markdown_utf8.c_str()] ?: @"",
+        @"instructionSpec" :
+            [NSString stringWithUTF8String:outcome.result.instruction_spec.c_str()]
+            ?: @"",
       } mutableCopy];
       if (sherpa_onnx::ocr::IsOcrVlmFamily(outcome.family)) {
         payload[@"stopReason"] =
             [NSString stringWithUTF8String:outcome.result.stop_reason.c_str()] ?: @"";
         payload[@"complete"] = @(outcome.result.complete);
       }
+      if (outcome.result.has_content) {
+        NSMutableDictionary *content = [@{
+          @"format" : [NSString stringWithUTF8String:sherpa_onnx::ocr::OcrContentFormatName(
+                          outcome.result.content.format)]
+              ?: @"markdown",
+          @"value" : [NSString stringWithUTF8String:outcome.result.content.value.c_str()]
+              ?: @"",
+        } mutableCopy];
+        if (!outcome.result.content.language.empty()) {
+          content[@"language"] =
+              [NSString stringWithUTF8String:outcome.result.content.language.c_str()] ?: @"";
+        }
+        payload[@"content"] = content;
+      }
+      NSMutableArray *elements = [NSMutableArray arrayWithCapacity:outcome.result.elements.size()];
+      for (const auto &element : outcome.result.elements) {
+        NSMutableDictionary *el = [@{
+          @"kind" : [NSString stringWithUTF8String:sherpa_onnx::ocr::OcrElementKindName(
+                        element.kind)]
+              ?: @"text",
+          @"frameIndex" : @(element.frame_index),
+        } mutableCopy];
+        if (element.has_quad) {
+          NSMutableArray *quad = [NSMutableArray arrayWithCapacity:8];
+          for (int i = 0; i < 8; ++i) {
+            [quad addObject:@(element.quad.xy[i])];
+          }
+          el[@"quad"] = quad;
+        }
+        if (element.has_utf16) {
+          el[@"utf16Start"] = @(element.utf16_start);
+          el[@"utf16End"] = @(element.utf16_end);
+        }
+        if (element.heading_level) {
+          el[@"headingLevel"] = @(*element.heading_level);
+        }
+        if (element.checked) {
+          el[@"checked"] = @(*element.checked);
+        }
+        [elements addObject:el];
+      }
+      payload[@"elements"] = elements;
       resolve(payload);
     } catch (const std::exception &e) {
       reject(kOcrInternal, [NSString stringWithUTF8String:e.what()], nil);
