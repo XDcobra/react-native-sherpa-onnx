@@ -56,9 +56,43 @@ Frames copied into an OfflineImageBuffer keep `source: { videoBufferId, ptsUs, f
 
 `exportVideoFrame(video, ptsUs, destination, { format, maxSide })` encodes one RGB frame via the image export path.
 
-## Player (not built)
+## Audio track and pipeline export
 
-`getVideoKeyframeTimes`, `seekableRange`, `liveEdgeUs`, and native `VideoPacketReader` are prepared for a future `VideoPreview`. The view itself is a later epic.
+Offline (and finished live) buffers expose `info.audio` when a container audio stream exists:
+
+```ts
+{
+  codec: string;       // "aac", "opus", "ac3", …
+  decodable: boolean;  // decoder present in this FFmpeg build
+  sampleRate: number;
+  channels: number;
+  startMs: number;
+  durationMs: number;
+}
+```
+
+`decodable` is false for codecs the SDK FFmpeg is not built with (AC-3, DTS, ALAC, …). Missing audio is `audio: null`, not an error. Audio-only files still fail create with `VIDEO_NO_VIDEO_TRACK`.
+
+Export the track into a normal pipeline AudioBuffer (mono, default 16 kHz) for STT / enhancement:
+
+```ts
+import { createOfflineAudioBufferFromVideo } from 'react-native-sherpa-onnx/videobuffer';
+
+const { audio, mediaStartMs, sourceCodec } = await createOfflineAudioBufferFromVideo(offline, {
+  targetSampleRateHz: 16000, // omit → 16000; 0 → keep source; > 0 → exact
+  rangeMs: { startMs: 0, endMs: 5000 },
+  signal,
+  onProgress: ({ percent }) => {},
+});
+```
+
+`mediaStartMs` is the video-timeline time of PCM sample 0 (edit list, late audio, or `rangeMs.startMs`). Recording live buffers reject with `VIDEO_BUFFER_INVALID_STATE` for the offline export; use `createLiveAudioBufferFromLiveVideo` to tap a recording live buffer into a live AudioBuffer. Unsupported codecs reject with `VIDEO_AUDIO_CODEC_UNSUPPORTED`. Preview playback of the same track is a separate API (`react-native-sherpa-onnx/videopreview`); feeding an AudioBuffer into preview is a future option.
+
+File ingest into a live video buffer copies the audio track by default (`includeAudio: true`).
+
+## Player
+
+`getVideoKeyframeTimes`, `seekableRange`, `liveEdgeUs`, and native `VideoPacketReader` feed VideoPreview — see [videopreview.md](./videopreview.md).
 
 ## Memory
 

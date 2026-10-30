@@ -152,6 +152,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [segmentbuffer-streaming.md](./segmentbuffer-streaming.md) | Live segment buffer — streaming segment linking |
 | [imagebuffer-offline.md](./imagebuffer-offline.md) | Offline image buffer — decode files, multi-frame, spatial OCR input |
 | [videobuffer.md](./videobuffer.md) | Offline + live video buffers — demux, HW decode, image bridge, OCR `ptsMs` |
+| [videopreview.md](./videopreview.md) | Player object + `<VideoPreviewView>` for VideoBuffer preview (A/V, seek, live edge) |
 
 ---
 

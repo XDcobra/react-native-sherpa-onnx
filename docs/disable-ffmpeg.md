@@ -49,6 +49,9 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 | **`saveAudioAsFile(input, output, format, options?)`** | Saves a buffer or `FileSource` to the requested output format. Non-WAV formats require FFmpeg. |
 | **`createOfflineVideoBufferFromFile(path)`** | Opens a container (`mov` / `matroska`) via libavformat. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 | **`ingestFileToLiveVideoBuffer(path, live)`** | Remuxes a file into a live video buffer. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`createOfflineAudioBufferFromVideo(video)`** | Decodes the container audio track through FFmpeg. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`createLiveAudioBufferFromLiveVideo(live)`** | Live audio tap decode. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`createVideoPreviewPlayer` audio track** | Preview audio uses FFmpeg SW decode. Video still plays; `audioUnavailable` / status `unavailable`. |
 
 The audio helpers above are exposed from **`react-native-sherpa-onnx/audio`**. Video file APIs are from **`react-native-sherpa-onnx/videobuffer`**. Live video buffers fed by native producers (no file demux) keep working. STT, archive extraction, model detection, and general pipeline buffer operations continue to work when FFmpeg is disabled.
 
