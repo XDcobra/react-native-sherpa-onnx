@@ -37,7 +37,7 @@ println "[react-native-sherpa-onnx] sherpa-onnx version (extracted/used): ${sher
 def ffmpegVersion = System.getenv('FFMPEG_VERSION')
 if (!ffmpegVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG'), 'ffmpeg-android-v')
-  ffmpegVersion = v ?: (project.hasProperty('ffmpegVersion') ? project.ffmpegVersion : '8.0.1')
+  ffmpegVersion = v ?: (project.hasProperty('ffmpegVersion') ? project.ffmpegVersion : '8.1.3-1')
 }
 project.ext.ffmpegVersion = ffmpegVersion
 println "[react-native-sherpa-onnx] ffmpeg version (extracted/used): ${ffmpegVersion}"
