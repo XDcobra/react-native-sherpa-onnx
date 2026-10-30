@@ -4,18 +4,9 @@
 
 **Offline OCR** runs on decoded image frames held in an [`OfflineImageBuffer`](imagebuffer-offline.md) and writes plain text plus optional [`TextSpatialSpan`](textbuffer-offline.md) metadata into an empty [`OfflineTextBuffer`](textbuffer-offline.md).
 
-Import path: **`react-native-sherpa-onnx/ocr`**.
+Import path: **`react-native-sherpa-onnx/ocr`**. Families and packs: [Models](#models).
 
-| `modelType` | Family | Alias | Recognize extras |
-| --- | --- | --- | --- |
-| `ppocr` | PP-OCR Det/Rec/optional Cls | — | spans on `textOut` |
-| `doctr` | OnnxTR Det/Rec | — | spans on `textOut` |
-| `doc_vlm` | Granite Docling | — | `raw`, `markdown`, `doctags`, `complete`, `stopReason` |
-| `nemotron_parse` | Nemotron-3.5-Parse | `nemotron-parse` only (never bare `nemotron`) | `raw`, `markdown`, `complete`, `stopReason` |
-| `paddleocr_vl` | PaddleOCR-VL | `paddleocr-vl` only (never bare `paddleocr`) | `raw`, `markdown`, `complete`, `stopReason`; spotting also writes spans |
-| `auto` | Detects from pack layout | — | extras of the resolved family |
-
-VLM `raw` is the native model stream; `markdown` is GFM the SDK produces; `textOut` is plaintext (no tags). `complete` is `true` only on a natural stop (not `maxNewTokens`). Overlay draws spans — it does not parse markup. `maxNewTokens` is VLM-only (`0` / omit → 8192). Pack files and decode details: [Models](#models).
+Recognize options and tasks are per family: [Recognize options by family](#recognize-options-by-family).
 
 ---
 
@@ -53,7 +44,7 @@ if (!det.success) {
   throw new Error(det.error ?? 'OCR detection failed');
 }
 
-// Step 2: create engine (swap createOCR args per family — table below)
+// Step 2: create engine
 const ocr = await createOCR({
   modelSource: modelDir,
   modelType: 'auto',
@@ -85,7 +76,7 @@ try {
     : [];
   console.log(text, spans.length, page.spanCount);
   // if (page.family === 'doc_vlm' || page.family === 'nemotron_parse' || page.family === 'paddleocr_vl') {
-  //   console.log(page.complete, page.stopReason, page.raw, page.markdown);
+  //   console.log(page.complete, page.stopReason, page.raw, page.content, page.elements, page.instruction);
   // }
 } finally {
   // Step 6: release buffers + engine
@@ -94,14 +85,6 @@ try {
   await ocr.destroy();
 }
 ```
-
-| Family | `createOCR(...)` |
-| --- | --- |
-| `ppocr` | `createOCR({ modelSource: modelDir, modelType: 'auto', provider: 'cpu', numThreads: 2 })` |
-| `doctr` | `createOCR({ modelSource: modelDir, modelType: 'auto', doctr: { detBoxThresh: 0.15, detBoxScoreThresh: 0.15 } })` |
-| `doc_vlm` | `createOCR({ modelSource: modelDir, modelType: 'doc_vlm', maxNewTokens: 512 })` |
-| `nemotron_parse` | `createOCR({ modelSource: modelDir, modelType: 'nemotron_parse', maxNewTokens: 512 })` |
-| `paddleocr_vl` | `createOCR({ modelSource: modelDir, modelType: 'paddleocr_vl', maxNewTokens: 512, paddleocrVl: { maxPixels: 401408 } })` |
 
 ### Multi-frame + progress + cancel
 
@@ -142,120 +125,185 @@ try {
 
 ## Models
 
-| `modelType` | Required files | Optional |
-| --- | --- | --- |
-| `ppocr` | `det`, `rec`, `rec_dict` | `cls` |
-| `doctr` | `det`, `rec`, `manifest` | — |
-| `doc_vlm` | `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` | — |
-| `nemotron_parse` | granite octet plus `patch_embed`, `pos_embed` | `patch_embed_data` |
-| `paddleocr_vl` | `vision_encoder`, `embedding`, `decoder`, `tokenizer` | `*_data`, `manifest` |
-| `auto` | Resolves family from pack layout (manifest `family`, then layout heuristics) | — |
-
-Published `doc_vlm` packs (self-contained; pack id is the technique, not a Hub `_quantized` filename):
-
-| ID | Weights | Notes |
-| --- | --- | --- |
-| `docvlm-granite-258m-fp32` | ~1.26 GiB | Canonical. Float KV. |
-| `docvlm-granite-258m-q8` | ~320 MB | Hub `_quantized` triple. Float KV. |
-| `docvlm-granite-258m-fp16` | ~632 MB | Float16 KV. |
-| `docvlm-granite-258m-q4f16` | ~265 MB | Float16 KV + MatMulNBits. |
-
-Each granite archive includes vision, embed, decoder, tokenizer, and manifest. `ppocrv6-tiny` stays the phone default.
-
-### `nemotron_parse` (Nemotron-3.5-Parse)
-
-New family — not `doc_vlm`. Alias **only** `nemotron-parse` (never bare `nemotron`, which is an STT token). Hub: [`XDcobra/Nemotron-3.5-Parse-ONNX`](https://huggingface.co/XDcobra/Nemotron-3.5-Parse-ONNX). GitHub release ids: `nemotron-3.5-parse-fp16`, `nemotron-3.5-parse-int8`.
-
-**Pack layout** (one quant per folder / `.tar.bz2`, flatten to pack root):
-
-| File | Required |
-| --- | --- |
-| `patch_embed.onnx` (+ optional `.onnx_data`) | yes / data optional |
-| `pos_embed.npy` | yes |
-| `vision_encoder.onnx` + `.onnx_data` | yes |
-| `embed_tokens.onnx` + `.onnx_data` | yes |
-| `decoder_model_merged.onnx` + `.onnx_data` | yes |
-| `tokenizer.json` | yes |
-| `ocr_manifest.json` (`family: "nemotron_parse"`) | yes |
-
-Hub folders `onnx/fp16` and `onnx/int8` flatten to pack ids `nemotron-3.5-parse-fp16` / `nemotron-3.5-parse-int8`. Local export: `build/ocr-models/nemotron-3.5-parse/onnx-{fp16,int8}`. Language hints: NVIDIA MOSCAR (163 language/script entries → 124 ISO codes). MOSCAR is synthetic; IndicVisionBench real pages cover `bn`, `gu`, `hi`, `kn`, `ml`, `mr`, `or`, `pa`, `ta`, `te`.
-
-```ts
-const ocr = await createOCR({
-  modelSource: { kind: 'fs', path: '/data/models/nemotron-3.5-parse-int8' },
-  modelType: 'nemotron_parse',
-  maxNewTokens: 512, // omit or 0 → 8192, then clamp to remaining context
-});
-const page = await ocr.recognize(image, textOut);
-if (page.family === 'nemotron_parse') {
-  // raw is native <x_*>/<y_*>/<class_*> markup — not DocTags.
-  console.log(page.complete, page.stopReason, page.raw, page.markdown);
-}
-```
-
-Hardcoded control prompt (no Jinja):
-`</s><s><predict_bbox><predict_classes><output_markdown><predict_text_in_pic>`.
-Decode is greedy + HF repetition penalty 1.1; stop on EOS id `2` (`stopReason: 'eos'`, `complete: true`) or the generation cap (`'max_new_tokens'`, `complete: false`). `markdown` is GFM: bbox/class tags stripped and LaTeX `tabular` converted to pipe tables. `textOut` is the same body flattened to plaintext. Overlay boxes come from line spans on `textOut`, not from parsing `raw`.
+| `modelType` | Required files | Optional | When to use |
+| --- | --- | --- | --- |
+| `ppocr` | `det`, `rec`, `rec_dict` | `cls` | Phone default. Fast line OCR with overlay boxes on signs, receipts, and scans. Start with `ppocrv6-tiny`; step up to `ppocrv6-small` / `ppocrv6-medium` for accuracy. |
+| `doctr` | `det`, `rec`, `manifest` | — | Same job as ppocr (detect + recognize + boxes) when the pack language set matches. `doctr-mobile` is the small `en`/`fr` pack; `doctr-default` is the larger Latin pack. |
+| `doc_vlm` | `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` | — | Structured documents: page markdown, a table / formula / code block, or a pixel region. Needs more RAM. Smallest published pack: `docvlm-granite-258m-q4f16`. |
+| `nemotron_parse` | granite octet plus `patch_embed`, `pos_embed` | `patch_embed_data` | Full-page markdown from a document photo. Larger VLM. Prefer `nemotron-3.5-parse-int8`. Alias `nemotron-parse` only (never bare `nemotron`). |
+| `paddleocr_vl` | `vision_encoder`, `embedding`, `decoder`, `tokenizer` | `*_data`, `manifest` | One loaded session, pick a task per run (page, table, formula, chart, seal, spotting with boxes). Largest pack: `paddleocr-vl-1.6-fp16`. Alias `paddleocr-vl` only (never bare `paddleocr`). |
+| `auto` | Resolves family from pack layout (manifest `family`, then layout heuristics) | — | When you do not want to hard-code `modelType`. Result extras follow the resolved family. |
 
 Validate category: **`ocr`**. Detection: [model-detect.md](model-detect.md) · languages: [model-languages.md](model-languages.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
 
-### `paddleocr_vl` (PaddleOCR-VL)
+---
 
-New family — not `ppocr`, not `doc_vlm`, not `nemotron_parse`. Alias **only** `paddleocr-vl` (never bare `paddleocr`, which is PP-OCR). Hub: [`XDcobra/PaddleOCR-VL-1.6-ONNX`](https://huggingface.co/XDcobra/PaddleOCR-VL-1.6-ONNX). GitHub release id: `paddleocr-vl-1.6-fp16`.
+## Recognize options by family
 
-**Pack layout** (one quant per folder / `.tar.bz2`, flatten to pack root). Detect matches this graph layout by stem, including suffixes such as `_fp16`, not only the 1.6 pack id:
+`engine.recognize(image, textOut, options?)` takes `OcrRecognizeOptionsOf<F>` for the loaded family. Omit `instruction` → `OCR_DEFAULT_INSTRUCTIONS[family]`.
 
-| File | Required |
+Shared on every family (`OcrRecognizeOptionsBase`):
+
+| Option | Effect |
 | --- | --- |
-| `vision_encoder.onnx` (+ optional `.onnx_data`) | yes / data optional |
-| `embedding.onnx` (+ optional `.onnx_data`) | yes / data optional |
-| `decoder.onnx` (+ optional `.onnx_data`) | yes / data optional |
-| `tokenizer.json` | yes |
-| `ocr_manifest.json` (`family: "paddleocr_vl"`) | optional (trusted when present) |
+| `frames` | Frame indices in the image buffer. Omit = all frames. |
+| `crop` | `{ x, y, width, height }` in decoded-frame pixels. The engine crops first; span and element quads are translated back to the full frame. Omit = full frame. Outside the frame → `OCR_INVALID_REGION`. |
+| `granularity` | Span level filter. Must be in `engine.capabilities.granularities` or `OCR_UNSUPPORTED_GRANULARITY`. |
+| `onProgress` | Phase callbacks (`OCR_PROGRESS_PHASES`). |
+| `progressMinIntervalMs` | Coalesce interval for progress events. Default `200`. `0` = unthrottled. |
+| `signal` | Abort at the same hooks as progress → `OCR_CANCELLED`. |
 
-Canonical names are `embedding.onnx` and `decoder.onnx` — not granite `embed_tokens` / `decoder_model_merged`. No `pos_embed.npy`, no layout model.
-
-Use **`provider: 'cpu'`** for `paddleocr-vl-1.6-fp16`. `xnnpack` attaches, then `createOCR` rejects: vision `FastGelu` (`com.microsoft`) is fp16, the CPU kernel is fp32-only, XNNPACK does not take the node. Fixing that would only make init succeed — this VLM does not get a meaningful XNNPACK speedup (contrib ops and fp16 compute stay on CPU). Same `OCR_INTERNAL_ERROR` if you pass `xnnpack` anyway; there is no silent CPU retry.
-
-`paddleocrVl.maxPixels` is init-only (`smart_resize` area). Omit or `0` → **1 003 520** (official). Clamped to `[112896, 1003520]`. Phones that OOMed at the official ceiling can pass `PADDLEOCR_VL_MOBILE_MAX_PIXELS` (`401408`, 512 visual tokens). `maxNewTokens: 512` is a first-page cap; omit/`0` still means 8192.
-
-`paddleocrVl.task` selects the official control-prompt task. Omit → **`ocr`**. Closed enum only (`'ocr' | 'spotting'`); no free-form prompt. Recognize can override on the same loaded session:
+### `ppocr`
 
 ```ts
-await ocr.recognize(image, textOut, {
-  paddleocrVl: { task: 'spotting' },
-});
+type OcrRecognizeOptionsOf<'ppocr'> = {
+  frames?: number[];
+  granularity?: 'line';
+  crop?: { x: number; y: number; width: number; height: number };
+  onProgress?: (progress: OcrProgress) => void;
+  progressMinIntervalMs?: number;
+  signal?: AbortSignal;
+};
 ```
 
-| Task | Prompt suffix | `raw` | `markdown` / `textOut` | spans |
-| --- | --- | --- | --- | --- |
-| `ocr` (default) | `OCR:` | model stream | unchanged strip | empty |
-| `spotting` | `Spotting:` | stream with `<\|LOC_n\|>` | instance texts, LOC stripped | one line span per instance |
+| Option | Effect |
+| --- | --- |
+| `granularity` | `'line'` only. Line boxes land on `textOut` as spatial spans. |
+| `crop` | Run detect/recognize on a pixel cutout. |
+| *(no `instruction`)* | Line OCR. Init-time `ppocr` DB knobs (`detUnclipRatio` default `1.5`, `detBoxThresh` / `detBoxScoreThresh` default `0.3` / `0.5`) change box tightness; they are not recognize options. Omit a thresh to keep the family default; an explicit value is never remapped. |
 
-Spotting is **one run**: instance text plus boxes, not a GFM page parse. Each instance is text then **eight** `<|LOC_n|>` tokens (`x1 y1 x2 y2 x3 y3 x4 y4`, values **0–1000**). Pixel quad: `(n/1000) * srcWidth/Height`. Passing `paddleocrVl` on a non-`paddleocr_vl` engine is `OCR_INVALID_ARGUMENT`.
-
-Paddle documents spotting `image_max_pixels = 1605632`. This SDK does **not** auto-raise `maxPixels` for spotting; the clamp ceiling stays **1 003 520**. Spotting quality may want a higher cap later — pass it explicitly when that lands; this slice keeps the phone-safe default.
+### `doctr`
 
 ```ts
-const ocr = await createOCR({
-  modelSource: { kind: 'fs', path: '/data/models/paddleocr-vl-1.6-fp16' },
-  modelType: 'paddleocr_vl',
-  maxNewTokens: 512, // omit or 0 → 8192, then clamp to remaining context
-  paddleocrVl: { maxPixels: 401408, task: 'ocr' }, // omit or 0 → 1003520; omit task → ocr
-});
-const page = await ocr.recognize(image, textOut);
-if (page.family === 'paddleocr_vl') {
-  // raw is the native markdown/HTML stream — not DocTags, not Nemotron xy tags.
-  console.log(page.complete, page.stopReason, page.raw, page.markdown);
-}
+type OcrRecognizeOptionsOf<'doctr'> = {
+  frames?: number[];
+  granularity?: 'line';
+  crop?: { x: number; y: number; width: number; height: number };
+  onProgress?: (progress: OcrProgress) => void;
+  progressMinIntervalMs?: number;
+  signal?: AbortSignal;
+};
 ```
 
-Control prompt (no Jinja):
-`<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|>×N<|IMAGE_END|>OCR:\nAssistant:\n`
-(or `Spotting:` when `task` is `'spotting'`).
-Decode is greedy argmax with no repetition penalty; stop on EOS id `2` (`stopReason: 'eos'`, `complete: true`) or the generation cap (`'max_new_tokens'`, `complete: false`). Overlay spans are empty for `ocr`; spotting fills line spans from LOC quads.
+| Option | Effect |
+| --- | --- |
+| `granularity` | `'line'` only. Line boxes land on `textOut` as spatial spans. |
+| `crop` | Run detect/recognize on a pixel cutout. |
+| *(no `instruction`)* | Line OCR. Init-time `doctr` DB knobs match ppocr except thresh defaults `0.15` / `0.15`. |
 
-Validate category: **`ocr`**. Detection: [model-detect.md](model-detect.md) · languages: [model-languages.md](model-languages.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Ocr`).
+### `doc_vlm`
+
+```ts
+type OcrRecognizeOptionsOf<'doc_vlm'> = {
+  frames?: number[];
+  granularity?: 'line' | 'block';
+  crop?: { x: number; y: number; width: number; height: number };
+  onProgress?: (progress: OcrProgress) => void;
+  progressMinIntervalMs?: number;
+  signal?: AbortSignal;
+  instruction?:
+    | { task: 'page' }
+    | { task: 'element'; element: 'table' | 'formula' | 'code' }
+    | { task: 'regionText'; region: { x: number; y: number; width: number; height: number } }
+    | { task: 'identifyElement'; region: { x: number; y: number; width: number; height: number } };
+  raw?: 'accepted' | 'full';
+};
+```
+
+| Option | Effect |
+| --- | --- |
+| `granularity` | `'line'` for titles/tables with locs; `'block'` for picture/chart media. |
+| `crop` | Allowed with `page` and `element`. Rejected with `regionText` / `identifyElement` (`OCR_INSTRUCTION_UNSUPPORTED`). |
+| `raw` | `'accepted'` (default): stop decode on the first DocTags / prompt-only reject so the SDK parser does not wait on a stream it will not use. `'full'`: keep generating through EOS / `maxNewTokens` so a custom parser can read the complete model answer on `result.raw`. |
+
+| | `page` | `element: 'table'` |
+| --- | --- | --- |
+| Image | ![page fixture](./images/ocr/page_01.png) | ![table fixture](./images/ocr/table_01.png) |
+| `instruction` | `{ task: 'page' }` (default) | `{ task: 'element', element: 'table' }` |
+| Format | `markdown` | `markdown` |
+| Output | Quarterly Operations Report, shift summary, … | `\| Item \| Qty \| Price \|` |
+
+| | `element: 'formula'` | `element: 'code'` |
+| --- | --- | --- |
+| Image | ![formula fixture](./images/ocr/formula_01.png) | ![code fixture](./images/ocr/code_01.png) |
+| `instruction` | `{ task: 'element', element: 'formula' }` | `{ task: 'element', element: 'code' }` |
+| Format | `latex` | `code` |
+| Output | `E = m c ^ { \wedge } 2` | `def add(a, b): …` |
+
+| | `regionText` | `identifyElement` |
+| --- | --- | --- |
+| Image | ![page fixture](./images/ocr/page_01.png) | ![page fixture](./images/ocr/page_01.png) |
+| `instruction` | `{ task: 'regionText', region }` | `{ task: 'identifyElement', region }` |
+| Format | `plain` | `plain` |
+| Output | text inside `region` | short label for what is in `region` |
+
+### `nemotron_parse`
+
+```ts
+type OcrRecognizeOptionsOf<'nemotron_parse'> = {
+  frames?: number[];
+  granularity?: 'line';
+  crop?: { x: number; y: number; width: number; height: number };
+  onProgress?: (progress: OcrProgress) => void;
+  progressMinIntervalMs?: number;
+  signal?: AbortSignal;
+  instruction?: {
+    task: 'page';
+    output: { text: 'markdown'; layout: 'none'; textInPictures: true };
+  };
+};
+```
+
+| Option | Effect |
+| --- | --- |
+| `granularity` | `'line'` only. |
+| `crop` | Run the page parse on a pixel cutout. |
+
+| | `page` |
+| --- | --- |
+| Image | ![page fixture](./images/ocr/page_01.png) |
+| `instruction` | `{ task: 'page', output: { text: 'markdown', layout: 'none', textInPictures: true } }` (default) |
+| Format | `markdown` |
+| Output | Quarterly Operations Report, shift summary, … |
+
+### `paddleocr_vl`
+
+Use **`provider: 'cpu'`** for `paddleocr-vl-1.6-fp16` (`createOCR` rejects `xnnpack`).
+
+```ts
+type OcrRecognizeOptionsOf<'paddleocr_vl'> = {
+  frames?: number[];
+  granularity?: 'line';
+  crop?: { x: number; y: number; width: number; height: number };
+  onProgress?: (progress: OcrProgress) => void;
+  progressMinIntervalMs?: number;
+  signal?: AbortSignal;
+  instruction?: {
+    task: 'ocr' | 'table' | 'formula' | 'chart' | 'seal' | 'spotting';
+  };
+};
+```
+
+| Option | Effect |
+| --- | --- |
+| `granularity` | `'line'` only. |
+| `crop` | Run the chosen task on a pixel cutout. |
+
+Init-only (not recognize): `maxNewTokens`, `paddleocrVl.maxPixels` (area cap; omit/`0` → task default).
+
+| | `ocr` | `table` | `formula` |
+| --- | --- | --- | --- |
+| Image | ![page fixture](./images/ocr/page_01.png) | ![table fixture](./images/ocr/table_01.png) | ![formula fixture](./images/ocr/formula_01.png) |
+| `instruction` | `{ task: 'ocr' }` (default) | `{ task: 'table' }` | `{ task: 'formula' }` |
+| Format | `markdown` | `markdown` | `latex` |
+| Output | Quarterly Operations Report, … | `\| Item \| Qty \| Price \|` | `E = m c^{2}` |
+
+| | `chart` | `seal` | `spotting` |
+| --- | --- | --- | --- |
+| Image | ![chart fixture](./images/ocr/chart_01.png) | ![seal fixture](./images/ocr/seal_01.png) | ![spotting fixture](./images/ocr/spotting_01.png) |
+| `instruction` | `{ task: 'chart' }` | `{ task: 'seal' }` | `{ task: 'spotting' }` |
+| Format | `markdown` | `plain` | `plain` |
+| Output | `\| Month \| Units \|` | `CITY HALL` / `SEAL 01` | `Hello World`, `Dock 12`, `Gate B` + line spans |
 
 ---
 
@@ -298,15 +346,11 @@ const ocr = await createOCR({
 });
 ```
 
-Family option bags (`ppocr` / `doctr` / `paddleocrVl`) are constrained by `modelType`. VLM cap is top-level `maxNewTokens` on `auto` / `doc_vlm` / `nemotron_parse` / `paddleocr_vl` only.
-
-`provider` and `numThreads` apply to every family, including `doc_vlm`, `nemotron_parse`, and `paddleocr_vl`. The provider string is passed to ONNX Runtime (`cpu`, `nnapi`, `xnnpack`, `coreml`). If that EP is missing or cannot attach, native logs and the session stays on CPU — it does not throw. If the EP attaches but session create fails (unsupported ops, OOM, alignment), `createOCR` rejects with `OCR_INTERNAL_ERROR` and the Ort message. It does not crash and does not silently retry CPU — pass `provider: 'cpu'` to retry. `paddleocr-vl-1.6-fp16` + `xnnpack` is that case (fp16 `FastGelu`); see the family section above. See [execution-providers.md](execution-providers.md).
-
-`ppocr.detUnclipRatio` / `doctr.detUnclipRatio` (default `1.5`) control DB box expansion after detection — lower values tighten spatial quads around glyphs.
+A missing or unusable `provider` logs and stays on CPU (no throw). If the EP attaches but session create fails, `createOCR` rejects `OCR_INTERNAL_ERROR` — it does not silently retry CPU. See [execution-providers.md](execution-providers.md). Init fields: [Types](#types).
 
 ### `engine.recognize(imageBuffer, textOut, options?)`
 
-Reads a populated image buffer; writes text (+ spatial spans) into an empty text buffer. Resolves `OcrRecognizeResult` (discriminated on `family`).
+Reads a populated image buffer; writes text (+ spatial spans) into an empty text buffer. Resolves `OcrRecognizeResult` (discriminated on `family`). Per-family `options`: [Recognize options by family](#recognize-options-by-family).
 
 ```ts
 recognize(
@@ -320,11 +364,19 @@ recognize(
 const page = await ocr.recognize(image, textOut, {
   granularity: 'line',
   frames: [0],
+  crop: { x: 0, y: 0, width: 200, height: 80 },
   onProgress: (p) => console.log(p.phase, p.done, p.total),
   signal: ac.signal,
-  // paddleocr_vl only; omit → init paddleocrVl.task (default 'ocr')
-  paddleocrVl: { task: 'spotting' },
 });
+if (ocr.family === 'paddleocr_vl') {
+  await ocr.recognize(image, textOut2, {
+    instruction: { task: 'spotting' },
+  });
+} else if (ocr.family === 'doc_vlm') {
+  await ocr.recognize(image, textOut2, {
+    instruction: { task: 'element', element: 'table' },
+  });
+}
 ```
 
 ### `engine.destroy()`
@@ -355,7 +407,7 @@ console.log(ocr.instanceId);
 | Destination / feature | Buffer or handle | Notes |
 | --- | --- | --- |
 | Plain transcript | `OfflineTextBuffer` (`txt_off_*`) | `getOfflineTextBufferTextSlice` |
-| Box overlay / layout UI | Spatial spans on same text buffer | `getOfflineTextBufferSpatialSpansSlice` (`origin: 'ocr'`). Ready-made: [`OfflineImageBufferAnnotatedView`](imagebuffer-offline.md#offlineimagebufferannotatedview); own UI: [`mapTextSpatialSpansToFrame`](imagebuffer-offline.md#maptextspatialspanstoframespans-options) |
+| Box overlay / layout UI | Spatial spans on same text buffer | Draws spans; does not parse markup. `getOfflineTextBufferSpatialSpansSlice` (`origin: 'ocr'`). Ready-made: [`OfflineImageBufferAnnotatedView`](imagebuffer-offline.md#offlineimagebufferannotatedview); own UI: [`mapTextSpatialSpansToFrame`](imagebuffer-offline.md#maptextspatialspanstoframespans-options) |
 | Offline TTS | `OfflineTextBuffer` | Read aloud recognized text |
 | Offline punctuation | `OfflineTextBuffer` | Optional cleanup before TTS |
 
@@ -399,12 +451,17 @@ const page = await ocr.recognize(image, textOut, {
 | `OcrConcreteModelType` | Exclude `auto` |
 | `OcrFamily` | Concrete backend family after load |
 | `OcrGranularity` | `'line' \| 'word' \| 'block'` |
-| `OcrInitializeOptions` | Discriminated on `modelType`; shared `provider?`, `numThreads?`; VLM-only `maxNewTokens?` |
-| `OcrPaddleocrVlTask` | `'ocr' \| 'spotting'` |
-| `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrVlmOptions` / `OcrPaddleocrVlOptions` | Family init bags (`paddleocrVl.maxPixels`, `paddleocrVl.task`) |
-| `OcrRecognizeOptions` | `frames?`, `granularity?`, `onProgress?`, `progressMinIntervalMs?` (default 200), `signal?`, `paddleocrVl?: { task? }` (paddleocr_vl only) |
-| `OcrRecognizeResult` | Discriminated on `family`. VLM families share `raw`/`markdown`/`complete`/`stopReason`; `doc_vlm` also has `doctags` |
-| `OcrVlmStopReason` | `'doctag_end' \| 'eos' \| 'max_new_tokens' \| 'invalid_sequence'` |
+| `OcrInitializeOptions` | Discriminated on `modelType`; shared `provider?`, `numThreads?`; VLM-only `maxNewTokens?` (`0` / omit → 8192) |
+| `OcrPaddleocrVlTask` | `'ocr' \| 'table' \| 'formula' \| 'chart' \| 'seal' \| 'spotting'` |
+| `OcrInstructionOf<F>` / `OcrTaskOf<F>` | Family-discriminated recognize instruction. Omit → `OCR_DEFAULT_INSTRUCTIONS[family]` |
+| `OcrDbDetectorOptions` | Shared `detBoxThresh?` / `detBoxScoreThresh?` / `detUnclipRatio?` for ppocr and doctr |
+| `OcrPpocrOptions` / `OcrDoctrOptions` / `OcrVlmOptions` / `OcrPaddleocrVlOptions` | Family init bags (`paddleocrVl.maxPixels` is a cap; task is recognize-time only) |
+| `OcrRecognizeOptionsOf<F>` | `frames?`, `granularity?`, `crop?`, `onProgress?`, `progressMinIntervalMs?` (default 200), `signal?`, plus `instruction?` and `raw?` (`'accepted'` \| `'full'`) on instruction families |
+| `OcrRecognizeResult` | Discriminated on `family`. VLM families share `raw`/`content`/`elements`/`instruction`/`complete`/`stopReason`. `raw` is the decoded model stream even when our parsers fail (`content`/`elements` then empty). No public `markdown` / `doctags`. `complete` is `true` only on a natural stop (not `maxNewTokens`) |
+| `OcrContent` | `{ format: 'markdown' \| 'plain' \| 'latex' \| 'code', value }` (`code` also has `language`) |
+| `OcrElement` | `{ kind, frameIndex, quad, utf16Start, utf16End, headingLevel, checked }` |
+| `OCR_CAPABILITIES` | Per-family `tasks`, `granularities`, `supportsCrop`, `producesElements` |
+| `OcrVlmStopReason` | `'doctag_end' \| 'eos' \| 'max_new_tokens' \| 'invalid_sequence'`. `invalid_sequence` = Granite stream left the DocTags grammar. Default `raw: 'accepted'` stops decode there; `raw: 'full'` continues so `result.raw` is the complete stream |
 | `OcrProgress` | `{ phase, done, total, frameIndex, frameCount }`. `total === 0` → indeterminate |
 | `OCR_PROGRESS_PHASES` | Known phase names; extra strings are allowed |
 | `OcrDetectModelResult` | `detectOcrModel` return |
@@ -431,7 +488,14 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_MODEL_NOT_FOUND` | Pack / ONNX paths missing at init. |
 | `OCR_NOT_INITIALIZED` | Native engine not ready. |
 | `OCR_INSTANCE_NOT_FOUND` | `instanceId` missing or already **destroyed**. |
-| `OCR_INVALID_ARGUMENT` | Bad options (e.g. invalid frame index, a non-integer / negative `maxNewTokens` or `paddleocrVl.maxPixels`, `paddleocrVl.task` other than `'ocr' \| 'spotting'`, or those fields / the `paddleocrVl` recognize bag on the wrong family). |
+| `OCR_INVALID_ARGUMENT` | Bad options (e.g. invalid frame index, a non-integer / negative `maxNewTokens` or `paddleocrVl.maxPixels`). |
+| `OCR_INSTRUCTION_FAMILY_MISMATCH` | Recognize spec family does not match the loaded engine. |
+| `OCR_INSTRUCTION_UNSUPPORTED` | Task / combination not in `capabilities.tasks` (or crop + Granite region). |
+| `OCR_INVALID_REGION` | Region is empty or outside the (cropped) frame. |
+| `OCR_UNSUPPORTED_GRANULARITY` | Requested span level is not in `capabilities.granularities`. |
+| `OCR_INVALID_RECOGNIZE_SPEC` | Spec string failed to parse. |
+| `OCR_PARSE_UNKNOWN_KIND` | Markup emitted an unmapped element kind. Parsers still throw this in host tests; `recognize` keeps `raw` and leaves `content`/`elements` empty. |
+| `OCR_CAPABILITIES_MISMATCH` | Native reported a task TypeScript does not know (init). |
 | `OCR_IMAGE_BUFFER_NOT_FOUND` | Image buffer id missing from registry. |
 | `OCR_IMAGE_BUFFER_EMPTY` | Image buffer has no frames. |
 | `OCR_FRAME_READ_FAILED` | Could not read a requested frame. |
@@ -439,7 +503,7 @@ See [imagebuffer-offline.md](imagebuffer-offline.md) and [textbuffer-offline.md]
 | `OCR_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
 | `OCR_CANCELLED` | `AbortSignal` aborted at a progress hook (phase / decode step / rec box). |
 | `OCR_BUSY` | Concurrent recognize on the same instance. |
-| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for VLM families, missing `raw` / `markdown` / `complete` / `stopReason` (`doc_vlm` also requires `doctags`); and a `createOCR` failure when session create fails (unsupported EP ops, missing contrib ops such as `GroupQueryAttention`, fp16 `FastGelu` on `paddleocr-vl-1.6-fp16` + `xnnpack`, OOM). |
+| `OCR_INTERNAL_ERROR` | Unexpected native failure. Also a recognize payload missing `family` or a finite `spanCount`; for VLM families, missing `raw` / `complete` / `stopReason`; and a `createOCR` failure when session create fails (unsupported EP ops, missing contrib ops such as `GroupQueryAttention`, `paddleocr-vl-1.6-fp16` + `xnnpack`, OOM). |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |
 
 ---
@@ -502,7 +566,7 @@ import {
   detectOcrModel,
 } from 'react-native-sherpa-onnx/ocr';
 
-const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m-fp32');
+const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m-q4f16');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source);
 if (!det.success) {
@@ -515,7 +579,7 @@ const ocr = await createOCR({
 });
 const page = await ocr.recognize(image, textOut, { granularity: 'line' });
 if (page.family === 'doc_vlm') {
-  console.log(page.complete, page.stopReason, page.raw, page.markdown);
+  console.log(page.complete, page.stopReason, page.raw, page.content, page.elements, page.instruction);
 }
 await ocr.destroy();
 ```
@@ -546,7 +610,7 @@ const ocr = await createOCR({
 });
 const page = await ocr.recognize(image, textOut, { granularity: 'line' });
 if (page.family === 'nemotron_parse') {
-  console.log(page.complete, page.stopReason, page.raw, page.markdown);
+  console.log(page.complete, page.stopReason, page.raw, page.content, page.elements, page.instruction);
 }
 await ocr.destroy();
 ```

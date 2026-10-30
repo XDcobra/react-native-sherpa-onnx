@@ -1,0 +1,2 @@
+<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Seal Recognition:
+Assistant:

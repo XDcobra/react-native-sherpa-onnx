@@ -88,9 +88,55 @@ std::vector<uint8_t> ResizeBicubic(const uint8_t* src, int src_w, int src_h, int
 
 int ClampMaxPixels(int max_pixels) {
   int cap = max_pixels <= 0 ? kOfficialMaxPixels : max_pixels;
-  if (cap > kOfficialMaxPixels) cap = kOfficialMaxPixels;
+  if (cap > kSpottingMaxPixels) cap = kSpottingMaxPixels;
   if (cap < kMinPixels) cap = kMinPixels;
   return cap;
+}
+
+double Lanczos3(double x) {
+  constexpr double a = 3.0;
+  constexpr double pi = 3.14159265358979323846;
+  x = std::abs(x);
+  if (x < 1e-12) return 1.0;
+  if (x >= a) return 0.0;
+  const double pix = pi * x;
+  return (a * std::sin(pix) * std::sin(pix / a)) / (pix * pix);
+}
+
+std::vector<uint8_t> ResizeLanczos3(const uint8_t* src, int src_w, int src_h,
+                                    int dst_w, int dst_h) {
+  std::vector<uint8_t> dst(static_cast<size_t>(dst_w) * dst_h * 3);
+  const double scale_x = static_cast<double>(src_w) / static_cast<double>(dst_w);
+  const double scale_y = static_cast<double>(src_h) / static_cast<double>(dst_h);
+  for (int y = 0; y < dst_h; ++y) {
+    const double src_y = (static_cast<double>(y) + 0.5) * scale_y - 0.5;
+    const int y0 = static_cast<int>(std::floor(src_y));
+    for (int x = 0; x < dst_w; ++x) {
+      const double src_x = (static_cast<double>(x) + 0.5) * scale_x - 0.5;
+      const int x0 = static_cast<int>(std::floor(src_x));
+      double acc[3] = {0, 0, 0};
+      double wsum = 0.0;
+      for (int ky = -2; ky <= 3; ++ky) {
+        const int sy = ReflectIndex(y0 + ky, src_h);
+        const double wy = Lanczos3(src_y - static_cast<double>(y0 + ky));
+        for (int kx = -2; kx <= 3; ++kx) {
+          const int sx = ReflectIndex(x0 + kx, src_w);
+          const double w = wy * Lanczos3(src_x - static_cast<double>(x0 + kx));
+          const uint8_t* p = src + (static_cast<size_t>(sy) * src_w + sx) * 3;
+          acc[0] += w * p[0];
+          acc[1] += w * p[1];
+          acc[2] += w * p[2];
+          wsum += w;
+        }
+      }
+      uint8_t* out = dst.data() + (static_cast<size_t>(y) * dst_w + x) * 3;
+      if (wsum == 0.0) wsum = 1.0;
+      out[0] = Clamp8(acc[0] / wsum);
+      out[1] = Clamp8(acc[1] / wsum);
+      out[2] = Clamp8(acc[2] / wsum);
+    }
+  }
+  return dst;
 }
 
 }  // namespace
@@ -133,15 +179,50 @@ SmartResizeSize SmartResize(int height, int width, int factor, int min_pixels,
   return SmartResizeSize{h_bar, w_bar};
 }
 
-PaddleocrVlPatches PreprocessRgb(const uint8_t* rgb, int width, int height,
-                                 int max_pixels) {
+int EffectiveMaxPixels(int init_cap, int task_default) {
+  if (task_default <= 0) task_default = kOfficialMaxPixels;
+  if (init_cap <= 0) return task_default;
+  return init_cap < task_default ? init_cap : task_default;
+}
+
+std::vector<uint8_t> Upscale2xLanczos(const uint8_t* rgb, int width, int height) {
   if (rgb == nullptr || width <= 0 || height <= 0) {
     throw std::invalid_argument("PaddleocrVlImageOps: invalid frame");
   }
-  const int cap = ClampMaxPixels(max_pixels);
-  const SmartResizeSize size = SmartResize(height, width, kFactor, kMinPixels, cap);
+  return ResizeLanczos3(rgb, width, height, width * 2, height * 2);
+}
+
+PaddleocrVlPatches PreprocessRgb(const uint8_t* rgb, int width, int height,
+                                 int max_pixels) {
+  PaddleocrVlPreprocessOptions options;
+  options.task_max_pixels = max_pixels <= 0 ? kOfficialMaxPixels : max_pixels;
+  return PreprocessRgb(rgb, width, height, options);
+}
+
+PaddleocrVlPatches PreprocessRgb(const uint8_t* rgb, int width, int height,
+                                 const PaddleocrVlPreprocessOptions& options) {
+  if (rgb == nullptr || width <= 0 || height <= 0) {
+    throw std::invalid_argument("PaddleocrVlImageOps: invalid frame");
+  }
+  const int cap = ClampMaxPixels(
+      EffectiveMaxPixels(options.init_max_pixels, options.task_max_pixels));
+  const uint8_t* work = rgb;
+  int work_w = width;
+  int work_h = height;
+  std::vector<uint8_t> upscaled;
+  bool did_upscale = false;
+  if (options.upscale_small_2x && width < kSpottingUpscaleBelow &&
+      height < kSpottingUpscaleBelow) {
+    upscaled = Upscale2xLanczos(rgb, width, height);
+    work = upscaled.data();
+    work_w = width * 2;
+    work_h = height * 2;
+    did_upscale = true;
+  }
+  const SmartResizeSize size =
+      SmartResize(work_h, work_w, kFactor, kMinPixels, cap);
   const std::vector<uint8_t> resized =
-      ResizeBicubic(rgb, width, height, size.width, size.height);
+      ResizeBicubic(work, work_w, work_h, size.width, size.height);
 
   const int grid_h = size.height / kPatch;
   const int grid_w = size.width / kPatch;
@@ -151,6 +232,8 @@ PaddleocrVlPatches PreprocessRgb(const uint8_t* rgb, int width, int height,
   out.src_w = width;
   out.resized_h = size.height;
   out.resized_w = size.width;
+  out.effective_max_pixels = cap;
+  out.upscaled = did_upscale;
   out.grid_t = 1;
   out.grid_h = grid_h;
   out.grid_w = grid_w;

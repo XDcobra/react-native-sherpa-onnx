@@ -250,6 +250,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/image\"",
     "\"#{pod_root}/android/src/main/cpp/image/decode\"",
     "\"#{pod_root}/android/src/main/cpp/ocr\"",
+    "\"#{pod_root}/android/src/main/cpp/ocr/markup\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/ppocr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/doctr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/doc_vlm\"",

@@ -265,6 +265,7 @@ export const styles = StyleSheet.create({
   },
   tabRowInline: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     flex: 1,
   },
@@ -284,8 +285,8 @@ export const styles = StyleSheet.create({
     color: '#007AFF',
   },
   tab: {
-    flex: 1,
     paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 10,
     backgroundColor: '#f1f5f9',
     alignItems: 'center',
@@ -417,6 +418,21 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     minHeight: 44,
+  },
+  rectRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  rectInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: '#111',
+    backgroundColor: '#fff',
   },
   paramValueBadge: {
     backgroundColor: '#F3F4F6',

@@ -1,3 +1,4 @@
+#include "OcrCapabilities.h"
 #include "OcrDetect.h"
 #include "OcrEngine.h"
 #include "OcrTypes.h"
@@ -88,6 +89,25 @@ void PutDouble(JNIEnv* env, jobject map, jmethodID put, const char* key,
   env->DeleteLocalRef(dblClass);
 }
 
+jobject NewQuadList(JNIEnv* env, const sherpa_onnx::ocr::OcrQuad& quad) {
+  jclass floatClass = env->FindClass("java/lang/Float");
+  jmethodID floatValueOf =
+      env->GetStaticMethodID(floatClass, "valueOf", "(F)Ljava/lang/Float;");
+  jclass listClass = env->FindClass("java/util/ArrayList");
+  jmethodID listInit = env->GetMethodID(listClass, "<init>", "(I)V");
+  jmethodID listAdd =
+      env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+  jobject quadList = env->NewObject(listClass, listInit, 8);
+  for (int i = 0; i < 8; ++i) {
+    jobject f = env->CallStaticObjectMethod(floatClass, floatValueOf, quad.xy[i]);
+    env->CallBooleanMethod(quadList, listAdd, f);
+    env->DeleteLocalRef(f);
+  }
+  env->DeleteLocalRef(floatClass);
+  env->DeleteLocalRef(listClass);
+  return quadList;
+}
+
 const char* SpanLevelName(sherpa_onnx::ocr::OcrSpanLevel level) {
   switch (level) {
     case sherpa_onnx::ocr::OcrSpanLevel::kWord:
@@ -155,7 +175,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     jstring modelType, jint numThreads, jstring provider, jint maxSideLen,
     jboolean useOrientationCls, jfloat detBoxThresh, jfloat detBoxScoreThresh,
     jfloat detUnclipRatio, jint maxNewTokens, jint maxPixels,
-    jstring quantization, jobject pathOverrides, jstring paddleocrVlTask) {
+    jstring quantization, jobject pathOverrides) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string dir = JstringToStd(env, modelDir);
   const std::string type = JstringToStd(env, modelType);
@@ -172,7 +192,6 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeLoad(
     opts.max_pixels = maxPixels;
     opts.provider = JstringToStd(env, provider);
     opts.quantization = JstringToStd(env, quantization);
-    opts.paddleocr_vl_task = JstringToStd(env, paddleocrVlTask);
     ApplyPathOverrides(env, pathOverrides, opts);
     LOGI("nativeLoad instance=%s type=%s provider=%s threads=%d dir=%s",
          id.c_str(), type.c_str(),
@@ -450,8 +469,7 @@ JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring imageBufferId,
     jintArray frameIndices, jstring granularity, jstring operationId,
-    jint progressMinIntervalMs, jboolean hasPaddleocrVl,
-    jstring paddleocrVlTask) {
+    jint progressMinIntervalMs, jstring recognizeSpec) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string imageId = JstringToStd(env, imageBufferId);
   const std::string opId = JstringToStd(env, operationId);
@@ -473,8 +491,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   opts.granularity = ParseGranularity(gran);
   opts.progress_min_interval_ms =
       progressMinIntervalMs < 0 ? 0 : static_cast<int>(progressMinIntervalMs);
-  opts.has_paddleocr_vl = hasPaddleocrVl == JNI_TRUE;
-  opts.paddleocr_vl_task = JstringToStd(env, paddleocrVlTask);
+  opts.recognize_spec = JstringToStd(env, recognizeSpec);
   if (frameIndices != nullptr) {
     const jsize n = env->GetArrayLength(frameIndices);
     jint* elems = env->GetIntArrayElements(frameIndices, nullptr);
@@ -536,12 +553,28 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   PutString(env, map, put, "errorMessage", outcome.errorMessage);
   PutString(env, map, put, "family", outcome.family);
   PutString(env, map, put, "text", outcome.result.text_utf8);
-  PutString(env, map, put, "doctags", outcome.result.doctags_utf8);
   PutString(env, map, put, "raw", outcome.result.raw_utf8);
-  PutString(env, map, put, "markdown", outcome.result.markdown_utf8);
+  PutString(env, map, put, "instructionSpec", outcome.result.instruction_spec);
   if (sherpa_onnx::ocr::IsOcrVlmFamily(outcome.family)) {
     PutString(env, map, put, "stopReason", outcome.result.stop_reason);
     PutBool(env, map, put, "complete", outcome.result.complete ? JNI_TRUE : JNI_FALSE);
+  }
+  if (outcome.result.has_content) {
+    jmethodID contentPut = nullptr;
+    jobject contentMap = NewHashMap(env, &contentPut);
+    if (contentMap) {
+      PutString(env, contentMap, contentPut, "format",
+                sherpa_onnx::ocr::OcrContentFormatName(outcome.result.content.format));
+      PutString(env, contentMap, contentPut, "value", outcome.result.content.value);
+      if (!outcome.result.content.language.empty()) {
+        PutString(env, contentMap, contentPut, "language",
+                  outcome.result.content.language);
+      }
+      jstring contentKey = env->NewStringUTF("content");
+      env->CallObjectMethod(map, put, contentKey, contentMap);
+      env->DeleteLocalRef(contentKey);
+      env->DeleteLocalRef(contentMap);
+    }
   }
 
   jclass arrayListClass = env->FindClass("java/util/ArrayList");
@@ -561,26 +594,11 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
     PutDouble(env, spanMap, spanPut, "confidence",
               static_cast<double>(span.confidence));
 
-    jclass floatClass = env->FindClass("java/lang/Float");
-    jmethodID floatValueOf =
-        env->GetStaticMethodID(floatClass, "valueOf", "(F)Ljava/lang/Float;");
-    jclass listClass = env->FindClass("java/util/ArrayList");
-    jmethodID listInit = env->GetMethodID(listClass, "<init>", "(I)V");
-    jmethodID listAdd =
-        env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
-    jobject quadList = env->NewObject(listClass, listInit, 8);
-    for (int i = 0; i < 8; ++i) {
-      jobject f = env->CallStaticObjectMethod(floatClass, floatValueOf,
-                                              span.quad.xy[i]);
-      env->CallBooleanMethod(quadList, listAdd, f);
-      env->DeleteLocalRef(f);
-    }
+    jobject quadList = NewQuadList(env, span.quad);
     jstring qkey = env->NewStringUTF("quad");
     env->CallObjectMethod(spanMap, spanPut, qkey, quadList);
     env->DeleteLocalRef(qkey);
     env->DeleteLocalRef(quadList);
-    env->DeleteLocalRef(floatClass);
-    env->DeleteLocalRef(listClass);
 
     env->CallBooleanMethod(spansList, arrayListAdd, spanMap);
     env->DeleteLocalRef(spanMap);
@@ -590,8 +608,91 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   env->CallObjectMethod(map, put, spansKey, spansList);
   env->DeleteLocalRef(spansKey);
   env->DeleteLocalRef(spansList);
+
+  jobject elementsList = env->NewObject(arrayListClass, arrayListInit);
+  for (const auto& element : outcome.result.elements) {
+    jmethodID elementPut = nullptr;
+    jobject elementMap = NewHashMap(env, &elementPut);
+    if (!elementMap) continue;
+    PutString(env, elementMap, elementPut, "kind",
+              sherpa_onnx::ocr::OcrElementKindName(element.kind));
+    PutInt(env, elementMap, elementPut, "frameIndex", element.frame_index);
+    if (element.has_quad) {
+      jobject quadList = NewQuadList(env, element.quad);
+      jstring qkey = env->NewStringUTF("quad");
+      env->CallObjectMethod(elementMap, elementPut, qkey, quadList);
+      env->DeleteLocalRef(qkey);
+      env->DeleteLocalRef(quadList);
+    }
+    if (element.has_utf16) {
+      PutInt(env, elementMap, elementPut, "utf16Start", element.utf16_start);
+      PutInt(env, elementMap, elementPut, "utf16End", element.utf16_end);
+    }
+    if (element.heading_level) {
+      PutInt(env, elementMap, elementPut, "headingLevel", *element.heading_level);
+    }
+    if (element.checked) {
+      PutBool(env, elementMap, elementPut, "checked",
+              *element.checked ? JNI_TRUE : JNI_FALSE);
+    }
+    env->CallBooleanMethod(elementsList, arrayListAdd, elementMap);
+    env->DeleteLocalRef(elementMap);
+  }
+  jstring elementsKey = env->NewStringUTF("elements");
+  env->CallObjectMethod(map, put, elementsKey, elementsList);
+  env->DeleteLocalRef(elementsKey);
+  env->DeleteLocalRef(elementsList);
   env->DeleteLocalRef(arrayListClass);
 
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_ocr_OcrNative_nativeGetCapabilities(JNIEnv* env,
+                                                        jclass /*clazz*/,
+                                                        jstring instanceId) {
+  const std::string id = JstringToStd(env, instanceId);
+  auto* engine = sherpa_onnx::ocr::OcrEngineRegistry::Instance().Get(id);
+  if (!engine || !engine->IsLoaded()) return nullptr;
+  const char* family = engine->Family();
+  if (!family || family[0] == '\0') return nullptr;
+  const auto caps = sherpa_onnx::ocr::CapabilitiesForFamily(family);
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  if (!map) return nullptr;
+  PutString(env, map, put, "family", family);
+  PutBool(env, map, put, "supportsCrop",
+          caps.supports_crop ? JNI_TRUE : JNI_FALSE);
+  PutBool(env, map, put, "producesElements",
+          caps.produces_elements ? JNI_TRUE : JNI_FALSE);
+
+  jclass listClass = env->FindClass("java/util/ArrayList");
+  jmethodID listInit = env->GetMethodID(listClass, "<init>", "()V");
+  jmethodID listAdd =
+      env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
+  jobject tasks = env->NewObject(listClass, listInit);
+  for (const auto& task : caps.tasks) {
+    jstring item = env->NewStringUTF(task.c_str());
+    env->CallBooleanMethod(tasks, listAdd, item);
+    env->DeleteLocalRef(item);
+  }
+  jstring tasksKey = env->NewStringUTF("tasks");
+  env->CallObjectMethod(map, put, tasksKey, tasks);
+  env->DeleteLocalRef(tasksKey);
+  env->DeleteLocalRef(tasks);
+
+  jobject granularities = env->NewObject(listClass, listInit);
+  for (const auto g : caps.granularities) {
+    jstring item =
+        env->NewStringUTF(sherpa_onnx::ocr::GranularityName(g));
+    env->CallBooleanMethod(granularities, listAdd, item);
+    env->DeleteLocalRef(item);
+  }
+  jstring granKey = env->NewStringUTF("granularities");
+  env->CallObjectMethod(map, put, granKey, granularities);
+  env->DeleteLocalRef(granKey);
+  env->DeleteLocalRef(granularities);
+  env->DeleteLocalRef(listClass);
   return map;
 }
 

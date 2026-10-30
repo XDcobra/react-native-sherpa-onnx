@@ -350,7 +350,8 @@
       "<rootDir>/example/",
       "<rootDir>/android/",
       "<rootDir>/ios/",
-      "<rootDir>/lib/"
+      "<rootDir>/lib/",
+      "\\.test-d\\.ts$"
     ],
     "setupFilesAfterEnv": [
       "<rootDir>/jest.setup.js"

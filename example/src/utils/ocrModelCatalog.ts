@@ -13,6 +13,7 @@ import {
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import type { OcrFamily } from 'react-native-sherpa-onnx/ocr';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -76,6 +77,54 @@ export function isVlmOcrPack(id: string): boolean {
 export function isPaddleocrVlOcrPack(id: string): boolean {
   const lower = id.toLowerCase();
   return lower.includes('paddleocr-vl') || lower.includes('paddleocr_vl');
+}
+
+/** Resolve the public OCR family from a pack folder / catalog id. */
+export function inferOcrFamilyFromFolder(folder: string): OcrFamily | null {
+  const normalized = folder.toLowerCase();
+  if (
+    normalized.includes('paddleocr-vl') ||
+    normalized.includes('paddleocr_vl')
+  ) {
+    return 'paddleocr_vl';
+  }
+  if (
+    normalized.includes('nemotron-3.5-parse') ||
+    normalized.includes('nemotron-parse') ||
+    normalized.includes('nemotron_parse')
+  ) {
+    return 'nemotron_parse';
+  }
+  if (
+    normalized.startsWith('docvlm') ||
+    normalized.includes('granite-docling') ||
+    normalized.includes('granite')
+  ) {
+    return 'doc_vlm';
+  }
+  if (normalized.startsWith('doctr') || normalized.includes('onnxtr')) {
+    return 'doctr';
+  }
+  if (normalized.startsWith('ppocr') || normalized.includes('pp-ocr')) {
+    return 'ppocr';
+  }
+  return null;
+}
+
+export function isDbDetectorOcrFamily(
+  family: OcrFamily | null | undefined
+): family is 'ppocr' | 'doctr' {
+  return family === 'ppocr' || family === 'doctr';
+}
+
+export function isVlmOcrFamily(
+  family: OcrFamily | null | undefined
+): family is 'doc_vlm' | 'nemotron_parse' | 'paddleocr_vl' {
+  return (
+    family === 'doc_vlm' ||
+    family === 'nemotron_parse' ||
+    family === 'paddleocr_vl'
+  );
 }
 
 export function resolveOcrModelSource(

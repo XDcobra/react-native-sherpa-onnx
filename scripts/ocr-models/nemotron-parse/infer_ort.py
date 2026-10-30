@@ -20,6 +20,7 @@ from constants import (
     NUM_DECODER_LAYERS,
     NUM_KV_HEADS,
     PATCH_SIZE,
+    build_output_prompt,
 )
 from navit_pos import add_navit_positions_numpy
 from paths import HF_SRC, ONNX_DIR, ensure_hf_src_on_path
@@ -27,8 +28,13 @@ from wrappers import decoder_input_names, decoder_output_names
 
 
 def session(path: Path) -> ort.InferenceSession:
+    import os
+
     opts = ort.SessionOptions()
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    threads = max(1, int(os.environ.get("ORT_NUM_THREADS") or os.environ.get("OMP_NUM_THREADS") or "14"))
+    opts.intra_op_num_threads = threads
+    opts.inter_op_num_threads = 1
     return ort.InferenceSession(str(path), opts, providers=["CPUExecutionProvider"])
 
 
@@ -227,15 +233,28 @@ def parse_args(argv):
     parser.add_argument("--onnx-dir", type=Path, default=ONNX_DIR)
     parser.add_argument("--image", type=Path)
     parser.add_argument("--max-new-tokens", type=int, default=32)
-    parser.add_argument("--prompt", default=DEFAULT_PROMPT)
+    parser.add_argument("--prompt", default=None)
+    parser.add_argument(
+        "--output-profile",
+        metavar="text,layout,pic",
+        help="e.g. markdown,boxesAndClasses,nopic  (overrides --prompt)",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(argv or sys.argv[1:])
     image = Image.open(args.image).convert("RGB") if args.image else make_hello_image()
+    prompt = args.prompt
+    if args.output_profile:
+        parts = [p.strip() for p in args.output_profile.split(",")]
+        if len(parts) != 3:
+            raise SystemExit("--output-profile must be text,layout,pic")
+        prompt = build_output_prompt(parts[0], parts[1], parts[2])
+    if not prompt:
+        prompt = DEFAULT_PROMPT
     parser = OrtParser(args.onnx_dir)
-    result = parser.generate(image, prompt=args.prompt, max_new_tokens=args.max_new_tokens)
+    result = parser.generate(image, prompt=prompt, max_new_tokens=args.max_new_tokens)
     print(json.dumps(result, indent=2)[:4000])
     return 0
 

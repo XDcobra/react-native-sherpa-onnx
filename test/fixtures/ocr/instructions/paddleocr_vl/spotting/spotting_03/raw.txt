@@ -1,0 +1,3 @@
+Bravo<|LOC_500|><|LOC_137|><|LOC_559|><|LOC_137|><|LOC_559|><|LOC_163|><|LOC_500|><|LOC_163|>
+Alpha<|LOC_38|><|LOC_337|><|LOC_98|><|LOC_337|><|LOC_98|><|LOC_369|><|LOC_38|><|LOC_369|>
+Charlie<|LOC_650|><|LOC_803|><|LOC_721|><|LOC_803|><|LOC_721|><|LOC_830|><|LOC_650|><|LOC_830|></s>

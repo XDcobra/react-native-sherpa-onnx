@@ -60,6 +60,24 @@
       "category": "ocr",
       "repo": "XDcobra/react-native-sherpa-onnx",
       "tag": "ocr-models",
+      "id": "doctr-mobile"
+    },
+    {
+      "category": "ocr",
+      "repo": "XDcobra/react-native-sherpa-onnx",
+      "tag": "ocr-models",
+      "id": "docvlm-granite-258m-q4f16"
+    },
+    {
+      "category": "ocr",
+      "repo": "XDcobra/react-native-sherpa-onnx",
+      "tag": "ocr-models",
+      "id": "nemotron-3.5-parse-int8"
+    },
+    {
+      "category": "ocr",
+      "repo": "XDcobra/react-native-sherpa-onnx",
+      "tag": "ocr-models",
       "id": "paddleocr-vl-1.6-fp16"
     }
   ]

@@ -208,6 +208,13 @@ set(SOURCES
     ocr/OcrTextUtils.cpp
     ocr/OcrEngine.cpp
     ocr/OcrRecognizeContext.cpp
+    ocr/OcrRecognizeSpec.cpp
+    ocr/OcrCapabilities.cpp
+    ocr/OcrGeometry.cpp
+    ocr/OcrCrop.cpp
+    ocr/markup/OcrTable.cpp
+    ocr/markup/OcrOtsl.cpp
+    ocr/markup/OcrElementKind.cpp
     ocr/OcrOrtEnv.cpp
     ocr/OcrOrtHelpers.cpp
     ocr/ppocr/PpocrBackend.cpp

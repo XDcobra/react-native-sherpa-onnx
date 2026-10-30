@@ -8,7 +8,6 @@ import type {
   OcrInitializeOptions,
   OcrModelType,
   OcrPaddleocrVlOptions,
-  OcrPaddleocrVlTask,
   OcrPpocrOptions,
 } from './types';
 
@@ -65,13 +64,10 @@ function appendOcrScalarBridgeFields(
       invalidOcrArg('paddleocrVl.maxPixels is only valid for paddleocr_vl');
     }
   }
-  const task = options.paddleocrVl?.task;
-  if (task !== undefined) {
-    assertOcrPaddleocrVlTask(task);
-    if (modelType !== 'paddleocr_vl' && modelType !== 'auto') {
-      invalidOcrArg('paddleocrVl.task is only valid for paddleocr_vl');
-    }
-  }
+  const detBoxThresh =
+    options.ppocr?.detBoxThresh ?? options.doctr?.detBoxThresh;
+  const detBoxScoreThresh =
+    options.ppocr?.detBoxScoreThresh ?? options.doctr?.detBoxScoreThresh;
   const detUnclipRatio =
     options.ppocr?.detUnclipRatio ?? options.doctr?.detUnclipRatio;
 
@@ -86,25 +82,12 @@ function appendOcrScalarBridgeFields(
     ...(options.ppocr?.useOrientationCls !== undefined
       ? { useOrientationCls: options.ppocr.useOrientationCls }
       : {}),
-    ...(options.doctr?.detBoxThresh !== undefined
-      ? { detBoxThresh: options.doctr.detBoxThresh }
-      : {}),
-    ...(options.doctr?.detBoxScoreThresh !== undefined
-      ? { detBoxScoreThresh: options.doctr.detBoxScoreThresh }
-      : {}),
+    ...(detBoxThresh !== undefined ? { detBoxThresh } : {}),
+    ...(detBoxScoreThresh !== undefined ? { detBoxScoreThresh } : {}),
     ...(detUnclipRatio !== undefined ? { detUnclipRatio } : {}),
     ...(maxNewTokens !== undefined ? { maxNewTokens } : {}),
     ...(maxPixels !== undefined ? { maxPixels } : {}),
-    ...(task !== undefined ? { paddleocrVlTask: task } : {}),
   };
-}
-
-export function assertOcrPaddleocrVlTask(
-  task: string
-): asserts task is OcrPaddleocrVlTask {
-  if (task !== 'ocr' && task !== 'spotting') {
-    invalidOcrArg("paddleocrVl.task must be 'ocr' or 'spotting'");
-  }
 }
 
 export async function buildOcrInitBridgeOptions(

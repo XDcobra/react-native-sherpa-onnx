@@ -1,0 +1,26 @@
+{
+  "family": "nemotron_parse",
+  "task": "page",
+  "profile": "markdown_none_pic",
+  "fixture_id": "page_03",
+  "pack_id": "nemotron-3.5-parse-int8",
+  "prompt_text": "</s><s><no_bbox><no_classes><output_markdown><predict_text_in_pic>",
+  "preprocess": {
+    "prompt": "</s><s><no_bbox><no_classes><output_markdown><predict_text_in_pic>",
+    "image": "test/fixtures/ocr/instructions/_images/page_03.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 128,
+  "ort_token_count": 128,
+  "prefix_len": 128,
+  "grammar": {
+    "kind": "nemotron",
+    "ok": true,
+    "unknown": [],
+    "class_count": 0,
+    "box_count": 0,
+    "notes": []
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/nemotron_parse/page/markdown_none_pic/page_03",
+  "max_new_tokens": 128
+}

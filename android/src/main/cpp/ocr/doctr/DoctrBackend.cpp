@@ -68,6 +68,13 @@ DoctrBackend::~DoctrBackend() {
 void DoctrBackend::Load(const std::string& model_dir, const OcrLoadOptions& options) {
   Release();
   options_ = options;
+  options_.det_box_thresh =
+      ResolveOcrDetThresh(options.det_box_thresh, kDoctrDetBoxThresh);
+  options_.det_box_score_thresh =
+      ResolveOcrDetThresh(options.det_box_score_thresh, kDoctrDetBoxScoreThresh);
+  OCR_LOGI("doctr detector box_thresh=%.3f score_thresh=%.3f unclip=%.3f",
+           options_.det_box_thresh, options_.det_box_score_thresh,
+           options_.det_unclip_ratio);
 
   const std::string det_path =
       OcrResolvePath(options.path_det, model_dir, "det.onnx");
@@ -163,16 +170,10 @@ OcrResult DoctrBackend::Recognize(const OcrFrameView& frame,
 
   // doctr det outputs logits (not probabilities); sigmoid + postprocess maps
   // boxes from det input space back to source image coords.
-  // doctr DB models produce lower sigmoid scores than ppocr; use adapted defaults
-  // when the caller passes the ppocr-tuned defaults.
-  float box_thresh = options_.det_box_thresh;
-  float score_thresh = options_.det_box_score_thresh;
-  if (box_thresh >= 0.3f) box_thresh = 0.15f;
-  if (score_thresh >= 0.5f) score_thresh = 0.15f;
   auto boxes = DoctrDbPostprocess(
       logits, pred_h, pred_w,
       frame.width, frame.height,
-      box_thresh, score_thresh,
+      options_.det_box_thresh, options_.det_box_score_thresh,
       options_.det_unclip_ratio);
 
   // --- Recognition per box ---

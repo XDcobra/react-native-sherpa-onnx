@@ -1,0 +1,33 @@
+{
+  "family": "paddleocr_vl",
+  "task": "chart",
+  "profile": null,
+  "fixture_id": "chart_01",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Chart Recognition:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1003520,
+    "upscaled": false,
+    "image_size": [
+      720,
+      420
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/chart_01.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 27,
+  "ort_token_count": 27,
+  "prefix_len": 27,
+  "grammar": {
+    "kind": "chart",
+    "ok": true,
+    "unknown": [],
+    "form": "gfm",
+    "notes": [
+      "chart_form=gfm"
+    ],
+    "sample": "Month | Units\nMon | 12\nTue | 18\nWed | 9\nThu | 21</s>"
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/chart/chart_01",
+  "max_new_tokens": 128
+}

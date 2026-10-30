@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -11,6 +10,7 @@ import {
   PADDLEOCR_VL_MIN_PIXELS,
   PADDLEOCR_VL_MOBILE_MAX_PIXELS,
   PADDLEOCR_VL_OFFICIAL_MAX_PIXELS,
+  PADDLEOCR_VL_SPOTTING_MAX_PIXELS,
   type OcrConcreteModelType,
   type OcrCustomPathKey,
 } from 'react-native-sherpa-onnx/ocr';
@@ -37,6 +37,10 @@ export type OcrCustomInitFormState = {
   maxNewTokens: number;
   /** 0 → official 1003520. Used by paddleocr_vl. */
   maxPixels: number;
+  /** 0 → native default. Used by ppocr/doctr. */
+  detBoxThresh: number;
+  /** 0 → native default. Used by ppocr/doctr. */
+  detBoxScoreThresh: number;
 };
 
 type OcrCustomInitFormProps = {
@@ -56,7 +60,10 @@ const MAX_PIXEL_PRESETS = [
   0,
   PADDLEOCR_VL_MOBILE_MAX_PIXELS,
   PADDLEOCR_VL_MIN_PIXELS,
+  PADDLEOCR_VL_SPOTTING_MAX_PIXELS,
 ] as const;
+const DET_BOX_THRESH_PRESETS = [0, 0.15, 0.3] as const;
+const DET_BOX_SCORE_THRESH_PRESETS = [0, 0.15, 0.5] as const;
 
 type DocVlmInitOptionChipsProps = {
   maxNewTokens: number;
@@ -76,11 +83,7 @@ export function DocVlmInitOptionChips({
         Cap on generated VLM tokens. 0 uses the backend default (8192). 512 is
         only enough for short goldens; full pages need a higher cap.
       </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.typeRow}
-      >
+      <View style={styles.typeRow}>
         {MAX_NEW_TOKEN_PRESETS.map((preset) => {
           const active = maxNewTokens === preset;
           return (
@@ -101,7 +104,7 @@ export function DocVlmInitOptionChips({
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+      </View>
     </View>
   );
 }
@@ -125,11 +128,7 @@ export function PaddleocrVlMaxPixelsChips({
         {PADDLEOCR_VL_OFFICIAL_MAX_PIXELS} cap. {PADDLEOCR_VL_MOBILE_MAX_PIXELS}{' '}
         is a phone-oriented 512-token cap.
       </Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.typeRow}
-      >
+      <View style={styles.typeRow}>
         {MAX_PIXEL_PRESETS.map((preset) => {
           const active = maxPixels === preset;
           return (
@@ -150,7 +149,82 @@ export function PaddleocrVlMaxPixelsChips({
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
+      </View>
+    </View>
+  );
+}
+
+type OcrDbDetectorChipsProps = {
+  family?: 'ppocr' | 'doctr';
+  detBoxThresh: number;
+  detBoxScoreThresh: number;
+  onChangeBoxThresh: (value: number) => void;
+  onChangeBoxScoreThresh: (value: number) => void;
+  disabled?: boolean;
+};
+
+export function OcrDbDetectorChips({
+  family,
+  detBoxThresh,
+  detBoxScoreThresh,
+  onChangeBoxThresh,
+  onChangeBoxScoreThresh,
+  disabled = false,
+}: OcrDbDetectorChipsProps) {
+  const title = family ? `${family} DB detector` : 'ppocr/doctr DB detector';
+  return (
+    <View>
+      <Text style={styles.subheading}>{title}</Text>
+      <Text style={styles.hint}>
+        0 leaves the native default (ppocr 0.3 / 0.5, doctr 0.15 / 0.15).
+        Re-init to apply.
+      </Text>
+      <Text style={styles.hint}>detBoxThresh</Text>
+      <View style={styles.typeRow}>
+        {DET_BOX_THRESH_PRESETS.map((preset) => {
+          const active = detBoxThresh === preset;
+          return (
+            <TouchableOpacity
+              key={`box-${preset}`}
+              style={[styles.typeChip, active && styles.typeChipActive]}
+              onPress={() => onChangeBoxThresh(preset)}
+              disabled={disabled}
+            >
+              <Text
+                style={[
+                  styles.typeChipText,
+                  active && styles.typeChipTextActive,
+                ]}
+              >
+                {preset === 0 ? 'default' : String(preset)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <Text style={styles.hint}>detBoxScoreThresh</Text>
+      <View style={styles.typeRow}>
+        {DET_BOX_SCORE_THRESH_PRESETS.map((preset) => {
+          const active = detBoxScoreThresh === preset;
+          return (
+            <TouchableOpacity
+              key={`score-${preset}`}
+              style={[styles.typeChip, active && styles.typeChipActive]}
+              onPress={() => onChangeBoxScoreThresh(preset)}
+              disabled={disabled}
+            >
+              <Text
+                style={[
+                  styles.typeChipText,
+                  active && styles.typeChipTextActive,
+                ]}
+              >
+                {preset === 0 ? 'default' : String(preset)}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -228,21 +302,9 @@ export function OcrCustomInitForm({
       fileSources: {},
       maxNewTokens: value.maxNewTokens,
       maxPixels: value.maxPixels,
+      detBoxThresh: value.detBoxThresh,
+      detBoxScoreThresh: value.detBoxScoreThresh,
     });
-  };
-
-  const setMaxNewTokens = (maxNewTokens: number) => {
-    if (maxNewTokens === value.maxNewTokens) {
-      return;
-    }
-    onChange({ ...value, maxNewTokens });
-  };
-
-  const setMaxPixels = (maxPixels: number) => {
-    if (maxPixels === value.maxPixels) {
-      return;
-    }
-    onChange({ ...value, maxPixels });
   };
 
   const setFileSource = (
@@ -261,11 +323,7 @@ export function OcrCustomInitForm({
   return (
     <View style={styles.container}>
       <Text style={styles.subheading}>OCR model type</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.typeRow}
-      >
+      <View style={styles.typeRow}>
         {OCR_CONCRETE_TYPES.map((type) => {
           const active = value.modelType === type;
           return (
@@ -286,25 +344,7 @@ export function OcrCustomInitForm({
             </TouchableOpacity>
           );
         })}
-      </ScrollView>
-
-      {value.modelType === 'doc_vlm' ||
-      value.modelType === 'nemotron_parse' ||
-      value.modelType === 'paddleocr_vl' ? (
-        <DocVlmInitOptionChips
-          maxNewTokens={value.maxNewTokens}
-          onChangeMaxNewTokens={setMaxNewTokens}
-          disabled={disabled || fillLoading}
-        />
-      ) : null}
-
-      {value.modelType === 'paddleocr_vl' ? (
-        <PaddleocrVlMaxPixelsChips
-          maxPixels={value.maxPixels}
-          onChangeMaxPixels={setMaxPixels}
-          disabled={disabled || fillLoading}
-        />
-      ) : null}
+      </View>
 
       <View style={styles.helperRow}>
         <TouchableOpacity
@@ -389,6 +429,7 @@ const styles = StyleSheet.create({
   },
   typeRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
     paddingBottom: 4,
   },

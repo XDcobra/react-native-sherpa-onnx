@@ -20,7 +20,9 @@
 #include <string>
 #include <vector>
 
+#include "OcrCrop.h"
 #include "OcrFactory.h"
+#include "OcrInstruction.h"
 #include "OcrTypes.h"
 #include "ocr_test_image.h"
 #include "doctr/DoctrManifest.h"
@@ -309,3 +311,43 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<const char*>& info) {
       return std::string(info.param);
     });
+
+TEST(DoctrCrop, TranslateQuadsBackToFullFrame) {
+  const std::string dir = ResolveDoctrModelDir();
+  if (dir.empty() || !DoctrPackLooksValid(dir)) {
+    FAIL() << "doctr-mobile pack not found. Set DOCTR_MODEL_DIR or unpack.";
+  }
+  const auto img = ocr_test::LoadRgbImage(RepoRelativeFixture("ocr/en_hello.png"));
+  ASSERT_GT(img.width, 8);
+  ASSERT_GT(img.height, 8);
+
+  auto backend = CreateOcrBackend("doctr");
+  OcrLoadOptions opts;
+  opts.num_threads = 2;
+  opts.use_orientation_cls = false;
+  backend->Load(dir, opts);
+
+  OcrFrameView frame;
+  frame.rgb = img.rgb.data();
+  frame.width = img.width;
+  frame.height = img.height;
+
+  const OcrPixelRect crop{img.width / 8, img.height / 8, (img.width * 3) / 4,
+                          (img.height * 3) / 4};
+  OcrCroppedFrame cropped(frame, crop);
+  OcrResult result = backend->Recognize(cropped.view());
+  backend->Release();
+  ASSERT_GE(result.spans.size(), 1u);
+  std::vector<OcrQuad> local;
+  for (const auto& span : result.spans) local.push_back(span.quad);
+  cropped.TranslateResult(result);
+  ASSERT_EQ(result.spans.size(), local.size());
+  const float dx = static_cast<float>(crop.x);
+  const float dy = static_cast<float>(crop.y);
+  for (size_t i = 0; i < result.spans.size(); ++i) {
+    for (int k = 0; k < 4; ++k) {
+      EXPECT_FLOAT_EQ(result.spans[i].quad.xy[k * 2], local[i].xy[k * 2] + dx);
+      EXPECT_FLOAT_EQ(result.spans[i].quad.xy[k * 2 + 1], local[i].xy[k * 2 + 1] + dy);
+    }
+  }
+}

@@ -86,5 +86,12 @@ export async function fillOcrCustomConfigFromModelFolder(
 }
 
 export function emptyOcrCustomInitFormState(): OcrCustomInitFormState {
-  return { modelType: 'ppocr', fileSources: {}, maxNewTokens: 0, maxPixels: 0 };
+  return {
+    modelType: 'ppocr',
+    fileSources: {},
+    maxNewTokens: 0,
+    maxPixels: 0,
+    detBoxThresh: 0,
+    detBoxScoreThresh: 0,
+  };
 }

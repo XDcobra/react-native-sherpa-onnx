@@ -1,0 +1,33 @@
+{
+  "family": "doc_vlm",
+  "task": "element_chart",
+  "profile": null,
+  "fixture_id": "chart_03",
+  "pack_id": "docvlm-granite-258m-fp32",
+  "prompt_text": "<|start_of_role|>user<|end_of_role|><image>Convert chart to table.<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>",
+  "preprocess": {
+    "user_text": "Convert chart to table.",
+    "image": "test/fixtures/ocr/instructions/_images/chart_03.png"
+  },
+  "token_identical": false,
+  "hf_token_count": 55,
+  "ort_token_count": 57,
+  "prefix_len": 0,
+  "grammar": {
+    "kind": "doctags_otsl",
+    "ok": false,
+    "unknown": [
+      "unknown"
+    ],
+    "tags": [
+      "chart",
+      "fcel",
+      "nl",
+      "unknown"
+    ],
+    "loc_count": 4,
+    "notes": []
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/doc_vlm/element_chart/chart_03",
+  "max_new_tokens": 128
+}

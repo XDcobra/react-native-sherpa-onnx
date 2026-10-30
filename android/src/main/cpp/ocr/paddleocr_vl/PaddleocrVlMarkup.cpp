@@ -1,7 +1,11 @@
 #include "PaddleocrVlMarkup.h"
 
+#include "../OcrGeometry.h"
 #include "../OcrTextUtils.h"
+#include "../markup/OcrOtsl.h"
+#include "../markup/OcrTable.h"
 #include "PaddleocrVlLog.h"
+#include "PaddleocrVlTaskProfile.h"
 
 #include <cctype>
 #include <string>
@@ -13,7 +17,6 @@ namespace paddleocr_vl {
 namespace {
 
 constexpr const char kLocPrefix[] = "<|LOC_";
-constexpr float kLocNorm = 1000.f;
 
 void StripTrailingEos(std::string& s) {
   auto ends_with = [&](const char* lit) {
@@ -146,8 +149,7 @@ bool ParseEightLocs(const std::string& s, size_t i, int coords[8],
 }
 
 float MapLoc(int n, int dim) {
-  if (dim <= 0) return 0.f;
-  return (static_cast<float>(n) / kLocNorm) * static_cast<float>(dim);
+  return static_cast<float>(GridCoordToPixel(n, dim, kOcrGridPaddle));
 }
 
 void ParseSpotting(const std::string& raw, const PaddleocrVlParseOptions& options,
@@ -231,14 +233,31 @@ PaddleocrVlMarkup ParsePaddleocrVlMarkup(
   std::string raw = generated;
   StripTrailingEos(raw);
   out.raw_utf8 = raw;
-  if (options.task == "spotting") {
+  const auto& profile = ProfileForId(options.task);
+  if (profile.parser == PaddleocrVlParser::kSpotting) {
     ParseSpotting(raw, options, out);
     return out;
   }
-  OCR_LOGI("paddleocr_vl task=ocr instances=0");
-  out.markdown_utf8 = StripSpecialsKeepMarkup(raw);
-  out.text_utf8 = LayoutText(out.markdown_utf8);
+  const std::string stripped = StripSpecialsKeepMarkup(raw);
+  if (profile.parser == PaddleocrVlParser::kOtsl) {
+    const OcrTable table = ParseOtsl(stripped);
+    out.markdown_utf8 = table.RenderGfm();
+    out.text_utf8 = table.RenderPlain();
+  } else if (profile.parser == PaddleocrVlParser::kGfmTable) {
+    const OcrTable table = ParseGfmPipes(stripped);
+    out.markdown_utf8 = table.RenderGfm();
+    out.text_utf8 = table.RenderPlain();
+  } else if (profile.parser == PaddleocrVlParser::kPassthrough) {
+    out.markdown_utf8 = stripped;
+    out.text_utf8 = LayoutText(stripped);
+  } else {
+    out.markdown_utf8 = stripped;
+    out.text_utf8 = LayoutText(stripped);
+  }
   out.spans.clear();
+  OCR_LOGI("paddleocr_vl task=%s parser=%d content=%zu text=%zu", profile.id,
+           static_cast<int>(profile.parser), out.markdown_utf8.size(),
+           out.text_utf8.size());
   return out;
 }
 

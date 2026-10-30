@@ -5,6 +5,7 @@
 #include "NemotronParseMarkup.h"
 #include "NemotronParseNavit.h"
 #include "NemotronParseNpy.h"
+#include "NemotronParsePrompt.h"
 #include "OcrOrtEnv.h"
 #include "OcrOrtHelpers.h"
 #include "ort/ApplyOrtProvider.h"
@@ -21,6 +22,7 @@
 #include <string>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -42,8 +44,15 @@ constexpr int kDecoderWidth = 1024;
 constexpr int kVisionWidth = 1152;
 constexpr int kPatchIn = 768;
 constexpr float kRepetitionPenalty = 1.1f;
-constexpr const char* kPrompt =
-    "</s><s><predict_bbox><predict_classes><output_markdown><predict_text_in_pic>";
+
+const NemotronParseOutput& ResolveOutput(const OcrRecognizeContext& ctx) {
+  const auto* inst =
+      std::get_if<NemotronParseInstruction>(&ctx.request.instruction);
+  if (inst) return inst->output;
+  static const NemotronParseInstruction kDefault =
+      DefaultNemotronParseInstruction();
+  return kDefault.output;
+}
 
 void RequireNonEmptyFile(const std::string& path) {
   std::error_code ec;
@@ -299,12 +308,12 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame,
   });
   positioned.clear();
 
-  const std::vector<int32_t> prompt = tokenizer_.Encode(kPrompt);
+  const NemotronParseOutput& output = ResolveOutput(ctx);
+  const std::string prompt_text = BuildNemotronPrompt(output);
+  const std::vector<int32_t> prompt = tokenizer_.Encode(prompt_text);
   if (prompt.empty()) {
     throw std::runtime_error("NemotronParseBackend: empty prompt encode");
   }
-  OCR_LOGI("nemotron_parse prompt_len=%zu", prompt.size());
-
   std::vector<float> text_embeds;
   ctx.RunPhase(kOcrPhaseEmbed, [&] {
     std::vector<int64_t> ids64(prompt.begin(), prompt.end());
@@ -446,16 +455,24 @@ OcrResult NemotronParseBackend::Recognize(const OcrFrameView& frame,
                              std::chrono::steady_clock::now() - t_decode)
                              .count();
 
-  NemotronParseMarkup parsed;
+  OcrResult result;
   ctx.RunPhase(kOcrPhaseParse, [&] {
     const std::string decoded = tokenizer_.Decode(generated);
-    parsed = ParseNemotronMarkup(decoded, frame.width, frame.height, frame.frame_index);
+    result.raw_utf8 = decoded;
+    try {
+      NemotronParseMarkup parsed =
+          ParseNemotronMarkup(decoded, frame.width, frame.height, frame.frame_index);
+      ApplyNemotronOutput(result, parsed, output);
+    } catch (const OcrCodedError& e) {
+      OCR_LOGW("nemotron_parse parse failed code=%s raw=%zu — keeping raw",
+               e.code().c_str(), result.raw_utf8.size());
+    }
   });
-  OcrResult result;
-  result.raw_utf8 = std::move(parsed.raw_utf8);
-  result.markdown_utf8 = std::move(parsed.markdown_utf8);
-  result.text_utf8 = std::move(parsed.text_utf8);
-  result.spans = std::move(parsed.spans);
+  OCR_LOGI(
+      "nemotron_parse parse content_format=%s elements=%zu spans=%zu "
+      "unknown=0 stop=%s",
+      NemotronContentFormatLog(output), result.elements.size(), result.spans.size(),
+      stop_reason.c_str());
   result.stop_reason = stop_reason;
   result.complete = (stop_reason == "eos");
   OCR_LOGI(

@@ -1,0 +1,31 @@
+{
+  "family": "paddleocr_vl",
+  "task": "table",
+  "profile": null,
+  "fixture_id": "table_02",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Table Recognition:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1003520,
+    "upscaled": false,
+    "image_size": [
+      720,
+      360
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/table_02.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 45,
+  "ort_token_count": 45,
+  "prefix_len": 45,
+  "grammar": {
+    "kind": "otsl",
+    "ok": true,
+    "unknown": [],
+    "cell_count": 16,
+    "notes": [],
+    "sample": "<fcel>City<fcel>Temp<fcel>Wind<nl><fcel>Hamburg<fcel>12C<fcel>NW 8<nl><fcel>Oslo<fcel>4C<fcel>E 3<nl><fcel>Lisbon<fcel>19C<fcel>SW 11<nl></s>"
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/table/table_02",
+  "max_new_tokens": 128
+}

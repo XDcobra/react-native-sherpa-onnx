@@ -1,0 +1,18 @@
+# Laboratory Safety Briefing
+
+Fixture page 02
+
+Wear gloves before opening solvent cabinets.
+
+Record every spill in the yellow log book.
+
+Evacuation maps are posted beside each stairwell.
+
+Shift summary
+
+\begin{tabular}{ccc}
+\thead{Shift} & \thead{Units} & \thead{Rejects}\\
+Mon AM & 3210 & 14\\
+Mon PM & 2980 & 21\\
+Tue AM & 3440 & 9\\
+\end{

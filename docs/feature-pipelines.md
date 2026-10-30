@@ -240,7 +240,7 @@ flowchart LR
   D --> E[UI overlay or offline TTS]
 ```
 
-`ppocr`, `doctr`, `doc_vlm`, and `nemotron_parse` use the same `createOCR` → `recognize` pipeline. `modelType: 'auto'` resolves from the manifest `family`, then from pack layout. `OcrRecognizeResult` is discriminated on `family`: VLM families share `raw` / `markdown` / `complete` / `stopReason` on the promise (not on the text buffer). `doc_vlm` also keeps `doctags`.
+`ppocr`, `doctr`, `doc_vlm`, `nemotron_parse`, and `paddleocr_vl` use the same `createOCR` → `recognize` pipeline. `modelType: 'auto'` resolves from the manifest `family`, then from pack layout. `OcrRecognizeResult` is discriminated on `family`: VLM families share `raw` / `content` / `elements` / `instruction` / `complete` / `stopReason` on the promise (not on the text buffer).
 
 When to use:
 - Batch page/document OCR with deterministic completion.

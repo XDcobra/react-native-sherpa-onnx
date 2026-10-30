@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
 import {
   assertOcrCustomConfig,
@@ -7,7 +7,11 @@ import {
   type OcrConcreteModelType,
   type OcrCustomConfig,
   type OcrEngine,
+  type OcrFamily,
+  type OcrDoctrOptions,
   type OcrInitializeOptions,
+  type OcrPaddleocrVlOptions,
+  type OcrPpocrOptions,
 } from 'react-native-sherpa-onnx/ocr';
 import { getModelDisplayName, toDetectSource } from '../modelConfig';
 import { clearOcrCache, getOcrCache, setOcrCache } from '../engineCache';
@@ -19,7 +23,10 @@ import {
   emptyOcrCustomInitFormState,
   fillOcrCustomConfigFromModelFolder,
 } from '../utils/ocrCustomInitFill';
-import { isPaddleocrVlOcrPack } from '../utils/ocrModelCatalog';
+import {
+  inferOcrFamilyFromFolder,
+  isVlmOcrFamily,
+} from '../utils/ocrModelCatalog';
 import { useOcrModelCatalog } from './useOcrModelCatalog';
 import { useDeviceProviders } from '../providers/DeviceProvidersContext';
 
@@ -28,6 +35,64 @@ export const OCR_MAX_THREADS = 8;
 export const OCR_MIN_UNCLIP = 1.0;
 export const OCR_MAX_UNCLIP = 2.5;
 export const OCR_DEFAULT_UNCLIP = 1.5;
+
+function ocrDbDetectorOptions(
+  detUnclipRatio: number,
+  detBoxThresh: number,
+  detBoxScoreThresh: number
+) {
+  return {
+    detUnclipRatio,
+    ...(detBoxThresh > 0 ? { detBoxThresh } : {}),
+    ...(detBoxScoreThresh > 0 ? { detBoxScoreThresh } : {}),
+  };
+}
+
+function familyInitExtras(
+  family: OcrFamily | null,
+  args: {
+    detUnclipRatio: number;
+    detBoxThresh: number;
+    detBoxScoreThresh: number;
+    maxNewTokens: number;
+    maxPixels: number;
+    maxSideLen: number;
+    useOrientationCls: boolean;
+  }
+): {
+  maxNewTokens?: number;
+  ppocr?: OcrPpocrOptions;
+  doctr?: OcrDoctrOptions;
+  paddleocrVl?: OcrPaddleocrVlOptions;
+} {
+  const db = ocrDbDetectorOptions(
+    args.detUnclipRatio,
+    args.detBoxThresh,
+    args.detBoxScoreThresh
+  );
+  if (family === 'ppocr') {
+    return {
+      ppocr: {
+        ...db,
+        ...(args.maxSideLen > 0 ? { maxSideLen: args.maxSideLen } : {}),
+        useOrientationCls: args.useOrientationCls,
+      },
+    };
+  }
+  if (family === 'doctr') {
+    return { doctr: db };
+  }
+  if (family === 'paddleocr_vl') {
+    return {
+      maxNewTokens: args.maxNewTokens,
+      paddleocrVl: { maxPixels: args.maxPixels },
+    };
+  }
+  if (isVlmOcrFamily(family)) {
+    return { maxNewTokens: args.maxNewTokens };
+  }
+  return {};
+}
 
 export function clampOcrUnclipRatio(value: number): number {
   const clamped = Math.min(OCR_MAX_UNCLIP, Math.max(OCR_MIN_UNCLIP, value));
@@ -52,6 +117,9 @@ export function asOcrFamily(
 function largeVlmPackWarning(id: string): string | null {
   const lower = id.toLowerCase();
   if (lower.includes('docvlm') || lower.includes('granite')) {
+    if (lower.includes('q4f16')) {
+      return 'docvlm-granite-258m-q4f16 is ~221 MiB compressed / ~265 MB unpacked (Float16 KV + MatMulNBits). Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?';
+    }
     return 'docvlm-granite-258m is ~420 MiB compressed / ~1.2 GiB unpacked and needs significant RAM. Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?';
   }
   if (
@@ -99,6 +167,17 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
   const [numThreads, setNumThreads] = useState(2);
   const [provider, setProvider] = useState('cpu');
   const [detUnclipRatio, setDetUnclipRatio] = useState(OCR_DEFAULT_UNCLIP);
+  const [detBoxThresh, setDetBoxThresh] = useState(0);
+  const [detBoxScoreThresh, setDetBoxScoreThresh] = useState(0);
+  const [maxSideLen, setMaxSideLen] = useState(0);
+  const [useOrientationCls, setUseOrientationCls] = useState(true);
+
+  const selectedFamily = useMemo<OcrFamily | null>(() => {
+    if (initMode === 'custom') {
+      return customInitForm.modelType;
+    }
+    return selectedFolder ? inferOcrFamilyFromFolder(selectedFolder) : null;
+  }, [customInitForm.modelType, initMode, selectedFolder]);
   const [initBusy, setInitBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [initMessage, setInitMessage] = useState<string | null>(null);
@@ -193,6 +272,8 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
         fileSources: fillResult.customConfig,
         maxNewTokens: prev.maxNewTokens,
         maxPixels: prev.maxPixels,
+        detBoxThresh: prev.detBoxThresh,
+        detBoxScoreThresh: prev.detBoxScoreThresh,
       }));
       const missing =
         fillResult.missingKeys.length > 0
@@ -239,30 +320,37 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
         const summary = det.success
           ? `detect: modelType=${det.modelType ?? '?'}`
           : `detect failed: ${det.error ?? 'unknown'}`;
+        const familyForInit =
+          inferOcrFamilyFromFolder(folderId) ??
+          asOcrFamily(det.success ? det.modelType : null);
         const maxLabel =
           customInitForm.maxNewTokens === 0
             ? 'default'
             : String(customInitForm.maxNewTokens);
-        const initOptions: OcrInitializeOptions = {
+        const initOptions = {
           modelSource,
-          modelType: 'auto',
+          modelType: familyForInit ?? 'auto',
           provider: providerValue,
           numThreads: threads,
-          ppocr: { detUnclipRatio },
-          doctr: { detUnclipRatio },
-          maxNewTokens: customInitForm.maxNewTokens,
-          ...(isPaddleocrVlOcrPack(folderId)
-            ? { paddleocrVl: { maxPixels: customInitForm.maxPixels } }
-            : {}),
-        };
+          ...familyInitExtras(familyForInit, {
+            detUnclipRatio,
+            detBoxThresh,
+            detBoxScoreThresh,
+            maxNewTokens: customInitForm.maxNewTokens,
+            maxPixels: customInitForm.maxPixels,
+            maxSideLen,
+            useOrientationCls,
+          }),
+        } as OcrInitializeOptions;
         const ocr = await createOCR(initOptions);
         engineRef.current = ocr;
-        const family = asOcrFamily(det.success ? det.modelType : null);
-        const message = `Ready · instance=${
-          ocr.instanceId
-        } · modelType=auto · ${getModelDisplayName(
-          folderId
-        )} · maxNewTokens=${maxLabel}`;
+        const family =
+          asOcrFamily(det.success ? det.modelType : null) ?? familyForInit;
+        const message = `Ready · instance=${ocr.instanceId} · modelType=${
+          familyForInit ?? 'auto'
+        } · ${getModelDisplayName(folderId)}${
+          isVlmOcrFamily(familyForInit) ? ` · maxNewTokens=${maxLabel}` : ''
+        }`;
         setEngineFamily(family);
         setInitializedFolder(folderId);
         setInitMessage(message);
@@ -278,6 +366,10 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
       customInitForm.maxNewTokens,
       customInitForm.maxPixels,
       detUnclipRatio,
+      detBoxThresh,
+      detBoxScoreThresh,
+      maxSideLen,
+      useOrientationCls,
       numThreads,
       provider,
       runDetect,
@@ -305,54 +397,35 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
         ...customInitForm.fileSources,
       } as OcrCustomConfig;
       assertOcrCustomConfig(customConfig as unknown as Record<string, unknown>);
-      const wantVlmOpts =
-        customInitForm.modelType === 'doc_vlm' ||
-        customInitForm.modelType === 'nemotron_parse' ||
-        customInitForm.modelType === 'paddleocr_vl';
-      const customBase = {
-        initMode: 'custom' as const,
+      const family = customInitForm.modelType;
+      const extras = familyInitExtras(family, {
+        detUnclipRatio,
+        detBoxThresh,
+        detBoxScoreThresh,
+        maxNewTokens: customInitForm.maxNewTokens,
+        maxPixels: customInitForm.maxPixels,
+        maxSideLen,
+        useOrientationCls,
+      });
+      const ocr = await createOCR({
+        initMode: 'custom',
         customConfig,
         provider: providerValue,
         numThreads: threads,
-      };
-      const ocr = await createOCR(
-        customInitForm.modelType === 'ppocr'
-          ? {
-              ...customBase,
-              modelType: 'ppocr',
-              ppocr: { detUnclipRatio },
-            }
-          : customInitForm.modelType === 'doctr'
-          ? {
-              ...customBase,
-              modelType: 'doctr',
-              doctr: { detUnclipRatio },
-            }
-          : customInitForm.modelType === 'paddleocr_vl'
-          ? {
-              ...customBase,
-              modelType: 'paddleocr_vl',
-              maxNewTokens: customInitForm.maxNewTokens,
-              paddleocrVl: { maxPixels: customInitForm.maxPixels },
-            }
-          : {
-              ...customBase,
-              modelType: customInitForm.modelType,
-              maxNewTokens: customInitForm.maxNewTokens,
-            }
-      );
+        modelType: family,
+        ...extras,
+      } as OcrInitializeOptions);
       engineRef.current = ocr;
-      const family = asOcrFamily(customInitForm.modelType);
       const folder = selectedFolder
         ? `custom:${selectedFolder}`
-        : `custom:${customInitForm.modelType}`;
+        : `custom:${family}`;
       const maxLabel =
         customInitForm.maxNewTokens === 0
           ? 'default'
           : String(customInitForm.maxNewTokens);
-      const message = `Ready · instance=${ocr.instanceId} · custom:${
-        customInitForm.modelType
-      }${wantVlmOpts ? ` · maxNewTokens=${maxLabel}` : ''}`;
+      const message = `Ready · instance=${ocr.instanceId} · custom:${family}${
+        isVlmOcrFamily(family) ? ` · maxNewTokens=${maxLabel}` : ''
+      }`;
       setEngineFamily(family);
       setInitializedFolder(folder);
       setInitMessage(message);
@@ -369,6 +442,10 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
     customInitForm.modelType,
     detectSummary,
     detUnclipRatio,
+    detBoxThresh,
+    detBoxScoreThresh,
+    maxSideLen,
+    useOrientationCls,
     numThreads,
     provider,
     selectedFolder,
@@ -422,8 +499,17 @@ export function useOcrModelInit(options: UseOcrModelInitOptions = {}) {
     setProvider,
     providerOptions,
     providersLoading,
+    selectedFamily,
     detUnclipRatio,
     setDetUnclipRatio,
+    detBoxThresh,
+    setDetBoxThresh,
+    detBoxScoreThresh,
+    setDetBoxScoreThresh,
+    maxSideLen,
+    setMaxSideLen,
+    useOrientationCls,
+    setUseOrientationCls,
     initBusy,
     error,
     setError,

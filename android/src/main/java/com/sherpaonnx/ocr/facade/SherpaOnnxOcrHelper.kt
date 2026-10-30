@@ -119,21 +119,15 @@ class SherpaOnnxOcrHelper(
       val useOrientationCls =
         if (options.hasKey("useOrientationCls")) options.getBoolean("useOrientationCls") else true
       val detBoxThresh =
-        if (options.hasKey("detBoxThresh")) options.getDouble("detBoxThresh").toFloat() else 0.3f
+        if (options.hasKey("detBoxThresh")) options.getDouble("detBoxThresh").toFloat() else -1f
       val detBoxScoreThresh =
-        if (options.hasKey("detBoxScoreThresh")) options.getDouble("detBoxScoreThresh").toFloat() else 0.5f
+        if (options.hasKey("detBoxScoreThresh")) options.getDouble("detBoxScoreThresh").toFloat() else -1f
       val detUnclipRatio =
         if (options.hasKey("detUnclipRatio")) options.getDouble("detUnclipRatio").toFloat() else 1.5f
       val maxNewTokens =
         if (options.hasKey("maxNewTokens")) options.getDouble("maxNewTokens").toInt() else 0
       val maxPixels =
         if (options.hasKey("maxPixels")) options.getDouble("maxPixels").toInt() else 0
-      val paddleocrVlTask =
-        if (options.hasKey("paddleocrVlTask") && !options.isNull("paddleocrVlTask")) {
-          options.getString("paddleocrVlTask")
-        } else {
-          null
-        }
       val quantization =
         if (options.hasKey("quantization") && !options.isNull("quantization")) {
           options.getString("quantization")
@@ -159,19 +153,38 @@ class SherpaOnnxOcrHelper(
           maxPixels,
           quantization,
           pathOverrides,
-          paddleocrVlTask,
         )
       } catch (e: Exception) {
         instances.remove(instanceId)
         throw e
       }
+      val caps = OcrNative.nativeGetCapabilities(instanceId)
+      val family = (caps?.get("family") as? String)?.ifBlank { null } ?: modelType
       Log.i(
         TAG,
-        "initialized instance=$instanceId mode=${core.initMode} type=$modelType dir=$modelDir",
+        "initialized instance=$instanceId mode=${core.initMode} type=$family dir=$modelDir",
       )
       val out = Arguments.createMap()
       out.putString("instanceId", instanceId)
-      out.putString("modelType", modelType)
+      out.putString("modelType", family)
+      val tasks = Arguments.createArray()
+      (caps?.get("tasks") as? List<*>)?.forEach { item ->
+        if (item is String) tasks.pushString(item)
+      }
+      out.putArray("tasks", tasks)
+      val granularities = Arguments.createArray()
+      (caps?.get("granularities") as? List<*>)?.forEach { item ->
+        if (item is String) granularities.pushString(item)
+      }
+      out.putArray("granularities", granularities)
+      out.putBoolean(
+        "supportsCrop",
+        (caps?.get("supportsCrop") as? Boolean) ?: true,
+      )
+      out.putBoolean(
+        "producesElements",
+        (caps?.get("producesElements") as? Boolean) ?: false,
+      )
       promise.resolve(out)
     } catch (e: Exception) {
       Log.e(TAG, "initializeOcr failed", e)
@@ -265,15 +278,10 @@ class SherpaOnnxOcrHelper(
         ?.toInt()
         ?.coerceAtLeast(0)
         ?: 200
-    val paddleocrVl =
+    val recognizeSpec =
       options
-        ?.takeIf { it.hasKey("paddleocrVl") && !it.isNull("paddleocrVl") }
-        ?.getMap("paddleocrVl")
-    val hasPaddleocrVl = paddleocrVl != null
-    val paddleocrVlTask =
-      paddleocrVl
-        ?.takeIf { it.hasKey("task") && !it.isNull("task") }
-        ?.getString("task")
+        ?.takeIf { it.hasKey("recognizeSpec") && !it.isNull("recognizeSpec") }
+        ?.getString("recognizeSpec")
 
     val gateKey = NativeInstanceGate.keyFor(sentinel)
     if (!NativeInstanceGate.beginUse(gateKey)) {
@@ -299,8 +307,7 @@ class SherpaOnnxOcrHelper(
           granularity,
           operationId.ifEmpty { null },
           progressMinIntervalMs,
-          hasPaddleocrVl,
-          paddleocrVlTask,
+          recognizeSpec,
         )
           ?: run {
             promise.reject(OcrErrorCodes.RECOGNIZE_FAILED, "nativeRecognize returned null")
@@ -330,23 +337,15 @@ class SherpaOnnxOcrHelper(
         promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing family")
         return
       }
-      val doctags = raw["doctags"] as? String
-      val markup = raw["raw"] as? String
-      val markdown = raw["markdown"] as? String
+      val rawText = raw["raw"] as? String
       val stopReason = raw["stopReason"] as? String
       val complete = raw["complete"] as? Boolean
       val isVlm =
         family == "doc_vlm" || family == "nemotron_parse" || family == "paddleocr_vl"
-      val rawText = markup ?: if (family == "doc_vlm") doctags else null
-      if (markdown == null ||
-          (isVlm && (rawText == null || stopReason.isNullOrBlank() || complete == null)) ||
-          (family == "doc_vlm" && doctags == null) ||
-          (family == "paddleocr_vl" && markup == null)
-      ) {
+      if (isVlm && (rawText == null || stopReason.isNullOrBlank() || complete == null)) {
         Log.e(
           TAG,
           "recognize extras missing family=$family raw=${rawText != null} " +
-            "doctags=${doctags != null} markdown=${markdown != null} " +
             "stopReason=${stopReason ?: "null"} complete=$complete",
         )
         promise.reject(OcrErrorCodes.INTERNAL_ERROR, "recognize result missing extras")
@@ -371,14 +370,34 @@ class SherpaOnnxOcrHelper(
 
       Log.i(
         TAG,
-        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length} rawLen=${(rawText ?: "").length} markdownLen=${markdown.length}",
+        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length} rawLen=${(rawText ?: "").length}",
       )
       val result = Arguments.createMap()
       result.putString("family", family)
       result.putInt("spanCount", spans.size)
-      result.putString("doctags", doctags ?: "")
       result.putString("raw", rawText ?: "")
-      result.putString("markdown", markdown)
+      val instructionSpec = raw["instructionSpec"] as? String
+      if (!instructionSpec.isNullOrEmpty()) {
+        result.putString("instructionSpec", instructionSpec)
+      }
+      @Suppress("UNCHECKED_CAST")
+      val content = raw["content"] as? HashMap<String, Any>
+      if (content != null) {
+        val contentMap = Arguments.createMap()
+        (content["format"] as? String)?.let { contentMap.putString("format", it) }
+        (content["value"] as? String)?.let { contentMap.putString("value", it) }
+        (content["language"] as? String)?.let { contentMap.putString("language", it) }
+        result.putMap("content", contentMap)
+      }
+      @Suppress("UNCHECKED_CAST")
+      val elementMaps = raw["elements"] as? ArrayList<HashMap<String, Any>>
+      if (elementMaps != null) {
+        val elementsArr = Arguments.createArray()
+        for (element in elementMaps) {
+          elementsArr.pushMap(nativeElementToMap(element))
+        }
+        result.putArray("elements", elementsArr)
+      }
       if (isVlm && stopReason != null && complete != null) {
         result.putString("stopReason", stopReason)
         result.putBoolean("complete", complete)
@@ -402,6 +421,26 @@ class SherpaOnnxOcrHelper(
       out[i] = arr.getDouble(i).toInt()
     }
     return out
+  }
+
+  private fun nativeElementToMap(raw: HashMap<String, Any>): WritableMap {
+    val map = Arguments.createMap()
+    (raw["kind"] as? String)?.let { map.putString("kind", it) }
+    map.putInt("frameIndex", (raw["frameIndex"] as? Number)?.toInt() ?: 0)
+    @Suppress("UNCHECKED_CAST")
+    val quadList = raw["quad"] as? ArrayList<Any>
+    if (quadList != null) {
+      val quad = Arguments.createArray()
+      for (i in 0 until 8) {
+        quad.pushDouble((quadList.getOrNull(i) as? Number)?.toDouble() ?: 0.0)
+      }
+      map.putArray("quad", quad)
+    }
+    (raw["utf16Start"] as? Number)?.toInt()?.let { map.putInt("utf16Start", it) }
+    (raw["utf16End"] as? Number)?.toInt()?.let { map.putInt("utf16End", it) }
+    (raw["headingLevel"] as? Number)?.toInt()?.let { map.putInt("headingLevel", it) }
+    (raw["checked"] as? Boolean)?.let { map.putBoolean("checked", it) }
+    return map
   }
 
   private fun mapNativeSpan(raw: HashMap<String, Any>, imageBufferId: String): TextSpatialSpan {

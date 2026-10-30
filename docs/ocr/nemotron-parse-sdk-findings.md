@@ -1,7 +1,7 @@
 # Nemotron-3.5-Parse — SDK findings
 
 > Branch: `feat/add-ocr-support-nemotron-parser`
-> Status: research done; Q1–Q7 locked. Implementation plan: [`nemotron-parse-sdk-plan.md`](nemotron-parse-sdk-plan.md)
+> Status: research done; Q1–Q7 locked. Phase 0 generate gate: **8/42** identical; only `markdown_none_pic` is 3/3. Implementation plan: [`nemotron-parse-sdk-plan.md`](nemotron-parse-sdk-plan.md) / [`ocr-instructions-sdk-plan.md`](ocr-instructions-sdk-plan.md)
 > Export scripts: [`scripts/ocr-models/nemotron-parse/`](../../scripts/ocr-models/nemotron-parse/)
 > Granite reference: [`phase2-doc-vlm-backend-plan.md`](phase2-doc-vlm-backend-plan.md)
 
@@ -29,6 +29,17 @@ Do not reuse `ParseDocTags`, `DocVlmDocTagsPrefix`, `DocVlmImageOps`, `DocVlmPro
 | 6 | `pos_embed` | Keep **`pos_embed.npy`**. C++ reads `<f4>`/`<f2>`, reject bad shape/Fortran. Expand f16→f32 once at `Load`. Compact pack stays f16 on disk. No pack-time `.bin`. |
 | 7 | Result extras | New `nemotron_parse` arm: **`raw`** + native **`markdown`** + `complete` / `stopReason` (`eos` \| `max_new_tokens`). New C++ `raw_utf8`. Never write this stream into `doctags`. |
 
+### Phase 0 generate gate (2026-10-29)
+
+CPU HF transformers 5.14.1 fp32 greedy vs CPU ORT pack `nemotron-3.5-parse-int8`. 14 profiles × 3 pages = 42 goldens.
+
+| Result | Count |
+|--------|-------|
+| `token_identical: true` | 8 |
+| `token_identical: false` | 34 |
+
+Only **`markdown_none_pic`** is 3/3 (`prefix_len` = full sequence). The NVIDIA card default `markdown_boxesAndClasses_nopic` is `prefix_len=0` on all 3 pages — it stays out of the public union. Other `none`-layout profiles hit 1/3 or 2/3, not the ≥3 gate. Public default is therefore `markdown_none_pic` (`</s><s><no_bbox><no_classes><output_markdown><predict_text_in_pic>`). Instruction API still exposes only `task: 'page'`.
+
 ---
 
 ## Why `DocVlmBackend` cannot load this pack
@@ -39,7 +50,7 @@ Both families are “vision + embed + greedy decoder”, but almost every contra
 |---|---|---|
 | Vision graph | One `vision_encoder.onnx` on Idefics3 NCHW tiles | `patch_embed.onnx` then host NaViT `pos_embed.npy` then `vision_encoder` on `[1, rows, cols, 1152]` |
 | Image tokens | Scatter features into `<image>` slots in the prompt | No image token ids. Vision embeddings **concatenated in front of** text embeds |
-| Prompt | Chat roles + tile placeholders + `Convert this page to docling.` | `</s><s><predict_bbox><predict_classes><output_markdown><predict_text_in_pic>` |
+| Prompt | Chat roles + tile placeholders + `Convert this page to docling.` | `</s><s><predict_bbox><predict_classes><output_markdown><predict_no_text_in_pic>` (NVIDIA card default; see Phase 0 prompt ids) |
 | KV geometry | Hard-checked: 3 KV heads, dim 64, max 8192 | 10 layers, 8 KV heads, head dim 64, vocab 72512 |
 | Tokenizer | GPT-2 byte BPE (`DocVlmTokenizer` over `tokenizer.json`) | mBART / `AutoProcessor` (BOS 0, PAD 1, EOS 2) |
 | Output | DocTags / OTSL | Native markdown + `<x_*>` `<y_*>` `<class_*>` (+ LaTeX tables) |
@@ -345,6 +356,44 @@ Nemotron’s stream is **not DocTags**. Stuffing it into `doctags` would lie to 
 TS / Kotlin extras checks must branch on family: granite still requires `doctags`; Nemotron requires `raw` and must **not** accept `doctags`. Example tabs: `Spans \| Markdown \| Raw`.
 
 Span `class` metadata is out of scope (current `OcrSpan` has no class). Classes stay in `raw`.
+
+---
+
+## Instruction prompt ids (Phase 0, 2026-10-29)
+
+All 14 valid NVIDIA control-token profiles encode to **exactly 6 ids**.
+The card default `markdown` + `boxesAndClasses` + no text-in-pic is:
+
+```text
+</s><s><predict_bbox><predict_classes><output_markdown><predict_no_text_in_pic>
+[2, 0, 50004, 50008, 50001, 50010]
+```
+
+That matches plan §1.1. `<output_ocr>` (50003) is not used.
+`scripts/ocr-models/instructions/verify_prompt_ids.py` checks every
+profile × 3 page fixtures (42 files).
+
+### HF greedy vs ORT pack (128-token cap, CPU, 2026-10-29)
+
+Pack `nemotron-3.5-parse-int8`. 42 jobs (14 profiles × 3 pages). Grammar
+parsed on every fixture (`unknown=[]`). Token identity did **not**:
+
+| Profile | Identical | Notes |
+|---------|-----------|-------|
+| `markdown_none_pic` | **3/3** | only profile that meets the ≥3-fixture gate |
+| `markdown_none_nopic` | 2/3 | `page_03` diverges |
+| `plain_none_nopic` | 2/3 | `page_03` diverges |
+| `plain_none_pic` | 1/3 | |
+| all 10 profiles with `boxes` / `boxesAndClasses` | **0/3** | `prefix_len=0` on the NVIDIA card default |
+
+The planned default `markdown_boxesAndClasses_nopic` (ids
+`[2,0,50004,50008,50001,50010]`) is **not** token-identical to this int8
+pack. HF and ORT both emit 128 tokens (hit the cap) but share no prefix.
+
+**Default locked to `markdown_none_pic`** (`markdown` + no boxes +
+text-in-pictures on) — the only profile that passed. Layout-token profiles
+stay documented; they do not enter the public union until a pack matches
+HF greedy.
 
 ---
 

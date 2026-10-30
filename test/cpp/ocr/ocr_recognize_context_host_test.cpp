@@ -1,7 +1,11 @@
 #include <gtest/gtest.h>
 
+#include "OcrCapabilities.h"
+#include "OcrCrop.h"
+#include "OcrInstruction.h"
 #include "OcrOrtEnv.h"
 #include "OcrRecognizeContext.h"
+#include "OcrTypes.h"
 
 #include <string>
 #include <utility>
@@ -89,6 +93,113 @@ TEST(OcrRecognizeContext, PhaseChangeBypassesThrottle) {
   ASSERT_EQ(phases.size(), 2u);
   EXPECT_EQ(phases[0], kOcrPhaseVision);
   EXPECT_EQ(phases[1], kOcrPhaseDecode);
+}
+
+TEST(OcrRecognizeContext, CropTranslatesSpansAndElements) {
+  constexpr int kW = 8;
+  constexpr int kH = 6;
+  std::vector<uint8_t> rgb(static_cast<size_t>(kW) * kH * 3, 7);
+  sherpa_onnx::ocr::OcrFrameView frame;
+  frame.rgb = rgb.data();
+  frame.width = kW;
+  frame.height = kH;
+  sherpa_onnx::ocr::OcrCroppedFrame cropped(
+      frame, sherpa_onnx::ocr::OcrPixelRect{2, 1, 4, 3});
+  sherpa_onnx::ocr::OcrResult result;
+  sherpa_onnx::ocr::OcrSpan span;
+  span.quad.xy[0] = 1.f;
+  span.quad.xy[1] = 1.f;
+  span.quad.xy[2] = 2.f;
+  span.quad.xy[3] = 1.f;
+  span.quad.xy[4] = 2.f;
+  span.quad.xy[5] = 2.f;
+  span.quad.xy[6] = 1.f;
+  span.quad.xy[7] = 2.f;
+  result.spans.push_back(span);
+  sherpa_onnx::ocr::OcrLayoutElement el;
+  el.kind = sherpa_onnx::ocr::OcrElementKind::kText;
+  el.has_quad = true;
+  el.quad = span.quad;
+  result.elements.push_back(el);
+  cropped.TranslateResult(result);
+  EXPECT_FLOAT_EQ(result.spans[0].quad.xy[0], 3.f);
+  EXPECT_FLOAT_EQ(result.spans[0].quad.xy[1], 2.f);
+  ASSERT_TRUE(result.elements[0].has_quad);
+  EXPECT_FLOAT_EQ(result.elements[0].quad.xy[0], 3.f);
+  EXPECT_FLOAT_EQ(result.elements[0].quad.xy[1], 2.f);
+}
+
+TEST(OcrRecognizeContext, ValidateRequestRejectsUnsupportedGranularity) {
+  using sherpa_onnx::ocr::DefaultInstructionForFamily;
+  using sherpa_onnx::ocr::OcrGranularity;
+  using sherpa_onnx::ocr::OcrRecognizeRequest;
+  using sherpa_onnx::ocr::ValidateRequest;
+  using sherpa_onnx::ocr::kOcrErrUnsupportedGranularity;
+  OcrRecognizeRequest req;
+  req.instruction = DefaultInstructionForFamily("doctr");
+  const auto rejected =
+      ValidateRequest("doctr", req, OcrGranularity::kWord, 100, 80);
+  EXPECT_FALSE(rejected.ok);
+  EXPECT_EQ(rejected.error_code, kOcrErrUnsupportedGranularity);
+}
+
+TEST(OcrRecognizeContext, ValidateRequestFamilyMismatchAndInvalidCrop) {
+  using sherpa_onnx::ocr::DefaultInstructionForFamily;
+  using sherpa_onnx::ocr::OcrGranularity;
+  using sherpa_onnx::ocr::OcrPixelRect;
+  using sherpa_onnx::ocr::OcrRecognizeRequest;
+  using sherpa_onnx::ocr::ValidateRequest;
+  using sherpa_onnx::ocr::kOcrErrInstructionFamilyMismatch;
+  using sherpa_onnx::ocr::kOcrErrInvalidRegion;
+  OcrRecognizeRequest req;
+  req.instruction = DefaultInstructionForFamily("doc_vlm");
+  const auto mismatch =
+      ValidateRequest("paddleocr_vl", req, OcrGranularity::kLine, 900, 1200);
+  EXPECT_FALSE(mismatch.ok);
+  EXPECT_EQ(mismatch.error_code, kOcrErrInstructionFamilyMismatch);
+
+  req.instruction = DefaultInstructionForFamily("ppocr");
+  req.crop = OcrPixelRect{0, 0, 200, 50};
+  const auto outside = ValidateRequest("ppocr", req, OcrGranularity::kLine, 100, 80);
+  EXPECT_FALSE(outside.ok);
+  EXPECT_EQ(outside.error_code, kOcrErrInvalidRegion);
+}
+
+TEST(OcrRecognizeContext, ValidateRequestGraniteChartRejected) {
+  using sherpa_onnx::ocr::DocVlmElement;
+  using sherpa_onnx::ocr::DocVlmInstruction;
+  using sherpa_onnx::ocr::DocVlmTask;
+  using sherpa_onnx::ocr::OcrGranularity;
+  using sherpa_onnx::ocr::OcrRecognizeRequest;
+  using sherpa_onnx::ocr::ValidateRequest;
+  using sherpa_onnx::ocr::kOcrErrInstructionUnsupported;
+  DocVlmInstruction inst;
+  inst.task = DocVlmTask::kElement;
+  inst.element = DocVlmElement::kChart;
+  OcrRecognizeRequest req;
+  req.instruction = inst;
+  const auto rejected =
+      ValidateRequest("doc_vlm", req, OcrGranularity::kLine, 900, 1200);
+  EXPECT_FALSE(rejected.ok);
+  EXPECT_EQ(rejected.error_code, kOcrErrInstructionUnsupported);
+}
+
+TEST(OcrRecognizeContext, ValidateRequestNemotronBoxesRejected) {
+  using sherpa_onnx::ocr::NemotronParseInstruction;
+  using sherpa_onnx::ocr::NemotronParseLayout;
+  using sherpa_onnx::ocr::OcrGranularity;
+  using sherpa_onnx::ocr::OcrRecognizeRequest;
+  using sherpa_onnx::ocr::ValidateRequest;
+  using sherpa_onnx::ocr::kOcrErrInstructionUnsupported;
+  NemotronParseInstruction inst;
+  inst.output.layout = NemotronParseLayout::kBoxesAndClasses;
+  inst.output.text_in_pictures = false;
+  OcrRecognizeRequest req;
+  req.instruction = inst;
+  const auto rejected =
+      ValidateRequest("nemotron_parse", req, OcrGranularity::kLine, 900, 1200);
+  EXPECT_FALSE(rejected.ok);
+  EXPECT_EQ(rejected.error_code, kOcrErrInstructionUnsupported);
 }
 
 TEST(OcrRecognizeContext, ZeroIntervalIsUnthrottled) {

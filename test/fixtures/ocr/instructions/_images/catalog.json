@@ -1,0 +1,260 @@
+{
+  "page_01": {
+    "kind": "page",
+    "width": 900,
+    "height": 1200,
+    "region": {
+      "x": 48,
+      "y": 55,
+      "width": 452,
+      "height": 33
+    },
+    "expected_text": "Quarterly Operations Report",
+    "path": "test/fixtures/ocr/instructions/_images/page_01.png",
+    "id": "page_01"
+  },
+  "page_02": {
+    "kind": "page",
+    "width": 900,
+    "height": 1200,
+    "region": {
+      "x": 48,
+      "y": 55,
+      "width": 416,
+      "height": 33
+    },
+    "expected_text": "Laboratory Safety Briefing",
+    "path": "test/fixtures/ocr/instructions/_images/page_02.png",
+    "id": "page_02"
+  },
+  "page_03": {
+    "kind": "page",
+    "width": 900,
+    "height": 1200,
+    "region": {
+      "x": 48,
+      "y": 55,
+      "width": 384,
+      "height": 33
+    },
+    "expected_text": "Harbor Traffic Summary",
+    "path": "test/fixtures/ocr/instructions/_images/page_03.png",
+    "id": "page_03"
+  },
+  "table_01": {
+    "kind": "table",
+    "width": 720,
+    "height": 360,
+    "index": 1,
+    "path": "test/fixtures/ocr/instructions/_images/table_01.png",
+    "id": "table_01"
+  },
+  "table_02": {
+    "kind": "table",
+    "width": 720,
+    "height": 360,
+    "index": 2,
+    "path": "test/fixtures/ocr/instructions/_images/table_02.png",
+    "id": "table_02"
+  },
+  "table_03": {
+    "kind": "table",
+    "width": 720,
+    "height": 360,
+    "index": 3,
+    "path": "test/fixtures/ocr/instructions/_images/table_03.png",
+    "id": "table_03"
+  },
+  "formula_01": {
+    "kind": "formula",
+    "width": 640,
+    "height": 180,
+    "expected_text": "E = mc^2",
+    "index": 1,
+    "path": "test/fixtures/ocr/instructions/_images/formula_01.png",
+    "id": "formula_01"
+  },
+  "formula_02": {
+    "kind": "formula",
+    "width": 640,
+    "height": 180,
+    "expected_text": "a^2 + b^2 = c^2",
+    "index": 2,
+    "path": "test/fixtures/ocr/instructions/_images/formula_02.png",
+    "id": "formula_02"
+  },
+  "formula_03": {
+    "kind": "formula",
+    "width": 640,
+    "height": 180,
+    "expected_text": "F = ma",
+    "index": 3,
+    "path": "test/fixtures/ocr/instructions/_images/formula_03.png",
+    "id": "formula_03"
+  },
+  "code_01": {
+    "kind": "code",
+    "width": 720,
+    "height": 320,
+    "index": 1,
+    "path": "test/fixtures/ocr/instructions/_images/code_01.png",
+    "id": "code_01"
+  },
+  "code_02": {
+    "kind": "code",
+    "width": 720,
+    "height": 320,
+    "index": 2,
+    "path": "test/fixtures/ocr/instructions/_images/code_02.png",
+    "id": "code_02"
+  },
+  "code_03": {
+    "kind": "code",
+    "width": 720,
+    "height": 320,
+    "index": 3,
+    "path": "test/fixtures/ocr/instructions/_images/code_03.png",
+    "id": "code_03"
+  },
+  "chart_01": {
+    "kind": "chart",
+    "width": 720,
+    "height": 420,
+    "index": 1,
+    "path": "test/fixtures/ocr/instructions/_images/chart_01.png",
+    "id": "chart_01"
+  },
+  "chart_02": {
+    "kind": "chart",
+    "width": 720,
+    "height": 420,
+    "index": 2,
+    "path": "test/fixtures/ocr/instructions/_images/chart_02.png",
+    "id": "chart_02"
+  },
+  "chart_03": {
+    "kind": "chart",
+    "width": 720,
+    "height": 420,
+    "index": 3,
+    "path": "test/fixtures/ocr/instructions/_images/chart_03.png",
+    "id": "chart_03"
+  },
+  "seal_01": {
+    "kind": "seal",
+    "width": 400,
+    "height": 400,
+    "expected_text": "CITY HALL",
+    "path": "test/fixtures/ocr/instructions/_images/seal_01.png",
+    "id": "seal_01"
+  },
+  "seal_02": {
+    "kind": "seal",
+    "width": 400,
+    "height": 400,
+    "expected_text": "PORT AUTH",
+    "path": "test/fixtures/ocr/instructions/_images/seal_02.png",
+    "id": "seal_02"
+  },
+  "seal_03": {
+    "kind": "seal",
+    "width": 400,
+    "height": 400,
+    "expected_text": "UNI SEAL",
+    "path": "test/fixtures/ocr/instructions/_images/seal_03.png",
+    "id": "seal_03"
+  },
+  "spotting_01": {
+    "kind": "spotting",
+    "width": 800,
+    "height": 600,
+    "index": 1,
+    "boxes": [
+      {
+        "text": "Hello World",
+        "x": 40,
+        "y": 44,
+        "width": 93,
+        "height": 13
+      },
+      {
+        "text": "Dock 12",
+        "x": 40,
+        "y": 124,
+        "width": 66,
+        "height": 13
+      },
+      {
+        "text": "Gate B",
+        "x": 300,
+        "y": 303,
+        "width": 56,
+        "height": 14
+      }
+    ],
+    "path": "test/fixtures/ocr/instructions/_images/spotting_01.png",
+    "id": "spotting_01"
+  },
+  "spotting_02": {
+    "kind": "spotting",
+    "width": 800,
+    "height": 600,
+    "index": 2,
+    "boxes": [
+      {
+        "text": "Lot 44",
+        "x": 60,
+        "y": 83,
+        "width": 50,
+        "height": 14
+      },
+      {
+        "text": "Hold",
+        "x": 200,
+        "y": 244,
+        "width": 37,
+        "height": 13
+      },
+      {
+        "text": "Clear",
+        "x": 480,
+        "y": 424,
+        "width": 44,
+        "height": 13
+      }
+    ],
+    "path": "test/fixtures/ocr/instructions/_images/spotting_02.png",
+    "id": "spotting_02"
+  },
+  "spotting_03": {
+    "kind": "spotting",
+    "width": 800,
+    "height": 600,
+    "index": 3,
+    "boxes": [
+      {
+        "text": "Alpha",
+        "x": 31,
+        "y": 204,
+        "width": 47,
+        "height": 17
+      },
+      {
+        "text": "Bravo",
+        "x": 400,
+        "y": 84,
+        "width": 47,
+        "height": 13
+      },
+      {
+        "text": "Charlie",
+        "x": 520,
+        "y": 484,
+        "width": 57,
+        "height": 13
+      }
+    ],
+    "path": "test/fixtures/ocr/instructions/_images/spotting_03.png",
+    "id": "spotting_03"
+  }
+}

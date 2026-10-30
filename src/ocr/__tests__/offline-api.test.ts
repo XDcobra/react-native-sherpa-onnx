@@ -74,8 +74,6 @@ describe('ocr offline API', () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'ppocr',
       spanCount: 1,
-      doctags: '',
-      markdown: '',
     });
     mockNative.unloadOcr.mockResolvedValue(undefined);
     mockNative.cancelOcrRecognize.mockResolvedValue(undefined);
@@ -401,6 +399,35 @@ describe('ocr offline API', () => {
 
   // ──── Phase 5: doctr round-trip tests ─────────────────────────────────
 
+  it('createOCR ppocr forwards shared DB detector options', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_ppocr_db',
+      modelType: 'ppocr',
+    });
+
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
+      modelType: 'ppocr',
+      ppocr: {
+        detBoxThresh: 0.25,
+        detBoxScoreThresh: 0.4,
+        detUnclipRatio: 1.2,
+      },
+    });
+
+    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
+      expect.stringMatching(/^ocr_/),
+      expect.objectContaining({
+        modelDir: '/models/ppocrv6-tiny',
+        modelType: 'ppocr',
+        detBoxThresh: 0.25,
+        detBoxScoreThresh: 0.4,
+        detUnclipRatio: 1.2,
+      })
+    );
+    await ocr.destroy();
+  });
+
   it('createOCR ppocr forwards detUnclipRatio from ppocr options', async () => {
     mockNative.initializeOcr.mockResolvedValue({
       instanceId: 'ocr_ppocr_unclip',
@@ -413,14 +440,41 @@ describe('ocr offline API', () => {
       ppocr: { detUnclipRatio: 1.2 },
     });
 
-    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
-      expect.stringMatching(/^ocr_/),
-      expect.objectContaining({
-        modelDir: '/models/ppocrv6-tiny',
-        modelType: 'ppocr',
-        detUnclipRatio: 1.2,
-      })
-    );
+    const bridge = mockNative.initializeOcr.mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(bridge).toMatchObject({
+      modelDir: '/models/ppocrv6-tiny',
+      modelType: 'ppocr',
+      detUnclipRatio: 1.2,
+    });
+    expect(bridge).not.toHaveProperty('detBoxThresh');
+    expect(bridge).not.toHaveProperty('detBoxScoreThresh');
+    await ocr.destroy();
+  });
+
+  it('createOCR doctr omits detector thresh keys so native family defaults apply', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_doctr_omit',
+      modelType: 'doctr',
+    });
+
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/doctr-mobile' },
+      modelType: 'doctr',
+    });
+
+    const bridge = mockNative.initializeOcr.mock.calls[0]?.[1] as Record<
+      string,
+      unknown
+    >;
+    expect(bridge).toMatchObject({
+      modelDir: '/models/doctr-mobile',
+      modelType: 'doctr',
+    });
+    expect(bridge).not.toHaveProperty('detBoxThresh');
+    expect(bridge).not.toHaveProperty('detBoxScoreThresh');
     await ocr.destroy();
   });
 
@@ -502,9 +556,9 @@ describe('ocr offline API', () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'doc_vlm',
       spanCount: 3,
-      doctags: '<doctag><text>Hi</text></doctag>',
       raw: '<doctag><text>Hi</text></doctag>',
-      markdown: 'Hi',
+      content: { format: 'markdown', value: 'Hi' },
+      elements: [],
       complete: true,
       stopReason: 'doctag_end',
     });
@@ -541,10 +595,11 @@ describe('ocr offline API', () => {
     );
     expect(page).toEqual({
       family: 'doc_vlm',
+      instruction: { task: 'page' },
       spanCount: 3,
       raw: '<doctag><text>Hi</text></doctag>',
-      doctags: '<doctag><text>Hi</text></doctag>',
-      markdown: 'Hi',
+      content: { format: 'markdown', value: 'Hi' },
+      elements: [],
       complete: true,
       stopReason: 'doctag_end',
     });
@@ -680,8 +735,6 @@ describe('ocr offline API', () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'doctr',
       spanCount: 2,
-      doctags: '',
-      markdown: '',
     });
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/onnxtr-default' },
@@ -700,12 +753,21 @@ describe('ocr offline API', () => {
     await ocr.destroy();
   });
 
-  it('doc_vlm recognize returns doctags and markdown', async () => {
+  it('doc_vlm recognize returns content and instruction', async () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'doc_vlm',
       spanCount: 3,
-      doctags: '<doctag><text>Hi</text></doctag>',
-      markdown: 'Hi',
+      raw: '<doctag><text>Hi</text></doctag>',
+      content: { format: 'markdown', value: 'Hi' },
+      elements: [
+        {
+          kind: 'text',
+          frameIndex: 0,
+          quad: [0, 0, 10, 0, 10, 10, 0, 10],
+          utf16Start: 0,
+          utf16End: 2,
+        },
+      ],
       complete: true,
       stopReason: 'doctag_end',
     });
@@ -719,13 +781,137 @@ describe('ocr offline API', () => {
     );
     expect(page).toEqual({
       family: 'doc_vlm',
+      instruction: { task: 'page' },
       spanCount: 3,
       raw: '<doctag><text>Hi</text></doctag>',
-      doctags: '<doctag><text>Hi</text></doctag>',
-      markdown: 'Hi',
+      content: { format: 'markdown', value: 'Hi' },
+      elements: [
+        {
+          kind: 'text',
+          frameIndex: 0,
+          quad: { xy: [0, 0, 10, 0, 10, 10, 0, 10] },
+          utf16Start: 0,
+          utf16End: 2,
+          headingLevel: null,
+          checked: null,
+        },
+      ],
       complete: true,
       stopReason: 'doctag_end',
     });
+    expect(page).not.toHaveProperty('markdown');
+    expect(page).not.toHaveProperty('doctags');
+    await ocr.destroy();
+  });
+
+  it('doc_vlm code content maps language from native', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_doc_vlm_code',
+      modelType: 'doc_vlm',
+    });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 0,
+      raw: '<code><loc_0><loc_0><loc_500><loc_500><_Python_>def add(a, b):\n    return a + b</code>',
+      content: {
+        format: 'code',
+        value: 'def add(a, b):\n    return a + b',
+        language: 'Python',
+      },
+      elements: [],
+      instructionSpec: 'v1;family=doc_vlm;task=element;element=code',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
+      modelType: 'doc_vlm',
+    });
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      { instruction: { task: 'element', element: 'code' } }
+    );
+    expect(page.instruction).toEqual({ task: 'element', element: 'code' });
+    expect(page.content).toEqual({
+      format: 'code',
+      value: 'def add(a, b):\n    return a + b',
+      language: 'Python',
+    });
+    await ocr.destroy();
+  });
+
+  it('doc_vlm code content language is null when native omits it', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_doc_vlm_code_nolang',
+      modelType: 'doc_vlm',
+    });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 0,
+      raw: '<code>print(1)</code>',
+      content: { format: 'code', value: 'print(1)' },
+      elements: [],
+      instructionSpec: 'v1;family=doc_vlm;task=element;element=code',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
+      modelType: 'doc_vlm',
+    });
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      { instruction: { task: 'element', element: 'code' } }
+    );
+    expect(page.content).toEqual({
+      format: 'code',
+      value: 'print(1)',
+      language: null,
+    });
+    await ocr.destroy();
+  });
+
+  it('doc_vlm identifyElement content is plain prose', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_doc_vlm_ident',
+      modelType: 'doc_vlm',
+    });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'doc_vlm',
+      spanCount: 0,
+      raw: 'Harbor Traffic Summary',
+      content: { format: 'plain', value: 'Harbor Traffic Summary' },
+      elements: [],
+      instructionSpec:
+        'v1;family=doc_vlm;task=identifyElement;rx=48;ry=55;rw=452;rh=33',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
+      modelType: 'doc_vlm',
+    });
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      {
+        instruction: {
+          task: 'identifyElement',
+          region: { x: 48, y: 55, width: 452, height: 33 },
+        },
+      }
+    );
+    expect(page.instruction).toEqual({
+      task: 'identifyElement',
+      region: { x: 48, y: 55, width: 452, height: 33 },
+    });
+    expect(page.content).toEqual({
+      format: 'plain',
+      value: 'Harbor Traffic Summary',
+    });
+    expect(page.elements).toEqual([]);
     await ocr.destroy();
   });
 
@@ -750,7 +936,8 @@ describe('ocr offline API', () => {
       family: 'nemotron_parse',
       spanCount: 1,
       raw: '<x_0.1><y_0.2>Hello<x_0.8><y_0.7><class_Text>',
-      markdown: 'Hello',
+      content: { format: 'markdown', value: 'Hello' },
+      elements: [],
       complete: true,
       stopReason: 'eos',
     });
@@ -772,9 +959,14 @@ describe('ocr offline API', () => {
     );
     expect(page).toEqual({
       family: 'nemotron_parse',
+      instruction: {
+        task: 'page',
+        output: { text: 'markdown', layout: 'none', textInPictures: true },
+      },
       spanCount: 1,
       raw: '<x_0.1><y_0.2>Hello<x_0.8><y_0.7><class_Text>',
-      markdown: 'Hello',
+      content: { format: 'markdown', value: 'Hello' },
+      elements: [],
       complete: true,
       stopReason: 'eos',
     });
@@ -786,8 +978,6 @@ describe('ocr offline API', () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'nemotron_parse',
       spanCount: 0,
-      doctags: '<x_0><y_0>Hi<x_1><y_1><class_Text>',
-      markdown: 'Hi',
       complete: true,
       stopReason: 'eos',
     });
@@ -826,8 +1016,8 @@ describe('ocr offline API', () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'doc_vlm',
       spanCount: 0,
-      doctags: '<doctag><text>Hi</text></doctag>',
-      markdown: 'Hi',
+      raw: '<doctag><text>Hi</text></doctag>',
+      content: { format: 'markdown', value: 'Hi' },
     });
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/docvlm-granite-258m-fp32' },
@@ -842,8 +1032,8 @@ describe('ocr offline API', () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'doc_vlm',
       spanCount: 0,
-      doctags: '<doctag><text>Hi</text></doctag>',
-      markdown: 'Hi',
+      raw: '<doctag><text>Hi</text></doctag>',
+      content: { format: 'markdown', value: 'Hi' },
       complete: true,
       stopReason: 'not_a_reason',
     });
@@ -877,7 +1067,8 @@ describe('ocr offline API', () => {
       family: 'paddleocr_vl',
       spanCount: 0,
       raw: 'Hello **World**',
-      markdown: 'Hello **World**',
+      content: { format: 'markdown', value: 'Hello **World**' },
+      elements: [],
       complete: true,
       stopReason: 'eos',
     });
@@ -901,9 +1092,11 @@ describe('ocr offline API', () => {
     );
     expect(page).toEqual({
       family: 'paddleocr_vl',
+      instruction: { task: 'ocr' },
       spanCount: 0,
       raw: 'Hello **World**',
-      markdown: 'Hello **World**',
+      content: { format: 'markdown', value: 'Hello **World**' },
+      elements: [],
       complete: true,
       stopReason: 'eos',
     });
@@ -950,20 +1143,7 @@ describe('ocr offline API', () => {
     }
   });
 
-  it('createOCR paddleocr_vl forwards task', async () => {
-    const ocr = await createOCR({
-      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
-      modelType: 'paddleocr_vl',
-      paddleocrVl: { task: 'spotting' },
-    });
-    expect(mockNative.initializeOcr).toHaveBeenCalledWith(
-      expect.stringMatching(/^ocr_/),
-      expect.objectContaining({ paddleocrVlTask: 'spotting' })
-    );
-    await ocr.destroy();
-  });
-
-  it('createOCR paddleocr_vl omits paddleocrVlTask when task is absent', async () => {
+  it('createOCR paddleocr_vl omits paddleocrVlTask (task is recognize-time)', async () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
       modelType: 'paddleocr_vl',
@@ -972,34 +1152,11 @@ describe('ocr offline API', () => {
       paddleocrVlTask?: string;
     };
     expect(bridge).not.toHaveProperty('paddleocrVlTask');
+    expect(ocr.family).toBe('paddleocr_vl');
     await ocr.destroy();
   });
 
-  it('createOCR rejects a paddleocrVl.task other than ocr or spotting', async () => {
-    mockNative.initializeOcr.mockClear();
-    await expect(
-      createOCR({
-        modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
-        modelType: 'paddleocr_vl',
-        paddleocrVl: { task: 'table' },
-      } as unknown as OcrInitializeOptions)
-    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
-    expect(mockNative.initializeOcr).not.toHaveBeenCalled();
-  });
-
-  it('createOCR rejects paddleocrVl.task on a non-paddleocr_vl family', async () => {
-    mockNative.initializeOcr.mockClear();
-    await expect(
-      createOCR({
-        modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
-        modelType: 'ppocr',
-        paddleocrVl: { task: 'ocr' },
-      } as unknown as OcrInitializeOptions)
-    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
-    expect(mockNative.initializeOcr).not.toHaveBeenCalled();
-  });
-
-  it('recognize paddleocr_vl forwards task override', async () => {
+  it('recognize paddleocr_vl forwards instruction spec', async () => {
     mockNative.initializeOcr.mockResolvedValue({
       instanceId: 'ocr_paddleocr_vl_task',
       modelType: 'paddleocr_vl',
@@ -1008,7 +1165,8 @@ describe('ocr offline API', () => {
       family: 'paddleocr_vl',
       spanCount: 1,
       raw: 'Hi<|LOC_0|><|LOC_0|><|LOC_1000|><|LOC_0|><|LOC_1000|><|LOC_1000|><|LOC_0|><|LOC_1000|>',
-      markdown: 'Hi',
+      content: { format: 'plain', value: 'Hi' },
+      elements: [],
       complete: true,
       stopReason: 'eos',
     });
@@ -1019,20 +1177,20 @@ describe('ocr offline API', () => {
     await ocr.recognize(
       'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-      { paddleocrVl: { task: 'spotting' } }
+      { instruction: { task: 'spotting' } }
     );
     expect(mockNative.ocrRecognize).toHaveBeenCalledWith(
       expect.stringMatching(/^ocr_/),
       'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
       expect.objectContaining({
-        paddleocrVl: { task: 'spotting' },
+        recognizeSpec: 'v1;family=paddleocr_vl;task=spotting',
       })
     );
     await ocr.destroy();
   });
 
-  it('recognize paddleocr_vl omits paddleocrVl when recognize options omit it', async () => {
+  it('recognize paddleocr_vl encodes the default instruction when omitted', async () => {
     mockNative.initializeOcr.mockResolvedValue({
       instanceId: 'ocr_paddleocr_vl_omit',
       modelType: 'paddleocr_vl',
@@ -1040,20 +1198,84 @@ describe('ocr offline API', () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
       modelType: 'paddleocr_vl',
-      paddleocrVl: { task: 'ocr' },
     });
     await ocr.recognize(
       'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
       'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
     );
     const rec = mockNative.ocrRecognize.mock.calls[0]?.[3] as {
-      paddleocrVl?: { task?: string };
+      recognizeSpec?: string;
     };
-    expect(rec).not.toHaveProperty('paddleocrVl');
+    expect(rec.recognizeSpec).toBe('v1;family=paddleocr_vl;task=ocr');
     await ocr.destroy();
   });
 
-  it('recognize rejects a paddleocrVl.task other than ocr or spotting', async () => {
+  it('recognize paddleocr_vl chart is now a Phase 3 capability', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_paddleocr_vl_chart',
+      modelType: 'paddleocr_vl',
+    });
+    mockNative.ocrRecognize.mockResolvedValue({
+      family: 'paddleocr_vl',
+      spanCount: 0,
+      raw: 'Month | Units\nMon | 12',
+      content: {
+        format: 'markdown',
+        value: '| Month | Units |\n| --- | --- |\n| Mon | 12 |',
+      },
+      elements: [],
+      instructionSpec: 'v1;family=paddleocr_vl;task=chart',
+      complete: true,
+      stopReason: 'eos',
+    });
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+      modelType: 'paddleocr_vl',
+    });
+    const page = await ocr.recognize(
+      'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      { instruction: { task: 'chart' } }
+    );
+    expect(page.instruction).toEqual({ task: 'chart' });
+    const rec = mockNative.ocrRecognize.mock.calls[0]?.[3] as {
+      recognizeSpec?: string;
+    };
+    expect(rec.recognizeSpec).toBe('v1;family=paddleocr_vl;task=chart');
+    await ocr.destroy();
+  });
+
+  it('createOCR rejects a native task missing from the TS table', async () => {
+    mockNative.initializeOcr.mockResolvedValue({
+      instanceId: 'ocr_caps_mismatch',
+      modelType: 'paddleocr_vl',
+      tasks: ['ocr', 'made_up_task'],
+    });
+    await expect(
+      createOCR({
+        modelSource: { kind: 'fs', path: '/models/paddleocr-vl-1.6-fp16' },
+        modelType: 'paddleocr_vl',
+      })
+    ).rejects.toMatchObject({ code: 'OCR_CAPABILITIES_MISMATCH' });
+  });
+
+  it('recognize rejects granularity the family does not emit', async () => {
+    const ocr = await createOCR({
+      modelSource: { kind: 'fs', path: '/models/doctr-mobile' },
+      modelType: 'doctr',
+    });
+    await expect(
+      ocr.recognize(
+        'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+        { granularity: 'word' }
+      )
+    ).rejects.toMatchObject({ code: 'OCR_UNSUPPORTED_GRANULARITY' });
+    expect(mockNative.ocrRecognize).not.toHaveBeenCalled();
+    await ocr.destroy();
+  });
+
+  it('recognize rejects a paddleocr_vl task not in capabilities', async () => {
     mockNative.initializeOcr.mockResolvedValue({
       instanceId: 'ocr_paddleocr_vl_bad_task',
       modelType: 'paddleocr_vl',
@@ -1066,16 +1288,14 @@ describe('ocr offline API', () => {
       ocr.recognize(
         'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
         'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-        { paddleocrVl: { task: 'chart' } } as unknown as {
-          paddleocrVl: { task: 'ocr' };
-        }
+        { instruction: { task: 'page' as 'ocr' } }
       )
-    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+    ).rejects.toMatchObject({ code: 'OCR_INSTRUCTION_UNSUPPORTED' });
     expect(mockNative.ocrRecognize).not.toHaveBeenCalled();
     await ocr.destroy();
   });
 
-  it('recognize rejects paddleocrVl on a non-paddleocr_vl family', async () => {
+  it('recognize rejects instruction on ppocr', async () => {
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
       modelType: 'ppocr',
@@ -1084,9 +1304,9 @@ describe('ocr offline API', () => {
       ocr.recognize(
         'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
         'txt_off_bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
-        { paddleocrVl: { task: 'spotting' } }
+        { instruction: { task: 'spotting' } } as never
       )
-    ).rejects.toMatchObject({ code: 'OCR_INVALID_ARGUMENT' });
+    ).rejects.toMatchObject({ code: 'OCR_INSTRUCTION_UNSUPPORTED' });
     expect(mockNative.ocrRecognize).not.toHaveBeenCalled();
     await ocr.destroy();
   });
@@ -1119,8 +1339,6 @@ describe('ocr offline API', () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'paddleocr_vl',
       spanCount: 0,
-      doctags: 'Hello',
-      markdown: 'Hello',
       complete: true,
       stopReason: 'eos',
     });
@@ -1140,8 +1358,6 @@ describe('ocr offline API', () => {
   it('recognize rejects when family is missing', async () => {
     mockNative.ocrRecognize.mockResolvedValue({
       spanCount: 0,
-      doctags: '',
-      markdown: '',
     });
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },
@@ -1160,8 +1376,6 @@ describe('ocr offline API', () => {
     mockNative.ocrRecognize.mockResolvedValue({
       family: 'ppocr',
       spanCount: Number.NaN,
-      doctags: '',
-      markdown: '',
     });
     const ocr = await createOCR({
       modelSource: { kind: 'fs', path: '/models/ppocrv6-tiny' },

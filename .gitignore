@@ -124,6 +124,14 @@ dist/diarization-models/
 build/ocr-models/
 dist/ocr-models/
 
+# Phase 0 HF-vs-ORT dumps (probe_instructions.py). Host tests use
+# prompt_ids.json / raw.txt / meta.json / prompt.txt / _images only.
+test/fixtures/ocr/instructions/**/hf_tokens.json
+test/fixtures/ocr/instructions/**/ort_tokens.json
+test/fixtures/ocr/instructions/**/ort_raw.txt
+test/fixtures/ocr/instructions/prompt-ids-verify.json
+test/fixtures/ocr/instructions/phase0-report.json
+
 # React Native Codegen
 ios/generated
 android/generated

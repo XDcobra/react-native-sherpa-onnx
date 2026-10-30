@@ -3,8 +3,11 @@
  */
 #pragma once
 
+#include "markup/OcrElementKind.h"
+
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -39,26 +42,77 @@ struct OcrSpan {
   OcrSpanLevel level = OcrSpanLevel::kLine;
 };
 
+enum class OcrContentFormat : uint8_t {
+  kMarkdown = 0,
+  kPlain,
+  kLatex,
+  kCode,
+};
+
+inline const char* OcrContentFormatName(OcrContentFormat format) {
+  switch (format) {
+    case OcrContentFormat::kMarkdown:
+      return "markdown";
+    case OcrContentFormat::kPlain:
+      return "plain";
+    case OcrContentFormat::kLatex:
+      return "latex";
+    case OcrContentFormat::kCode:
+      return "code";
+  }
+  return "markdown";
+}
+
+struct OcrContent {
+  OcrContentFormat format = OcrContentFormat::kMarkdown;
+  std::string value;
+  std::string language;
+};
+
+struct OcrLayoutElement {
+  OcrElementKind kind = OcrElementKind::kText;
+  int frame_index = 0;
+  bool has_quad = false;
+  OcrQuad quad{};
+  bool has_utf16 = false;
+  int utf16_start = 0;
+  int utf16_end = 0;
+  std::optional<int> heading_level;
+  std::optional<bool> checked;
+};
+
 struct OcrResult {
   std::string text_utf8;
   std::vector<OcrSpan> spans;
-  /** doc_vlm: raw DocTags after ASCII lstrip. Empty for ppocr/doctr. */
-  std::string doctags_utf8;
   /**
-   * Family markup stream. doc_vlm: same as doctags. nemotron_parse: xy/class
-   * tags. Empty for ppocr/doctr.
+   * Family markup stream (always the decoder output). doc_vlm: DocTags.
+   * nemotron_parse: xy/class tags. paddleocr_vl: decoded tokens.
+   * Empty for ppocr/doctr. Kept when a parser rejects the stream.
    */
   std::string raw_utf8;
-  /** VLM markdown (reconstructed or native). Empty for ppocr/doctr. */
-  std::string markdown_utf8;
+  bool has_content = false;
+  OcrContent content;
+  std::vector<OcrLayoutElement> elements;
   /**
    * VLM stop: doctag_end | eos | max_new_tokens | invalid_sequence.
+   * invalid_sequence: Granite prefix/prompt-only reject. raw=accepted
+   * (default) stops decode; raw=full continues so raw_utf8 is complete.
    * Empty for ppocr/doctr.
    */
   std::string stop_reason;
   /** VLM: true after a natural stop (</doctag> or EOS). ppocr/doctr stay true. */
   bool complete = true;
+  /** Serialized recognize spec echoed to JS (`v1;family=…`). */
+  std::string instruction_spec;
 };
+
+inline void SetOcrContent(OcrResult& result, OcrContentFormat format,
+                          std::string value, std::string language = {}) {
+  result.has_content = true;
+  result.content.format = format;
+  result.content.value = std::move(value);
+  result.content.language = std::move(language);
+}
 
 /** Prefer absolute override; otherwise `model_dir/canonical`. */
 inline std::string OcrResolvePath(const std::string& override_path,
@@ -80,13 +134,24 @@ inline std::string OcrResolvePath(const std::string& override_path,
   return out;
 }
 
+/** Negative = omit; `Load` applies the family default. Never remap an explicit value. */
+inline constexpr float kOcrDetThreshUnspecified = -1.f;
+inline constexpr float kPpocrDetBoxThresh = 0.3f;
+inline constexpr float kPpocrDetBoxScoreThresh = 0.5f;
+inline constexpr float kDoctrDetBoxThresh = 0.15f;
+inline constexpr float kDoctrDetBoxScoreThresh = 0.15f;
+
+inline float ResolveOcrDetThresh(float value, float family_default) {
+  return value < 0.f ? family_default : value;
+}
+
 struct OcrLoadOptions {
   int num_threads = 4;
   /** Longest side for det resize (PP-OCR style). */
   int max_side_len = 960;
   bool use_orientation_cls = true;
-  float det_box_thresh = 0.3f;
-  float det_box_score_thresh = 0.5f;
+  float det_box_thresh = kOcrDetThreshUnspecified;
+  float det_box_score_thresh = kOcrDetThreshUnspecified;
   float det_unclip_ratio = 1.5f;
   std::string provider;
   /**
@@ -98,11 +163,6 @@ struct OcrLoadOptions {
    * paddleocr_vl smart_resize area cap. 0 → 1003520. Ignored by other families.
    */
   int max_pixels = 0;
-  /**
-   * paddleocr_vl control-prompt task. Empty or `ocr` → `OCR:`. `spotting` →
-   * `Spotting:`. Ignored by other families.
-   */
-  std::string paddleocr_vl_task;
   std::string quantization;
 
   /**
