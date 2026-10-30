@@ -10,7 +10,7 @@ if File.exist?(setup_script)
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = pod_root
   unless system("bash", setup_script)
     ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
-    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt, libarchive_prebuilt, lexbor_prebuilt, libyuv_prebuilt, libwebp_prebuilt) and network. Run manually: bash #{setup_script}")
+    abort("[SherpaOnnx] setup-ios-framework.sh failed. Check IOS_RELEASE_TAG files (sherpa-onnx-prebuilt, ffmpeg_prebuilt, libarchive_prebuilt, lexbor_prebuilt, libwebp_prebuilt) and network. Run manually: bash #{setup_script}")
   end
   ENV["SHERPA_ONNX_PROJECT_ROOT"] = prev
 end
@@ -61,6 +61,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared VideoBuffer core (platform/android excluded below).
     "android/src/main/cpp/video/**/*.{h,cpp}",
+    # libyuv common (ISA-flagged neon64 is a subspec).
+    "third_party/libyuv/source/*.cc",
     # Shared OCR core (factory + PpocrBackend + OcrEngine; JNI excluded below).
     "android/src/main/cpp/ocr/**/*.{h,cpp}",
     # Shared ORT provider attach (sherpa-style CPU fallback).
@@ -94,6 +96,16 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/image/**/*",
     "android/src/main/cpp/jni/video/**/*",
     "android/src/main/cpp/video/platform/android/**/*",
+    "third_party/libyuv/source/*jpeg*",
+    "third_party/libyuv/source/*mjpeg*",
+    "third_party/libyuv/source/*_wasm.cc",
+    "third_party/libyuv/source/*_lsx.cc",
+    "third_party/libyuv/source/*_lasx.cc",
+    "third_party/libyuv/source/*_hvx.cc",
+    "third_party/libyuv/source/*_rvv.cc",
+    "third_party/libyuv/source/*_sme.cc",
+    "third_party/libyuv/source/*_sve.cc",
+    "third_party/libyuv/source/*_neon64.cc",
     "android/src/main/cpp/jni/ocr/**/*",
     "android/src/main/cpp/jni/pdf/**/*",
     "android/src/main/cpp/jni/document/**/*",
@@ -110,6 +122,7 @@ Pod::Spec.new do |s|
   private_headers += Dir.glob(File.join(pod_root, "android", "src", "main", "cpp", "**", "*.{h,hpp}"))
   private_headers += Dir.glob(File.join(pod_root, "ios", "**", "*.hpp"))
   private_headers += Dir.glob(File.join(pod_root, "third_party", "pugixml", "src", "**", "*.{h,hpp}"))
+  private_headers += Dir.glob(File.join(pod_root, "third_party", "libyuv", "include", "**", "*.h"))
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
   s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox", "ImageIO", "CoreGraphics", "UIKit", "CoreMedia", "CoreVideo", "VideoToolbox"
@@ -117,7 +130,6 @@ Pod::Spec.new do |s|
   ffmpeg_xcframework = File.join(pod_root, "ios", "Frameworks", "FFmpeg.xcframework")
   libarchive_xcframework = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
   lexbor_xcframework = File.join(pod_root, "ios", "Frameworks", "lexbor.xcframework")
-  libyuv_xcframework = File.join(pod_root, "ios", "Frameworks", "libyuv.xcframework")
   libwebp_xcframework = File.join(pod_root, "ios", "Frameworks", "libwebp.xcframework")
   pdfium_xcframework = File.join(pod_root, "ios", "Frameworks", "pdfium.xcframework")
 
@@ -134,11 +146,6 @@ Pod::Spec.new do |s|
   end
 
   has_lexbor = File.exist?(lexbor_xcframework)
-
-  has_libyuv = File.exist?(libyuv_xcframework)
-  unless has_libyuv
-    abort("[SherpaOnnx] missing ios/Frameworks/libyuv.xcframework (always-on for VideoBuffer). Check third_party/libyuv_prebuilt/IOS_RELEASE_TAG and re-run scripts/setup-ios-framework.sh.")
-  end
 
   # Opt-in (default off). Require explicit SHERPA_ONNX_ENABLE_LIBWEBP=1 and xcframework present.
   has_libwebp = false
@@ -164,7 +171,6 @@ Pod::Spec.new do |s|
   vendored << "ios/Frameworks/FFmpeg.xcframework" if has_ffmpeg
   vendored << "ios/Frameworks/libarchive.xcframework" if has_libarchive
   vendored << "ios/Frameworks/lexbor.xcframework" if has_lexbor
-  vendored << "ios/Frameworks/libyuv.xcframework" if has_libyuv
   vendored << "ios/Frameworks/libwebp.xcframework" if has_libwebp
   vendored << "ios/Frameworks/pdfium.xcframework" if has_pdfium
   
@@ -190,12 +196,6 @@ Pod::Spec.new do |s|
   lexbor_simulator_slice = File.join(lexbor_xcframework_root, "ios-arm64_x86_64-simulator")
   lexbor_device_slice = File.join(lexbor_xcframework_root, "ios-arm64")
 
-  libyuv_xcframework_root = File.join(pod_root, "ios", "Frameworks", "libyuv.xcframework")
-  libyuv_simulator_headers = File.join(libyuv_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
-  libyuv_device_headers = File.join(libyuv_xcframework_root, "ios-arm64", "Headers")
-  libyuv_simulator_slice = File.join(libyuv_xcframework_root, "ios-arm64_x86_64-simulator")
-  libyuv_device_slice = File.join(libyuv_xcframework_root, "ios-arm64")
-
   libwebp_xcframework_root = File.join(pod_root, "ios", "Frameworks", "libwebp.xcframework")
   libwebp_simulator_headers = File.join(libwebp_xcframework_root, "ios-arm64_x86_64-simulator", "Headers")
   libwebp_device_headers = File.join(libwebp_xcframework_root, "ios-arm64", "Headers")
@@ -217,11 +217,11 @@ Pod::Spec.new do |s|
 
   gcc_defs = '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
   gcc_defs += ' LEXBOR_STATIC=1' if has_lexbor
-  gcc_defs += ' LIBYUV_DISABLE_JPEG=1 LIBYUV_DISABLE_SME=1 LIBYUV_DISABLE_SVE=1 LIBYUV_DISABLE_LSX=1 LIBYUV_DISABLE_LASX=1 LIBYUV_DISABLE_HVX=1 LIBYUV_DISABLE_RVV=1' if has_libyuv
   gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
   gcc_defs += ' HAVE_LIBARCHIVE=1' if has_libarchive
   gcc_defs += ' HAVE_LIBWEBP=1' if has_libwebp
   gcc_defs += ' HAVE_PDFIUM=1' if has_pdfium
+  gcc_defs += ' LIBYUV_DISABLE_JPEG=1 LIBYUV_DISABLE_SME=1 LIBYUV_DISABLE_SVE=1 LIBYUV_DISABLE_LSX=1 LIBYUV_DISABLE_LASX=1 LIBYUV_DISABLE_HVX=1 LIBYUV_DISABLE_RVV=1'
 
   ld_flags_base = '$(inherited)'
   if has_ffmpeg
@@ -232,9 +232,6 @@ Pod::Spec.new do |s|
   end
   if has_lexbor
     ld_flags_base += ' -llexbor'
-  end
-  if has_libyuv
-    ld_flags_base += ' -lyuv'
   end
   if has_libwebp
     ld_flags_base += ' -lwebp'
@@ -271,6 +268,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/image\"",
     "\"#{pod_root}/android/src/main/cpp/image/decode\"",
     "\"#{pod_root}/android/src/main/cpp/video\"",
+    "\"#{pod_root}/third_party/libyuv/include\"",
     "\"#{pod_root}/android/src/main/cpp/ocr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/markup\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/ppocr\"",
@@ -321,10 +319,6 @@ Pod::Spec.new do |s|
     header_search_paths << "\"#{lexbor_device_headers}\""
     header_search_paths << "\"#{lexbor_simulator_headers}\""
   end
-  if has_libyuv
-    header_search_paths << "\"#{libyuv_device_headers}\""
-    header_search_paths << "\"#{libyuv_simulator_headers}\""
-  end
   if has_libwebp
     header_search_paths << "\"#{libwebp_device_headers}\""
     header_search_paths << "\"#{libwebp_simulator_headers}\""
@@ -351,10 +345,6 @@ Pod::Spec.new do |s|
   if has_lexbor
     library_search_paths_ios << "\"#{lexbor_device_slice}\""
     library_search_paths_sim << "\"#{lexbor_simulator_slice}\""
-  end
-  if has_libyuv
-    library_search_paths_ios << "\"#{libyuv_device_slice}\""
-    library_search_paths_sim << "\"#{libyuv_simulator_slice}\""
   end
   if has_libwebp
     library_search_paths_ios << "\"#{libwebp_device_slice}\""
@@ -394,6 +384,16 @@ Pod::Spec.new do |s|
   }
 
   s.libraries = "c++", "z", "iconv", "bz2"
+
+  # neon64 files only — ISA flags must not leak onto SDK translation units.
+  s.subspec "libyuv_neon64" do |n|
+    n.source_files = "third_party/libyuv/source/{compare,rotate,row,scale}_neon64.cc"
+    n.compiler_flags = "-march=armv8.2-a+dotprod+i8mm"
+    n.pod_target_xcconfig = {
+      "OTHER_CPLUSPLUSFLAGS[arch=arm64]" => "$(inherited) -march=armv8.2-a+dotprod+i8mm",
+      "GCC_PREPROCESSOR_DEFINITIONS" => gcc_defs
+    }
+  end
 
   # Per-release-model license metadata (synced from CI; same CSV as android/src/main/assets/model_licenses/).
   # Use resource_bundles so assets are packaged reliably across CocoaPods integration modes.
