@@ -12,14 +12,16 @@ import {
   type LayoutChangeEvent,
 } from 'react-native';
 import {
-  DocVlmInitOptionChips,
   InitModeSelector,
   ModelFolderGrid,
   OcrCustomInitForm,
-  PaddleocrVlMaxPixelsChips,
 } from './modelInit';
+import {
+  OcrFamilyPublicApiFields,
+  type OcrRecognizeInstructionState,
+} from './ocr/OcrFamilyPublicApiFields';
 import { getModelDisplayName } from '../modelConfig';
-import { isPaddleocrVlOcrPack, isVlmOcrPack } from '../utils/ocrModelCatalog';
+import { isDbDetectorOcrFamily } from '../utils/ocrModelCatalog';
 import {
   OCR_MAX_THREADS,
   OCR_MAX_UNCLIP,
@@ -37,6 +39,7 @@ type Props = {
   disabled?: boolean;
   showScatteredTest?: boolean;
   onSelectFolder?: (id: string) => void;
+  recognize?: OcrRecognizeInstructionState;
 };
 
 export function OcrModelInitPanel({
@@ -45,8 +48,11 @@ export function OcrModelInitPanel({
   disabled = false,
   showScatteredTest = true,
   onSelectFolder,
+  recognize,
 }: Props) {
   const busy = disabled || ocr.initBusy;
+  const family = ocr.selectedFamily;
+  const showDbDetector = isDbDetectorOcrFamily(family);
   const [providerPickerOpen, setProviderPickerOpen] = useState(false);
   const unclipTrackWidthRef = useRef(0);
 
@@ -81,8 +87,11 @@ export function OcrModelInitPanel({
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{title}</Text>
       <Text style={styles.sectionHint}>
-        Recommended start: ppocrv6-tiny (bundled assets or Download Manager →
-        OCR).
+        Pick a pack — section 1 then shows only that family’s public createOCR
+        and recognize fields (instruction.task, maxNewTokens, detector, …).
+        Smallest published: ppocrv6-tiny, doctr-mobile,
+        docvlm-granite-258m-q4f16, nemotron-3.5-parse-int8,
+        paddleocr-vl-1.6-fp16.
       </Text>
 
       <View style={styles.sectionBody}>
@@ -110,24 +119,6 @@ export function OcrModelInitPanel({
               disabled={busy || ocr.fillLoading}
               emptyMessage="No OCR models found. Use bundled assets, PAD, or Download Manager → OCR."
             />
-            {ocr.selectedFolder && isVlmOcrPack(ocr.selectedFolder) ? (
-              <DocVlmInitOptionChips
-                maxNewTokens={ocr.customInitForm.maxNewTokens}
-                onChangeMaxNewTokens={(maxNewTokens) =>
-                  ocr.setCustomInitForm((prev) => ({ ...prev, maxNewTokens }))
-                }
-                disabled={busy || ocr.fillLoading}
-              />
-            ) : null}
-            {ocr.selectedFolder && isPaddleocrVlOcrPack(ocr.selectedFolder) ? (
-              <PaddleocrVlMaxPixelsChips
-                maxPixels={ocr.customInitForm.maxPixels}
-                onChangeMaxPixels={(maxPixels) =>
-                  ocr.setCustomInitForm((prev) => ({ ...prev, maxPixels }))
-                }
-                disabled={busy || ocr.fillLoading}
-              />
-            ) : null}
           </>
         ) : (
           <OcrCustomInitForm
@@ -204,61 +195,87 @@ export function OcrModelInitPanel({
           </Text>
         </TouchableOpacity>
 
-        <View style={styles.sliderHeader}>
-          <Text style={styles.fieldLabel}>detUnclipRatio</Text>
-          <Text style={styles.sliderValue}>
-            {ocr.detUnclipRatio.toFixed(2)}
-          </Text>
-        </View>
-        <Text style={styles.sectionHint}>
-          Expands DB detection boxes for ppocr/doctr (1.0 tight … 2.5 loose).
-          Default 1.5 — not glyph-perfect bounds. Re-init to apply.
-        </Text>
-        <View
-          style={[styles.sliderTrack, busy && styles.sliderTrackDisabled]}
-          onLayout={onUnclipSliderLayout}
-          onStartShouldSetResponder={() => !busy}
-          onMoveShouldSetResponder={() => !busy}
-          onResponderTerminationRequest={() => false}
-          onResponderGrant={onUnclipTouch}
-          onResponderMove={onUnclipTouch}
-        >
-          <View style={styles.sliderRail} pointerEvents="none">
+        {showDbDetector ? (
+          <>
+            <View style={styles.sliderHeader}>
+              <Text style={styles.fieldLabel}>detUnclipRatio</Text>
+              <Text style={styles.sliderValue}>
+                {ocr.detUnclipRatio.toFixed(2)}
+              </Text>
+            </View>
+            <Text style={styles.sectionHint}>
+              Expands {family} DB boxes (1.0 tight … 2.5 loose). Default 1.5 —
+              not glyph-perfect bounds. Re-init to apply.
+            </Text>
             <View
-              style={[
-                styles.sliderFill,
-                {
-                  width: `${
-                    ((ocr.detUnclipRatio - OCR_MIN_UNCLIP) /
-                      (OCR_MAX_UNCLIP - OCR_MIN_UNCLIP)) *
-                    100
-                  }%`,
-                },
-              ]}
-            />
-          </View>
-          <View
-            pointerEvents="none"
-            style={[
-              styles.sliderThumb,
-              {
-                left: `${
-                  ((ocr.detUnclipRatio - OCR_MIN_UNCLIP) /
-                    (OCR_MAX_UNCLIP - OCR_MIN_UNCLIP)) *
-                  100
-                }%`,
-              },
-            ]}
-          />
-        </View>
-        <View style={styles.sliderLegend}>
-          <Text style={styles.sliderLegendText}>
-            {OCR_MIN_UNCLIP.toFixed(1)}
-          </Text>
-          <Text style={styles.sliderLegendText}>
-            {OCR_MAX_UNCLIP.toFixed(1)}
-          </Text>
-        </View>
+              style={[styles.sliderTrack, busy && styles.sliderTrackDisabled]}
+              onLayout={onUnclipSliderLayout}
+              onStartShouldSetResponder={() => !busy}
+              onMoveShouldSetResponder={() => !busy}
+              onResponderTerminationRequest={() => false}
+              onResponderGrant={onUnclipTouch}
+              onResponderMove={onUnclipTouch}
+            >
+              <View style={styles.sliderRail} pointerEvents="none">
+                <View
+                  style={[
+                    styles.sliderFill,
+                    {
+                      width: `${
+                        ((ocr.detUnclipRatio - OCR_MIN_UNCLIP) /
+                          (OCR_MAX_UNCLIP - OCR_MIN_UNCLIP)) *
+                        100
+                      }%`,
+                    },
+                  ]}
+                />
+              </View>
+              <View
+                pointerEvents="none"
+                style={[
+                  styles.sliderThumb,
+                  {
+                    left: `${
+                      ((ocr.detUnclipRatio - OCR_MIN_UNCLIP) /
+                        (OCR_MAX_UNCLIP - OCR_MIN_UNCLIP)) *
+                      100
+                    }%`,
+                  },
+                ]}
+              />
+            </View>
+            <View style={styles.sliderLegend}>
+              <Text style={styles.sliderLegendText}>
+                {OCR_MIN_UNCLIP.toFixed(1)}
+              </Text>
+              <Text style={styles.sliderLegendText}>
+                {OCR_MAX_UNCLIP.toFixed(1)}
+              </Text>
+            </View>
+          </>
+        ) : null}
+
+        <OcrFamilyPublicApiFields
+          family={family}
+          disabled={busy || ocr.fillLoading}
+          maxNewTokens={ocr.customInitForm.maxNewTokens}
+          onChangeMaxNewTokens={(maxNewTokens) =>
+            ocr.setCustomInitForm((prev) => ({ ...prev, maxNewTokens }))
+          }
+          maxPixels={ocr.customInitForm.maxPixels}
+          onChangeMaxPixels={(maxPixels) =>
+            ocr.setCustomInitForm((prev) => ({ ...prev, maxPixels }))
+          }
+          detBoxThresh={ocr.detBoxThresh}
+          detBoxScoreThresh={ocr.detBoxScoreThresh}
+          onChangeBoxThresh={ocr.setDetBoxThresh}
+          onChangeBoxScoreThresh={ocr.setDetBoxScoreThresh}
+          maxSideLen={ocr.maxSideLen}
+          onChangeMaxSideLen={ocr.setMaxSideLen}
+          useOrientationCls={ocr.useOrientationCls}
+          onChangeUseOrientationCls={ocr.setUseOrientationCls}
+          recognize={recognize}
+        />
 
         <View style={styles.actionRow}>
           <TouchableOpacity

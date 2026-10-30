@@ -65,6 +65,7 @@ export {
 export {
   DocVlmInitOptionChips,
   PaddleocrVlMaxPixelsChips,
+  OcrDbDetectorChips,
   OcrCustomInitForm,
   type OcrCustomInitFormState,
 } from './OcrCustomInitForm';
