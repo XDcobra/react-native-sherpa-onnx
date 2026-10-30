@@ -173,6 +173,9 @@ android/src/main/cpp/include/libarchive/
 android/src/main/cpp/include/lexbor/
 # libwebp headers (from Maven AAR or release zip; Gradle extracts to here)
 android/src/main/cpp/include/webp/
+# libyuv headers (from Maven AAR or release zip; Gradle extracts to here)
+android/src/main/cpp/include/libyuv/
+android/src/main/cpp/include/libyuv.h
 # pdfium headers (from Maven AAR or release zip; Gradle extracts to here)
 android/src/main/cpp/include/pdfium/
 # sherpa-onnx C-API headers (from Maven AAR or release; Gradle extracts to here)
