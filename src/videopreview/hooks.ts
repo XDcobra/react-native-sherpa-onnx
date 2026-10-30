@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { PipelineVideoBufferIdSource } from '../videobuffer/types';
 import { createVideoPreviewPlayer } from './player';
+import { snapshotForStatusHook } from './statusSnapshot';
 import type {
   VideoPreviewPlayer,
   VideoPreviewPlayerOptions,
@@ -56,25 +63,25 @@ export function useVideoPreviewPlayer(
   return player;
 }
 
-function interpolate(snap: VideoPreviewSnapshot, nativeTs: number): number {
-  if (snap.state !== 'playing') return snap.positionMs;
-  const elapsed = Date.now() - nativeTs;
-  return snap.positionMs + Math.max(0, elapsed);
-}
-
 export function useVideoPreviewStatus(
   player: VideoPreviewPlayer | null,
   options?: { smoothPosition?: boolean }
 ): VideoPreviewSnapshot | null {
+  const smoothPosition = options?.smoothPosition === true;
   const snapRef = useRef<VideoPreviewSnapshot | null>(
     player?.initialSnapshot ?? null
   );
   const nativeTsRef = useRef(Date.now());
+  const cacheRef = useRef<{
+    base: VideoPreviewSnapshot | null;
+    out: VideoPreviewSnapshot | null;
+  }>({ base: null, out: null });
   const [, bump] = useState(0);
 
   useEffect(() => {
     if (!player) {
       snapRef.current = null;
+      cacheRef.current = { base: null, out: null };
       bump((n) => n + 1);
       return;
     }
@@ -111,9 +118,9 @@ export function useVideoPreviewStatus(
     };
   }, [player]);
 
-  return useSyncExternalStore(
-    (onStoreChange) => {
-      if (!options?.smoothPosition || !player) return () => undefined;
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      if (!smoothPosition || !player) return () => undefined;
       let raf = 0;
       const loop = () => {
         onStoreChange();
@@ -122,12 +129,19 @@ export function useVideoPreviewStatus(
       raf = requestAnimationFrame(loop);
       return () => cancelAnimationFrame(raf);
     },
-    () => {
-      const s = snapRef.current;
-      if (!s) return null;
-      if (!options?.smoothPosition) return s;
-      return { ...s, positionMs: interpolate(s, nativeTsRef.current) };
-    },
+    [player, smoothPosition]
+  );
+
+  return useSyncExternalStore(
+    subscribe,
+    () =>
+      snapshotForStatusHook(
+        snapRef.current,
+        nativeTsRef.current,
+        Date.now(),
+        smoothPosition,
+        cacheRef.current
+      ),
     () => snapRef.current
   );
 }
