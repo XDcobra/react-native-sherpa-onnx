@@ -167,6 +167,19 @@ export interface ConfigureVideoBufferOptions {
   decoderBudget?: VideoDecoderBudget;
 }
 
+export type VideoFileDurationProbe = {
+  durationUs: number;
+  isExact: boolean;
+};
+
+export type VideoFileContainerProbe = {
+  inputFormatName: string;
+  codecName: string;
+  codedWidth: number;
+  codedHeight: number;
+  audioCodecName?: string;
+};
+
 export interface CreateOfflineAudioFromVideoOptions {
   targetSampleRateHz?: number;
   rangeMs?: { startMs: number; endMs: number };

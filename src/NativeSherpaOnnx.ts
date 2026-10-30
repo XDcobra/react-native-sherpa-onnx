@@ -3176,6 +3176,27 @@ export interface Spec extends TurboModule {
 
   // ── VideoBuffer ────────────────────────────────────────────────────────
 
+  /**
+   * Probe video file duration from container metadata (no index, no HW decode).
+   * JS wrapper: `probeVideoFileDuration` from `react-native-sherpa-onnx/videobuffer`.
+   */
+  probeVideoFileDuration(source: Object): Promise<{
+    durationUs: number;
+    isExact: boolean;
+  }>;
+
+  /**
+   * Probe container format and video codec from file content (no VideoBuffer).
+   * JS wrapper: `probeVideoFileContainer` from `react-native-sherpa-onnx/videobuffer`.
+   */
+  probeVideoFileContainer(source: Object): Promise<{
+    inputFormatName: string;
+    codecName: string;
+    codedWidth: number;
+    codedHeight: number;
+    audioCodecName?: string;
+  }>;
+
   createOfflineVideoBufferFromFile(
     source: Object,
     options?: Object

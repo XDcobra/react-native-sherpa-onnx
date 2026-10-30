@@ -50,6 +50,8 @@ import type {
   VideoAudioExtractResult,
   VideoExportCodec,
   VideoExportContainer,
+  VideoFileContainerProbe,
+  VideoFileDurationProbe,
 } from './types';
 
 let extractOpId = 0;
@@ -210,6 +212,68 @@ function assertFileSource(source: FileSource): void {
     typeof (source as FileSource).kind !== 'string'
   ) {
     throw new Error('VIDEO_INVALID_ARGUMENT: source must be a FileSource');
+  }
+}
+
+export async function probeVideoFileDuration(
+  source: FileSource
+): Promise<VideoFileDurationProbe | null> {
+  assertFileSource(source);
+  try {
+    const result = await getNative().probeVideoFileDuration(source as Object);
+    if (
+      !result ||
+      typeof result.durationUs !== 'number' ||
+      !Number.isFinite(result.durationUs) ||
+      result.durationUs <= 0
+    ) {
+      return null;
+    }
+    return {
+      durationUs: result.durationUs,
+      isExact: Boolean(result.isExact),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function probeVideoFileContainer(
+  source: FileSource
+): Promise<VideoFileContainerProbe | null> {
+  assertFileSource(source);
+  try {
+    const result = await getNative().probeVideoFileContainer(source as Object);
+    const inputFormatName = result?.inputFormatName?.trim();
+    const codecName = result?.codecName?.trim();
+    if (!inputFormatName || !codecName) {
+      return null;
+    }
+    const codedWidth =
+      typeof result.codedWidth === 'number' ? result.codedWidth : 0;
+    const codedHeight =
+      typeof result.codedHeight === 'number' ? result.codedHeight : 0;
+    const audio = result.audioCodecName?.trim();
+    const probe: VideoFileContainerProbe = {
+      inputFormatName,
+      codecName,
+      codedWidth,
+      codedHeight,
+    };
+    if (audio) {
+      probe.audioCodecName = audio;
+    }
+    if (__DEV__) {
+      console.log(
+        '[SherpaOnnx:video] probeContainer',
+        probe.inputFormatName,
+        probe.codecName,
+        `${probe.codedWidth}x${probe.codedHeight}`
+      );
+    }
+    return probe;
+  } catch {
+    return null;
   }
 }
 
@@ -722,5 +786,7 @@ export type {
   VideoDecoderBudget,
   VideoExportCodec,
   VideoExportContainer,
+  VideoFileContainerProbe,
+  VideoFileDurationProbe,
   VideoRetention,
 } from './types';

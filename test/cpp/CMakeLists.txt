@@ -863,6 +863,7 @@ set(VIDEOBUFFER_CORE_SOURCES
   "${VIDEO_CPP_ROOT}/live/AudioPacketRing.cpp"
   "${VIDEO_CPP_ROOT}/demux/BitstreamUtil.cpp"
   "${VIDEO_CPP_ROOT}/demux/FfmpegDemuxer.cpp"
+  "${VIDEO_CPP_ROOT}/demux/FfmpegProbe.cpp"
   "${VIDEO_CPP_ROOT}/decode/FakeDecoder.cpp"
   "${VIDEO_CPP_ROOT}/decode/DecoderFactory.cpp"
   "${VIDEO_CPP_ROOT}/decode/DecoderPool.cpp"
@@ -905,6 +906,7 @@ add_executable(videobuffer_core_host_test
   "${VIDEOBUFFER_TEST_DIR}/decoder_pool_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/encoder_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/export_session_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/probe_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/audio_timeline_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/preview_controller_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/preview_live_test.cpp"
@@ -965,6 +967,7 @@ if(TARGET PkgConfig::LIBAV)
     "${VIDEOBUFFER_TEST_DIR}/audio_decode_test.cpp"
     "${VIDEOBUFFER_TEST_DIR}/audio_extract_test.cpp"
     "${VIDEOBUFFER_TEST_DIR}/export_session_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/probe_test.cpp"
     "${VIDEOBUFFER_TEST_DIR}/live_audio_test.cpp"
     ${VIDEOBUFFER_CORE_SOURCES}
     "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"

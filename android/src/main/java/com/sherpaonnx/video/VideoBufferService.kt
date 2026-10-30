@@ -116,6 +116,9 @@ internal object VideoBufferService : ComponentCallbacks2 {
       cancelFlagAddr, progress,
     )
 
+  fun probeVideoFile(path: String): Map<String, Any>? =
+    VideoBufferNative.nativeProbeVideoFile(path)
+
   /**
    * Called from JNI on a media thread. Marshals onto the JS queue.
    */

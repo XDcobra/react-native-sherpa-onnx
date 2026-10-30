@@ -3704,6 +3704,66 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun probeVideoFileDuration(source: ReadableMap, promise: Promise) {
+    probeVideoFileNative(source, promise, durationOnly = true)
+  }
+
+  override fun probeVideoFileContainer(source: ReadableMap, promise: Promise) {
+    probeVideoFileNative(source, promise, durationOnly = false)
+  }
+
+  private fun probeVideoFileNative(
+    source: ReadableMap,
+    promise: Promise,
+    durationOnly: Boolean,
+  ) {
+    decodeExecutor.execute {
+      var demux: com.sherpaonnx.fileio.DemuxableOpenedSource? = null
+      try {
+        com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+        demux = fileIOHelper.resolveDemuxableSource(source)
+        @Suppress("UNCHECKED_CAST")
+        val raw = com.sherpaonnx.video.VideoBufferService.probeVideoFile(demux.path)
+          as? HashMap<String, Any>
+        if (raw == null) {
+          promise.reject("VIDEO_INTERNAL", "null video probe result")
+          return@execute
+        }
+        val err = raw["errorCode"] as? String
+        if (!err.isNullOrEmpty()) {
+          promise.reject(err, raw["errorMessage"] as? String ?: err)
+          return@execute
+        }
+        val map = Arguments.createMap()
+        if (durationOnly) {
+          val durationUs = (raw["durationUs"] as? Number)?.toDouble() ?: -1.0
+          map.putDouble("durationUs", durationUs)
+          map.putBoolean("isExact", ((raw["isExact"] as? Number)?.toLong() ?: 0L) != 0L)
+        } else {
+          map.putString("inputFormatName", raw["inputFormatName"] as? String ?: "")
+          map.putString("codecName", raw["codecName"] as? String ?: "")
+          map.putInt("codedWidth", (raw["codedWidth"] as? Number)?.toInt() ?: 0)
+          map.putInt("codedHeight", (raw["codedHeight"] as? Number)?.toInt() ?: 0)
+          val audio = raw["audioCodecName"] as? String
+          if (!audio.isNullOrBlank()) {
+            map.putString("audioCodecName", audio)
+          }
+        }
+        promise.resolve(map)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        android.util.Log.w("SherpaOnnx:video", "probeVideoFile fileio: ${e.message}")
+        promise.reject(e.code, e.message, e)
+      } catch (e: Exception) {
+        promise.reject("VIDEO_INTERNAL", e.message, e)
+      } finally {
+        try {
+          demux?.close()
+        } catch (_: Exception) {
+        }
+      }
+    }
+  }
+
   override fun createOfflineVideoBufferFromFile(
     source: ReadableMap,
     options: ReadableMap?,

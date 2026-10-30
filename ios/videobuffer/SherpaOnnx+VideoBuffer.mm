@@ -4,6 +4,7 @@
 #include "VideoImageBridge.h"
 #include "VideoLog.h"
 #include "VideoRegistry.h"
+#include "demux/FfmpegProbe.h"
 #include "encode/EncoderBackend.h"
 #include "encode/VideoExportSession.h"
 #include "audio/LiveAudioTap.h"
@@ -146,6 +147,80 @@ void BindVideoModule(SherpaOnnx *mod) {
 }
 
 @implementation SherpaOnnx (VideoBuffer)
+
+- (void)runVideoFileProbe:(NSDictionary *)source
+             durationOnly:(BOOL)durationOnly
+                  resolve:(RCTPromiseResolveBlock)resolve
+                   reject:(RCTPromiseRejectBlock)reject {
+  BindVideoModule(self);
+  if (![source isKindOfClass:[NSDictionary class]]) {
+    reject(@"VIDEO_INVALID_ARGUMENT", @"source must be a FileSource", nil);
+    return;
+  }
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source
+                                                         error:&errCode
+                                                       message:&errMsg];
+  if (!readHandle) {
+    reject(errCode ?: @"VIDEO_INVALID_ARGUMENT",
+           errMsg ?: @"Failed to resolve FileSource", nil);
+    return;
+  }
+  NSString *path = [FileIOResolver demuxableFilePathFromHandle:readHandle
+                                                        source:source
+                                                         error:&errCode
+                                                       message:&errMsg];
+  if (path.length == 0) {
+    [readHandle cleanup];
+    reject(errCode ?: @"VIDEO_INVALID_ARGUMENT",
+           errMsg ?: @"FileSource is not a readable file", nil);
+    return;
+  }
+  sherpa_onnx::video::VideoFileProbe probe;
+  auto st = sherpa_onnx::video::ProbeVideoFile([path UTF8String], &probe);
+  [readHandle cleanup];
+  if ([FileIOResolver isNofdCachePath:path]) {
+    [FileIOResolver unpinNofdPath:path];
+  }
+  if (!st.ok) {
+    reject([NSString stringWithUTF8String:st.errorCode.c_str()] ?: @"VIDEO_INTERNAL",
+           [NSString stringWithUTF8String:st.errorMessage.c_str()] ?: @"probe failed",
+           nil);
+    return;
+  }
+  if (durationOnly) {
+    resolve(@{
+      @"durationUs" : @(probe.durationUs),
+      @"isExact" : @(probe.durationExact),
+    });
+    return;
+  }
+  NSMutableDictionary *dict = [@{
+    @"inputFormatName" : [NSString stringWithUTF8String:probe.inputFormatName.c_str()]
+        ?: @"unknown",
+    @"codecName" : [NSString stringWithUTF8String:probe.codecName.c_str()] ?: @"unknown",
+    @"codedWidth" : @(probe.codedWidth),
+    @"codedHeight" : @(probe.codedHeight),
+  } mutableCopy];
+  if (probe.audioCodecName && !probe.audioCodecName->empty()) {
+    dict[@"audioCodecName"] =
+        [NSString stringWithUTF8String:probe.audioCodecName->c_str()];
+  }
+  resolve(dict);
+}
+
+- (void)probeVideoFileDuration:(NSDictionary *)source
+                       resolve:(RCTPromiseResolveBlock)resolve
+                        reject:(RCTPromiseRejectBlock)reject {
+  [self runVideoFileProbe:source durationOnly:YES resolve:resolve reject:reject];
+}
+
+- (void)probeVideoFileContainer:(NSDictionary *)source
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject {
+  [self runVideoFileProbe:source durationOnly:NO resolve:resolve reject:reject];
+}
 
 - (void)createOfflineVideoBufferFromFile:(NSDictionary *)source
                                  options:(NSDictionary *)options

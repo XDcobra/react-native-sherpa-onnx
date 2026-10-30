@@ -18,6 +18,8 @@ jest.mock('react-native', () => {
     configureVideoBuffer: jest.fn(),
     cancelDecode: jest.fn(),
     exportVideo: jest.fn(),
+    probeVideoFileDuration: jest.fn(),
+    probeVideoFileContainer: jest.fn(),
   };
   return {
     Platform: { OS: 'ios' },
@@ -53,6 +55,8 @@ import {
   createOfflineVideoBufferFromFile,
   exportVideo,
   finalizeLiveVideoBuffer,
+  probeVideoFileContainer,
+  probeVideoFileDuration,
   ingestFileToLiveVideoBuffer,
   resolveLiveVideoBufferId,
   resolveOfflineVideoBufferId,
@@ -127,6 +131,8 @@ describe('videobuffer public API mapping', () => {
       createOfflineAudioBufferFromVideo: jest.Mock;
       configureVideoBuffer: jest.Mock;
       exportVideo: jest.Mock;
+      probeVideoFileDuration: jest.Mock;
+      probeVideoFileContainer: jest.Mock;
     };
     __emitVideo: (event: unknown) => void;
     __listenerCount: () => number;
@@ -301,6 +307,52 @@ describe('videobuffer public API mapping', () => {
       })
     ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: toUs/);
     expect(rn.__mockNative.exportVideo).not.toHaveBeenCalled();
+  });
+
+  it('rejects a string path for video probe', async () => {
+    await expect(probeVideoFileDuration('/tmp/a.mp4' as never)).rejects.toThrow(
+      /VIDEO_INVALID_ARGUMENT: source must be a FileSource/
+    );
+    await expect(
+      probeVideoFileContainer('/tmp/a.mp4' as never)
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: source must be a FileSource/);
+    expect(rn.__mockNative.probeVideoFileDuration).not.toHaveBeenCalled();
+    expect(rn.__mockNative.probeVideoFileContainer).not.toHaveBeenCalled();
+  });
+
+  it('maps probeVideoFileDuration and returns null on native reject', async () => {
+    const source = { kind: 'fs' as const, path: '/tmp/a.mp4' };
+    rn.__mockNative.probeVideoFileDuration.mockResolvedValue({
+      durationUs: 1_000_000,
+      isExact: true,
+    });
+    await expect(probeVideoFileDuration(source)).resolves.toEqual({
+      durationUs: 1_000_000,
+      isExact: true,
+    });
+    expect(rn.__mockNative.probeVideoFileDuration).toHaveBeenCalledWith(source);
+    rn.__mockNative.probeVideoFileDuration.mockRejectedValue(
+      new Error('VIDEO_NO_VIDEO_TRACK: no video stream')
+    );
+    await expect(probeVideoFileDuration(source)).resolves.toBeNull();
+  });
+
+  it('maps probeVideoFileContainer including optional audio codec', async () => {
+    const source = { kind: 'fs' as const, path: '/tmp/a.webm' };
+    rn.__mockNative.probeVideoFileContainer.mockResolvedValue({
+      inputFormatName: 'matroska,webm',
+      codecName: 'vp9',
+      codedWidth: 16,
+      codedHeight: 16,
+      audioCodecName: 'opus',
+    });
+    await expect(probeVideoFileContainer(source)).resolves.toEqual({
+      inputFormatName: 'matroska,webm',
+      codecName: 'vp9',
+      codedWidth: 16,
+      codedHeight: 16,
+      audioCodecName: 'opus',
+    });
   });
 
   it('maps exportVideo FileDestination and defaults codec/bitrate', async () => {

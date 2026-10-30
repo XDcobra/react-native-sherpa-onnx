@@ -85,4 +85,6 @@ internal object VideoBufferNative {
     cancelFlagAddr: Long,
     progress: Any?,
   ): HashMap<String, Any>?
+
+  external fun nativeProbeVideoFile(path: String): HashMap<String, Any>?
 }

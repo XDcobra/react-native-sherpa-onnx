@@ -33,6 +33,7 @@ inline const char* kErrMemoryBudget = "VIDEO_MEMORY_BUDGET_EXCEEDED";
 inline const char* kErrSpoolIo = "VIDEO_SPOOL_IO";
 inline const char* kErrCancelled = "VIDEO_CANCELLED";
 inline const char* kErrFileCorrupt = "VIDEO_FILE_CORRUPT";
+inline const char* kErrDurationUnknown = "VIDEO_DURATION_UNKNOWN";
 inline const char* kErrPreviewDecoderBusy = "VIDEO_PREVIEW_DECODER_BUSY";
 inline const char* kErrPreviewNotFound = "VIDEO_PREVIEW_NOT_FOUND";
 inline const char* kErrPreviewReleased = "VIDEO_PREVIEW_RELEASED";

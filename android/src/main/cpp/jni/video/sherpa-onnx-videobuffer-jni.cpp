@@ -9,6 +9,7 @@
 #include "decode/DecoderPool.h"
 #include "live/LiveIngest.h"
 #include "live/LiveVideoEntry.h"
+#include "demux/FfmpegProbe.h"
 #include "encode/EncoderBackend.h"
 #include "encode/VideoExportSession.h"
 #include "platform/android/AMediaCodecDecoder.h"
@@ -613,6 +614,32 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
     return map;
   }
   PutString(env, map, put, "ok", "true");
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_video_VideoBufferNative_nativeProbeVideoFile(
+    JNIEnv* env, jclass, jstring jPath) {
+  using sherpa_onnx::video::ProbeVideoFile;
+  using sherpa_onnx::video::VideoFileProbe;
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  VideoFileProbe probe;
+  auto st = ProbeVideoFile(JstringToStd(env, jPath), &probe);
+  if (!st.ok) {
+    PutString(env, map, put, "errorCode", st.errorCode);
+    PutString(env, map, put, "errorMessage", st.errorMessage);
+    return map;
+  }
+  PutString(env, map, put, "inputFormatName", probe.inputFormatName);
+  PutString(env, map, put, "codecName", probe.codecName);
+  PutLong(env, map, put, "codedWidth", probe.codedWidth);
+  PutLong(env, map, put, "codedHeight", probe.codedHeight);
+  PutLong(env, map, put, "durationUs", probe.durationUs);
+  PutLong(env, map, put, "isExact", probe.durationExact ? 1 : 0);
+  if (probe.audioCodecName && !probe.audioCodecName->empty()) {
+    PutString(env, map, put, "audioCodecName", *probe.audioCodecName);
+  }
   return map;
 }
 

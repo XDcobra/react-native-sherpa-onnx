@@ -286,6 +286,7 @@ set(SOURCES
     video/decode/DecodeSession.cpp
     video/decode/ThinningPlanner.cpp
     video/demux/FfmpegDemuxer.cpp
+    video/demux/FfmpegProbe.cpp
     video/VideoEntry.cpp
     video/OfflineVideoEntry.cpp
     video/VideoRegistry.cpp
