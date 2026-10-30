@@ -13,6 +13,7 @@ import {
   unlink,
 } from '@dr.pogodin/react-native-fs';
 import {
+  probeAudioFileContainer,
   probeAudioFileDuration,
   saveAudioAsFile,
   type AudioOutputFormat,
@@ -30,6 +31,15 @@ import {
   ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import {
+  createOfflineVideoBufferFromFile,
+  exportVideo,
+  exportVideoFrame,
+  probeVideoFileContainer,
+  probeVideoFileDuration,
+  releaseVideoBuffer,
+  type VideoExportContainer,
+} from 'react-native-sherpa-onnx/videobuffer';
 
 import { formatResolvedLocation } from '../../components/audioSaveUtils';
 import { describeFileSource } from '../../utils/fileSourceFromUri';
@@ -48,6 +58,7 @@ export type {
   FileioInputChannelMeta,
   FileioSampleSelection,
 } from './fileioInputChannels';
+export { fileioSampleMedia } from './fileioInputChannels';
 
 /** Matches the “Audio source” cards on {@link FileIOScreen} (encode only). */
 export type AudioSourceChoice =
@@ -69,6 +80,13 @@ export const FILEIO_OUTPUT_FORMATS: AudioOutputFormat[] = [
   'ogg',
 ];
 
+export const FILEIO_VIDEO_OUTPUT_FORMATS: VideoExportContainer[] = [
+  'mp4',
+  'mov',
+  'mkv',
+  'webm',
+];
+
 /** Payload when the user runs encode (Copy) on the File I/O screen. */
 export type FileioCopyInput = {
   destinationKind: FileDestination['kind'];
@@ -85,20 +103,37 @@ export type FileioCopyResult =
   | { status: 'error'; message: string };
 
 export type FileioProbeResult =
-  | { status: 'success'; durationMs: number; isExact: boolean; detail: string }
+  | {
+      status: 'success';
+      media: 'audio' | 'video';
+      durationMs?: number;
+      durationUs?: number;
+      isExact?: boolean;
+      inputFormatName?: string;
+      codecName?: string;
+      detail: string;
+      summary: string;
+    }
   | { status: 'error'; message: string };
 
 export type FileioDecodeResult =
   | {
       status: 'success';
+      media: 'audio' | 'video';
       bufferId: string;
-      sampleRate: number;
-      channelCount: number;
-      numSamples: number;
-      durationMs: number;
+      durationMs?: number;
+      durationUs?: number;
       detail: string;
+      summary: string;
     }
   | { status: 'error'; message: string };
+
+export type FileioVideoEncodeInput = {
+  destinationKind: FileDestination['kind'];
+  inputSource: FileSource;
+  inputLabel: string;
+  outputFormat: VideoExportContainer;
+};
 
 const FS_EXPORT_DIR = `${DocumentDirectoryPath}/SherpaOnnxFileIO/exports`;
 const APP_EXPORT_RELATIVE = 'SherpaOnnxFileIO/exports';
@@ -139,16 +174,29 @@ export function mimeTypeForFormat(format: AudioOutputFormat): string {
   }
 }
 
-function exportFilename(
-  format: AudioOutputFormat,
-  prefix = 'fileio-copy'
-): string {
-  return `${prefix}-${Date.now()}.${format}`;
+export function mimeTypeForVideoFormat(format: VideoExportContainer): string {
+  switch (format) {
+    case 'mp4':
+      return 'video/mp4';
+    case 'mov':
+      return 'video/quicktime';
+    case 'mkv':
+      return 'video/x-matroska';
+    case 'webm':
+      return 'video/webm';
+  }
+}
+
+function exportFilename(ext: string, prefix = 'fileio-copy'): string {
+  return `${prefix}-${Date.now()}.${ext}`;
 }
 
 function isBundledTestPath(rel: string | undefined): rel is string {
   return (
-    !!rel && (rel.startsWith('test_codec/') || rel.startsWith('test_wavs/'))
+    !!rel &&
+    (rel.startsWith('test_codec/') ||
+      rel.startsWith('test_wavs/') ||
+      rel.startsWith('test_videos/'))
   );
 }
 
@@ -159,7 +207,9 @@ function looksLikeMissingBundledAsset(nativeMessage: string): boolean {
     lower.includes('probe_open_failed') ||
     lower.includes('probe_not_found') ||
     lower.includes('source file not found') ||
-    lower.includes('cannot open file')
+    lower.includes('cannot open file') ||
+    lower.includes('video_ffmpeg_disabled') ||
+    lower.includes('video_file_corrupt')
   );
 }
 
@@ -210,12 +260,16 @@ function formatProbeNullError(
   bundledPath: string | undefined
 ): string {
   if (isBundledTestPath(bundledPath)) {
-    return `Probe returned no duration: ${bundledPath}`;
+    return `Probe returned no metadata: ${bundledPath}`;
   }
   return [
-    `Probe returned no duration for: ${input.label}`,
+    `Probe returned no metadata for: ${input.label}`,
     describeFileSource(input.fileSource),
   ].join('\n');
+}
+
+function isVideoBundledPath(path: string | undefined): boolean {
+  return !!path && path.startsWith('test_videos/');
 }
 
 function buildContentTreeDestination(
@@ -246,15 +300,15 @@ function buildContentTreeDestination(
 }
 
 async function pickContentTreeDestination(
-  format: AudioOutputFormat
+  filename: string,
+  mimeType: string
 ): Promise<FileDestination> {
   const picked = await pickDirectory({ requestLongTermAccess: false });
   const uri = picked.uri?.trim();
   if (!uri) {
     throw new Error('Folder picker did not return a URI.');
   }
-  const filename = exportFilename(format);
-  return buildContentTreeDestination(uri, filename, mimeTypeForFormat(format));
+  return buildContentTreeDestination(uri, filename, mimeType);
 }
 
 async function pickSecurityScopedDestination(): Promise<FileDestination> {
@@ -278,9 +332,8 @@ async function pickSecurityScopedDestination(): Promise<FileDestination> {
 
 async function fixedDestinationForKind(
   kind: 'fs' | 'app',
-  format: AudioOutputFormat
+  filename: string
 ): Promise<FileDestination> {
-  const filename = exportFilename(format);
   if (kind === 'fs') {
     await mkdir(FS_EXPORT_DIR, { NSURLIsExcludedFromBackupKey: false }).catch(
       () => {}
@@ -398,71 +451,211 @@ async function saveViaStagingAndSaveDocuments(
   }
 }
 
+async function runAudioProbe(
+  input: FileioInputSource
+): Promise<FileioProbeResult> {
+  const duration = await probeAudioFileDuration(input.fileSource);
+  const container = await probeAudioFileContainer(input.fileSource);
+  if (!duration && !container) {
+    return {
+      status: 'error',
+      message: formatProbeNullError(input, input.bundledPath),
+    };
+  }
+  const lines = ['Media: audio'];
+  if (duration) {
+    lines.push(
+      `Duration: ${duration.durationMs.toFixed(1)} ms`,
+      `Exact: ${duration.isExact ? 'yes' : 'no'}`
+    );
+  }
+  if (container) {
+    lines.push(
+      `Container: ${container.inputFormatName}`,
+      `Codec: ${container.codecName}`
+    );
+  }
+  lines.push(`Input: ${input.label}`, describeFileSource(input.fileSource));
+  const summaryParts = [
+    duration ? `${duration.durationMs.toFixed(0)} ms` : null,
+    container ? `${container.inputFormatName}/${container.codecName}` : null,
+  ].filter(Boolean);
+  return {
+    status: 'success',
+    media: 'audio',
+    durationMs: duration?.durationMs,
+    isExact: duration?.isExact,
+    inputFormatName: container?.inputFormatName,
+    codecName: container?.codecName,
+    detail: lines.join('\n'),
+    summary: summaryParts.join(', ') || 'ok',
+  };
+}
+
+async function runVideoProbe(
+  input: FileioInputSource
+): Promise<FileioProbeResult> {
+  const duration = await probeVideoFileDuration(input.fileSource);
+  const container = await probeVideoFileContainer(input.fileSource);
+  if (!duration && !container) {
+    return {
+      status: 'error',
+      message: formatProbeNullError(input, input.bundledPath),
+    };
+  }
+  const lines = ['Media: video'];
+  if (duration) {
+    lines.push(
+      `Duration: ${(duration.durationUs / 1000).toFixed(1)} ms (${
+        duration.durationUs
+      } µs)`,
+      `Exact: ${duration.isExact ? 'yes' : 'no'}`
+    );
+  }
+  if (container) {
+    lines.push(
+      `Container: ${container.inputFormatName}`,
+      `Video codec: ${container.codecName}`,
+      `Coded size: ${container.codedWidth}×${container.codedHeight}`
+    );
+    if (container.audioCodecName) {
+      lines.push(`Audio codec: ${container.audioCodecName}`);
+    }
+  }
+  lines.push(`Input: ${input.label}`, describeFileSource(input.fileSource));
+  const summaryParts = [
+    duration ? `${(duration.durationUs / 1000).toFixed(0)} ms` : null,
+    container ? `${container.inputFormatName}/${container.codecName}` : null,
+  ].filter(Boolean);
+  return {
+    status: 'success',
+    media: 'video',
+    durationUs: duration?.durationUs,
+    durationMs: duration ? duration.durationUs / 1000 : undefined,
+    isExact: duration?.isExact,
+    inputFormatName: container?.inputFormatName,
+    codecName: container?.codecName,
+    detail: lines.join('\n'),
+    summary: summaryParts.join(', ') || 'ok',
+  };
+}
+
 export async function runFileioProbe(
   input: FileioInputSource
 ): Promise<FileioProbeResult> {
-  const bundledPath = input.bundledPath;
   try {
-    const probe = await probeAudioFileDuration(input.fileSource);
-    if (!probe) {
-      return {
-        status: 'error',
-        message: formatProbeNullError(input, bundledPath),
-      };
+    if (isVideoBundledPath(input.bundledPath)) {
+      return await runVideoProbe(input);
     }
+    if (input.bundledPath) {
+      return await runAudioProbe(input);
+    }
+    const video = await runVideoProbe(input);
+    if (video.status === 'success') {
+      return video;
+    }
+    return await runAudioProbe(input);
+  } catch (e) {
+    return {
+      status: 'error',
+      message: formatFileioNativeError(input.fileSource, input.bundledPath, e),
+    };
+  }
+}
+
+async function runAudioDecode(
+  input: FileioInputSource
+): Promise<FileioDecodeResult> {
+  const ref = await createOfflineAudioBufferFromFile(input.fileSource, {
+    forceMono: true,
+  });
+  const { info, bufferId } = ref;
+  await releasePipelineAudioBuffer(bufferId).catch(() => {});
+  const detail = [
+    'Media: audio',
+    `bufferId: ${String(bufferId)}`,
+    `sampleRate: ${info.sampleRate} Hz`,
+    `channels: ${info.channelCount}`,
+    `samples: ${info.numSamples}`,
+    `duration: ${info.durationMs.toFixed(1)} ms`,
+    `storage: ${info.storageKind ?? 'ram'}`,
+    `Input: ${input.label}`,
+    describeFileSource(input.fileSource),
+  ].join('\n');
+  return {
+    status: 'success',
+    media: 'audio',
+    bufferId: String(bufferId),
+    durationMs: info.durationMs,
+    detail,
+    summary: `${info.durationMs.toFixed(0)} ms, ${info.sampleRate} Hz`,
+  };
+}
+
+async function runVideoDecode(
+  input: FileioInputSource
+): Promise<FileioDecodeResult> {
+  const video = await createOfflineVideoBufferFromFile(input.fileSource);
+  const frameRel = `SherpaOnnxFileIO/decode-frame-${Date.now()}.jpg`;
+  try {
+    const ptsUs = video.info.seekableStartUs ?? 0;
+    const still = await exportVideoFrame(
+      video,
+      ptsUs,
+      { kind: 'app', base: 'cache', path: frameRel },
+      { format: 'jpeg', maxSide: 256 }
+    );
+    if (still.kind === 'fs') {
+      await unlink(still.path).catch(() => {});
+    }
+    const durationUs =
+      (video.info.seekableEndUs ?? 0) - (video.info.seekableStartUs ?? 0);
     const detail = [
-      `Duration: ${probe.durationMs.toFixed(1)} ms`,
-      `Exact: ${probe.isExact ? 'yes' : 'no'}`,
+      'Media: video',
+      `bufferId: ${String(video.bufferId)}`,
+      `kind: ${video.info.kind}`,
+      `frames: ${video.info.frameCount}`,
+      `seekable: ${video.info.seekableStartUs ?? 0}–${
+        video.info.seekableEndUs ?? 0
+      } µs`,
+      `audio: ${video.info.audio?.codec ?? 'none'}`,
+      `decoded frame at ${ptsUs} µs (jpeg, discarded)`,
       `Input: ${input.label}`,
       describeFileSource(input.fileSource),
     ].join('\n');
     return {
       status: 'success',
-      durationMs: probe.durationMs,
-      isExact: probe.isExact,
+      media: 'video',
+      bufferId: String(video.bufferId),
+      durationUs,
+      durationMs: durationUs / 1000,
       detail,
+      summary: `${video.info.frameCount} frames, frame@${ptsUs}µs`,
     };
-  } catch (e) {
-    return {
-      status: 'error',
-      message: formatFileioNativeError(input.fileSource, bundledPath, e),
-    };
+  } finally {
+    await releaseVideoBuffer(video).catch(() => {});
   }
 }
 
 export async function runFileioDecode(
   input: FileioInputSource
 ): Promise<FileioDecodeResult> {
-  const bundledPath = input.bundledPath;
   try {
-    const ref = await createOfflineAudioBufferFromFile(input.fileSource, {
-      forceMono: true,
-    });
-    const { info, bufferId } = ref;
-    await releasePipelineAudioBuffer(bufferId).catch(() => {});
-    const detail = [
-      `bufferId: ${String(bufferId)}`,
-      `sampleRate: ${info.sampleRate} Hz`,
-      `channels: ${info.channelCount}`,
-      `samples: ${info.numSamples}`,
-      `duration: ${info.durationMs.toFixed(1)} ms`,
-      `storage: ${info.storageKind ?? 'ram'}`,
-      `Input: ${input.label}`,
-      describeFileSource(input.fileSource),
-    ].join('\n');
-    return {
-      status: 'success',
-      bufferId: String(bufferId),
-      sampleRate: info.sampleRate,
-      channelCount: info.channelCount,
-      numSamples: info.numSamples,
-      durationMs: info.durationMs,
-      detail,
-    };
+    if (isVideoBundledPath(input.bundledPath)) {
+      return await runVideoDecode(input);
+    }
+    if (input.bundledPath) {
+      return await runAudioDecode(input);
+    }
+    try {
+      return await runVideoDecode(input);
+    } catch {
+      return await runAudioDecode(input);
+    }
   } catch (e) {
     return {
       status: 'error',
-      message: formatFileioNativeError(input.fileSource, bundledPath, e),
+      message: formatFileioNativeError(input.fileSource, input.bundledPath, e),
     };
   }
 }
@@ -489,7 +682,7 @@ export async function runFileioCopy(
       case 'app': {
         const dest = await fixedDestinationForKind(
           input.destinationKind,
-          input.outputFormat
+          exportFilename(input.outputFormat)
         );
         resolved = await saveAudioAsFile(
           prepared.input,
@@ -500,7 +693,10 @@ export async function runFileioCopy(
         break;
       }
       case 'contentTree': {
-        const dest = await pickContentTreeDestination(input.outputFormat);
+        const dest = await pickContentTreeDestination(
+          exportFilename(input.outputFormat),
+          mimeTypeForFormat(input.outputFormat)
+        );
         resolved = await saveAudioAsFile(
           prepared.input,
           dest,
@@ -563,5 +759,114 @@ export async function runFileioCopy(
     return { status: 'error', message };
   } finally {
     await prepared?.dispose();
+  }
+}
+
+export async function runFileioVideoEncode(
+  input: FileioVideoEncodeInput
+): Promise<FileioCopyResult> {
+  let video: Awaited<
+    ReturnType<typeof createOfflineVideoBufferFromFile>
+  > | null = null;
+  const filename = exportFilename(input.outputFormat, 'fileio-video');
+  const mime = mimeTypeForVideoFormat(input.outputFormat);
+  try {
+    video = await createOfflineVideoBufferFromFile(input.inputSource);
+
+    let dest: FileDestination;
+    switch (input.destinationKind) {
+      case 'fs':
+      case 'app':
+        dest = await fixedDestinationForKind(input.destinationKind, filename);
+        break;
+      case 'contentTree':
+        dest = await pickContentTreeDestination(filename, mime);
+        break;
+      case 'contentUri': {
+        if (Platform.OS === 'ios') {
+          dest = { kind: 'contentUri', uri: 'content://unsupported-on-ios' };
+          break;
+        }
+        dest = {
+          kind: 'app',
+          base: 'cache',
+          path: `SherpaOnnxFileIO/staging/${filename}`,
+        };
+        const staged = await exportVideo(video, dest, input.outputFormat);
+        if (staged.kind !== 'fs') {
+          throw new Error(
+            'Expected a filesystem path from app cache staging; got content URI.'
+          );
+        }
+        const sourceUri = encodeURI(
+          staged.path.startsWith('file://')
+            ? staged.path
+            : `file://${staged.path}`
+        );
+        try {
+          const responses = await saveDocuments({
+            sourceUris: [sourceUri],
+            mimeType: mime,
+            fileName: filename,
+          });
+          const first = responses[0];
+          if (first?.error) {
+            throw new Error(first.error);
+          }
+          const uri = first?.uri?.trim();
+          if (!uri) {
+            throw new Error('Save dialog did not return a target URI.');
+          }
+          const resolved: ResolvedFileRef = uri.startsWith('content://')
+            ? { kind: 'contentUri', uri }
+            : { kind: 'fs', path: decodeURI(uri.replace(/^file:\/\//, '')) };
+          return {
+            status: 'success',
+            resolved,
+            detail: [
+              `Output: ${formatResolvedLocation(resolved)}`,
+              `Format: ${input.outputFormat}`,
+              'Video encode: exportVideo (H.264)',
+              `File input: ${input.inputLabel}`,
+              describeFileSource(input.inputSource),
+            ].join('\n'),
+          };
+        } finally {
+          await unlink(staged.path).catch(() => {});
+        }
+      }
+      case 'securityScoped':
+        dest = await pickSecurityScopedDestination();
+        break;
+    }
+
+    const resolved = await exportVideo(video, dest, input.outputFormat);
+    return {
+      status: 'success',
+      resolved,
+      detail: [
+        `Output: ${formatResolvedLocation(resolved)}`,
+        `Format: ${input.outputFormat}`,
+        'Video encode: exportVideo (H.264)',
+        `File input: ${input.inputLabel}`,
+        describeFileSource(input.inputSource),
+      ].join('\n'),
+    };
+  } catch (e) {
+    if (isPickCanceled(e)) {
+      return { status: 'canceled' };
+    }
+    return {
+      status: 'error',
+      message: formatFileioNativeError(
+        input.inputSource,
+        input.inputSource.kind === 'app' ? input.inputSource.path : undefined,
+        e
+      ),
+    };
+  } finally {
+    if (video) {
+      await releaseVideoBuffer(video).catch(() => {});
+    }
   }
 }

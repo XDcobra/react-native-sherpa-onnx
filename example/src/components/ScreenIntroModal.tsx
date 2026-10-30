@@ -63,7 +63,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   FileIO: {
     title: 'File I/O sandbox',
-    body: 'Codec and FileDestination sandbox: probe/decode/encode bundled test_codec assets or a picked file, then export via saveAudioAsFile to fs, app, contentUri, and other destination kinds.',
+    body: 'Codec and FileDestination sandbox: probe/decode/encode bundled test_codec audio and 1 s 144p test_videos clips (or a picked file). Audio uses saveAudioAsFile; video uses probeVideoFile* / exportVideoFrame / exportVideo.',
   },
   AudioVisualization: {
     title: 'Audio visualization API',

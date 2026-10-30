@@ -27,7 +27,7 @@ In the app, use e.g. `resolveModelPath({ type: 'asset', path: 'models/my-whisper
 If the folder is empty, the example app’s sample-audio options will show “Path not found” until you add the WAV files (you can obtain test files from the same source as in `example/scripts/download-models.js` or record your own).
 
 - **`test_videos/` folder**  
-  Bundled clips for Video Preview (`preview_h264_aac.mp4`) and Video → OCR (`ocr_subtitles_h264_aac.mp4`). Copied to `App.app/test_videos/`.
+  Bundled clips for Video Preview (`preview_h264_aac.mp4`), Video → OCR (`ocr_subtitles_h264_aac.mp4`), and File I/O (`sample.mp4` / `.mov` / `.mkv` / `.webm`, 1 s 144p). Copied to `App.app/test_videos/`.
 
 ## Layout
 

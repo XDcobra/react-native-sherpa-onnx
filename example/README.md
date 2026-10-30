@@ -42,7 +42,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Test images (OCR)**      | `android/app/src/main/assets/test_images/`       | `ios/sherpa_models/test_images/`       |
 | **Test PDFs (text layer)** | `android/app/src/main/assets/test_pdfs/`         | `ios/sherpa_models/test_pdfs/`         |
 | **Test e-docs (Read aloud)** | `android/app/src/main/assets/test_edocs/`      | `ios/sherpa_models/test_edocs/`        |
-| **Test videos (Preview / Video OCR)**  | `android/app/src/main/assets/test_videos/`       | `ios/sherpa_models/test_videos/`       |
+| **Test videos (Preview / OCR / File I/O)** | `android/app/src/main/assets/test_videos/`   | `ios/sherpa_models/test_videos/`       |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 >
@@ -191,9 +191,11 @@ This screen runs online punctuation over live text buffers. It shows incremental
 | -------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
 |                                                    |                                                    |                                                    |
 
-This screen validates file and conversion workflows, including loading local assets/files and exporting generated or transformed audio outputs. It is the UI reference for [docs/fileio.md](../docs/fileio.md) and [docs/audio-conversion.md](../docs/audio-conversion.md).
+This screen validates file and conversion workflows: **Probe**, **Decode**, and **Encode** over `FileSource` / `FileDestination`. **Run all audio samples** and **Run all video samples** can both be on (audio matrix first, then video). It is the UI reference for [docs/fileio.md](../docs/fileio.md), [docs/audio-conversion.md](../docs/audio-conversion.md), and [docs/videobuffer-offline.md](../docs/videobuffer-offline.md) (`probeVideoFileDuration` / `probeVideoFileContainer` / `exportVideo`).
 
-**Codec sandbox (`test_codec/`):** bundled samples for probe/decode/encode round-trips. Add files listed in `example/android/app/src/main/assets/test_codec/README.md` (Android) and `example/ios/sherpa_models/test_codec/README.md` (iOS), then rebuild. Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }` (APK `assets/`, not sandbox `files/`).
+**Audio sandbox (`test_codec/`):** probe (`probeAudioFileDuration` + `probeAudioFileContainer`), decode (`createOfflineAudioBufferFromFile`), encode (`saveAudioAsFile`). Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }`.
+
+**Video sandbox (`test_videos/sample.*`):** 1 s, 256×144 H.264 (AAC in MP4/MOV, Opus in MKV/WebM). Probe (duration + container sniff), decode (open + one JPEG frame), encode (`exportVideo` to mp4/mov/mkv/webm). WebM sample is H.264 in a Matroska shell (same as SDK export).
 
 ## Audio visualization showcase
 
