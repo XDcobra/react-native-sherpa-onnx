@@ -95,8 +95,8 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 
 ### Pipeline & orchestration
 
-- ✅ Offline pipeline buffers: [Audio](./docs/audiobuffer-offline.md) · [Text](./docs/textbuffer-offline.md) · [Segment](./docs/segmentbuffer-offline.md) · [Image](./docs/imagebuffer-offline.md)
-- ✅ Live pipeline buffers: [Audio](./docs/audiobuffer-streaming.md) · [Text](./docs/textbuffer-streaming.md) · [Segment](./docs/segmentbuffer-streaming.md)
+- ✅ Offline pipeline buffers: [Audio](./docs/audiobuffer-offline.md) · [Text](./docs/textbuffer-offline.md) · [Segment](./docs/segmentbuffer-offline.md) · [Image](./docs/imagebuffer-offline.md) · [Video](./docs/videobuffer-offline.md)
+- ✅ Live pipeline buffers: [Audio](./docs/audiobuffer-streaming.md) · [Text](./docs/textbuffer-streaming.md) · [Segment](./docs/segmentbuffer-streaming.md) · [Video](./docs/videobuffer-streaming.md)
 - ✅ Native chaining & recipes: [Feature pipelines](./docs/feature-pipelines.md) · [Streaming pipeline lifecycle](./docs/streaming-pipelines-overview.md)
 - ✅ Long audio & OOM mitigation: [Segmentation engine](./docs/segmentation-engine.md)
 - ✅ Audio session and routing: [Pipeline Audio Session](./docs/audio-session.md)
@@ -104,7 +104,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 
 ### Playback, models & platform
 
-- ✅ Playback & visualization: [PCM Player](./docs/pcm-player.md) · [Audio visualization](./docs/audio-visualization.md)
+- ✅ Playback & visualization: [PCM Player](./docs/pcm-player.md) · [Audio visualization](./docs/audio-visualization.md) · [Video preview](./docs/videopreview.md)
 - ✅ Model setup & detection: [Model setup](./docs/model-setup.md) · [Model detection & init](./docs/model-detect.md) · [Model languages](./docs/model-languages.md)
 - ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD & ODR](./docs/model-delivery-pad-odr.md)
 - ✅ Acceleration & diagnostics: [Execution providers](./docs/execution-providers.md) · [Native diagnostics](./docs/native-diagnostics.md) · [Memory planning](./docs/memory-and-models.md)
@@ -112,7 +112,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 
 ### Input & output formats
 
-What you can decode in and write out. Details: [Audio save](./docs/audio-conversion.md) · [Image buffer](./docs/imagebuffer-offline.md) · [PDF](./docs/pdf-offline.md) · [E-documents](./docs/document-offline.md) · [File I/O](./docs/fileio.md).
+What you can decode in and write out. Details: [Audio save](./docs/audio-conversion.md) · [Image buffer](./docs/imagebuffer-offline.md) · [Video buffer](./docs/videobuffer-offline.md) · [PDF](./docs/pdf-offline.md) · [E-documents](./docs/document-offline.md) · [File I/O](./docs/fileio.md).
 
 | | Input | Output |
 | --- | --- | --- |
@@ -121,6 +121,7 @@ What you can decode in and write out. Details: [Audio save](./docs/audio-convers
 | **Images** | JPEG, PNG, BMP, GIF; WebP *(opt-in)*; HEIC/HEIF | JPEG, PNG; WebP *(opt-in)* |
 | **PDF** | PDF *(opt-in PDFium)* | Text layer · page images |
 | **E-documents** | EPUB, FB2, MOBI, CBZ, CBR | Markup text · page/section images |
+| **Video** | MP4 / MOV / MKV / WebM (H.264, HEVC) | JPEG / PNG stills · PCM audio extract |
 
 ## How to start
 
@@ -478,18 +479,52 @@ The SDK exposes a public API for native image-buffer previews (`react-native-she
 
 <table>
 <tr>
-<td align="center"><img src="./docs/images/example/vision_preview_1.png" alt="ImageBuffer preview" width="180" /></td>
-<td align="center"><img src="./docs/images/example/vision_preview_2.png" alt="Annotated boxes overlay" width="180" /></td>
-<td align="center"><img src="./docs/images/example/vision_preview_3.png" alt="Comics — mixed book markup and OCR" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/example/vision_preview_1.png" alt="ImageBuffer preview" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/example/vision_preview_2.png" alt="Annotated boxes overlay" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/example/vision_preview_3.png" alt="Comics — mixed book markup and OCR" width="180" /></td>
 </tr>
 <tr>
 <td align="center"><sub>ImageBuffer · FrameView</sub></td>
 <td align="center"><sub>Overlay · boxes</sub></td>
 <td align="center"><sub>Comics · mixed book + OCR</sub></td>
 </tr>
+<tr>
+<td></td>
+<td align="left"><pre><code>&lt;OfflineImageBufferFrameView
+  buffer={imageBuffer}
+  frameIndex={0}
+  resizeMode="contain"
+/&gt;</code></pre></td>
+<td></td>
+</tr>
 </table>
 
 Full guide: [Image buffer](./docs/imagebuffer-offline.md).
+
+## Video preview
+
+The SDK exposes a public API for native VideoBuffer playback (`react-native-sherpa-onnx/videopreview`) — play, pause, seek, frame step, and optional synced audio, without sending frames through JS. Create a player, then attach `<VideoPreviewView>`; the [example app](./example/README.md#video-preview) shows the player chrome.
+
+<table>
+<tr>
+<td align="center" width="33%"></td>
+<td align="center" width="33%"><img src="./docs/images/example/video_preview_1.png" alt="Video preview player" width="180" /></td>
+<td align="center" width="33%"></td>
+</tr>
+<tr>
+<td></td>
+<td align="center"><sub>VideoBuffer · PreviewView</sub></td>
+<td></td>
+</tr>
+<tr>
+<td></td>
+<td align="left"><pre><code>const player = await createVideoPreviewPlayer(videoBuffer);
+&lt;VideoPreviewView player={player} resizeMode="contain" /&gt;</code></pre></td>
+<td></td>
+</tr>
+</table>
+
+Full guide: [Video preview](./docs/videopreview.md). Open a clip with [offline VideoBuffer](./docs/videobuffer-offline.md) or [live VideoBuffer](./docs/videobuffer-streaming.md).
 
 ## Audio visualization
 
@@ -497,14 +532,22 @@ The SDK exposes a public API for native spectrum profiles (`react-native-sherpa-
 
 <table>
 <tr>
-<td align="center"><img src="./docs/images/example/vis_static_cut.png" alt="Static spectrum bars" width="180" /></td>
-<td align="center"><img src="./docs/images/example/vis_heatmap_cut.png" alt="Timeline heatmap" width="180" /></td>
-<td align="center"><img src="./docs/images/example/vis_3d_cut.png" alt="Pseudo-3D spectrum (example UI)" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/example/vis_static_cut.png" alt="Static spectrum bars" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/example/vis_heatmap_cut.png" alt="Timeline heatmap" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/example/vis_3d_cut.png" alt="Pseudo-3D spectrum (example UI)" width="180" /></td>
 </tr>
 <tr>
 <td align="center"><sub>Static · <code>levels</code></sub></td>
 <td align="center"><sub>Heatmap · <code>frames</code></sub></td>
 <td align="center"><sub>3D demo · app Skia UI</sub></td>
+</tr>
+<tr>
+<td></td>
+<td align="left"><pre><code>const profile = await computeAudioVisualizationProfile(
+  { kind: 'offline', buffer: audioBuffer },
+  { barCount: 96 }
+);</code></pre></td>
+<td></td>
 </tr>
 </table>
 
@@ -540,8 +583,8 @@ It includes:
 - Multiple model type support (Zipformer, Paraformer, NeMo CTC, Whisper, WeNet CTC, SenseVoice, FunASR Nano, Qwen3 ASR, Cohere Transcribe, Moonshine, and more)
 - Model selection and configuration
 - **Speech & media features**: STT (offline/streaming), TTS (offline/streaming), enhancement (offline/streaming), separation (offline/live overload), punctuation (offline/streaming), VAD, keyword spotting (KWS streaming), audio tagging (offline + live overload), alignment/timestamps, speaker identification (offline + live overload), spoken language identification (offline + live overload), and speaker diarization (offline)
-- **Vision & documents**: offline OCR, PDF, e-documents, ImageBuffer preview
-- **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs
+- **Vision & documents**: offline OCR, PDF, e-documents, ImageBuffer preview, Video Preview
+- **Pipeline showcase**: native buffer chaining and live/offline composition patterns used across SDK docs, including Video → OCR
 - **Model lifecycle workflows**: download manager, extraction/model setup, model detection, and provider checks
 - **Settings and diagnostics**: execution provider support and runtime environment checks
 - Test audio, images, PDFs, and e-documents for those pipelines
@@ -564,14 +607,69 @@ yarn android  # or yarn ios
 <td><img src="./docs/images/example/home_3.png" alt="Transcribe cantonese audio" width="240" /></td>
 </tr>
 <tr>
-<td><img src="./docs/images/example/stt_3.png" alt="Text to speech generation" width="240" /></td>
-<td><img src="./docs/images/example/tts_3.png" alt="Text to speech generation" width="240" /></td>
-<td><img src="./docs/images/example/segmentation_text_2.png" alt="Text to speech generation" width="240" /></td>
+<td><sub>Home 1</sub></td>
+<td><sub>Home 2</sub></td>
+<td><sub>Home 3</sub></td>
 </tr>
 <tr>
-<td><img src="./docs/images/example/ocr_offline_1.png" alt="Offline OCR" width="240" /></td>
-<td><img src="./docs/images/example/read_aloud_3.png" alt="Documents read aloud" width="240" /></td>
-<td><img src="./docs/images/example/ocr_offline_3.png" alt="ImageBuffer annotated preview" width="240" /></td>
+<td><img src="./docs/images/example/download_3.png" alt="Download manager" width="240" /></td>
+<td><img src="./docs/images/example/stt_3.png" alt="Speech-to-Text (offline)" width="240" /></td>
+<td><img src="./docs/images/example/tts_3.png" alt="Text-to-Speech (offline)" width="240" /></td>
+</tr>
+<tr>
+<td><sub>Download manager</sub></td>
+<td><sub>STT (offline)</sub></td>
+<td><sub>TTS (offline)</sub></td>
+</tr>
+<tr>
+<td><img src="./docs/images/example/alignment_3.png" alt="Alignment" width="240" /></td>
+<td><img src="./docs/images/example/enhancement_offline_3.png" alt="Speech enhancement (offline)" width="240" /></td>
+<td><img src="./docs/images/example/audio_tagging_offline_3.png" alt="Audio tagging (offline)" width="240" /></td>
+</tr>
+<tr>
+<td><sub>Alignment</sub></td>
+<td><sub>Enhancement (offline)</sub></td>
+<td><sub>Audio tagging (offline)</sub></td>
+</tr>
+<tr>
+<td><img src="./docs/images/example/punctuation_offline_3.png" alt="Punctuation (offline)" width="240" /></td>
+<td><img src="./docs/images/example/vis_3d.png" alt="Audio visualization" width="240" /></td>
+<td><img src="./docs/images/example/segmentation_audio_3.png" alt="Segmentation" width="240" /></td>
+</tr>
+<tr>
+<td><sub>Punctuation (offline)</sub></td>
+<td><sub>Audio visualization</sub></td>
+<td><sub>Segmentation</sub></td>
+</tr>
+<tr>
+<td><img src="./docs/images/example/settings_3.png" alt="Settings" width="240" /></td>
+<td><img src="./docs/images/example/separation_offline_3.png" alt="Source separation (offline)" width="240" /></td>
+<td><img src="./docs/images/example/speaker_identification_3.png" alt="Speaker identification" width="240" /></td>
+</tr>
+<tr>
+<td><sub>Settings</sub></td>
+<td><sub>Separation (offline)</sub></td>
+<td><sub>Speaker identification</sub></td>
+</tr>
+<tr>
+<td><img src="./docs/images/example/language_identification_offline_3.png" alt="Spoken language identification (offline)" width="240" /></td>
+<td><img src="./docs/images/example/diarization_offline_3.png" alt="Speaker diarization (offline)" width="240" /></td>
+<td><img src="./docs/images/example/ocr_offline_3.png" alt="OCR (offline)" width="240" /></td>
+</tr>
+<tr>
+<td><sub>Language identification (offline)</sub></td>
+<td><sub>Diarization (offline)</sub></td>
+<td><sub>OCR</sub></td>
+</tr>
+<tr>
+<td><img src="./docs/images/example/video_preview_1.png" alt="Video Preview" width="240" /></td>
+<td><img src="./docs/images/example/read_aloud_2.png" alt="Documents read aloud" width="240" /></td>
+<td></td>
+</tr>
+<tr>
+<td><sub>Video Preview</sub></td>
+<td><sub>Documents (read aloud)</sub></td>
+<td></td>
 </tr>
 </table>
 </div>
