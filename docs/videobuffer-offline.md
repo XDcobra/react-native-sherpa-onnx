@@ -27,10 +27,6 @@ For rolling ingest (`recording` → `finished`), see [Pipeline video buffers —
 
 **Why this is fast:** apps pass **ids**; frames and PCM stay native. Decode happens on demand, not as a full RGB dump through the JS bridge.
 
-| Containers | Video codecs (v1) | Rejects |
-| --- | --- | --- |
-| MP4, MOV, M4V, 3GP, MKV, WebM | H.264, HEVC | Other video codecs → `VIDEO_CODEC_UNSUPPORTED`. Audio-only → `VIDEO_NO_VIDEO_TRACK`. Unsupported container → `VIDEO_CONTAINER_UNSUPPORTED`. |
-
 ---
 
 ## Quick start
@@ -268,7 +264,7 @@ const video = await createOfflineVideoBufferFromFile({
 | `fs` / `app` (`cache`, `files`, …) / `pad` / iOS `appBundle` / iOS `securityScoped` | Direct path. |
 | Android `app` + `apkAsset` | APK zip entry has no fd. Copied to `<cache>/fileio_apkasset/…` on first open; later opens are a cache hit. |
 | Android `contentUri` with ParcelFileDescriptor | Opened via `/proc/self/fd/N` (seekable). |
-| Android `contentUri` stream (no PFD) | Copied to `<cache>/fileio_nofd/<sha256>` on first open; later opens of the same URI are a cache hit. |
+| Android `contentUri` stream (no PFD) | Copied to `<cache>/fileio_nofd/<sha256>` on first open; later opens of the same URI are a cache hit. Unpinned copies follow the [fileio_nofd policy](fileio.md#configurefileiooptions) (default 512 MiB / 24 h). |
 
 A string path is rejected (`VIDEO_INVALID_ARGUMENT`).
 
@@ -397,6 +393,25 @@ No audio track → `VIDEO_NO_AUDIO_TRACK`. `info.audio.decodable === false` → 
 Preview playback of the same track is a separate API (`react-native-sherpa-onnx/videopreview`); it does not play through this AudioBuffer.
 
 ---
+
+## Formats
+
+FFmpeg is **demux-only**. Pixels: **HW only** (Android MediaCodec / iOS VideoToolbox). Open without HW still indexes; frame APIs fail `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. No FFmpeg → `VIDEO_FFMPEG_DISABLED`. Sniff is by container, not extension.
+
+| Containers | Video codecs | Else |
+| --- | --- | --- |
+| MP4 / MOV / M4V / 3GP (`mov`) | **H.264**, **HEVC** | Other video codecs → `VIDEO_CODEC_UNSUPPORTED` |
+| MKV / WebM (`matroska`) | same | WebM+VP9 still rejected (video codec) |
+| | | no video stream → `VIDEO_NO_VIDEO_TRACK`; other containers → `VIDEO_CONTAINER_UNSUPPORTED` |
+
+| Audio in container | |
+| --- | --- |
+| AAC, MP3, Opus, Vorbis, FLAC, pcm_s16le, pcm_f32le | `decodable: true` — extract / preview |
+| AC-3 and anything else | extract → `VIDEO_AUDIO_CODEC_UNSUPPORTED`; preview continues muted (`unsupportedCodec`) |
+
+Extract → `OfflineAudioBuffer` float32. Image bridge / `exportVideoFrame`: RGB stills `jpeg` \| `png` \| `webp` (WebP = libwebp opt-in). Internal decode planes: NV12 / Gray8 / RGB24.
+
+Out of scope: AVI, MPEG-TS, FLV, AV1 / VP8 / VP9 decode, software H.264, mux/export of video files.
 
 ## JS Events
 

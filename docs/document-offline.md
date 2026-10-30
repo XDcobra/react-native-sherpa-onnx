@@ -9,22 +9,6 @@ Source adapter like [`pdf/`](pdf-offline.md): not a reader and not OCR. Recogniz
 
 libarchive is **default-on**. Disable at build time → `ERR_DOC_ARCHIVE_DISABLED` (no `isLibarchiveEnabled()`). Log tag `[SherpaOnnx:doc]`.
 
-## Formats
-
-Sniff is by file signature / container, not extension. `format` is on the result (no public detect API). Capability only — dispatch is [Typical pipeline](#typical-pipeline).
-
-| Format | `extractDocumentText` | `extractDocumentImages` |
-|--------|----------------------|-------------------------|
-| EPUB 2 / 3 | Spine XHTML, reading order; `linear="no"` skipped | Spine items **without** extractable text |
-| FB2 / FB2.ZIP / FBZ | XML document order (`format: 'fb2'` even inside a zip) | Sections without accompanying text (`<binary>`) |
-| CBZ | `ERR_DOC_NO_TEXT` | ZIP images, natural sort of archive paths |
-| CBR | `ERR_DOC_NO_TEXT` | Same as CBZ; RAR/RAR5 via libarchive |
-| MOBI / PRC / AZW / AZW3 (KF8), no DRM | PalmDOC / HUFF/CDIC HTML in reading order | Image-only parts (`recindex`), not cover art |
-
-Successful text + empty `imageOnlySections` → later images call is `ERR_DOC_NO_IMAGES`. Successful text + `imageOnlySections.length > 0` is a **mixed book**, not an error. Whole-document no markup (CBZ/CBR, scan EPUB) → `ERR_DOC_NO_TEXT`; images still work (undecodable files skipped).
-
-Out of scope: PDF ([`pdf/`](pdf-offline.md)), KFX / AZW4 / Topaz, DRM Kindle files (`ERR_DOC_DRM`), Office, TXT, loose HTML, DjVu, audio/dictionary MOBI. Font-only EPUB `encryption.xml` is **not** DRM.
-
 ## Typical pipeline
 
 The SDK does not sniff-then-dispatch. Start with `extractDocumentText` unless you already know it is a comic. Every branch ends on an `OfflineTextBuffer` (markup, OCR, or app-joined). **Typical goal is TTS** (`createTTS().synthesize`). Because buffers are the pipeline contract, any other feature that takes that TextBuffer works the same way — offline punctuation, alignment, and so on. See [feature-pipelines.md](feature-pipelines.md).
@@ -142,7 +126,14 @@ function extractDocumentText(
 ): Promise<ExtractDocumentTextResult>;
 ```
 
-`source` is a `FileSource` (see [fileio.md](fileio.md)). Android `apkAsset` copies into app cache on first open. A `contentUri` that is only a stream (no ParcelFileDescriptor) → `ERR_DOC_OPEN_FAILED`. Options: `signal`, `onProgress`.
+`source` is a `FileSource` (see [fileio.md](fileio.md)). Options: `signal`, `onProgress`.
+
+| Kind | How the file is opened |
+| --- | --- |
+| `fs` / `app` (`cache`, `files`, …) / `pad` / iOS `appBundle` / iOS `securityScoped` | Direct seekable path. |
+| Android `app` + `apkAsset` | APK zip entry has no fd. Copied to `<cache>/fileio_apkasset/…` on first open; later opens are a cache hit. |
+| Android `contentUri` with ParcelFileDescriptor | Opened via `/proc/self/fd/N` (seekable). |
+| Android `contentUri` stream (no PFD) | `ERR_DOC_OPEN_FAILED` (not `fileio_nofd`). |
 
 ```ts
 type ExtractDocumentTextResult = {
@@ -196,6 +187,22 @@ type ExtractDocumentImagesResult = {
 Text extract first is optional. After a successful text extract with empty `imageOnlySections`, images still return `ERR_DOC_NO_IMAGES`. Zero decodable frames after skips → `ERR_DOC_NO_IMAGES`.
 
 CBZ/CBR `pageNumber` is 1-based **after** sort; `href` is the archive path. EPUB/FB2 frames use `sectionIndex` + `href`. MOBI image frames use `href` like `recindex:1`.
+
+## Formats
+
+Sniff is by file signature / container, not extension. `format` is on the result (no public detect API). Capability only — dispatch is [Typical pipeline](#typical-pipeline).
+
+| Format | `extractDocumentText` | `extractDocumentImages` |
+|--------|----------------------|-------------------------|
+| EPUB 2 / 3 | Spine XHTML, reading order; `linear="no"` skipped | Spine items **without** extractable text |
+| FB2 / FB2.ZIP / FBZ | XML document order (`format: 'fb2'` even inside a zip) | Sections without accompanying text (`<binary>`) |
+| CBZ | `ERR_DOC_NO_TEXT` | ZIP images, natural sort of archive paths |
+| CBR | `ERR_DOC_NO_TEXT` | Same as CBZ; RAR/RAR5 via libarchive |
+| MOBI / PRC / AZW / AZW3 (KF8), no DRM | PalmDOC / HUFF/CDIC HTML in reading order | Image-only parts (`recindex`), not cover art |
+
+Successful text + empty `imageOnlySections` → later images call is `ERR_DOC_NO_IMAGES`. Successful text + `imageOnlySections.length > 0` is a **mixed book**, not an error. Whole-document no markup (CBZ/CBR, scan EPUB) → `ERR_DOC_NO_TEXT`; images still work (undecodable files skipped).
+
+Out of scope: PDF ([`pdf/`](pdf-offline.md)), KFX / AZW4 / Topaz, DRM Kindle files (`ERR_DOC_DRM`), Office, TXT, loose HTML, DjVu, audio/dictionary MOBI. Font-only EPUB `encryption.xml` is **not** DRM.
 
 ## Markup spans
 

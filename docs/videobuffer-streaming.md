@@ -299,7 +299,16 @@ const info = await ingestFileToLiveVideoBuffer(
 // }
 ```
 
-Remuxes a `FileSource` into a **recording** live buffer. Needs FFmpeg. Same resolver as [`createOfflineVideoBufferFromFile`](videobuffer-offline.md#createofflinevideobufferfromfilesource) (`apkAsset` cache, `contentUri` PFD or `fileio_nofd` copy). A string path is rejected (`VIDEO_INVALID_ARGUMENT`). Resolves with a fresh `LiveVideoBufferInfo` when ingest completes. Finished / unknown buffer → `VIDEO_BUFFER_INVALID_STATE` / `VIDEO_BUFFER_NOT_FOUND`.
+`source` is a `FileSource` (see [fileio.md](fileio.md)). Same resolver as [`createOfflineVideoBufferFromFile`](videobuffer-offline.md#createofflinevideobufferfromfilesource). Needs FFmpeg. Resolves with a fresh `LiveVideoBufferInfo` when ingest completes. Finished / unknown buffer → `VIDEO_BUFFER_INVALID_STATE` / `VIDEO_BUFFER_NOT_FOUND`.
+
+| Kind | How the file is opened |
+| --- | --- |
+| `fs` / `app` (`cache`, `files`, …) / `pad` / iOS `appBundle` / iOS `securityScoped` | Direct path. |
+| Android `app` + `apkAsset` | APK zip entry has no fd. Copied to `<cache>/fileio_apkasset/…` on first open; later opens are a cache hit. |
+| Android `contentUri` with ParcelFileDescriptor | Opened via `/proc/self/fd/N` (seekable). |
+| Android `contentUri` stream (no PFD) | Copied to `<cache>/fileio_nofd/<sha256>` on first open; later opens of the same URI are a cache hit. Unpinned copies follow the [fileio_nofd policy](fileio.md#configurefileiooptions) (default 512 MiB / 24 h). |
+
+A string path is rejected (`VIDEO_INVALID_ARGUMENT`).
 
 **`options`** (`IngestFileToLiveOptions`)
 
@@ -438,6 +447,12 @@ Taps the **recording** live buffer’s audio into a [live AudioBuffer](audiobuff
 No audio / unsupported codec → `VIDEO_NO_AUDIO_TRACK` / `VIDEO_AUDIO_CODEC_UNSUPPORTED`.
 
 ---
+
+## Formats
+
+File ingest uses the same container/codec table as [offline](videobuffer-offline.md#formats). Packets stay encoded; HW H.264 / HEVC is required later for preview / OCR. A native live producer (no file) still works with FFmpeg compiled out.
+
+Out of scope: public JS packet-append of VP8 / AV1; camera MIME is not a JS API.
 
 ## JS Events
 

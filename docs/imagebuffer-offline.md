@@ -17,18 +17,6 @@ Live / streaming ImageBuffer is not implemented yet (types may be reserved). Fil
 | **Offline image buffer** | Multi-frame buffer after create. Usually `state: 'immutable'` (all frames ready). PDF [`lazy-lru`](pdf-offline.md#raster-strategies) uses `state: 'lazy'`: call [`ensureOfflineImageBufferFrame`](#ensureofflineimagebufferframebuffer-frameindex) (or FrameView / OCR) before using a cold frame; at most `hotFrames` stay decoded. | Batch OCR `recognize`, multi-page prep / PDF slider. |
 | **Live image buffer** | Reserved (`liveImageBuffer` types only). | Future camera / streaming OCR. |
 
-**Supported formats**
-
-| Format | Notes |
-| --- | --- |
-| JPEG / PNG / BMP / GIF | Via `createOfflineImageBufferFromFiles` / `FromBase64`. EXIF orientation applied for JPEG. |
-| WebP | Same create APIs. **Opt-in libwebp** (default off) — see below. Without enable → `ERR_IMAGE_WEBP_DISABLED`. |
-| HEIC / HEIF | Same create APIs. **Android: API 28+**; older devices → `ERR_IMAGE_FORMAT_UNSUPPORTED`. iOS: ImageIO. |
-| PDF (page raster) | Not via image create APIs — use [`rasterizePdfPages`](pdf-offline.md). Frames may include `pageNumber` / `dpi`. |
-| E-document images | Not via image create APIs — use [`extractDocumentImages`](document-offline.md) (CBZ/CBR pages; EPUB/FB2/MOBI image-only sections). Frames may include `sectionIndex` / `href` / `pageNumber`. |
-
-Optional **`maxSide`** caps the longest edge after image decode (default **4096**; `<= 0` disables). PDF raster has its own `maxSide` / `dpi` — see [pdf-offline.md](pdf-offline.md).
-
 ## Opt-in libwebp (default OFF)
 
 Default SDK builds do **not** include libwebp.
@@ -163,7 +151,14 @@ const pages = await createOfflineImageBufferFromFiles(
 );
 ```
 
-`FileSource` kinds (`fs`, `app`, `contentUri`, `securityScoped`, `pad`) follow [fileio.md](fileio.md).
+`source` is a `FileSource` (see [fileio.md](fileio.md)).
+
+| Kind | How the file is opened |
+| --- | --- |
+| `fs` / `app` (`cache`, `files`, …) / `pad` / iOS `appBundle` / iOS `securityScoped` | Direct path; bytes are read into the buffer. |
+| Android `app` + `apkAsset` | APK zip entry has no fd. Copied to `<cache>/fileio_apkasset/…` on first open; later opens are a cache hit. |
+| Android `contentUri` with ParcelFileDescriptor | Read via `/proc/self/fd/N`. |
+| Android `contentUri` stream (no PFD) | Stream is read in memory (not `fileio_nofd`). |
 
 Options (`CreateOfflineImageBufferOptions`):
 
@@ -402,6 +397,29 @@ import { OfflineImageBufferAnnotatedView } from 'react-native-sherpa-onnx/imageb
 Use `mapTextSpatialSpansToFrame` when drawing your own overlay on `OfflineImageBufferFrameView` (labels, rotated quads, a canvas). Styling, level filters, and selection do not need a custom overlay.
 
 ---
+
+## Formats
+
+Sniff is by magic bytes, not extension. Each source becomes **one** packed **RGB8** frame (alpha dropped). Multi-frame buffers are **multiple sources**, not animated files.
+
+| Format | Decode | Notes |
+|--------|--------|-------|
+| JPEG | yes | EXIF orientation 1–8 |
+| PNG | yes | |
+| BMP | yes | |
+| GIF | yes, **first frame only** | |
+| WebP | **opt-in libwebp** | Default off → `ERR_IMAGE_WEBP_DISABLED`. First frame. Enable: [Opt-in libwebp](#opt-in-libwebp-default-off). |
+| HEIC / HEIF | platform | Brands `heic` / `heix` / `hevc` / `hevx` / `mif1` / `msf1`. **Android API 28+**; older → `ERR_IMAGE_FORMAT_UNSUPPORTED`. **iOS** ImageIO, index 0. |
+
+| Export (`exportOfflineImageBufferFrame`) | |
+|---|---|
+| `jpeg` / `jpg` | quality 1–100 (default **85**) |
+| `png` | quality ignored |
+| `webp` | same libwebp opt-in; quality 1–100 |
+
+PDF pages and e-document images are **not** decoded here — [`rasterizePdfPages`](pdf-offline.md) / [`extractDocumentImages`](document-offline.md).
+
+Out of scope: AVIF, TIFF, SVG, JPEG XL, animated GIF/WebP/HEIC as extra frames.
 
 ## JS Events
 

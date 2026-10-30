@@ -244,6 +244,20 @@ await probeAudioFileContainer({
 
 Related decode option (optional, default `true`): `allowDemuxerAutoProbe` on `AudioDecodeOptions` / `FileIngestOptions`. When `false`, `avformat_open_input` does not fall back to auto-probe after the extension-specific demuxer fails (stricter open behavior; may reject files that only open via content sniffing).
 
+## Formats
+
+Input: pipeline buffer **or** `FileSource` (same decode list as [audiobuffer-offline.md](audiobuffer-offline.md#formats)). Live must be finalized. Sniff is by container, not extension. No FFmpeg: non-WAV (and WAV resample) reject.
+
+| Output `AudioOutputFormat` | Codec | Container | Rate (`0` = default) | Bitrate |
+| --- | --- | --- | --- | --- |
+| `wav` | PCM **s16le** | WAV | 0 = source; explicit resample | ignored |
+| `flac` | FLAC | FLAC | 0 = source | ignored |
+| `mp3` | **libshine** | MP3 | 0 → **44100**; allowed 32000, 44100, 48000 | quality low/med/high = **64/128/192** kbps; `bitrate` kbps overrides |
+| `aac` / `m4a` | AAC | ADTS / MP4 | 0 = source | 64/128/192 |
+| `opus` / `ogg` / `webm` / `mkv` | **libopus** | ogg / webm / matroska | 0 → **48000**; allowed 8000, 12000, 16000, 24000, 48000 | 24/64/128 |
+
+Out of scope: ALAC (not in public `AudioOutputFormat`), video encode.
+
 ## Sample-rate semantics
 
 - `wav`: `0` uses the source sample rate; explicit values resample.

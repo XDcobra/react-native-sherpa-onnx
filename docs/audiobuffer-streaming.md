@@ -531,6 +531,12 @@ function appendOfflineToLiveAudioBuffer(
 await appendOfflineToLiveAudioBuffer(live, offline);
 ```
 
+## Formats
+
+`ingestFileToLiveAudioBuffer` uses the same decode table as [offline](audiobuffer-offline.md#formats). Live rings themselves are **float32, mono only** (`channelCount` must be 1). Default live rate **16000**. Mic capture writes PCM at that rate.
+
+Out of scope: stereo live rings; file formats beyond the offline decode list.
+
 ## Segmentation
 
 Live audio buffers can attach segmentation behavior at creation time through `CreateEmptyLiveAudioBufferOptions.segmentation`.
