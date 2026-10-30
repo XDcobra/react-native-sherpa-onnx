@@ -1,0 +1,15 @@
+<x_0.0488><y_0.0414>**Laboratory Safety Briefing**<x_0.5176><y_0.075><class_Section-header>
+
+<x_0.0498><y_0.0922>Fixture page 02<x_0.1807><y_0.1102><class_Text>
+
+<x_0.0479><y_0.1328>Wear gloves before opening solvent cabinets.<x_0.5039><y_0.1547><class_Text>
+
+<x_0.0469><y_0.1664>Record every spill in the yellow log book.<x_0.4561><y_0.1875><class_Text>
+
+<x_0.0479><y_0.1992>Evacuation maps are posted beside each stairwell.<x_0.5537><y_0.2219><class_Text>
+
+<x_0.0508><y_0.2547>Shift summary<x_0.3125><y_0.2859><class_Section-header>
+
+<x_0.0459><y_0.2891>\begin{tabular}{ccc}
+\thead{Shift} & \thead{Units} & \thead{Rejects}\\
+Mon AM & 3210 & 1

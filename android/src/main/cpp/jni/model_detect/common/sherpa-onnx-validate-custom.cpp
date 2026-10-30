@@ -3,6 +3,7 @@
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-validate-alignment.h"
+#include "sherpa-onnx-validate-ocr.h"
 #include "sherpa-onnx-validate-slid.h"
 #include "sherpa-onnx-validate-kws.h"
 #include "sherpa-onnx-validate-audio-tagging.h"
@@ -76,6 +77,10 @@ PunctuationModelKind ParsePunctuationModelTypeLocal(const std::string& modelType
 AlignmentModelKind ParseAlignmentModelTypeLocal(const std::string& modelType) {
     if (modelType == "wav2vec2") return AlignmentModelKind::kWav2Vec2;
     return AlignmentModelKind::kUnknown;
+}
+
+OcrModelKind ParseOcrModelTypeLocal(const std::string& modelType) {
+    return ParseOcrModelType(modelType);
 }
 
 LanguageIdModelKind ParseLanguageIdModelTypeLocal(const std::string& modelType) {
@@ -282,6 +287,21 @@ CustomModelValidationResult ValidateCustomModelPaths(
         return FromValidation(vr.ok, vr.missingRequired, vr.error);
     }
 
+    if (cat == "ocr") {
+        const OcrModelKind kind = ParseOcrModelTypeLocal(modelType);
+        if (kind == OcrModelKind::kUnknown) {
+            return FromValidation(
+                false,
+                {},
+                "Unsupported custom OCR model type: " + modelType
+            );
+        }
+        OcrModelPaths ocrPaths;
+        FillOcrModelPathsFromStringMap(paths, ocrPaths);
+        const auto vr = ValidateOcrPaths(kind, ocrPaths, contextLabel);
+        return FromValidation(vr.ok, vr.missingRequired, vr.error);
+    }
+
     if (cat == "languageid" || cat == "language_id" || cat == "slid") {
         const LanguageIdModelKind kind = ParseLanguageIdModelTypeLocal(modelType);
         if (kind == LanguageIdModelKind::kUnknown) {
@@ -391,6 +411,11 @@ CustomModelPathRequirements GetCustomModelPathRequirements(
         const AlignmentModelKind kind = ParseAlignmentModelTypeLocal(modelType);
         if (kind == AlignmentModelKind::kUnknown) return {};
         return FromSpecs(GetAlignmentPathRequirements(kind));
+    }
+    if (cat == "ocr") {
+        const OcrModelKind kind = ParseOcrModelTypeLocal(modelType);
+        if (kind == OcrModelKind::kUnknown) return {};
+        return FromSpecs(GetOcrPathRequirements(kind));
     }
     if (cat == "languageid" || cat == "language_id" || cat == "slid") {
         const LanguageIdModelKind kind = ParseLanguageIdModelTypeLocal(modelType);

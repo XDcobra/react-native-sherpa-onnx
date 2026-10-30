@@ -1,4 +1,5 @@
 #include "sortformer-streaming-model.h"
+#include "ort/ApplyOrtProvider.h"
 
 #include <algorithm>
 #include <array>
@@ -222,6 +223,7 @@ Status SortformerStreamingModel::Initialize(const StreamingDiarizerConfig& confi
     auto impl = std::make_unique<Impl>();
     impl->session_options.SetIntraOpNumThreads(std::max(1, config_.num_threads));
     impl->session_options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+    sherpa_onnx::ApplyOrtProvider(impl->session_options, config_.provider);
 
 #if defined(_WIN32)
     std::wstring wide(config_.model_path.begin(), config_.model_path.end());

@@ -1,0 +1,26 @@
+{
+  "family": "nemotron_parse",
+  "task": "page",
+  "profile": "plain_boxes_nopic",
+  "fixture_id": "page_03",
+  "pack_id": "nemotron-3.5-parse-int8",
+  "prompt_text": "</s><s><predict_bbox><no_classes><output_plain><predict_no_text_in_pic>",
+  "preprocess": {
+    "prompt": "</s><s><predict_bbox><no_classes><output_plain><predict_no_text_in_pic>",
+    "image": "test/fixtures/ocr/instructions/_images/page_03.png"
+  },
+  "token_identical": false,
+  "hf_token_count": 80,
+  "ort_token_count": 80,
+  "prefix_len": 0,
+  "grammar": {
+    "kind": "nemotron",
+    "ok": true,
+    "unknown": [],
+    "class_count": 0,
+    "box_count": 7,
+    "notes": []
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/nemotron_parse/page/plain_boxes_nopic/page_03",
+  "max_new_tokens": 128
+}

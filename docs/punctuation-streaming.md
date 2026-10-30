@@ -397,6 +397,17 @@ console.log(segs.map((s) => s.text).join(' '));
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/punctuation_streaming_1.png) | ![Example 2](./images/example/punctuation_streaming_2.png) | ![Example 3](./images/example/punctuation_streaming_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Punctuation (streaming)** (`example/src/screens/punctuation-streaming/PunctuationStreamingScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#punctuation-streaming).
+
+---
+
 ## See also
 
 - [Punctuation (offline)](punctuation-offline.md)

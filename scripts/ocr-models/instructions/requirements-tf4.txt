@@ -1,0 +1,11 @@
+# PaddleOCR-VL + Granite Docling HF snapshots (export-era transformers)
+transformers>=4.57.0,<5.0
+torch>=2.6
+torchvision
+onnxruntime>=1.20
+pillow
+huggingface-hub>=0.26
+numpy
+tokenizers
+sentencepiece
+einops

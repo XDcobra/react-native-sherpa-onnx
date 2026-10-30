@@ -68,8 +68,8 @@ export function normalizePublicLanguageRows(
 /**
  * Normalize native structured `languages` rows from detect. Native (C++)
  * already appends curated catalog rows when filename heuristics are empty
- * (TTS / STT / Alignment via `AppendCurated*LanguageRowsIfEmpty`). This layer
- * only normalizes those rows — no TypeScript fallback.
+ * (TTS / STT / Alignment / OCR via `AppendCurated*LanguageRowsIfEmpty`). This
+ * layer only normalizes those rows — no TypeScript fallback.
  */
 export function publicLanguageHintsFromNative(
   input: ResolvePublicLanguageHintsInput

@@ -1,0 +1,29 @@
+{
+  "family": "paddleocr_vl",
+  "task": "ocr",
+  "profile": null,
+  "fixture_id": "page_03",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>OCR:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1003520,
+    "upscaled": false,
+    "image_size": [
+      900,
+      1200
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/page_03.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 89,
+  "ort_token_count": 89,
+  "prefix_len": 89,
+  "grammar": {
+    "kind": "markdown_html",
+    "ok": true,
+    "unknown": [],
+    "notes": []
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/ocr/page_03",
+  "max_new_tokens": 128
+}

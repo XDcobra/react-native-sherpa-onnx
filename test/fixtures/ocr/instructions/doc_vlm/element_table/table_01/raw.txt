@@ -1,0 +1,1 @@
+<otsl><loc_0><loc_0><loc_500><loc_500><fcel>Item<fcel>Qty<fcel>Price<nl><fcel>Bolts<fcel>120<fcel>4.50<nl><fcel>Nuts<fcel>240<fcel>1.20<nl><fcel>Washers<fcel>400<fcel>0.40<nl></otsl><|end_of_text|>

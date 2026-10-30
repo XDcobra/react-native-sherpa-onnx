@@ -60,7 +60,9 @@ AlignmentResult AlignAccurateFromPcm(
     size_t sample_count,
     int32_t sample_rate,
     const std::string& granularity,  // sentence | word | character
-    const std::string& vocab_path = ""
+    const std::string& vocab_path = "",
+    const std::string& provider = "",
+    int32_t num_threads = 0
 );
 
 AlignmentResult AlignAccurateFromFile(
@@ -68,7 +70,9 @@ AlignmentResult AlignAccurateFromFile(
     const std::string& text,
     const std::string& audio_path,
     const std::string& granularity,  // sentence | word | character
-    const std::string& vocab_path = ""
+    const std::string& vocab_path = "",
+    const std::string& provider = "",
+    int32_t num_threads = 0
 );
 
 ForcedCtcResult AlignAccurateForcedCtcFromPcm(
@@ -79,7 +83,9 @@ ForcedCtcResult AlignAccurateForcedCtcFromPcm(
   int32_t sample_rate,
   const std::string& granularity,
   const std::string& language = "",
-  const std::string& vocab_path = ""
+  const std::string& vocab_path = "",
+  const std::string& provider = "",
+  int32_t num_threads = 0
 );
 
 }  // namespace alignment

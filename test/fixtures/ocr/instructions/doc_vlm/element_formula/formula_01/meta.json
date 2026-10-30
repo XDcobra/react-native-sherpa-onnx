@@ -1,0 +1,28 @@
+{
+  "family": "doc_vlm",
+  "task": "element_formula",
+  "profile": null,
+  "fixture_id": "formula_01",
+  "pack_id": "docvlm-granite-258m-fp32",
+  "prompt_text": "<|start_of_role|>user<|end_of_role|><image>Convert formula to LaTeX.<|end_of_text|>\n<|start_of_role|>assistant<|end_of_role|>",
+  "preprocess": {
+    "user_text": "Convert formula to LaTeX.",
+    "image": "test/fixtures/ocr/instructions/_images/formula_01.png"
+  },
+  "token_identical": false,
+  "hf_token_count": 32,
+  "ort_token_count": 35,
+  "prefix_len": 20,
+  "grammar": {
+    "kind": "doctags_formula",
+    "ok": true,
+    "unknown": [],
+    "tags": [
+      "formula"
+    ],
+    "loc_count": 4,
+    "notes": []
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/doc_vlm/element_formula/formula_01",
+  "max_new_tokens": 128
+}

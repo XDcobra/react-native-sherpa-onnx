@@ -4,6 +4,7 @@ jest.mock('react-native', () => {
     getOfflineTextBufferTokensSlice: jest.fn(),
     getOfflineTextBufferTimestampsSlice: jest.fn(),
     getOfflineTextBufferDurationsSlice: jest.fn(),
+    getOfflineTextBufferSpatialSpansSlice: jest.fn(),
   };
 
   return {
@@ -17,6 +18,7 @@ jest.mock('react-native', () => {
 
 import {
   getOfflineTextBufferDurationsSlice,
+  getOfflineTextBufferSpatialSpansSlice,
   getOfflineTextBufferTextSlice,
   getOfflineTextBufferTimestampsSlice,
   getOfflineTextBufferTokensSlice,
@@ -30,6 +32,7 @@ describe('offline textbuffer slice chunking', () => {
       getOfflineTextBufferTokensSlice: jest.Mock;
       getOfflineTextBufferTimestampsSlice: jest.Mock;
       getOfflineTextBufferDurationsSlice: jest.Mock;
+      getOfflineTextBufferSpatialSpansSlice: jest.Mock;
     };
   };
   const mockNative = reactNativeMock.__mockNative;
@@ -112,5 +115,82 @@ describe('offline textbuffer slice chunking', () => {
 
     const out = await getOfflineTextBufferDurationsSlice(bufferId, 0, cap + 1);
     expect(out).toEqual([...first, ...second]);
+  });
+
+  it('chunks spatial span object-array reads and maps fields', async () => {
+    const cap = TEXT_MAX_SLICE_COUNT;
+    const makeSpan = (i: number) => ({
+      utf16Start: i,
+      utf16End: i + 1,
+      level: 'line',
+      sourceImageBufferId: 'img_off_aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      frameIndex: 0,
+      quad: [0, 0, 1, 0, 1, 1, 0, 1],
+      origin: 'ocr',
+      confidence: 0.9,
+    });
+    const first = Array.from({ length: cap }, (_, i) => makeSpan(i));
+    const second = [makeSpan(cap)];
+    mockNative.getOfflineTextBufferSpatialSpansSlice
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(second);
+
+    const out = await getOfflineTextBufferSpatialSpansSlice(
+      bufferId,
+      0,
+      cap + 1
+    );
+    expect(out).toHaveLength(cap + 1);
+    expect(out[0]).toMatchObject({
+      utf16Start: 0,
+      utf16End: 1,
+      level: 'line',
+      origin: 'ocr',
+      confidence: 0.9,
+      quad: [0, 0, 1, 0, 1, 1, 0, 1],
+    });
+    expect(out[cap]?.utf16Start).toBe(cap);
+    expect(
+      mockNative.getOfflineTextBufferSpatialSpansSlice
+    ).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses one native call for spatial spans within cap', async () => {
+    mockNative.getOfflineTextBufferSpatialSpansSlice.mockResolvedValue([]);
+    const out = await getOfflineTextBufferSpatialSpansSlice(bufferId, 0, 10);
+    expect(out).toEqual([]);
+    expect(
+      mockNative.getOfflineTextBufferSpatialSpansSlice
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      mockNative.getOfflineTextBufferSpatialSpansSlice
+    ).toHaveBeenCalledWith(bufferId, 0, 10);
+  });
+
+  it('maps textLayer spans without image id and with page size', async () => {
+    mockNative.getOfflineTextBufferSpatialSpansSlice.mockResolvedValue([
+      {
+        utf16Start: 0,
+        utf16End: 4,
+        level: 'line',
+        sourceImageBufferId: '',
+        frameIndex: 0,
+        quad: [10, 20, 110, 20, 110, 40, 10, 40],
+        origin: 'textLayer',
+        pageNumber: 1,
+        pageWidth: 612,
+        pageHeight: 792,
+      },
+    ]);
+    const out = await getOfflineTextBufferSpatialSpansSlice(bufferId, 0, 1);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({
+      origin: 'textLayer',
+      pageNumber: 1,
+      pageWidth: 612,
+      pageHeight: 792,
+      quad: [10, 20, 110, 20, 110, 40, 10, 40],
+    });
+    expect(out[0]?.sourceImageBufferId).toBeUndefined();
   });
 });

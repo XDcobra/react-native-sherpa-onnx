@@ -118,6 +118,50 @@ std::string ParseAlignmentVocabPath(NSDictionary *options) {
   return std::string([trimmed UTF8String]);
 }
 
+std::string ParseAlignmentProvider(NSDictionary *options) {
+  NSString *value = [options[@"provider"] isKindOfClass:[NSString class]]
+      ? options[@"provider"]
+      : nil;
+  NSString *trimmed = value != nil
+      ? [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+      : @"";
+  if (trimmed == nil || trimmed.length == 0) {
+    return {};
+  }
+  return std::string([trimmed UTF8String]);
+}
+
+int32_t ParseAlignmentNumThreads(NSDictionary *options) {
+  if (options == nil) {
+    return 0;
+  }
+  id raw = options[@"numThreads"];
+  if (raw == nil) {
+    return 0;
+  }
+  if (![raw isKindOfClass:[NSNumber class]]) {
+    throw std::runtime_error("ALIGNMENT_OPTIONS_INVALID: numThreads must be an integer >= 1.");
+  }
+  const double value = [raw doubleValue];
+  const int32_t intValue = static_cast<int32_t>(value);
+  if (!std::isfinite(value) || value != static_cast<double>(intValue) || intValue < 1) {
+    throw std::runtime_error("ALIGNMENT_OPTIONS_INVALID: numThreads must be an integer >= 1.");
+  }
+  return intValue;
+}
+
+int32_t ParseOptionalNumThreads(NSNumber *numThreads) {
+  if (numThreads == nil) {
+    return 0;
+  }
+  const double value = [numThreads doubleValue];
+  const int32_t intValue = static_cast<int32_t>(value);
+  if (!std::isfinite(value) || value != static_cast<double>(intValue) || intValue < 1) {
+    throw std::runtime_error("ALIGNMENT_OPTIONS_INVALID: numThreads must be an integer >= 1.");
+  }
+  return intValue;
+}
+
 PcmSliceDescriptor ParsePcmSliceDescriptor(NSDictionary *pcm) {
   if (pcm == nil) {
     throw std::runtime_error("ALIGNMENT_ANCHOR_OUT_OF_RANGE: pcm slice descriptor is required.");

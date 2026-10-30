@@ -18,8 +18,12 @@ export type AppBaseDir =
   | 'tmp'
   | 'externalFiles'
   /**
-   * Android APK bundled assets (e.g. `android/app/src/main/assets/...`).
-   * This is intentionally distinct from sandboxed `files`.
+   * Android APK bundled assets (`android/app/src/main/assets/...`).
+   * Distinct from sandboxed `files`. The APK zip entry is **not** a seekable
+   * file: native copies it into app cache (`<cache>/fileio_apkasset/…`) on first
+   * open, then reuses that file. Choose `apkAsset` knowing that extra disk and
+   * a one-time copy happen; prefer `fs` / `app:cache` if you already materialized
+   * the file. iOS: unsupported (`FILEIO_UNSUPPORTED_ON_PLATFORM`).
    */
   | 'apkAsset'
   /**

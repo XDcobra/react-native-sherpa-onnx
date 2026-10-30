@@ -105,6 +105,21 @@ function validateAccurateOptions(options: Record<string, unknown>): void {
     );
   }
 
+  if (options.numThreads !== undefined) {
+    const n = options.numThreads;
+    if (
+      typeof n !== 'number' ||
+      !Number.isFinite(n) ||
+      !Number.isInteger(n) ||
+      n < 1
+    ) {
+      throw createAlignmentError(
+        'ALIGNMENT_OPTIONS_INVALID',
+        'numThreads must be an integer >= 1.'
+      );
+    }
+  }
+
   const segmentation = options.segmentation;
   if (segmentation == null) {
     return;

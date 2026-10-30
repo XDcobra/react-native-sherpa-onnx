@@ -148,6 +148,9 @@ describe('builtin github providers', () => {
     expect(
       githubXdcobraProvider.supportsCategory(ModelCategory.Diarization)
     ).toBe(true);
+    expect(githubXdcobraProvider.supportsCategory(ModelCategory.Ocr)).toBe(
+      true
+    );
     expect(githubXdcobraProvider.supportsCategory(ModelCategory.Tts)).toBe(
       false
     );

@@ -1,0 +1,61 @@
+# Host e-document extractor tests (C++ GTest): EPUB/FB2/CBZ/CBR/MOBI.
+
+name: Test – Document host (C++)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/document/**'
+      - 'test/cpp/document/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/document/**'
+      - 'third_party/pugixml'
+      - 'third_party/lexbor'
+      - 'third_party/lexbor_prebuilt/**'
+      - '.github/workflows/test-document-host.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/document/**'
+      - 'test/cpp/document/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/document/**'
+      - 'third_party/pugixml'
+      - 'third_party/lexbor'
+      - 'third_party/lexbor_prebuilt/**'
+      - '.github/workflows/test-document-host.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-document-host
+  cancel-in-progress: true
+
+jobs:
+  document-host:
+    name: Document host tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Init document submodules
+        run: git submodule update --init third_party/pugixml third_party/lexbor
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgtest-dev libarchive-dev pkg-config
+
+      - name: Configure and build document_host_test
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target document_host_test
+
+      - name: Run document host tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R document_host_test --output-on-failure

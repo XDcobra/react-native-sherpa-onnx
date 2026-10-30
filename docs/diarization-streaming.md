@@ -442,7 +442,7 @@ See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [segmentbuffer-strea
 - **Android**:
   - Worker thread runs in `DiarizationStreamingPipelineWorker.kt`.
   - Audio drained from `LiveEntry` cursor $\rightarrow$ JNI $\rightarrow$ `StreamingDiarizationWrapper` $\rightarrow$ `LiveSegmentEntry.appendSegment(...)`.
-  - Runs on ONNX Runtime mobile library with CPU or NNAPI/QNN providers.
+  - Runs on ONNX Runtime mobile library with CPU, NNAPI, XNNPACK, or CoreML providers.
 - **iOS**:
   - Worker thread runs in `DiarizationStreamingPipelineWorker.mm`.
   - Audio drained from `PaLiveEntry` cursor $\rightarrow$ C++ `StreamingDiarizationWrapper` $\rightarrow$ `seg_live_append_segment(...)`.
@@ -556,6 +556,17 @@ await pipeline.reset(); // clear Sortformer state; pipeline keeps running
 ```
 
 </details>
+
+## Example app
+
+
+| ![Example 1](./images/example/diarization_streaming_1.png) | ![Example 2](./images/example/diarization_streaming_2.png) | ![Example 3](./images/example/diarization_streaming_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Speaker diarization (streaming)** as a developer showcase for this API. See [example/README.md](../example/README.md#speaker-diarization-streaming).
+
+---
 
 ## See also
 

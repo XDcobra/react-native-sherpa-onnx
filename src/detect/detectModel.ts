@@ -82,6 +82,7 @@ const CATEGORY_BY_NATIVE: Record<string, ModelCategory> = {
   speakerEmbedding: ModelCategory.SpeakerEmbedding,
   diarization: ModelCategory.Diarization,
   alignment: ModelCategory.Alignment,
+  ocr: ModelCategory.Ocr,
   languageId: ModelCategory.LanguageId,
   kws: ModelCategory.Kws,
   audiotagging: ModelCategory.AudioTagging,
@@ -146,7 +147,9 @@ function normalizeQuantization(raw: string | undefined): Quantization {
     raw === 'int4' ||
     raw === 'uint8' ||
     raw === 'fp32' ||
-    raw === 'bf16'
+    raw === 'bf16' ||
+    raw === 'q8' ||
+    raw === 'q4f16'
   ) {
     return raw;
   }

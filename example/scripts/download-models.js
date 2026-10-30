@@ -6,9 +6,12 @@ const https = require('https');
 const http = require('http');
 const { execFileSync } = require('child_process');
 
-const API_BASE =
-  'https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags';
+const DEFAULT_REPO = 'k2-fsa/sherpa-onnx';
 const ARCHIVE_EXTENSIONS = ['.tar.bz2', '.onnx'];
+
+function releaseApiBase(repo) {
+  return `https://api.github.com/repos/${repo}/releases/tags`;
+}
 
 const args = parseArgs(process.argv.slice(2));
 const exampleRoot = path.resolve(__dirname, '..');
@@ -59,8 +62,25 @@ const manualHint =
       throw new Error('Model config is empty.');
     }
 
+    const wantedIds = new Set(
+      config.models.map((entry) => entry.id).filter(Boolean)
+    );
+    const managedIds = collectManagedModelIds(outputDir, cacheDir);
+
     for (const entry of config.models) {
       await ensureModel(entry);
+    }
+
+    pruneUnlistedModels(outputDir, wantedIds, {
+      label: outputDir,
+    });
+    const extraPruneDir = args.prune ? path.resolve(String(args.prune)) : null;
+    if (extraPruneDir && extraPruneDir !== outputDir) {
+      pruneUnlistedModels(extraPruneDir, wantedIds, {
+        label: extraPruneDir,
+        managedOnly: true,
+        managedIds,
+      });
     }
 
     console.log('[SherpaOnnx] Model download step completed.');
@@ -79,6 +99,10 @@ const manualHint =
 async function ensureModel(entry) {
   const modelId = entry.id;
   const tag = entry.tag;
+  const repo =
+    typeof entry.repo === 'string' && entry.repo.trim()
+      ? entry.repo.trim()
+      : DEFAULT_REPO;
 
   if (!modelId || !tag) {
     throw new Error('Model config entry is missing id or tag.');
@@ -97,12 +121,45 @@ async function ensureModel(entry) {
       console.log(`[SherpaOnnx] Using manual model: ${manualModelDir}`);
       replaceDir(cacheModelDir, manualModelDir);
     } else {
-      await downloadModelToCache(modelId, tag, cacheModelDir);
+      await downloadModelToCache(modelId, tag, cacheModelDir, repo);
     }
   }
 
   console.log(`[SherpaOnnx] Copying ${modelId} into output.`);
   replaceDir(targetModelDir, cacheModelDir);
+}
+
+function collectManagedModelIds(...dirs) {
+  const ids = new Set();
+  for (const dirPath of dirs) {
+    if (!dirPath || !fs.existsSync(dirPath)) continue;
+    for (const name of fs.readdirSync(dirPath)) {
+      if (!name || name.startsWith('.') || name === 'README.md') continue;
+      const full = path.join(dirPath, name);
+      if (fs.statSync(full).isDirectory()) {
+        ids.add(name);
+      }
+    }
+  }
+  return ids;
+}
+
+function pruneUnlistedModels(dirPath, wantedIds, options = {}) {
+  if (!dirPath || !fs.existsSync(dirPath)) return;
+  const managedOnly = Boolean(options.managedOnly);
+  const managedIds = options.managedIds || null;
+  const label = options.label || dirPath;
+  for (const name of fs.readdirSync(dirPath)) {
+    if (!name || name.startsWith('.') || name === 'README.md') continue;
+    if (wantedIds.has(name)) continue;
+    if (managedOnly && managedIds && !managedIds.has(name)) continue;
+    const full = path.join(dirPath, name);
+    if (!fs.statSync(full).isDirectory()) continue;
+    console.log(
+      `[SherpaOnnx] Pruning ${name} from ${label} (not in model-download-config.json)`
+    );
+    removePath(full);
+  }
 }
 
 function hasModelContent(dirPath) {
@@ -115,13 +172,15 @@ function hasModelContent(dirPath) {
   return entries.length > 0;
 }
 
-async function downloadModelToCache(modelId, tag, cacheModelDir) {
-  console.log(`[SherpaOnnx] Downloading ${modelId} (${tag})...`);
-  const release = await getRelease(tag);
+async function downloadModelToCache(modelId, tag, cacheModelDir, repo) {
+  console.log(`[SherpaOnnx] Downloading ${modelId} (${repo}@${tag})...`);
+  const release = await getRelease(tag, repo);
   const asset = findAsset(release, modelId);
 
   if (!asset) {
-    throw new Error(`Model asset not found for ${modelId} in release ${tag}.`);
+    throw new Error(
+      `Model asset not found for ${modelId} in ${repo} release ${tag}.`
+    );
   }
 
   const archivePath = path.join(cacheDir, `${modelId}${asset.ext}`);
@@ -176,14 +235,15 @@ function resolveExtractedRoot(extractDir, modelId) {
   return extractDir;
 }
 
-async function getRelease(tag) {
-  if (releaseCache.has(tag)) {
-    return releaseCache.get(tag);
+async function getRelease(tag, repo = DEFAULT_REPO) {
+  const cacheKey = `${repo}@${tag}`;
+  if (releaseCache.has(cacheKey)) {
+    return releaseCache.get(cacheKey);
   }
 
-  const url = `${API_BASE}/${encodeURIComponent(tag)}`;
+  const url = `${releaseApiBase(repo)}/${encodeURIComponent(tag)}`;
   const release = await fetchJson(url);
-  releaseCache.set(tag, release);
+  releaseCache.set(cacheKey, release);
   return release;
 }
 

@@ -474,6 +474,17 @@ await pipeline.completed;
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/enhancement_streaming_1.png) | ![Example 2](./images/example/enhancement_streaming_2.png) | ![Example 3](./images/example/enhancement_streaming_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Speech enhancement (streaming)** (`example/src/screens/enhancement-streaming/EnhancementStreamingScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#speech-enhancement-streaming).
+
+---
+
 ## See also
 
 - [Speech enhancement (offline)](enhancement-offline.md)

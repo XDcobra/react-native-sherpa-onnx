@@ -1,0 +1,1 @@
+<fcel>City<fcel>Temp<fcel>Wind<nl><fcel>Hamburg<fcel>12C<fcel>NW 8<nl><fcel>Oslo<fcel>4C<fcel>E 3<nl><fcel>Lisbon<fcel>19C<fcel>SW 11<nl></s>

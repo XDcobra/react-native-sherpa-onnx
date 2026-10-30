@@ -3,10 +3,8 @@
 # - Audio: same android/src/.../jni/audio/*.cpp as Android, linked against system libav (Linux).
 #   convert-file and f32le→format tests; MP3 cases skip if libshine is not in system FFmpeg (Ubuntu).
 # - model_detect: STT/TTS model detection helpers.
-# - ctc_alignment_host_test (Linux): downloads ONNX Runtime host build (version from
-#   third_party/onnxruntime_prebuilt/VERSIONS, ONNXRUNTIME_VERSION), then runs ORT smoke +
-#   CTC alignment pipeline smoke on fixtures. Catches ORT/integration regressions; does not
-#   assert alignment accuracy vs. reference timestamps.
+# - ctc_alignment_host_test (Linux): ORT smoke + tiny stub + vocab units (no real pack).
+#   Real EN golden (wav2vec2-base-960h-int8) lives in test-alignment-host.yml.
 
 name: Test – host audio convert (C++)
 
@@ -55,6 +53,11 @@ jobs:
           cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build .
 
-      - name: Run CTest (audio, model_detect, CTC alignment host)
+      - name: Run host tests
         working-directory: ${{ github.workspace }}
-        run: cd test/cpp/build && ctest --output-on-failure
+        # ppocr_host_test → test-ocr-host.yml; CtcAlignmentGolden → test-alignment-host.yml
+        run: |
+          ctest --test-dir test/cpp/build --output-on-failure -R \
+            '^(model_detect_test|diarization_core_test|speaker_embedding_core_test|audio_f32le_to_format_host_test)$'
+          ./test/cpp/build/ctc_alignment_host_test \
+            --gtest_filter='OrtSmoke*:WavFixture*:CtcAlignmentCore*:VocabProfile*'

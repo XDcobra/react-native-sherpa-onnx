@@ -159,6 +159,36 @@ describe('accurateOptionsToModelConfig', () => {
     });
   });
 
+  it('forwards provider on auto accurate options', () => {
+    expect(
+      accurateOptionsToModelConfig({
+        mode: 'accurate',
+        modelSource: fsPath('/m'),
+        provider: 'nnapi',
+        segmentation: { mode: 'off' },
+      })
+    ).toEqual({
+      initMode: 'auto',
+      modelSource: fsPath('/m'),
+      provider: 'nnapi',
+    });
+  });
+
+  it('forwards numThreads on auto accurate options', () => {
+    expect(
+      accurateOptionsToModelConfig({
+        mode: 'accurate',
+        modelSource: fsPath('/m'),
+        numThreads: 2,
+        segmentation: { mode: 'off' },
+      })
+    ).toEqual({
+      initMode: 'auto',
+      modelSource: fsPath('/m'),
+      numThreads: 2,
+    });
+  });
+
   it('maps custom accurate options', () => {
     const customConfig = { model: fsPath('/custom.onnx') };
     expect(

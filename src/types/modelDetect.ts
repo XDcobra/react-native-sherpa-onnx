@@ -1,7 +1,11 @@
 import type { PublicLanguageHint } from '../model-languages';
-import type { Quantization, QuantizationPreference } from '../download/types';
+import type {
+  Quantization,
+  QuantizationPreference,
+  SizeTier,
+} from '../download/types';
 
-export type { Quantization, QuantizationPreference };
+export type { Quantization, QuantizationPreference, SizeTier };
 
 export function normalizeQuantization(raw: unknown): Quantization | undefined {
   if (typeof raw !== 'string' || raw.trim().length === 0) return undefined;
@@ -13,7 +17,9 @@ export function normalizeQuantization(raw: unknown): Quantization | undefined {
     lower === 'int4' ||
     lower === 'uint8' ||
     lower === 'fp32' ||
-    lower === 'bf16'
+    lower === 'bf16' ||
+    lower === 'q8' ||
+    lower === 'q4f16'
   ) {
     return lower as Quantization;
   }
@@ -69,7 +75,7 @@ export interface ModelDetectResultBase {
   isStreaming: boolean;
   /** Normalized primary hints (`iso6391Hint`); from native heuristics + SDK fallback. */
   languages?: PublicLanguageHint[];
-  /** fp16, int8, int8-quantized, int4, uint8, fp32, bf16, unknown — from name heuristics or file detection. */
+  /** fp16, int8, int8-quantized, int4, uint8, fp32, bf16, q8, q4f16, unknown — from name heuristics or file detection. */
   quantization?: Quantization;
   /** Trace of how native detection chose the model kind. */
   detectionSources?: readonly DetectionSource[];
@@ -154,6 +160,51 @@ export interface AlignmentDetectModelResult extends ModelDetectResultBase {
   paths?: {
     model?: string;
     vocab?: string;
+  };
+}
+
+// ─── OCR extension ──────────────────────────────────────────────────────
+
+export interface OcrDetectModelResult extends ModelDetectResultBase {
+  /**
+   * Always `false` — OCR packs are offline multi-file layouts (no streaming
+   * session contract; no ORT online-guard).
+   */
+  // isStreaming from base
+  /** tiny / small / medium / large / unknown — from pack basename heuristics. */
+  sizeTier?: SizeTier;
+  paths?: {
+    det?: string;
+    rec?: string;
+    cls?: string;
+    /** Recognition dictionary (yml/txt); native key `rec_dict`. */
+    rec_dict?: string;
+    /** `ocr_manifest.json` — doctr and doc_vlm. */
+    manifest?: string;
+    /** `vision_encoder.onnx` — doc_vlm. */
+    vision_encoder?: string;
+    /** `vision_encoder.onnx_data` — doc_vlm. */
+    vision_encoder_data?: string;
+    /** `embed_tokens.onnx` — doc_vlm. */
+    embed_tokens?: string;
+    /** `embed_tokens.onnx_data` — doc_vlm. */
+    embed_tokens_data?: string;
+    /** `embedding.onnx` — paddleocr_vl. */
+    embedding?: string;
+    /** `embedding.onnx_data` — paddleocr_vl. */
+    embedding_data?: string;
+    /** `decoder_model_merged.onnx` — doc_vlm. `decoder.onnx` — paddleocr_vl. */
+    decoder?: string;
+    /** `decoder_model_merged.onnx_data` — doc_vlm. */
+    decoder_data?: string;
+    /** `tokenizer.json` — doc_vlm / nemotron_parse / paddleocr_vl. */
+    tokenizer?: string;
+    /** `patch_embed.onnx` — nemotron_parse. */
+    patch_embed?: string;
+    /** `patch_embed.onnx_data` — nemotron_parse. */
+    patch_embed_data?: string;
+    /** `pos_embed.npy` — nemotron_parse. */
+    pos_embed?: string;
   };
 }
 

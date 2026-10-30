@@ -66,9 +66,14 @@ CMakeFiles/
 cmake_install.cmake
 android/test_build/
 build-test/
+test/cpp/build*/
 
 # Local venv for one-off ONNX scripts (e.g. tiny model generation)
 .venv-ort-test/
+
+# Python bytecode from OCR / alignment export scripts
+__pycache__/
+*.py[cod]
 
 # Cocoapods
 #
@@ -115,6 +120,18 @@ dist/alignment-models/
 build/diarization-models/
 dist/diarization-models/
 
+# OCR release asset pipeline outputs
+build/ocr-models/
+dist/ocr-models/
+
+# Phase 0 HF-vs-ORT dumps (probe_instructions.py). Host tests use
+# prompt_ids.json / raw.txt / meta.json / prompt.txt / _images only.
+test/fixtures/ocr/instructions/**/hf_tokens.json
+test/fixtures/ocr/instructions/**/ort_tokens.json
+test/fixtures/ocr/instructions/**/ort_raw.txt
+test/fixtures/ocr/instructions/prompt-ids-verify.json
+test/fixtures/ocr/instructions/phase0-report.json
+
 # React Native Codegen
 ios/generated
 android/generated
@@ -130,12 +147,16 @@ example/android/app/src/main/assets/models/**
 !example/android/app/src/main/assets/models/**/README.md
 !example/android/app/src/main/assets/models/README.md
 example/android/sherpa_models/src/main/assets/models/**
-# Ignore sherpa_models contents except small example audio folders
+# Ignore sherpa_models contents except small example fixture folders
 example/ios/sherpa_models/*
 !example/ios/sherpa_models/test_codec/
 !example/ios/sherpa_models/test_wavs/
+!example/ios/sherpa_models/test_pdfs/
+!example/ios/sherpa_models/test_edocs/
 !example/ios/sherpa_models/test_codec/**
 !example/ios/sherpa_models/test_wavs/**
+!example/ios/sherpa_models/test_pdfs/**
+!example/ios/sherpa_models/test_edocs/**
 example/.model-cache/
 example/models/
 
@@ -146,6 +167,12 @@ android/src/main/jniLibs/*
 android/src/main/cpp/include/ffmpeg/
 # libarchive headers (from Maven AAR or release zip; Gradle extracts to here)
 android/src/main/cpp/include/libarchive/
+# lexbor headers (from Maven AAR or release zip; Gradle extracts to here)
+android/src/main/cpp/include/lexbor/
+# libwebp headers (from Maven AAR or release zip; Gradle extracts to here)
+android/src/main/cpp/include/webp/
+# pdfium headers (from Maven AAR or release zip; Gradle extracts to here)
+android/src/main/cpp/include/pdfium/
 # sherpa-onnx C-API headers (from Maven AAR or release; Gradle extracts to here)
 android/src/main/cpp/include/sherpa-onnx/
 android/src/main/cpp/include/onnxruntime/
@@ -248,6 +275,53 @@ third_party/libarchive_prebuilt/publish-maven/publish.env
 third_party/libarchive_prebuilt/android/
 third_party/libarchive_prebuilt/build-*/
 
+# lexbor prebuilt: build output (when building prebuilts locally)
+third_party/lexbor_prebuilt/*
+!third_party/lexbor_prebuilt/README.md
+!third_party/lexbor_prebuilt/build_lexbor_android.sh
+!third_party/lexbor_prebuilt/build_lexbor_ios.sh
+!third_party/lexbor_prebuilt/create_lexbor_aar.sh
+!third_party/lexbor_prebuilt/IOS_RELEASE_TAG
+!third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG
+!third_party/lexbor_prebuilt/publish-maven/
+third_party/lexbor_prebuilt/publish-maven/*
+!third_party/lexbor_prebuilt/publish-maven/publish.env.example
+!third_party/lexbor_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/lexbor_prebuilt/publish-maven/README.md
+third_party/lexbor_prebuilt/publish-maven/publish.env
+third_party/lexbor_prebuilt/android/
+third_party/lexbor_prebuilt/ios/
+third_party/lexbor_prebuilt/build-*/
+third_party/lexbor_prebuilt/build_ios/
+third_party/lexbor_prebuilt/lexbor.xcframework/
+
+# libwebp prebuilt: build output (when building prebuilts locally)
+third_party/libwebp_prebuilt/*
+!third_party/libwebp_prebuilt/README.md
+!third_party/libwebp_prebuilt/build_libwebp_android.sh
+!third_party/libwebp_prebuilt/build_libwebp_ios.sh
+!third_party/libwebp_prebuilt/create_libwebp_aar.sh
+!third_party/libwebp_prebuilt/IOS_RELEASE_TAG
+!third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG
+!third_party/libwebp_prebuilt/publish-maven/
+third_party/libwebp_prebuilt/publish-maven/*
+!third_party/libwebp_prebuilt/publish-maven/publish.env.example
+!third_party/libwebp_prebuilt/publish-maven/publish-to-github-pages.sh
+!third_party/libwebp_prebuilt/publish-maven/README.md
+third_party/libwebp_prebuilt/publish-maven/publish.env
+third_party/libwebp_prebuilt/android/
+third_party/libwebp_prebuilt/ios/
+third_party/libwebp_prebuilt/build-*/
+third_party/libwebp_prebuilt/build_ios/
+third_party/libwebp_prebuilt/libwebp.xcframework/
+
+# pdfium prebuilt: fetched binaries / assembled XCFramework (when building prebuilts locally)
+third_party/pdfium_prebuilt/android/
+third_party/pdfium_prebuilt/.fetch-tmp/
+third_party/pdfium_prebuilt/.ios-xc-build/
+third_party/pdfium_prebuilt/ios-build/
+third_party/pdfium_prebuilt/pdfium.xcframework/
+
 # opus prebuilt: build output (when building prebuilts locally)
 # ignore everything under opus_prebuilt by default
 third_party/opus_prebuilt/*
@@ -269,6 +343,9 @@ third_party/opus_prebuilt/build-*/
 ios/Frameworks/sherpa_onnx.xcframework/
 ios/Frameworks/FFmpeg.xcframework/
 ios/Frameworks/libarchive.xcframework/
+ios/Frameworks/lexbor.xcframework/
+ios/Frameworks/libwebp.xcframework/
+ios/Frameworks/pdfium.xcframework/
 ios/Frameworks/*.zip
 ios/Frameworks/*.xcarchive
 ios/Frameworks/.framework-version

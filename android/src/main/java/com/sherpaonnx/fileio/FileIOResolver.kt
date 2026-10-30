@@ -2,6 +2,7 @@ package com.sherpaonnx.fileio
 
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.util.Log
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
 import com.sherpaonnx.fileio.core.SherpaOnnxContentUriUtils
@@ -10,6 +11,8 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
+
+private const val LOG_TAG = "SherpaOnnxFileIO"
 
 /**
  * Central resolver for FileSource / FileDestination.
@@ -150,6 +153,36 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
         FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
         "Unknown source kind: $kind"
       )
+    }
+  }
+
+  /**
+   * document/ and pdf/: path or PFD after resolve. `apkAsset` is copied to
+   * cache by [resolveSource] then opened as a path. Streams still fail.
+   */
+  fun resolveSeekableSource(source: ReadableMap): SeekableOpenedSource {
+    val handle = resolveSource(source)
+    return when (handle) {
+      is ReadHandle.FilePath ->
+        SeekableOpenedSource(handle.file.absolutePath, -1, handle)
+      is ReadHandle.FileDescriptor -> {
+        val len = handle.length
+        if (len != null && len <= 0L) {
+          handle.close()
+          throw FileIOException(
+            FileIOErrorCodes.READ_ERROR,
+            "file descriptor has no seekable length",
+          )
+        }
+        SeekableOpenedSource("", handle.pfd.fd, handle)
+      }
+      is ReadHandle.Stream -> {
+        handle.close()
+        throw FileIOException(
+          FileIOErrorCodes.UNSUPPORTED_LOCATION_KIND,
+          "source is not seekable (requires a filesystem path or ParcelFileDescriptor)",
+        )
+      }
     }
   }
 
@@ -318,8 +351,10 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
       throw FileIOException(FileIOErrorCodes.PATH_TRAVERSAL_BLOCKED, "apkAsset path escapes cache root")
     }
     if (outFile.exists() && outFile.isFile) {
+      Log.i(LOG_TAG, "apkAsset cache hit path=${outFile.absolutePath}")
       return outFile
     }
+    Log.i(LOG_TAG, "apkAsset copy assets/$assetPath -> ${outFile.absolutePath}")
     outFile.parentFile?.mkdirs()
     try {
       context.assets.open(assetPath).use { input ->
@@ -366,4 +401,13 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
       null
     }
   }
+}
+
+/** Seekable path or borrowed PFD for document/ and pdf/. Caller must [close]. */
+internal class SeekableOpenedSource(
+  val path: String,
+  val fd: Int,
+  private val handle: FileIOResolver.ReadHandle,
+) : Closeable {
+  override fun close() = handle.close()
 }

@@ -1,0 +1,3 @@
+Hello World<|LOC_49|><|LOC_70|><|LOC_166|><|LOC_70|><|LOC_166|><|LOC_97|><|LOC_49|><|LOC_97|>
+Dock 12<|LOC_49|><|LOC_204|><|LOC_133|><|LOC_204|><|LOC_133|><|LOC_231|><|LOC_49|><|LOC_231|>
+Gate B<|LOC_374|><|LOC_503|><|LOC_444|><|LOC_503|><|LOC_444|><|LOC_530|><|LOC_374|><|LOC_530|></s>

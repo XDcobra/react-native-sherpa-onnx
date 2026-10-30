@@ -1,0 +1,129 @@
+#include "sherpa-onnx-validate-ocr.h"
+
+#include <cstddef>
+
+namespace sherpaonnx {
+namespace {
+
+static const OcrFieldRequirement kPpocrReqs[] = {
+    {"det", &OcrModelPaths::det, true},
+    {"rec", &OcrModelPaths::rec, true},
+    {"rec_dict", &OcrModelPaths::rec_dict, true},
+    {"cls", &OcrModelPaths::cls, false},
+};
+
+static const OcrFieldRequirement kDoctrReqs[] = {
+    {"det", &OcrModelPaths::det, true},
+    {"rec", &OcrModelPaths::rec, true},
+    {"manifest", &OcrModelPaths::manifest, true},
+    {"cls", &OcrModelPaths::cls, false},
+    {"rec_dict", &OcrModelPaths::rec_dict, false},
+};
+
+static const OcrFieldRequirement kDocVlmReqs[] = {
+    {"vision_encoder", &OcrModelPaths::vision_encoder, true},
+    {"vision_encoder_data", &OcrModelPaths::vision_encoder_data, true},
+    {"embed_tokens", &OcrModelPaths::embed_tokens, true},
+    {"embed_tokens_data", &OcrModelPaths::embed_tokens_data, true},
+    {"decoder", &OcrModelPaths::decoder, true},
+    {"decoder_data", &OcrModelPaths::decoder_data, true},
+    {"tokenizer", &OcrModelPaths::tokenizer, true},
+    {"manifest", &OcrModelPaths::manifest, true},
+};
+
+static const OcrFieldRequirement kPaddleocrVlReqs[] = {
+    {"vision_encoder", &OcrModelPaths::vision_encoder, true},
+    {"vision_encoder_data", &OcrModelPaths::vision_encoder_data, false},
+    {"embedding", &OcrModelPaths::embedding, true},
+    {"embedding_data", &OcrModelPaths::embedding_data, false},
+    {"decoder", &OcrModelPaths::decoder, true},
+    {"decoder_data", &OcrModelPaths::decoder_data, false},
+    {"tokenizer", &OcrModelPaths::tokenizer, true},
+    {"manifest", &OcrModelPaths::manifest, false},
+};
+
+static const OcrFieldRequirement kNemotronParseReqs[] = {
+    {"vision_encoder", &OcrModelPaths::vision_encoder, true},
+    {"vision_encoder_data", &OcrModelPaths::vision_encoder_data, true},
+    {"embed_tokens", &OcrModelPaths::embed_tokens, true},
+    {"embed_tokens_data", &OcrModelPaths::embed_tokens_data, true},
+    {"decoder", &OcrModelPaths::decoder, true},
+    {"decoder_data", &OcrModelPaths::decoder_data, true},
+    {"tokenizer", &OcrModelPaths::tokenizer, true},
+    {"manifest", &OcrModelPaths::manifest, true},
+    {"patch_embed", &OcrModelPaths::patch_embed, true},
+    {"patch_embed_data", &OcrModelPaths::patch_embed_data, false},
+    {"pos_embed", &OcrModelPaths::pos_embed, true},
+};
+
+static const OcrFieldRequirement* GetRequirements(OcrModelKind kind, size_t& count) {
+    switch (kind) {
+        case OcrModelKind::kPpocr:
+            count = std::size(kPpocrReqs);
+            return kPpocrReqs;
+        case OcrModelKind::kDoctr:
+            count = std::size(kDoctrReqs);
+            return kDoctrReqs;
+        case OcrModelKind::kDocVlm:
+            count = std::size(kDocVlmReqs);
+            return kDocVlmReqs;
+        case OcrModelKind::kNemotronParse:
+            count = std::size(kNemotronParseReqs);
+            return kNemotronParseReqs;
+        case OcrModelKind::kPaddleocrVl:
+            count = std::size(kPaddleocrVlReqs);
+            return kPaddleocrVlReqs;
+        default:
+            count = 0;
+            return nullptr;
+    }
+}
+
+static const char* OcrKindToName(OcrModelKind kind) {
+    return OcrModelKindToLiteral(kind);
+}
+
+}  // namespace
+
+OcrValidationResult ValidateOcrPaths(
+    OcrModelKind kind,
+    const OcrModelPaths& paths,
+    const std::string& modelDir
+) {
+    OcrValidationResult result;
+    size_t count = 0;
+    const auto* reqs = GetRequirements(kind, count);
+    if (!reqs) return result;
+
+    for (size_t i = 0; i < count; ++i) {
+        if (reqs[i].required && (paths.*(reqs[i].field)).empty()) {
+            result.missingRequired.push_back(reqs[i].fieldName);
+        }
+    }
+
+    if (!result.missingRequired.empty()) {
+        result.ok = false;
+        result.error = std::string("OCR ") + OcrKindToName(kind) +
+                       ": missing required files in " + modelDir + ": ";
+        for (size_t i = 0; i < result.missingRequired.size(); ++i) {
+            if (i > 0) result.error += ", ";
+            result.error += result.missingRequired[i];
+        }
+    }
+
+    return result;
+}
+
+std::vector<CustomPathFieldSpec> GetOcrPathRequirements(OcrModelKind kind) {
+    std::vector<CustomPathFieldSpec> specs;
+    size_t count = 0;
+    const auto* reqs = GetRequirements(kind, count);
+    if (!reqs) return specs;
+    specs.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        specs.push_back({reqs[i].fieldName, reqs[i].required});
+    }
+    return specs;
+}
+
+}  // namespace sherpaonnx

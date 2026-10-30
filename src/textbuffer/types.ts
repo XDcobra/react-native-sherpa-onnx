@@ -70,6 +70,52 @@ export interface LiveTextBufferSpoolInfo {
   path?: string;
 }
 
+// ========== Spatial Spans (OCR / text-layer provenance) ==========
+
+/** Granularity of a spatial span over the hypothesis text. */
+export type TextSpatialSpanLevel = 'line' | 'word' | 'block';
+
+/**
+ * Provenance of a spatial span.
+ * - `ocr`: produced by an OCR engine from image pixels
+ * - `textLayer`: native PDF text layer (no OCR)
+ * - `markup`: EPUB / HTML markup extraction
+ */
+export type TextSpatialSpanOrigin = 'ocr' | 'textLayer' | 'markup';
+
+/**
+ * Optional spatial metadata linking a UTF-16 range of offline text to
+ * pixel coordinates on a source image frame (OCR, PDF text layer, EPUB).
+ */
+export interface TextSpatialSpan {
+  utf16Start: number;
+  utf16End: number;
+  level: TextSpatialSpanLevel;
+  /**
+   * Source offline ImageBuffer id for `ocr` spans.
+   * Empty / omitted for `textLayer` (PDF) and `markup` when no image frame exists.
+   */
+  sourceImageBufferId?: string;
+  frameIndex: number;
+  /**
+   * Quad corners x0,y0,…x3,y3.
+   * OCR: decoded-frame pixels. textLayer: PDF user-space, top-left origin, y-down.
+   */
+  quad: [number, number, number, number, number, number, number, number];
+  confidence?: number;
+  origin: TextSpatialSpanOrigin;
+  /** 1-based PDF page when origin is textLayer. */
+  pageNumber?: number;
+  ptsMs?: number;
+  /** PDF user-space page size when origin is textLayer. */
+  pageWidth?: number;
+  pageHeight?: number;
+  /** 0-based reading-order section (EPUB spine / FB2 / comic). */
+  sectionIndex?: number;
+  /** EPUB path / FB2 id / archive path when known. */
+  href?: string;
+}
+
 // ========== Info Types ==========
 
 /** Metadata for an offline text buffer (after STT population or import). */
@@ -82,9 +128,13 @@ export interface OfflineTextBufferInfo {
   tokenCount: number;
   timestampCount: number;
   durationCount: number;
+  /** Number of spatial spans (OCR / text-layer). Zero when absent. */
+  spatialSpanCount: number;
   hasLang: boolean;
   hasEmotion: boolean;
   hasEvent: boolean;
+  /** True when `spatialSpanCount > 0`. */
+  hasSpatialSpans: boolean;
 }
 
 /** Metadata for a live text buffer (streaming STT, incremental). */

@@ -1,0 +1,4 @@
+<code><loc_0><loc_0><loc_500><loc_500><_Python_>def add(a, b):
+    return a + b
+
+print(add(2, 3))</code><|end_of_text|>

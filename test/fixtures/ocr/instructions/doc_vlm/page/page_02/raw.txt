@@ -1,0 +1,5 @@
+<doctag><section_header_level_1><loc_11><loc_14><loc_226><loc_29>Laboratory Safety Briefing</section_header_level_1>
+<text><loc_11><loc_39><loc_72><loc_46>Fixture page 02</text>
+<text><loc_11><loc_61><loc_236><loc_69>Wear gloves before opening solvent cabinets.</text>
+<text><loc_11><loc_79><loc_227><loc_87>Record every spill in the yellow log book.</text>
+<text><loc_11><loc_97><loc_245><loc_105>Evacuation

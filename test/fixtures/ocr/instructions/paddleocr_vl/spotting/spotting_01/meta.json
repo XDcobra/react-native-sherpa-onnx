@@ -1,0 +1,31 @@
+{
+  "family": "paddleocr_vl",
+  "task": "spotting",
+  "profile": null,
+  "fixture_id": "spotting_01",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Spotting:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1605632,
+    "upscaled": true,
+    "image_size": [
+      1600,
+      1200
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/spotting_01.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 35,
+  "ort_token_count": 35,
+  "prefix_len": 35,
+  "grammar": {
+    "kind": "spotting_loc",
+    "ok": true,
+    "unknown": [],
+    "loc_count": 24,
+    "quad_count": 3,
+    "notes": []
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/spotting/spotting_01",
+  "max_new_tokens": 128
+}

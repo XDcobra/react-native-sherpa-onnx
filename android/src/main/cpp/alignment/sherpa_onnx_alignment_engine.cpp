@@ -1046,7 +1046,9 @@ AlignmentResult AlignAccurateFromPcm(
     size_t sample_count,
     int32_t sample_rate,
     const std::string& granularity,
-    const std::string& vocab_path) {
+    const std::string& vocab_path,
+    const std::string& provider,
+    int32_t num_threads) {
   AssertGranularity("aligned", granularity);
 
   if (model_path.empty()) {
@@ -1069,7 +1071,9 @@ AlignmentResult AlignAccurateFromPcm(
       vocab_json,
       samples,
       sample_count,
-      sample_rate);
+      sample_rate,
+      provider,
+      num_threads);
 
   const std::vector<SubtitleItem> word_items = NormalizeIntervals(ctc.words);
   const std::vector<SubtitleItem> char_items = NormalizeIntervals(ctc.chars);
@@ -1093,7 +1097,9 @@ AlignmentResult AlignAccurateFromFile(
     const std::string& text,
     const std::string& audio_path,
     const std::string& granularity,
-    const std::string& vocab_path) {
+    const std::string& vocab_path,
+    const std::string& provider,
+    int32_t num_threads) {
   if (audio_path.empty()) {
     throw std::runtime_error("audioPath is required");
   }
@@ -1111,7 +1117,9 @@ AlignmentResult AlignAccurateFromFile(
       samples.size(),
       sample_rate,
       granularity,
-      vocab_path);
+      vocab_path,
+      provider,
+      num_threads);
 }
 
 ForcedCtcResult AlignAccurateForcedCtcFromPcm(
@@ -1122,7 +1130,9 @@ ForcedCtcResult AlignAccurateForcedCtcFromPcm(
     int32_t sample_rate,
     const std::string& granularity,
     const std::string& /*language*/,
-    const std::string& vocab_path) {
+    const std::string& vocab_path,
+    const std::string& provider,
+    int32_t num_threads) {
   if (window_text.empty()) {
     throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: windowText is required");
   }
@@ -1134,7 +1144,9 @@ ForcedCtcResult AlignAccurateForcedCtcFromPcm(
       sample_count,
       sample_rate,
       granularity,
-      vocab_path);
+      vocab_path,
+      provider,
+      num_threads);
 
   ForcedCtcResult out;
   out.diagnostics.frames_processed =

@@ -116,6 +116,24 @@ function isEnhancementHint(folder: string, hint: string): boolean {
 }
 
 const localStyles = StyleSheet.create({
+  sourceActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  sourceActionTitle: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  backButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: '#F2F2F7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   playRow: {
     flexDirection: 'row',
     gap: 10,
@@ -1524,7 +1542,33 @@ export default function EnhancementStreamingScreen() {
 
             {engineReady && audioSourceType === 'example' && (
               <>
-                <Text style={styles.subsectionTitle}>Select clip</Text>
+                <View style={localStyles.sourceActionRow}>
+                  <TouchableOpacity
+                    style={[
+                      localStyles.backButton,
+                      preparingInputBuffer && styles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      setAudioSourceType(null);
+                      setSelectedAudio(null);
+                      clearPreparedInputBuffer().catch(() => {});
+                      clearFinalizedOutput().catch(() => {});
+                      setLastInputPath(null);
+                    }}
+                    disabled={preparingInputBuffer}
+                    accessibilityLabel="Back"
+                  >
+                    <Ionicons name="chevron-back" size={22} color="#007AFF" />
+                  </TouchableOpacity>
+                  <Text
+                    style={[
+                      styles.subsectionTitle,
+                      localStyles.sourceActionTitle,
+                    ]}
+                  >
+                    Select clip
+                  </Text>
+                </View>
                 <View style={styles.audioFilesContainer}>
                   {AUDIO_FILES.map((audioFile) => (
                     <TouchableOpacity
@@ -1556,49 +1600,50 @@ export default function EnhancementStreamingScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
-
-                {!preparingInputBuffer && (
-                  <TouchableOpacity
-                    style={[styles.secondaryButton, styles.mt15]}
-                    onPress={() => {
-                      setAudioSourceType(null);
-                      setSelectedAudio(null);
-                      clearPreparedInputBuffer().catch(() => {});
-                      clearFinalizedOutput().catch(() => {});
-                      setLastInputPath(null);
-                    }}
-                    disabled={preparingInputBuffer}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {'<- Change audio source'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
               </>
             )}
 
             {engineReady && audioSourceType === 'own' && (
               <>
-                <Text style={styles.subsectionTitle}>Local WAV</Text>
                 {!preparingInputBuffer && (
-                  <TouchableOpacity
-                    style={[
-                      styles.button,
-                      (loading || preparingInputBuffer || enhancing) &&
-                        styles.buttonDisabled,
-                    ]}
-                    onPress={handlePickLocalFile}
-                    disabled={loading || preparingInputBuffer || enhancing}
-                  >
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="folder-open-outline"
-                        size={16}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.buttonText}>Choose file</Text>
-                    </View>
-                  </TouchableOpacity>
+                  <View style={localStyles.sourceActionRow}>
+                    <TouchableOpacity
+                      style={[
+                        localStyles.backButton,
+                        (loading || enhancing) && styles.buttonDisabled,
+                      ]}
+                      onPress={() => {
+                        setAudioSourceType(null);
+                        setCustomAudioPath(null);
+                        setCustomAudioName(null);
+                        clearPreparedInputBuffer().catch(() => {});
+                        clearFinalizedOutput().catch(() => {});
+                        setLastInputPath(null);
+                      }}
+                      disabled={loading || enhancing}
+                      accessibilityLabel="Back"
+                    >
+                      <Ionicons name="chevron-back" size={22} color="#007AFF" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.button,
+                        styles.flex1,
+                        (loading || enhancing) && styles.buttonDisabled,
+                      ]}
+                      onPress={handlePickLocalFile}
+                      disabled={loading || enhancing}
+                    >
+                      <View style={styles.rowCenter}>
+                        <Ionicons
+                          name="folder-open-outline"
+                          size={16}
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.buttonText}>Choose file</Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
                 )}
 
                 {customAudioName && (
@@ -1629,25 +1674,6 @@ export default function EnhancementStreamingScreen() {
                       </View>
                     </TouchableOpacity>
                   </View>
-                )}
-
-                {!preparingInputBuffer && (
-                  <TouchableOpacity
-                    style={[styles.secondaryButton, styles.mt15]}
-                    onPress={() => {
-                      setAudioSourceType(null);
-                      setCustomAudioPath(null);
-                      setCustomAudioName(null);
-                      clearPreparedInputBuffer().catch(() => {});
-                      clearFinalizedOutput().catch(() => {});
-                      setLastInputPath(null);
-                    }}
-                    disabled={preparingInputBuffer}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {'<- Change audio source'}
-                    </Text>
-                  </TouchableOpacity>
                 )}
               </>
             )}

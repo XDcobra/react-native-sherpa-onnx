@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>The North Wind and the Sun</book-title>
+      <author><first-name>VoiceLab</first-name><last-name>Fixtures</last-name></author>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <section id="ch1">
+      <title><p>The North Wind and the Sun</p></title>
+      <epigraph>
+        <p>Pride yields where warmth persists.</p>
+        <text-author>A fable</text-author>
+      </epigraph>
+      <p>The North Wind and the Sun disputed which was the stronger, while a traveler walked the road wrapped in a warm cloak.</p>
+      <cite><p>They agreed that the one who first made the traveler take off his cloak should be counted the stronger.</p></cite>
+      <p>Café naïve — the cloak stayed on until the Sun shone.</p>
+    </section>
+    <section id="ch2">
+      <title><p>After the contest</p></title>
+      <poem>
+        <v>The wind blew; the cloak stayed.</v>
+        <v>The sun shone; the cloak fell.</v>
+      </poem>
+      <p>Immediately the traveler took off his cloak.</p>
+    </section>
+    <section id="plate"><image l:href="#pic"/></section>
+  </body>
+  <binary id="pic" content-type="image/png">iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4z8AAAAADAAEY3Y20AAAAAElFTkSuQmCC</binary></FictionBook>

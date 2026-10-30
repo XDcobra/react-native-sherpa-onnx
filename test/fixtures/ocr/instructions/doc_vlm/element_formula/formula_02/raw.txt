@@ -1,0 +1,1 @@
+<formula><loc_0><loc_0><loc_500><loc_500>a ^ { \wedge } 2 + b ^ { \wedge } 2 = c ^ { \wedge } 2</formula><|end_of_text|>

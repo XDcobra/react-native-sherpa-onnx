@@ -1,0 +1,13 @@
+asset_name,license_type,commercial_use,confidence,detection_source,license_file
+doctr-default.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+doctr-mobile.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+docvlm-granite-258m-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+docvlm-granite-258m-fp32.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+docvlm-granite-258m-q4f16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+docvlm-granite-258m-q8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+nemotron-3.5-parse-fp16.tar.bz2,openmdw-1.1,conditional,high,manual,https://huggingface.co/nvidia/Nemotron-3.5-Parse/resolve/main/LICENSE
+nemotron-3.5-parse-int8.tar.bz2,openmdw-1.1,conditional,high,manual,https://huggingface.co/nvidia/Nemotron-3.5-Parse/resolve/main/LICENSE
+paddleocr-vl-1.6-fp16.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+ppocrv6-medium.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+ppocrv6-small.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md
+ppocrv6-tiny.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/datasets/choosealicense/licenses/resolve/main/markdown/apache-2.0.md

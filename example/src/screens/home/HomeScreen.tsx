@@ -19,6 +19,8 @@ const SECTION_ORDER = [
   'Download & Models',
   'Speech Recognition',
   'Speech Synthesis',
+  'Vision',
+  'Documents (EPUB, MOBI, PDF, …)',
   'Pipelines & Demos',
   'Alignment & Subtitles',
   'Speech Enhancement',
@@ -75,6 +77,26 @@ const FEATURES: HomeFeature[] = [
       'Use incremental TTS to start synthesis before the full prompt is built offline',
     icon: 'volume-medium',
     screen: 'TTSStreaming',
+    implemented: true,
+  },
+  {
+    id: 'ocr',
+    sectionTitle: 'Vision',
+    title: 'OCR',
+    description:
+      'Image or PDF → extract / recognize → text + spatial boxes (ocr + textLayer) on the page',
+    icon: 'scan-outline',
+    screen: 'OCR',
+    implemented: true,
+  },
+  {
+    id: 'documents',
+    sectionTitle: 'Documents (EPUB, MOBI, PDF, …)',
+    title: 'Read aloud',
+    description:
+      'Extract EPUB/FB2/MOBI/PDF text, or OCR mixed EPUB/CBZ pages, then speak with offline TTS',
+    icon: 'book-outline',
+    screen: 'Documents',
     implemented: true,
   },
   {
@@ -266,7 +288,7 @@ export default function HomeScreen({ navigation }: Props) {
   const renderFeatureCard = ({ item }: { item: HomeFeature }) => (
     <TouchableOpacity
       style={[styles.card, !item.implemented && styles.cardDisabled]}
-      onPress={() => navigation.navigate(item.screen)}
+      onPress={() => navigation.navigate(item.screen as never)}
       activeOpacity={0.7}
     >
       <View style={styles.cardContent}>

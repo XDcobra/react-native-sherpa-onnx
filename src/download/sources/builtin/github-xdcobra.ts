@@ -29,6 +29,9 @@ function getXdcobraCategoryTag(category: ModelCategory): string {
   if (category === ModelCategory.Diarization) {
     return 'diarization-models';
   }
+  if (category === ModelCategory.Ocr) {
+    return 'ocr-models';
+  }
   return getCategoryTag(category);
 }
 
@@ -38,7 +41,8 @@ export const githubXdcobraProvider: SourceProvider = {
   supportsCategory(category) {
     return (
       category === ModelCategory.Alignment ||
-      category === ModelCategory.Diarization
+      category === ModelCategory.Diarization ||
+      category === ModelCategory.Ocr
     );
   },
   async listModels(category, ctx) {

@@ -257,6 +257,43 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
   fun resolveSource(source: ReadableMap): FileIOResolver.ReadHandle = resolver.resolveSource(source)
 
   /**
+   * Seekable path or PFD for document/ and pdf/. `apkAsset` is copied to
+   * cache then opened as a path. Throws [FileIOException] for a stream or a
+   * PFD with no length.
+   */
+  fun openSeekableSource(source: ReadableMap): SeekableOpenedSource =
+    resolver.resolveSeekableSource(source)
+
+  /**
+   * Same as [openSeekableSource], mapping failures onto [openFailedCode]
+   * (ERR_DOC_OPEN_FAILED / ERR_PDF_OPEN_FAILED).
+   */
+  fun openSeekableSourceOrReject(
+    source: ReadableMap,
+    promise: Promise,
+    openFailedCode: String,
+    logTag: String,
+  ): SeekableOpenedSource? {
+    return try {
+      val opened = openSeekableSource(source)
+      if (opened.path.isNotEmpty()) {
+        Log.i(logTag, "open path=${opened.path}")
+      } else {
+        Log.i(logTag, "open fd=${opened.fd}")
+      }
+      opened
+    } catch (e: FileIOException) {
+      Log.w(logTag, "reject seekable source: ${e.message}")
+      promise.reject(openFailedCode, "$openFailedCode: ${e.message}", e)
+      null
+    } catch (e: Exception) {
+      Log.w(logTag, "resolveSource failed: ${e.message}")
+      promise.reject(openFailedCode, "Failed to resolve FileSource: ${e.message}", e)
+      null
+    }
+  }
+
+  /**
    * Removes stale scratch files under [ReactApplicationContext.getCacheDir] if the app was killed
    * mid-save (no [finally] ran to delete them). Targets:
    *

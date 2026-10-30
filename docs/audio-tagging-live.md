@@ -342,6 +342,17 @@ await tagger.destroy();
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/audio_tagging_live_1.png) | ![Example 2](./images/example/audio_tagging_live_2.png) | ![Example 3](./images/example/audio_tagging_live_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Audio tagging (live overload)** (`example/src/screens/audio-tagging/AudioTaggingScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#audio-tagging-live-overload).
+
+---
+
 ## See also
 
 - [Audio tagging (offline)](audio-tagging-offline.md)

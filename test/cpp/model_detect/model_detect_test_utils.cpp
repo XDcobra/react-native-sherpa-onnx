@@ -320,6 +320,14 @@ std::string PunctuationKindToString(PunctuationModelKind kind) {
     }
 }
 
+OcrModelKind OcrKindFromString(const std::string& modelType) {
+    return sherpaonnx::ParseOcrModelType(modelType);
+}
+
+std::string OcrKindToString(OcrModelKind kind) {
+    return sherpaonnx::OcrModelKindToLiteral(kind);
+}
+
 AudioTaggingModelKind AudioTaggingKindFromString(const std::string& modelType) {
     std::string t = ToLower(Trim(modelType));
     if (t == "ced") return AudioTaggingModelKind::kCed;

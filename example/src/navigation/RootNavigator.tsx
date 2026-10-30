@@ -26,6 +26,8 @@ import SeparationScreen from '../screens/separation/SeparationScreen';
 import SettingsScreen from '../screens/settings/SettingsScreen';
 import FileIOScreen from '../screens/fileio/FileIOScreen';
 import AudioVisualizationScreen from '../screens/audio-visualization/AudioVisualizationScreen';
+import OCRScreen from '../screens/ocr/OCRScreen';
+import DocumentsScreen from '../screens/documents/DocumentsScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
@@ -216,6 +218,20 @@ export default function RootNavigator() {
         component={AudioVisualizationScreen}
         options={{
           title: 'Audio Visualization',
+        }}
+      />
+      <Stack.Screen
+        name="OCR"
+        component={OCRScreen}
+        options={{
+          title: 'OCR',
+        }}
+      />
+      <Stack.Screen
+        name="Documents"
+        component={DocumentsScreen}
+        options={{
+          title: 'Read aloud',
         }}
       />
     </Stack.Navigator>

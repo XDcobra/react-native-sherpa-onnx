@@ -37,11 +37,13 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'a
 | Kind | Android | iOS |
 |------|---------|-----|
 | `fs` | Absolute path | Absolute path |
-| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset`; iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
-| `contentUri` | SAF document URI | Rejects |
+| `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset` (APK zip entry — native copies to `<cache>/fileio_apkasset/` on first open, then reuses that file); iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
+| `contentUri` | SAF document URI (PFD when the provider allows, otherwise a stream) | Rejects |
 | `contentTree` | SAF tree URI (creates document) | Rejects |
 | `securityScoped` | Rejects | Security-scoped bookmark URL |
 | `pad` | Installed PAD pack path (Android) | Rejects — use [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) on iOS |
+
+`apkAsset` is not a real file inside the APK. Choosing it means a cache copy (then cache hit) for every `FileSource` consumer. Prefer `fs` / `app:cache` if you already materialized the file.
 
 ## Quick start
 
@@ -219,12 +221,14 @@ Error codes thrown by file I/O operations:
 `FileSource` and `FileDestination` are also accepted by:
 
 - [`createOfflineAudioBufferFromFile(source)`](audiobuffer-offline.md) — decode audio from any source
+- [`createOfflineImageBufferFromFiles(sources)`](imagebuffer-offline.md) — decode one or more images from `FileSource` / `FileSource[]`
 - [`saveAudioAsFile(input, output, format, options?)`](audio-conversion.md) — save audio to any destination
 
 ## Related
 
 - [Audio conversion](audio-conversion.md) (`react-native-sherpa-onnx/audio`)
 - [Offline audio buffers](audiobuffer-offline.md) (`react-native-sherpa-onnx/audiobuffer`)
+- [Offline image buffers](imagebuffer-offline.md) (`react-native-sherpa-onnx/imagebuffer`)
 
 ## Use case examples
 
@@ -262,6 +266,17 @@ await promise;
 ```
 
 </details>
+
+## Example app
+
+
+| ![Example 1](./images/example/fileio_1.png) | ![Example 2](./images/example/fileio_2.png) | ![Example 3](./images/example/fileio_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **File I/O** (`example/src/components/ExampleAudioSaveScreen.tsx` / File I/O showcase) as a developer showcase for this API. See [example/README.md](../example/README.md#file-io-showcase).
+
+---
 
 ## Native crash diagnostics
 

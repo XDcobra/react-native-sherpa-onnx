@@ -135,6 +135,29 @@ void FillAlignmentModelPathsFromStringMap(
     SetPathFromMap(paths, "vocab", out.vocab);
 }
 
+void FillOcrModelPathsFromStringMap(
+    const std::map<std::string, std::string>& paths,
+    OcrModelPaths& out
+) {
+    SetPathFromMap(paths, "det", out.det);
+    SetPathFromMap(paths, "rec", out.rec);
+    SetPathFromMap(paths, "cls", out.cls);
+    SetPathFromMap(paths, "rec_dict", out.rec_dict);
+    SetPathFromMap(paths, "manifest", out.manifest);
+    SetPathFromMap(paths, "vision_encoder", out.vision_encoder);
+    SetPathFromMap(paths, "vision_encoder_data", out.vision_encoder_data);
+    SetPathFromMap(paths, "embed_tokens", out.embed_tokens);
+    SetPathFromMap(paths, "embed_tokens_data", out.embed_tokens_data);
+    SetPathFromMap(paths, "embedding", out.embedding);
+    SetPathFromMap(paths, "embedding_data", out.embedding_data);
+    SetPathFromMap(paths, "decoder", out.decoder);
+    SetPathFromMap(paths, "decoder_data", out.decoder_data);
+    SetPathFromMap(paths, "tokenizer", out.tokenizer);
+    SetPathFromMap(paths, "patch_embed", out.patch_embed);
+    SetPathFromMap(paths, "patch_embed_data", out.patch_embed_data);
+    SetPathFromMap(paths, "pos_embed", out.pos_embed);
+}
+
 void FillLanguageIdModelPathsFromStringMap(
     const std::map<std::string, std::string>& paths,
     LanguageIdModelPaths& out
@@ -296,6 +319,29 @@ std::map<std::string, std::string> AlignmentModelPathsToStringMap(
     std::map<std::string, std::string> out;
     PutPathIfNonEmpty(out, "model", paths.model);
     PutPathIfNonEmpty(out, "vocab", paths.vocab);
+    return out;
+}
+
+std::map<std::string, std::string> OcrModelPathsToStringMap(
+    const OcrModelPaths& paths) {
+    std::map<std::string, std::string> out;
+    PutPathIfNonEmpty(out, "det", paths.det);
+    PutPathIfNonEmpty(out, "rec", paths.rec);
+    PutPathIfNonEmpty(out, "cls", paths.cls);
+    PutPathIfNonEmpty(out, "rec_dict", paths.rec_dict);
+    PutPathIfNonEmpty(out, "manifest", paths.manifest);
+    PutPathIfNonEmpty(out, "vision_encoder", paths.vision_encoder);
+    PutPathIfNonEmpty(out, "vision_encoder_data", paths.vision_encoder_data);
+    PutPathIfNonEmpty(out, "embed_tokens", paths.embed_tokens);
+    PutPathIfNonEmpty(out, "embed_tokens_data", paths.embed_tokens_data);
+    PutPathIfNonEmpty(out, "embedding", paths.embedding);
+    PutPathIfNonEmpty(out, "embedding_data", paths.embedding_data);
+    PutPathIfNonEmpty(out, "decoder", paths.decoder);
+    PutPathIfNonEmpty(out, "decoder_data", paths.decoder_data);
+    PutPathIfNonEmpty(out, "tokenizer", paths.tokenizer);
+    PutPathIfNonEmpty(out, "patch_embed", paths.patch_embed);
+    PutPathIfNonEmpty(out, "patch_embed_data", paths.patch_embed_data);
+    PutPathIfNonEmpty(out, "pos_embed", paths.pos_embed);
     return out;
 }
 

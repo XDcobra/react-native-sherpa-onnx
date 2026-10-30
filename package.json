@@ -150,6 +150,26 @@
       "types": "./lib/typescript/src/segmentbuffer/index.d.ts",
       "default": "./lib/module/segmentbuffer/index.js"
     },
+    "./imagebuffer": {
+      "source": "./src/imagebuffer/index.ts",
+      "types": "./lib/typescript/src/imagebuffer/index.d.ts",
+      "default": "./lib/module/imagebuffer/index.js"
+    },
+    "./ocr": {
+      "source": "./src/ocr/index.ts",
+      "types": "./lib/typescript/src/ocr/index.d.ts",
+      "default": "./lib/module/ocr/index.js"
+    },
+    "./pdf": {
+      "source": "./src/pdf/index.ts",
+      "types": "./lib/typescript/src/pdf/index.d.ts",
+      "default": "./lib/module/pdf/index.js"
+    },
+    "./document": {
+      "source": "./src/document/index.ts",
+      "types": "./lib/typescript/src/document/index.d.ts",
+      "default": "./lib/module/document/index.js"
+    },
     "./segment": {
       "source": "./src/segment/index.ts",
       "types": "./lib/typescript/src/segment/index.d.ts",
@@ -176,6 +196,12 @@
     "third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG",
     "third_party/libarchive_prebuilt/IOS_RELEASE_TAG",
     "third_party/libarchive_prebuilt/ANDROID_RELEASE_TAG",
+    "third_party/lexbor_prebuilt/IOS_RELEASE_TAG",
+    "third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG",
+    "third_party/libwebp_prebuilt/IOS_RELEASE_TAG",
+    "third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG",
+    "third_party/pugixml/src",
+    "third_party/pugixml/src/**",
     "!ios/build",
     "!android/build",
     "!android/gradle",
@@ -324,7 +350,8 @@
       "<rootDir>/example/",
       "<rootDir>/android/",
       "<rootDir>/ios/",
-      "<rootDir>/lib/"
+      "<rootDir>/lib/",
+      "\\.test-d\\.ts$"
     ],
     "setupFilesAfterEnv": [
       "<rootDir>/jest.setup.js"

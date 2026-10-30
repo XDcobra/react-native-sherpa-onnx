@@ -172,3 +172,58 @@ describe('github-asset-rules — STT vs AudioTagging', () => {
     ).toBe(true);
   });
 });
+
+describe('github-asset-rules — OCR', () => {
+  it('accepts ppocr tar.bz2 packs', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Ocr,
+        'ppocrv6-tiny.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+    expect(
+      isAssetSupportedForCategory(ModelCategory.Ocr, 'det.onnx', 'onnx')
+    ).toBe(false);
+  });
+
+  it('accepts doctr tar.bz2 packs', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Ocr,
+        'doctr-mobile.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Ocr,
+        'doctr-default.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+  });
+
+  it('accepts doc_vlm tar.bz2 packs', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Ocr,
+        'docvlm-granite-258m-fp32.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+    expect(
+      isAssetSupportedForCategory(ModelCategory.Ocr, 'det.onnx', 'onnx')
+    ).toBe(false);
+  });
+
+  it('accepts paddleocr_vl tar.bz2 packs', () => {
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Ocr,
+        'paddleocr-vl-1.6-fp16.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
+  });
+});

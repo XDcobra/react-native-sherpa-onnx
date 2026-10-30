@@ -123,11 +123,18 @@ export async function resolveAlignmentOnnxPath(
 export function accurateOptionsToModelConfig(
   options: AlignTextToAudioOptionsAccurate
 ): AlignmentAccurateModelConfig {
+  const provider =
+    typeof options.provider === 'string' ? options.provider.trim() : '';
+  const providerField = provider.length > 0 ? { provider } : {};
+  const numThreadsField =
+    options.numThreads != null ? { numThreads: options.numThreads } : {};
   if (options.initMode === 'custom') {
     return {
       initMode: 'custom',
       modelType: options.modelType,
       customConfig: options.customConfig,
+      ...providerField,
+      ...numThreadsField,
     };
   }
   return {
@@ -136,5 +143,7 @@ export function accurateOptionsToModelConfig(
     ...(options.quantization != null
       ? { quantization: options.quantization }
       : {}),
+    ...providerField,
+    ...numThreadsField,
   };
 }

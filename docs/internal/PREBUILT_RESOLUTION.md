@@ -8,11 +8,16 @@ Every externally supplied Android artifact (native `.so`, C headers, `classes.ja
 |------:|-------|---------|
 | **1** | `THIRD_PARTY` | Prebuilt files committed under `third_party/<bundle>/android/` — no network required. Requires both JNI libs and headers to be complete; partial trees fall through to stage 3. |
 | **2** | `LOCAL_SDK` | Already present under the Android library module (`android/src/main/jniLibs/<abi>/`, `android/src/main/cpp/include/…`) with a matching version stamp under `android/build/prebuilt-downloads/*-version.txt`. |
-| **3** | `MAVEN_AAR` | Gradle configurations: `sherpaOnnxAar`, `ffmpegAar`, `libarchiveAar`, `onnxruntimeAar` (e.g. `com.xdcobra.sherpa:*`). |
+| **3** | `MAVEN_AAR` | Gradle configurations: `sherpaOnnxAar`, `ffmpegAar`, `libarchiveAar`, `lexborAar`, `libwebpAar` (opt-in), `pdfiumAar` (opt-in), `onnxruntimeAar` (e.g. `com.xdcobra.sherpa:*`). |
 | **4** | `GITHUB_RELEASE` | `curl` from `https://github.com/<repo>/releases/download/<tag>/<asset>.zip`. The tag is read from `third_party/*/ANDROID_RELEASE_TAG`. |
 | **5** | `ERROR` | `RuntimeException` / failed build when a required artifact is still missing after all applicable stages. |
 
 **Optional skips:** FFmpeg and libarchive are skipped entirely when `sherpaOnnxDisableFfmpeg` or `sherpaOnnxDisableLibarchive` is set in `gradle.properties`; see [disable-ffmpeg.md](./disable-ffmpeg.md) and [disable-libarchive.md](./disable-libarchive.md).
+
+**Opt-in (default off):**
+
+- **libwebp** resolves only when `sherpaOnnxEnableLibwebp=true`. Otherwise download/link is skipped and WebP decode/export rejects with `ERR_IMAGE_WEBP_DISABLED`. See [imagebuffer-offline.md](../imagebuffer-offline.md) and `third_party/libwebp_prebuilt/README.md`.
+- **PDFium** resolves only when `sherpaOnnxEnablePdfium=true`. Otherwise download/link is skipped and `extractPdfTextLayer` rejects with `ERR_PDF_PDFIUM_DISABLED`. See [pdf-offline.md](../pdf-offline.md) and `third_party/pdfium_prebuilt/README.md`.
 
 ## Artifact matrix
 
@@ -28,6 +33,12 @@ For each row, resolution tries **1 --> 2 --> 3 --> 4** in order; **5** applies i
 | **FFmpeg** | C headers | `libavcodec/avcodec.h` etc. | `third_party/ffmpeg_prebuilt/android/include/**` | `src/main/cpp/include/ffmpeg/` | AAR `include/**` | ZIP `include/**` |
 | **libarchive** | JNI | `libarchive.so`, `libzstd.so` | `third_party/libarchive_prebuilt/android/jni/<abi>/` | `src/main/jniLibs/<abi>/` | `libarchiveAar` | `libarchive-android.zip` |
 | **libarchive** | C headers | `archive.h` | `third_party/libarchive_prebuilt/android/include/**` | `src/main/cpp/include/libarchive/` | AAR `include/**` | ZIP `include/**` |
+| **lexbor** | JNI | `liblexbor.so` | `third_party/lexbor_prebuilt/android/jni/<abi>/` (or `<abi>/lib/`) | `src/main/jniLibs/<abi>/` | `lexborAar` | `lexbor-android.zip` |
+| **lexbor** | C headers | `lexbor/html/parser.h` | `third_party/lexbor_prebuilt/android/include/**` | `src/main/cpp/include/lexbor/` | AAR `include/**` | ZIP `include/**` |
+| **libwebp** | JNI | `libwebp.so`, `libsharpyuv.so` | `third_party/libwebp_prebuilt/android/jni/<abi>/` (or `<abi>/lib/`) | `src/main/jniLibs/<abi>/` | `libwebpAar` | `libwebp-android.zip` |
+| **libwebp** | C headers | `webp/decode.h` | `third_party/libwebp_prebuilt/android/include/**` | `src/main/cpp/include/webp/` | AAR `include/**` | ZIP `include/**` |
+| **pdfium** (opt-in) | JNI | `libpdfium.so` | `third_party/pdfium_prebuilt/android/jni/<abi>/` | `src/main/jniLibs/<abi>/` | `pdfiumAar` | `pdfium-android.zip` |
+| **pdfium** (opt-in) | C headers | `fpdfview.h` etc. | `third_party/pdfium_prebuilt/android/include/**` | `src/main/cpp/include/pdfium/` | AAR `include/**` | ZIP `include/**` |
 | **ONNX Runtime** | JNI + core `.so` | **`libonnxruntime4j_jni.so` and `libonnxruntime.so` from the same bundle** (AAR or full `third_party`). Single source for Java ORT and native Sherpa runtime dependency. | `third_party/onnxruntime_prebuilt/android/jni/<abi>/` (both files) | `src/main/jniLibs/<abi>/` | `onnxruntimeAar` → copy both per ABI | — |
 | **ONNX Runtime** | Java API | `classes.jar` → `onnxruntime-classes.jar` in build dir | — | — | `onnxruntimeAar` | — |
 | **ONNX Runtime** | C/C++ headers | `include/**` inside the published AAR (for native consumers) | — | — | `onnxruntimeAar` (optional extract) | — |
@@ -38,7 +49,7 @@ For each row, resolution tries **1 --> 2 --> 3 --> 4** in order; **5** applies i
 
 | Task | Responsibility |
 |------|---------------|
-| `downloadNativeLibsIfNeeded` | JNI `.so`, C headers, and version stamps for all four packages. Runs stages 1-->2-->3-->4 per package. |
+| `downloadNativeLibsIfNeeded` | JNI `.so`, C headers, and version stamps for all packages (sherpa-onnx, FFmpeg, libarchive, libwebp, pdfium when enabled, ORT as applicable). Runs stages 1-->2-->3-->4 per package. |
 | `checkJniLibs` | Hard-fails if any required `.so` is missing after `downloadNativeLibsIfNeeded`. Depends on it. |
 | `extractSherpaOnnxClasses` | Sherpa `classes.jar` into `build/sherpa-onnx-classes`. Resolution: THIRD_PARTY --> MAVEN_AAR --> GITHUB_EXTRACT. |
 | `extractOnnxruntimeClasses` | ORT `classes.jar` into `build/onnxruntime-classes`. Currently Maven only. |

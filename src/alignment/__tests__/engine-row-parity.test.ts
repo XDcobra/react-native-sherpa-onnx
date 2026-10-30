@@ -197,6 +197,52 @@ describe('AlignmentEngine rows 1/2/3/5 parity', () => {
     expect(progressCallOrder!).toBeLessThan(nativeCallOrder!);
   });
 
+  it('forwards accurate provider to native options', async () => {
+    const engine = createAlignment();
+
+    await engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
+      mode: 'accurate',
+      granularity: 'word',
+      modelSource: { kind: 'fs', path: '/models/alignment' },
+      provider: 'nnapi',
+    });
+
+    expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
+      'txt_off',
+      'off_audio',
+      'seg_out',
+      'accurate',
+      'word',
+      {
+        modelPath: '/resolved/alignment/model.onnx',
+        provider: 'nnapi',
+      }
+    );
+  });
+
+  it('forwards accurate numThreads to native options', async () => {
+    const engine = createAlignment();
+
+    await engine.alignTextToAudio('txt_off', 'off_audio', 'seg_out', {
+      mode: 'accurate',
+      granularity: 'word',
+      modelSource: { kind: 'fs', path: '/models/alignment' },
+      numThreads: 2,
+    });
+
+    expect(native.alignOfflineTextToAudio).toHaveBeenCalledWith(
+      'txt_off',
+      'off_audio',
+      'seg_out',
+      'accurate',
+      'word',
+      {
+        modelPath: '/resolved/alignment/model.onnx',
+        numThreads: 2,
+      }
+    );
+  });
+
   it('routes vad mode unchanged', async () => {
     const engine = createAlignment();
     const onProgress = jest.fn();

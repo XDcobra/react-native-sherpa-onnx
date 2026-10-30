@@ -293,6 +293,133 @@ export type PunctuationInitBridgeOptions = {
   debug?: boolean;
 };
 
+/** `initializeOcr(instanceId, options)`. */
+export type OcrInitBridgeOptions = {
+  initMode?: string;
+  /** Folder layout (auto). Optional for custom when `modelPaths` is set. */
+  modelDir?: string;
+  /** Resolved absolute path map for custom init. */
+  modelPaths?: Object;
+  modelType: string;
+  numThreads?: number;
+  provider?: string;
+  // ppocr
+  maxSideLen?: number;
+  useOrientationCls?: boolean;
+  // doctr
+  detBoxThresh?: number;
+  detBoxScoreThresh?: number;
+  detUnclipRatio?: number;
+  /** VLM generation cap (`doc_vlm` / `nemotron_parse` / `paddleocr_vl`). Omit → native 0 → 8192. */
+  maxNewTokens?: number;
+  /** paddleocr_vl smart_resize cap. Omit → native 0 → 1003520. */
+  maxPixels?: number;
+  quantization?: string;
+};
+
+export type OcrRecognizeNativeResult = {
+  family: string;
+  spanCount: number;
+  raw?: string;
+  stopReason?: string;
+  complete?: boolean;
+  instructionSpec?: string;
+  content?: {
+    format: string;
+    value: string;
+    language?: string;
+  };
+  elements?: Array<{
+    kind: string;
+    frameIndex: number;
+    quad?: number[];
+    utf16Start?: number;
+    utf16End?: number;
+    headingLevel?: number;
+    checked?: boolean;
+  }>;
+};
+
+/** `ocrRecognize(..., options)`. */
+export type OcrRecognizeBridgeOptions = {
+  frames?: number[];
+  granularity?: string;
+  operationId?: string;
+  /** Native coalesce interval. Default 200. `0` = unthrottled. */
+  progressMinIntervalMs?: number;
+  /** Wire spec from `encodeOcrRecognizeSpec`. Kotlin/ObjC forward unchanged. */
+  recognizeSpec?: string;
+};
+
+/** Native result from `detectOcrModel`. */
+export type OcrDetectNativeResult = {
+  success: boolean;
+  /** @deprecated Prefer `success`; kept for older native bridges. */
+  ok?: boolean;
+  error?: string;
+  errorMessage?: string;
+  errorCode?: string;
+  modelType?: string;
+  family?: string;
+  detectedModels?: Array<{ type: string; modelDir: string }>;
+  paths?: {
+    det?: string;
+    rec?: string;
+    cls?: string;
+    rec_dict?: string;
+    /** `ocr_manifest.json` — doctr and doc_vlm. */
+    manifest?: string;
+    vision_encoder?: string;
+    vision_encoder_data?: string;
+    embed_tokens?: string;
+    embed_tokens_data?: string;
+    embedding?: string;
+    embedding_data?: string;
+    decoder?: string;
+    decoder_data?: string;
+    tokenizer?: string;
+    patch_embed?: string;
+    patch_embed_data?: string;
+    pos_embed?: string;
+  };
+  /** Legacy path map (string values). */
+  files?: {
+    det?: string;
+    rec?: string;
+    cls?: string;
+    recInferenceYml?: string;
+    /** `ocr_manifest.json` — doctr and doc_vlm. */
+    manifest?: string;
+    vision_encoder?: string;
+    vision_encoder_data?: string;
+    embed_tokens?: string;
+    embed_tokens_data?: string;
+    embedding?: string;
+    embedding_data?: string;
+    decoder?: string;
+    decoder_data?: string;
+    tokenizer?: string;
+    patch_embed?: string;
+    patch_embed_data?: string;
+    pos_embed?: string;
+  };
+  detectionSources?: string[];
+  /** Curated / heuristic language rows from native detect. */
+  languages?: NativePublicLanguageRow[];
+  quantization?: string;
+  sizeTier?: string;
+  hasDet?: boolean;
+  hasRec?: boolean;
+  hasCls?: boolean;
+  hasRecYml?: boolean;
+  detPath?: string;
+  recPath?: string;
+  clsPath?: string;
+  recDictPath?: string;
+  /** `ocr_manifest.json` path — doctr family (top-level legacy). */
+  manifestPath?: string;
+};
+
 /** Structured language row from native detect bridge. */
 export type NativePublicLanguageRow = {
   iso6391Hint: string;
@@ -769,9 +896,11 @@ export interface Spec extends TurboModule {
     tokenCount: number;
     timestampCount: number;
     durationCount: number;
+    spatialSpanCount: number;
     hasLang: boolean;
     hasEmotion: boolean;
     hasEvent: boolean;
+    hasSpatialSpans: boolean;
   }>;
 
   /**
@@ -790,9 +919,11 @@ export interface Spec extends TurboModule {
     tokenCount: number;
     timestampCount: number;
     durationCount: number;
+    spatialSpanCount: number;
     hasLang: boolean;
     hasEmotion: boolean;
     hasEvent: boolean;
+    hasSpatialSpans: boolean;
   }>;
 
   /**
@@ -812,9 +943,11 @@ export interface Spec extends TurboModule {
     tokenCount: number;
     timestampCount: number;
     durationCount: number;
+    spatialSpanCount: number;
     hasLang: boolean;
     hasEmotion: boolean;
     hasEvent: boolean;
+    hasSpatialSpans: boolean;
   }>;
 
   /**
@@ -886,9 +1019,11 @@ export interface Spec extends TurboModule {
     tokenCount?: number;
     timestampCount?: number;
     durationCount?: number;
+    spatialSpanCount?: number;
     hasLang?: boolean;
     hasEmotion?: boolean;
     hasEvent?: boolean;
+    hasSpatialSpans?: boolean;
     totalCharsWritten?: number;
     revision?: number;
     segmentCount?: number;
@@ -903,6 +1038,228 @@ export interface Spec extends TurboModule {
    * Release any pipeline text buffer (offline or live).
    */
   releasePipelineTextBuffer(bufferId: string): Promise<void>;
+
+  // ==================== Offline ImageBuffer ====================
+
+  /** Create an empty offline image buffer (`img_off_*`). */
+  createEmptyOfflineImageBuffer(): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+  }>;
+
+  /**
+   * Decode one or more images from serialized {@link FileSource} maps into an offline ImageBuffer.
+   * Native options: `{ maxSide?: number, operationId?: string }`.
+   * Progress events: `SherpaOnnxImageProgress` with `{ operationId, done, total, phase }`.
+   * Public JS API wraps this with `onProgress` / `AbortSignal`.
+   */
+  createOfflineImageBufferFromFiles(
+    sources: Object[],
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+  }>;
+
+  /**
+   * Decode image blobs (base64 strings) into an offline ImageBuffer.
+   * Native options: `{ maxSide?: number, operationId?: string }`.
+   */
+  createOfflineImageBufferFromBase64(
+    base64List: string[],
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+  }>;
+
+  getOfflineImageBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+  }>;
+
+  getOfflineImageBufferFrameInfo(
+    bufferId: string,
+    frameIndex: number
+  ): Promise<{
+    index: number;
+    width: number;
+    height: number;
+    byteSize: number;
+    storageKind: string;
+    pageNumber?: number;
+    dpi?: number;
+    sectionIndex?: number;
+    href?: string;
+  }>;
+
+  /**
+   * Ensure a frame's RGB is resident (no-op info for non-lazy buffers).
+   * For lazy-lru PDF buffers: rasterize cold slot, update LRU, may prefetch ±1.
+   */
+  ensureOfflineImageBufferFrame(
+    bufferId: string,
+    frameIndex: number
+  ): Promise<{
+    index: number;
+    width: number;
+    height: number;
+    byteSize: number;
+    storageKind: string;
+    pageNumber?: number;
+    dpi?: number;
+    sectionIndex?: number;
+    href?: string;
+  }>;
+
+  releaseOfflineImageBuffer(bufferId: string): Promise<void>;
+
+  /** Cancel an in-flight create by native operationId (used internally via AbortSignal). */
+  cancelOfflineImageBufferCreate(operationId: string): Promise<void>;
+
+  /**
+   * Encode one OfflineImageBuffer frame to a FileDestination.
+   * `destination` is a serialized FileDestination map (same as saveAudioBufferToFile).
+   * `options`: `{ format?: string, quality?: number, maxSide?: number }`.
+   * Returns `{ outputKind, outputPath }` for ResolvedFileRef parsing.
+   */
+  exportOfflineImageBufferFrame(
+    bufferId: string,
+    frameIndex: number,
+    destination: Object,
+    options?: Object
+  ): Promise<{ outputKind: string; outputPath: string }>;
+
+  // ==================== Offline OCR ====================
+
+  /** Family-aware OCR pack detect (ppocr Det+Rec+dict). */
+  detectOcrModel(
+    modelDir: string,
+    modelType?: string | null,
+    quantization?: string | null
+  ): Promise<OcrDetectNativeResult>;
+
+  /** Load an OCR engine instance (Cpp OcrEngine + backend). */
+  initializeOcr(
+    instanceId: string,
+    options: OcrInitBridgeOptions
+  ): Promise<{
+    instanceId: string;
+    modelType: string;
+    tasks?: string[];
+    granularities?: string[];
+    supportsCrop?: boolean;
+    producesElements?: boolean;
+  }>;
+
+  /**
+   * Recognize frames from an offline ImageBuffer into an empty OfflineTextBuffer.
+   * Progress events: `SherpaOnnxOcrProgress` with
+   * `{ operationId, done, total, phase, frameIndex, frameCount }`.
+   * `total === 0` means the phase has no determinate bar.
+   * Native coalesces ticks at `progressMinIntervalMs` (default 200).
+   */
+  ocrRecognize(
+    instanceId: string,
+    imageBufferId: string,
+    textOutBufferId: string,
+    options?: OcrRecognizeBridgeOptions
+  ): Promise<OcrRecognizeNativeResult>;
+
+  /** Cancel an in-flight OCR recognize by native operationId. */
+  cancelOcrRecognize(operationId: string): Promise<void>;
+
+  unloadOcr(instanceId: string): Promise<void>;
+
+  // ==================== Offline PDF (text layer; opt-in PDFium) ====================
+
+  /** True when this native binary was built with PDFium linked. */
+  isPdfiumEnabled(): Promise<boolean>;
+
+  /**
+   * Extract digital PDF text layer into an empty OfflineTextBuffer.
+   * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   * `options.password` is the user/owner password for standard PDF encryption.
+   */
+  extractPdfTextLayer(
+    source: Object,
+    textOutBufferId: string,
+    options?: Object | null
+  ): Promise<{
+    pageCount: number;
+    pagesWithText: number;
+    utf16Length: number;
+    spatialSpanCount: number;
+  }>;
+
+  /**
+   * Rasterize PDF pages into a new OfflineImageBuffer (RGB8 frames with pageNumber).
+   * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
+   * `options.password` is the user/owner password for standard PDF encryption.
+   */
+  rasterizePdfPages(
+    source: Object,
+    options?: Object | null
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes: number;
+    storageKind: string;
+    pageCount: number;
+  }>;
+
+  // ==================== Offline e-documents (EPUB/FB2/CBZ/CBR; libarchive) ====================
+
+  /**
+   * Extract markup into an empty OfflineTextBuffer (`origin: 'markup'`).
+   * Progress events: `SherpaOnnxDocProgress` `{ done, total, phase }`.
+   */
+  extractDocumentText(
+    source: Object,
+    textOutBufferId: string,
+    options?: Object | null
+  ): Promise<{
+    format: string;
+    sectionCount: number;
+    sections: Array<{ sectionIndex: number; href?: string; kind: string }>;
+    imageOnlySections: Array<{
+      sectionIndex: number;
+      href?: string;
+      kind: string;
+    }>;
+    spatialSpanCount: number;
+  }>;
+
+  /**
+   * Extract image-only sections / CBZ / CBR into a new OfflineImageBuffer.
+   * Progress events: `SherpaOnnxDocProgress` `{ done, total, phase }`.
+   */
+  extractDocumentImages(
+    source: Object,
+    options?: Object | null
+  ): Promise<{
+    bufferId: string;
+    format: string;
+    frameCount: number;
+  }>;
 
   /**
    * Get a slice of hypothesis text from an offline text buffer.
@@ -939,6 +1296,33 @@ export interface Spec extends TurboModule {
     start: number,
     maxCount: number
   ): Promise<number[]>;
+
+  /**
+   * Get a slice of spatial spans from an offline text buffer (OCR / text-layer).
+   * Each element is a Fabric-safe map matching {@link TextSpatialSpan}.
+   */
+  getOfflineTextBufferSpatialSpansSlice(
+    bufferId: string,
+    start: number,
+    maxCount: number
+  ): Promise<
+    Array<{
+      utf16Start: number;
+      utf16End: number;
+      level: string;
+      sourceImageBufferId?: string;
+      frameIndex: number;
+      quad: number[];
+      confidence?: number;
+      origin: string;
+      pageNumber?: number;
+      ptsMs?: number;
+      pageWidth?: number;
+      pageHeight?: number;
+      sectionIndex?: number;
+      href?: string;
+    }>
+  >;
 
   /**
    * Get the language string from an offline text buffer.
@@ -1489,7 +1873,9 @@ export interface Spec extends TurboModule {
     sampleRate: number,
     granularity: 'sentence' | 'word' | 'character',
     language?: string,
-    vocabPath?: string
+    vocabPath?: string,
+    provider?: string,
+    numThreads?: number
   ): Promise<{
     subtitles: Array<{
       text: string;
@@ -1514,7 +1900,9 @@ export interface Spec extends TurboModule {
     sampleRate: number,
     granularity: 'sentence' | 'word',
     language?: string,
-    vocabPath?: string
+    vocabPath?: string,
+    provider?: string,
+    numThreads?: number
   ): Promise<{
     tokens: Array<{
       text: string;

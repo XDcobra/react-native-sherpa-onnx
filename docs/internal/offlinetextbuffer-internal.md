@@ -2,7 +2,7 @@
 
 **Scope:** Internal implementation details of `offlineTextBuffer` (the offline/immutable text buffer).  
 **Audience:** SDK developers planning engine integrations, text pipeline flows, and post-processing strategies.  
-**Native entry types:** `OfflineTextEntry` (Android/Kotlin), `PaOfflineTextEntry` (iOS/C++).
+**Native entry types:** `OfflineTextEntry` (Android/Kotlin), `TxtOfflineEntry` (iOS/C++).
 
 ---
 
@@ -12,7 +12,7 @@ An `OfflineTextBuffer` is an **immutable, fully populated text container**. Once
 
 Key characteristics:
 - **Immutable after population:** No append, no partial writes.
-- **Rich metadata:** Beyond the raw text string, it can hold tokens, timestamps, durations, language, emotion, and event metadata.
+- **Rich metadata:** Beyond the raw text string, it can hold tokens, timestamps, durations, spatial spans (OCR / text-layer), language, emotion, and event metadata.
 - **Slice-based reads:** Large payloads are accessed via slice APIs to avoid copying everything through the JS bridge at once.
 
 ---
@@ -38,6 +38,13 @@ Key characteristics:
 │  timestampCount: number                                      │
 │  durations: number[] (per-token durations)                   │
 │  durationCount: number                                       │
+│                                                              │
+│  ─── Spatial Spans (optional, OCR / text-layer) ───          │
+│  spatialSpans: TextSpatialSpan[]                             │
+│  spatialSpanCount: number                                    │
+│  hasSpatialSpans: boolean                                    │
+│  (utf16 range + level + sourceImageBufferId + frameIndex +   │
+│   quad[8] + origin + optional confidence/pageNumber/ptsMs)   │
 │                                                              │
 │  ─── Scalar Metadata (optional) ───                          │
 │  lang: string (e.g. "en", "de")                              │
@@ -139,6 +146,16 @@ getOfflineTextBufferDurationsSlice(buffer, start, maxCount): Promise<number[]>
 - Reads `maxCount` durations (per-token durations).
 - Values are in seconds (float).
 
+### Spatial Span Slices
+```ts
+getOfflineTextBufferSpatialSpansSlice(buffer, start, maxCount): Promise<TextSpatialSpan[]>
+```
+- Reads `maxCount` spatial spans starting from index `start`.
+- Each element is a structured object (Fabric-safe map), not a parallel float column.
+- Empty for STT-populated buffers; filled by OCR (and later PDF/EPUB) at populate time.
+- Native storage: `List<TextSpatialSpan>` (Android) / `std::vector<TxtSpatialSpan>` (iOS).
+- Text→text transforms (punctuation) currently drop spans; offset mapping is future work.
+
 ### Scalar Metadata
 ```ts
 getOfflineTextBufferLang(buffer): Promise<string>
@@ -177,6 +194,7 @@ For `createOfflineTextBufferFromText` and `createOfflineTextBufferFromLive`, the
 | Text string | < 100 KB (1 hour) | UTF-8 stored natively, UTF-16 length tracked |
 | Token array | < 500 KB (1 hour) | One string per token |
 | Timestamp array | < 200 KB (1 hour) | One float per token |
+| Spatial spans | small–moderate | Per OCR line/word; empty for STT |
 | Duration array | < 200 KB (1 hour) | One float per token |
 | Scalar metadata | < 1 KB | lang, emotion, event strings |
 | **Total** | **< 1 MB typical** | Well within mobile memory budget |

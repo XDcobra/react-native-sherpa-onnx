@@ -43,6 +43,50 @@ const char* AlignmentKindToModelType(AlignmentModelKind kind) {
     }
 }
 
+const char* OcrKindToModelType(OcrModelKind kind) {
+    if (kind == OcrModelKind::kUnknown) return "";
+    return OcrModelKindToLiteral(kind);
+}
+
+std::string InferOcrModelTypeFromKey(const std::string& modelKey) {
+    if (modelKey.empty()) {
+        return {};
+    }
+    std::string lower;
+    lower.reserve(modelKey.size());
+    for (unsigned char c : modelKey) {
+        lower.push_back(static_cast<char>(std::tolower(c)));
+    }
+    if (lower.find("nemotron_parse") != std::string::npos ||
+        lower.find("nemotron-parse") != std::string::npos ||
+        lower.find("nemotron-3.5-parse") != std::string::npos) {
+        return "nemotron_parse";
+    }
+    if (lower.find("docvlm") != std::string::npos ||
+        lower.find("doc-vlm") != std::string::npos ||
+        lower.find("doc_vlm") != std::string::npos ||
+        lower.find("granite-docling") != std::string::npos ||
+        lower.find("docling") != std::string::npos) {
+        return "doc_vlm";
+    }
+    if (lower.find("paddleocr_vl") != std::string::npos ||
+        lower.find("paddleocr-vl") != std::string::npos) {
+        return "paddleocr_vl";
+    }
+    if (lower.find("ppocr") != std::string::npos ||
+        lower.find("paddleocr") != std::string::npos ||
+        lower.find("pp-ocr") != std::string::npos) {
+        return "ppocr";
+    }
+    if (lower.find("doctr") != std::string::npos ||
+        lower.find("onnxtr") != std::string::npos ||
+        lower.find("doc-tr") != std::string::npos ||
+        lower.find("doc_tr") != std::string::npos) {
+        return "doctr";
+    }
+    return {};
+}
+
 std::string InferAlignmentModelTypeFromKey(const std::string& modelKey) {
     if (modelKey.empty()) {
         return {};
@@ -124,6 +168,15 @@ const std::vector<PublicLanguageRow>& CuratedRows(
             return kXlsrEmpty;
         }
         return AlignmentRowsForModelType(modelType);
+    }
+    if (domain == ModelLanguageDomain::kOcr) {
+        // Pack-first from OCR sources.csv embed; then family (ppocr) fallback.
+        const auto& packRows =
+            model_language_catalog::OcrPackRowsForModelKey(modelKey);
+        if (!packRows.empty()) {
+            return packRows;
+        }
+        return model_language_catalog::OcrRowsForModelType(modelType);
     }
     return SttRowsForModelType(modelType);
 }
@@ -222,6 +275,26 @@ void AppendCuratedAlignmentLanguageRowsIfEmpty(
     }
     AppendCuratedLanguageRowsIfEmpty(
         ModelLanguageDomain::kAlignment,
+        modelType,
+        modelKey,
+        result.ok,
+        HasNameOnlySource(result.detectionSources),
+        result.derivedLanguages,
+        result.detectionSources);
+}
+
+void AppendCuratedOcrLanguageRowsIfEmpty(
+    OcrDetectResult& result,
+    const std::string& modelKey) {
+    std::string modelType = OcrKindToModelType(result.selectedKind);
+    if (modelType.empty()) {
+        modelType = InferOcrModelTypeFromKey(modelKey);
+    }
+    if (modelType.empty()) {
+        return;
+    }
+    AppendCuratedLanguageRowsIfEmpty(
+        ModelLanguageDomain::kOcr,
         modelType,
         modelKey,
         result.ok,

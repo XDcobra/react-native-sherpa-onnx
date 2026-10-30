@@ -77,8 +77,27 @@ if(SHERPA_ONNX_DISABLE_LIBARCHIVE)
     message(STATUS "libarchive disabled (SHERPA_ONNX_DISABLE_LIBARCHIVE=ON). extractTarBz2/cancelExtractTarBz2 will return an error at runtime.")
 endif()
 
+# Optional: enable libwebp (gradle.properties: sherpaOnnxEnableLibwebp=true). Default OFF.
+set(USE_LIBWEBP OFF)
+if(SHERPA_ONNX_ENABLE_LIBWEBP)
+    set(USE_LIBWEBP ON)
+    message(STATUS "libwebp enabled (SHERPA_ONNX_ENABLE_LIBWEBP=ON).")
+else()
+    message(STATUS "libwebp disabled (default). Set sherpaOnnxEnableLibwebp=true to link WebP decode/encode.")
+endif()
+
+# Optional: enable PDFium (gradle.properties: sherpaOnnxEnablePdfium=true). Default OFF.
+set(USE_PDFIUM OFF)
+if(SHERPA_ONNX_ENABLE_PDFIUM)
+    set(USE_PDFIUM ON)
+    message(STATUS "PDFium enabled (SHERPA_ONNX_ENABLE_PDFIUM=ON).")
+else()
+    message(STATUS "PDFium disabled (default). Set sherpaOnnxEnablePdfium=true to link text-layer extract.")
+endif()
+
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). model_detect: subdirs common/stt/tts/enhancement/alignment; flat #includes via multiple include paths below.
 set(SOURCES
+    ort/ApplyOrtProvider.cpp
     alignment/sherpa_onnx_ctc_alignment.cpp
     alignment/sherpa_onnx_alignment_engine.cpp
     jni/alignment/sherpa-onnx-alignment-jni.cpp
@@ -153,6 +172,8 @@ set(SOURCES
     jni/model_detect/alignment/sherpa-onnx-model-detect-alignment.cpp
     jni/model_detect/alignment/sherpa-onnx-validate-alignment.cpp
     jni/model_detect/alignment/sherpa-onnx-alignment-wrapper.cpp
+    jni/model_detect/ocr/sherpa-onnx-model-detect-ocr.cpp
+    jni/model_detect/ocr/sherpa-onnx-validate-ocr.cpp
     jni/model_detect/slid/sherpa-onnx-model-detect-slid.cpp
     jni/model_detect/slid/sherpa-onnx-validate-slid.cpp
     jni/model_detect/slid/sherpa-onnx-slid-detect-wrapper.cpp
@@ -177,7 +198,101 @@ set(SOURCES
     jni/diagnostic/NativeDiagnosticAndroid.cpp
     jni/diagnostic/native_diagnostic_jni.cpp
     crypto/sha256.cpp
+    image/ImageMmapThreshold.cpp
+    image/ImageRegistry.cpp
+    image/ImageFrameEncoder.cpp
+    image/decode/ImageDecoder.cpp
+    jni/image/sherpa-onnx-imagebuffer-jni.cpp
+    ocr/OcrFactory.cpp
+    ocr/OcrDetect.cpp
+    ocr/OcrTextUtils.cpp
+    ocr/OcrEngine.cpp
+    ocr/OcrRecognizeContext.cpp
+    ocr/OcrRecognizeSpec.cpp
+    ocr/OcrCapabilities.cpp
+    ocr/OcrGeometry.cpp
+    ocr/OcrCrop.cpp
+    ocr/markup/OcrTable.cpp
+    ocr/markup/OcrOtsl.cpp
+    ocr/markup/OcrElementKind.cpp
+    ocr/OcrOrtEnv.cpp
+    ocr/OcrOrtHelpers.cpp
+    ocr/ppocr/PpocrBackend.cpp
+    ocr/ppocr/PpocrCtcDecoder.cpp
+    ocr/ppocr/PpocrDbPostprocess.cpp
+    ocr/ppocr/PpocrImageOps.cpp
+    ocr/doctr/DoctrBackend.cpp
+    ocr/doctr/DoctrDbPostprocess.cpp
+    ocr/doctr/DoctrImageOps.cpp
+    ocr/doctr/DoctrManifest.cpp
+    ocr/doctr/DoctrRecDecode.cpp
+    ocr/doc_vlm/DocVlmBackend.cpp
+    ocr/doc_vlm/DocVlmDocTags.cpp
+    ocr/doc_vlm/DocVlmDocTagsPrefix.cpp
+    ocr/doc_vlm/DocVlmImageOps.cpp
+    ocr/doc_vlm/DocVlmManifest.cpp
+    ocr/doc_vlm/DocVlmPrompt.cpp
+    ocr/doc_vlm/DocVlmTokenizer.cpp
+    ocr/nemotron_parse/NemotronParseBackend.cpp
+    ocr/nemotron_parse/NemotronParseImageOps.cpp
+    ocr/nemotron_parse/NemotronParseManifest.cpp
+    ocr/nemotron_parse/NemotronParseMarkup.cpp
+    ocr/nemotron_parse/NemotronParseNavit.cpp
+    ocr/nemotron_parse/NemotronParseNpy.cpp
+    ocr/nemotron_parse/NemotronParseTokenizer.cpp
+    ocr/paddleocr_vl/PaddleocrVlBackend.cpp
+    ocr/paddleocr_vl/PaddleocrVlImageOps.cpp
+    ocr/paddleocr_vl/PaddleocrVlManifest.cpp
+    ocr/paddleocr_vl/PaddleocrVlMarkup.cpp
+    ocr/paddleocr_vl/PaddleocrVlRope.cpp
+    ocr/paddleocr_vl/PaddleocrVlTokenizer.cpp
+    jni/ocr/sherpa-onnx-ocr-jni.cpp
+    pdf/PdfDocument.cpp
+    pdf/PdfTextLayerExtractor.cpp
+    pdf/PdfPageRasterizer.cpp
+    pdf/PdfLazySession.cpp
+    jni/pdf/sherpa-onnx-pdf-jni.cpp
+    document/DocumentExtractor.cpp
+    document/DocArchive.cpp
+    document/DocSniff.cpp
+    document/DocHtmlText.cpp
+    document/DocEpub.cpp
+    document/DocFb2.cpp
+    document/DocComic.cpp
+    document/DocMobi.cpp
+    ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
+    jni/document/sherpa-onnx-document-jni.cpp
 )
+
+# lexbor: prebuilt shared .so (TAG + Gradle download). No in-tree source build.
+set(LEXBOR_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/lexbor_prebuilt/android")
+set(LEXBOR_PREBUILT_LIB "${LEXBOR_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(LEXBOR_PREBUILT_JNI_ABI "${LEXBOR_PREBUILT_BASE}/jni/${ANDROID_ABI}")
+set(LEXBOR_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(LEXBOR_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include")
+set(USE_LEXBOR_PREBUILT OFF)
+if(EXISTS "${LEXBOR_PREBUILT_LIB}/liblexbor.so")
+    set(USE_LEXBOR_PREBUILT ON)
+    set(LEXBOR_LIB_DIR "${LEXBOR_PREBUILT_LIB}")
+elseif(EXISTS "${LEXBOR_PREBUILT_JNI_ABI}/liblexbor.so")
+    set(USE_LEXBOR_PREBUILT ON)
+    set(LEXBOR_LIB_DIR "${LEXBOR_PREBUILT_JNI_ABI}")
+elseif(EXISTS "${LEXBOR_JNILIBS}/liblexbor.so")
+    set(USE_LEXBOR_PREBUILT ON)
+    set(LEXBOR_LIB_DIR "${LEXBOR_JNILIBS}")
+endif()
+if(EXISTS "${LEXBOR_PREBUILT_BASE}/include/lexbor/html/parser.h")
+    set(LEXBOR_INCLUDE_DIR "${LEXBOR_PREBUILT_BASE}/include")
+elseif(EXISTS "${LEXBOR_INCLUDE_CPP}/lexbor/html/parser.h")
+    set(LEXBOR_INCLUDE_DIR "${LEXBOR_INCLUDE_CPP}")
+endif()
+if(NOT USE_LEXBOR_PREBUILT OR NOT LEXBOR_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "lexbor prebuilt not found (liblexbor.so + lexbor/html/parser.h). "
+        "Run a Gradle Android build so prebuilts download, or publish "
+        "third_party/lexbor_prebuilt (see README).")
+endif()
+message(STATUS "lexbor: using prebuilt (libs: ${LEXBOR_LIB_DIR}, include: ${LEXBOR_INCLUDE_DIR})")
 
 if(USE_LIBARCHIVE)
 # libarchive: (1) prebuilt from third_party/libarchive_prebuilt or jniLibs + cpp/include/libarchive (Maven/GitHub), or (2) build from source.
@@ -218,6 +333,73 @@ else()
     message(STATUS "libarchive built successfully")
 endif()
 endif(USE_LIBARCHIVE)
+
+if(USE_LIBWEBP)
+# libwebp: prebuilt from third_party/libwebp_prebuilt or jniLibs + cpp/include/webp (Maven/GitHub).
+# No in-tree CMake source build here — use third_party/libwebp_prebuilt/build_libwebp_android.sh.
+set(LIBWEBP_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/libwebp_prebuilt/android")
+set(LIBWEBP_PREBUILT_LIB "${LIBWEBP_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(LIBWEBP_PREBUILT_JNI_ABI "${LIBWEBP_PREBUILT_BASE}/jni/${ANDROID_ABI}")
+set(LIBWEBP_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(LIBWEBP_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/webp")
+set(USE_LIBWEBP_PREBUILT OFF)
+if(EXISTS "${LIBWEBP_PREBUILT_LIB}/libwebp.so")
+    set(USE_LIBWEBP_PREBUILT ON)
+    set(LIBWEBP_LIB_DIR "${LIBWEBP_PREBUILT_LIB}")
+elseif(EXISTS "${LIBWEBP_PREBUILT_JNI_ABI}/libwebp.so")
+    set(USE_LIBWEBP_PREBUILT ON)
+    set(LIBWEBP_LIB_DIR "${LIBWEBP_PREBUILT_JNI_ABI}")
+elseif(EXISTS "${LIBWEBP_JNILIBS}/libwebp.so")
+    set(USE_LIBWEBP_PREBUILT ON)
+    set(LIBWEBP_LIB_DIR "${LIBWEBP_JNILIBS}")
+endif()
+if(EXISTS "${LIBWEBP_PREBUILT_BASE}/include/webp/decode.h")
+    set(LIBWEBP_INCLUDE_DIR "${LIBWEBP_PREBUILT_BASE}/include")
+elseif(EXISTS "${LIBWEBP_INCLUDE_CPP}/webp/decode.h")
+    set(LIBWEBP_INCLUDE_DIR "${LIBWEBP_INCLUDE_CPP}")
+elseif(EXISTS "${LIBWEBP_INCLUDE_CPP}/decode.h")
+    set(LIBWEBP_INCLUDE_DIR "${LIBWEBP_INCLUDE_CPP}")
+endif()
+if(USE_LIBWEBP_PREBUILT AND LIBWEBP_INCLUDE_DIR)
+    message(STATUS "libwebp: using prebuilt (libs: ${LIBWEBP_LIB_DIR}, include: ${LIBWEBP_INCLUDE_DIR})")
+else()
+    message(WARNING "libwebp prebuilt not found for ${ANDROID_ABI}. "
+                    "sherpaOnnxEnableLibwebp=true requires prebuilts "
+                    "(third_party/libwebp_prebuilt or Maven/GitHub).")
+endif()
+endif(USE_LIBWEBP)
+
+if(USE_PDFIUM)
+# PDFium: prebuilt only (third_party/pdfium_prebuilt or jniLibs + cpp/include/pdfium).
+set(PDFIUM_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/pdfium_prebuilt/android")
+set(PDFIUM_PREBUILT_LIB "${PDFIUM_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(PDFIUM_PREBUILT_JNI_ABI "${PDFIUM_PREBUILT_BASE}/jni/${ANDROID_ABI}")
+set(PDFIUM_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(PDFIUM_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include/pdfium")
+set(USE_PDFIUM_PREBUILT OFF)
+if(EXISTS "${PDFIUM_PREBUILT_LIB}/libpdfium.so")
+    set(USE_PDFIUM_PREBUILT ON)
+    set(PDFIUM_LIB_DIR "${PDFIUM_PREBUILT_LIB}")
+elseif(EXISTS "${PDFIUM_PREBUILT_JNI_ABI}/libpdfium.so")
+    set(USE_PDFIUM_PREBUILT ON)
+    set(PDFIUM_LIB_DIR "${PDFIUM_PREBUILT_JNI_ABI}")
+elseif(EXISTS "${PDFIUM_JNILIBS}/libpdfium.so")
+    set(USE_PDFIUM_PREBUILT ON)
+    set(PDFIUM_LIB_DIR "${PDFIUM_JNILIBS}")
+endif()
+if(EXISTS "${PDFIUM_PREBUILT_BASE}/include/fpdfview.h")
+    set(PDFIUM_INCLUDE_DIR "${PDFIUM_PREBUILT_BASE}/include")
+elseif(EXISTS "${PDFIUM_INCLUDE_CPP}/fpdfview.h")
+    set(PDFIUM_INCLUDE_DIR "${PDFIUM_INCLUDE_CPP}")
+endif()
+if(USE_PDFIUM_PREBUILT AND PDFIUM_INCLUDE_DIR)
+    message(STATUS "pdfium: using prebuilt (libs: ${PDFIUM_LIB_DIR}, include: ${PDFIUM_INCLUDE_DIR})")
+else()
+    message(WARNING "pdfium prebuilt not found for ${ANDROID_ABI}. "
+                    "Run third_party/pdfium_prebuilt/fetch_pdfium_android.sh or CI workflow, "
+                    "or unset sherpaOnnxEnablePdfium.")
+endif()
+endif(USE_PDFIUM)
 
 # Create shared library
 add_library(sherpaonnx SHARED
@@ -293,10 +475,22 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/punctuation
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/vad
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/alignment
+    ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/ocr
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/slid
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/kws
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/model_detect/audio_tagging
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
+    ${CMAKE_CURRENT_SOURCE_DIR}/image
+    ${CMAKE_CURRENT_SOURCE_DIR}/image/decode
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/ppocr
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doctr
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doc_vlm
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/nemotron_parse
+    ${CMAKE_CURRENT_SOURCE_DIR}/ocr/paddleocr_vl
+    ${CMAKE_CURRENT_SOURCE_DIR}/pdf
+    ${CMAKE_CURRENT_SOURCE_DIR}/document
+    ${PROJECT_ROOT}/../third_party/pugixml/src
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 if(USE_FFMPEG)
@@ -304,6 +498,15 @@ if(USE_FFMPEG)
 endif()
 if(USE_LIBARCHIVE AND USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_INCLUDE_DIR)
     target_include_directories(sherpaonnx PRIVATE ${LIBARCHIVE_INCLUDE_DIR})
+endif()
+if(USE_LIBWEBP AND LIBWEBP_INCLUDE_DIR)
+    target_include_directories(sherpaonnx PRIVATE ${LIBWEBP_INCLUDE_DIR})
+endif()
+if(USE_PDFIUM AND PDFIUM_INCLUDE_DIR)
+    target_include_directories(sherpaonnx PRIVATE ${PDFIUM_INCLUDE_DIR})
+endif()
+if(LEXBOR_INCLUDE_DIR)
+    target_include_directories(sherpaonnx PRIVATE ${LEXBOR_INCLUDE_DIR})
 endif()
 # When USE_FFMPEG=OFF, do NOT define HAVE_FFMPEG at all. Then #ifdef HAVE_FFMPEG is false
 # in C++ and the stub (#else) branches are used — no FFmpeg headers needed.
@@ -314,6 +517,12 @@ endif()
 if(USE_LIBARCHIVE)
     target_compile_definitions(sherpaonnx PRIVATE HAVE_LIBARCHIVE=1)
 endif()
+if(USE_LIBWEBP)
+    target_compile_definitions(sherpaonnx PRIVATE HAVE_LIBWEBP=1)
+endif()
+if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_INCLUDE_DIR)
+    target_compile_definitions(sherpaonnx PRIVATE HAVE_PDFIUM=1)
+endif()
 
 # Link libraries (Kotlin API from AAR handles STT/TTS incl. Zipvoice)
 if(USE_FFMPEG)
@@ -321,6 +530,15 @@ if(USE_FFMPEG)
 endif()
 if(USE_LIBARCHIVE AND USE_LIBARCHIVE_PREBUILT AND LIBARCHIVE_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${LIBARCHIVE_LIB_DIR})
+endif()
+if(USE_LIBWEBP AND USE_LIBWEBP_PREBUILT AND LIBWEBP_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${LIBWEBP_LIB_DIR})
+endif()
+if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${PDFIUM_LIB_DIR})
+endif()
+if(USE_LEXBOR_PREBUILT AND LEXBOR_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${LEXBOR_LIB_DIR})
 endif()
 if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
@@ -349,7 +567,13 @@ endif()
 if(USE_LIBARCHIVE)
     target_link_libraries(sherpaonnx PRIVATE archive)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android)
+if(USE_LIBWEBP AND USE_LIBWEBP_PREBUILT)
+    target_link_libraries(sherpaonnx PRIVATE webp sharpyuv)
+endif()
+if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
+    target_link_libraries(sherpaonnx PRIVATE pdfium)
+endif()
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE
@@ -364,4 +588,25 @@ target_compile_options(sherpaonnx PRIVATE
 # https://github.com/XDcobra/react-native-sherpa-onnx/issues/76
 if(ANDROID)
     target_link_options(sherpaonnx PRIVATE "-Wl,-z,max-page-size=16384")
+    # NDK clang already static-links libunwind into a SHARED+exceptions DSO, but
+    # -lpdfium exports _Unwind_Resume so ld binds our EH relocs there instead
+    # (C++ throw → SIGBUS). Force the compiler's libunwind.a into this DSO and
+    # keep it non-exported. NDK 29 clang++ has no -static-libunwind.
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" "--target=${CMAKE_CXX_COMPILER_TARGET}"
+                "-print-file-name=libunwind.a"
+        OUTPUT_VARIABLE _SHERPA_UNWIND_A
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _SHERPA_UNWIND_RC
+    )
+    if(NOT _SHERPA_UNWIND_RC EQUAL 0 OR NOT EXISTS "${_SHERPA_UNWIND_A}")
+        message(FATAL_ERROR
+            "libunwind.a not found via ${CMAKE_CXX_COMPILER} -print-file-name "
+            "(rc=${_SHERPA_UNWIND_RC}, path='${_SHERPA_UNWIND_A}'). "
+            "Required so C++ exceptions do not bind to libpdfium.so.")
+    endif()
+    target_link_libraries(sherpaonnx PRIVATE
+        "-Wl,--whole-archive" "${_SHERPA_UNWIND_A}" "-Wl,--no-whole-archive"
+        "-Wl,--exclude-libs,libunwind.a")
+    message(STATUS "sherpaonnx: static libunwind (${_SHERPA_UNWIND_A})")
 endif()

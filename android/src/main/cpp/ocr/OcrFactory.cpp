@@ -1,0 +1,58 @@
+#include "OcrFactory.h"
+
+#include "doc_vlm/DocVlmBackend.h"
+#include "doctr/DoctrBackend.h"
+#include "nemotron_parse/NemotronParseBackend.h"
+#include "paddleocr_vl/PaddleocrVlBackend.h"
+#include "ppocr/PpocrBackend.h"
+
+#include <stdexcept>
+
+namespace {
+
+std::string CanonicalOcrModelType(const std::string& model_type) {
+  if (model_type == "paddleocr-vl") {
+    return "paddleocr_vl";
+  }
+  if (model_type == "nemotron-parse") {
+    return "nemotron_parse";
+  }
+  if (model_type == "docvlm" || model_type == "doc-vlm" ||
+      model_type == "granite-docling" || model_type == "docling") {
+    return "doc_vlm";
+  }
+  return model_type;
+}
+
+}  // namespace
+
+namespace sherpa_onnx {
+namespace ocr {
+
+std::unique_ptr<OcrBackend> CreateOcrBackend(const std::string& model_type) {
+  const std::string type = CanonicalOcrModelType(model_type);
+  if (type == "ppocr" || type == "auto") {
+    return std::make_unique<ppocr::PpocrBackend>();
+  }
+  if (type == "doctr") {
+    return std::make_unique<doctr::DoctrBackend>();
+  }
+  if (type == "doc_vlm") {
+    return std::make_unique<doc_vlm::DocVlmBackend>();
+  }
+  if (type == "nemotron_parse") {
+    return std::make_unique<nemotron_parse::NemotronParseBackend>();
+  }
+  if (type == "paddleocr_vl") {
+    return std::make_unique<paddleocr_vl::PaddleocrVlBackend>();
+  }
+  throw std::invalid_argument(
+      "Unknown OCR modelType/backend '" + model_type +
+      "'. Supported in this build: ppocr, doctr, doc_vlm, nemotron_parse, "
+      "paddleocr_vl (aliases: docvlm, doc-vlm, granite-docling, docling, "
+      "nemotron-parse, paddleocr-vl; auto → ppocr when passed straight to "
+      "CreateOcrBackend).");
+}
+
+}  // namespace ocr
+}  // namespace sherpa_onnx

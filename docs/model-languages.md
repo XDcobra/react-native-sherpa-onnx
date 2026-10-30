@@ -80,15 +80,20 @@ Static tables for building pickers (generated from the JSON catalog). Each retur
 | `getCohereTranscribeLanguages()` | Cohere Transcribe | |
 | `getQwen3AsrLanguages()` | Qwen3 ASR | |
 | `getDolphinInfoLanguages()` | Dolphin (informational) | |
+| `getPpocrLanguages()` | PP-OCR (OCR) | PP-OCRv6 family set (~49 ISO: `zh`/`en`/`ja` + 46 Latin) |
+| `getDoctrLanguages()` | DocTR (OCR) | OnnxTR family set (15 Latin-European: `en`/`fr`/`de`/`pt` + 11 more) |
 
-TTS / alignment hint helpers (ISO 639-1 strings only; for UI labels — runtime rows come from native detect):
+`doc_vlm` hints are `DOC_VLM_ISO6391_HINTS` (`en`, `ja`, `ar`, `zh`), not a `ModelLanguage[]` picker.
+
+TTS / alignment / OCR hint helpers (ISO 639-1 strings only; for UI labels — runtime rows come from native detect):
 
 | Function | Scope |
 | --- | --- |
 | `iso6391HintsForTtsModelType(modelType?, modelKey?)` | TTS families |
 | `iso6391HintsForAlignmentModelType(modelType?, modelKey?)` | Alignment — **pack-first** from `scripts/alignment-models/sources.csv` `languages` column (via generator); family fallbacks only for explicit multilingual markers (`multilingual-56`, MMS FA), never bare `xlsr` |
+| `iso6391HintsForOcrModelType(modelType?, modelKey?)` | OCR — **pack-first** from `scripts/ocr-models/sources.csv` `languages`; family fallback `ppocr`, `doctr`, `doc_vlm`, `nemotron_parse`, or `paddleocr_vl`. `auto` and an omitted type still fall back to ppocr hints |
 
-Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `WAV2VEC2_ALIGNMENT_ISO6391_HINTS`, …) mirror the getters — import when you need the raw array without a function call.
+Constants (`WHISPER_LANGUAGES`, `POCKET_TTS_ISO6391_HINTS`, `WAV2VEC2_ALIGNMENT_ISO6391_HINTS`, `PPOCR_LANGUAGES`, `DOCTR_LANGUAGES`, `DOCTR_ISO6391_HINTS`, `DOC_VLM_ISO6391_HINTS`, …) mirror the getters — import when you need the raw array without a function call.
 
 ---
 
@@ -147,18 +152,27 @@ Static tables — suitable for dropdown / chip pickers. Does not validate on-dis
 
 ---
 
-### TTS and alignment hint helpers
+### TTS, alignment, and OCR hint helpers
 
 ```typescript
 function iso6391HintsForTtsModelType(modelType?: string, modelKey?: string): readonly string[];
 function iso6391HintsForAlignmentModelType(modelType?: string, modelKey?: string): readonly string[];
+function getPpocrLanguages(): readonly ModelLanguage[];
+function getDoctrLanguages(): readonly ModelLanguage[];
+function iso6391HintsForOcrModelType(modelType?: string, modelKey?: string): readonly string[];
 ```
 
 ```typescript
 const hints = iso6391HintsForAlignmentModelType('wav2vec2');
+const ocrPack = iso6391HintsForOcrModelType('ppocr', 'ppocrv6-tiny'); // zh, en
+const ocrPicker = getPpocrLanguages();
+const doctrPicker = getDoctrLanguages();
+const doctrMobile = iso6391HintsForOcrModelType('doctr', 'doctr-mobile'); // en, fr
+const docVlm = iso6391HintsForOcrModelType('doc_vlm'); // en, ja, ar, zh
+const granite = iso6391HintsForOcrModelType('doc_vlm', 'docvlm-granite-258m-fp32');
 ```
 
-Normalized ISO 639-1 hints by model type — for catalog labels, not runtime validation.
+Normalized ISO 639-1 hints by model type — for catalog labels, not runtime validation. OCR detect prefers basename heuristics, then pack CSV, then the family list (`ppocr`, `doctr`, `doc_vlm`, `nemotron_parse`, or `paddleocr_vl`). `en` is the supported language on the granite pack; `ja`, `ar`, and `zh` are experimental. `docVlm` and `granite` are the same four codes today. `nemotron_parse` hints are NVIDIA MOSCAR coverage collapsed to ISO 639-1 (plus `yue`); MOSCAR is synthetic, not a real-document guarantee. `paddleocr_vl` hints are the official Table A1 languages that have an ISO 639-1 code (`en` and `zh` first).
 
 ---
 
@@ -179,4 +193,5 @@ import type {
 - [STT offline](stt-offline.md) — `modelOptions` per family
 - [TTS offline](tts-offline.md) — lexicon languages from `detectTtsModel`
 - [Alignment offline](alignment-offline.md)
+- [OCR offline](ocr-offline.md) — pack language hints + `getPpocrLanguages` + `getDoctrLanguages` + `DOC_VLM_ISO6391_HINTS` / `iso6391HintsForOcrModelType('doc_vlm')`
 - [Model detection](model-detect.md) — `languages` field on unified detect results

@@ -380,6 +380,17 @@ console.log(JSON.stringify(timeline, null, 2));
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/diarization_offline_1.png) | ![Example 2](./images/example/diarization_offline_2.png) | ![Example 3](./images/example/diarization_offline_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Speaker diarization (offline)** as a developer showcase for this API. See [example/README.md](../example/README.md#speaker-diarization-offline).
+
+---
+
 ## See also
 
 - [diarization-named-timeline.md](./diarization-named-timeline.md) — SID enroll + diarize → named who-spoke-when

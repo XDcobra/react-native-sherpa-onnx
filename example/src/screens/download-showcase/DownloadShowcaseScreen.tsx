@@ -46,6 +46,7 @@ const CATEGORY_LABELS: Record<ModelCategory, string> = {
   [ModelCategory.SpeakerEmbedding]: 'Speaker embedding',
   [ModelCategory.Qnn]: 'QNN',
   [ModelCategory.Alignment]: 'Alignment',
+  [ModelCategory.Ocr]: 'OCR',
   [ModelCategory.LanguageId]: 'Language identification (SLID)',
   [ModelCategory.Kws]: 'Keyword spotting (KWS)',
   [ModelCategory.AudioTagging]: 'Audio tagging',

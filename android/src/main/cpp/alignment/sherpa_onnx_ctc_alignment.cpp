@@ -8,6 +8,7 @@
 #endif
 
 #include "sherpa_onnx_ctc_alignment.hpp"
+#include "ort/ApplyOrtProvider.h"
 
 #include <algorithm>
 #include <cstdarg>
@@ -720,6 +721,8 @@ struct OrtSessionCache {
   OrtSession* session = nullptr;
   OrtAllocator* allocator = nullptr;
   std::string model_path;
+  std::string provider;
+  int32_t num_threads = 0;
   std::string input_name;
   std::string output_name;
 };
@@ -727,7 +730,9 @@ struct OrtSessionCache {
 static std::mutex g_ort_cache_mutex;
 static OrtSessionCache g_ort_cache;
 
-static void EnsureOrtSessionCacheLocked(const std::string& model_path) {
+static void EnsureOrtSessionCacheLocked(const std::string& model_path,
+                                        const std::string& provider,
+                                        int32_t num_threads) {
   if (g_ort_cache.api == nullptr) {
     g_ort_cache.api = ResolveOrtApiForAlignment();
     CheckOrtStatus(
@@ -739,15 +744,13 @@ static void EnsureOrtSessionCacheLocked(const std::string& model_path) {
         "CreateEnv failed");
     CheckOrtStatus(
         g_ort_cache.api,
-        g_ort_cache.api->CreateSessionOptions(&g_ort_cache.session_options),
-        "CreateSessionOptions failed");
-    CheckOrtStatus(
-        g_ort_cache.api,
         g_ort_cache.api->GetAllocatorWithDefaultOptions(&g_ort_cache.allocator),
         "GetAllocatorWithDefaultOptions failed");
   }
 
-  if (g_ort_cache.session != nullptr && g_ort_cache.model_path == model_path) {
+  if (g_ort_cache.session != nullptr && g_ort_cache.model_path == model_path &&
+      g_ort_cache.provider == provider &&
+      g_ort_cache.num_threads == num_threads) {
     return;
   }
 
@@ -757,6 +760,30 @@ static void EnsureOrtSessionCacheLocked(const std::string& model_path) {
     g_ort_cache.input_name.clear();
     g_ort_cache.output_name.clear();
   }
+  if (g_ort_cache.session_options != nullptr) {
+    g_ort_cache.api->ReleaseSessionOptions(g_ort_cache.session_options);
+    g_ort_cache.session_options = nullptr;
+  }
+  CheckOrtStatus(
+      g_ort_cache.api,
+      g_ort_cache.api->CreateSessionOptions(&g_ort_cache.session_options),
+      "CreateSessionOptions failed");
+  if (num_threads < 0) {
+    throw std::runtime_error(
+        "ALIGNMENT_OPTIONS_INVALID: numThreads must be an integer >= 1.");
+  }
+  if (num_threads >= 1) {
+    if (g_ort_cache.api->SetIntraOpNumThreads == nullptr) {
+      throw std::runtime_error(
+          "ALIGNMENT_OPTIONS_INVALID: SetIntraOpNumThreads is unavailable.");
+    }
+    CheckOrtStatus(
+        g_ort_cache.api,
+        g_ort_cache.api->SetIntraOpNumThreads(
+            g_ort_cache.session_options, num_threads),
+        "SetIntraOpNumThreads failed");
+  }
+  ApplyOrtProvider(g_ort_cache.api, g_ort_cache.session_options, provider);
 
   CheckOrtStatus(
       g_ort_cache.api,
@@ -807,17 +834,21 @@ static void EnsureOrtSessionCacheLocked(const std::string& model_path) {
   }
 
   g_ort_cache.model_path = model_path;
+  g_ort_cache.provider = provider;
+  g_ort_cache.num_threads = num_threads;
 }
 
 static std::vector<std::vector<float>> RunOrtInference(
     const std::string& modelPath,
-    const std::vector<float>& samples) {
+    const std::vector<float>& samples,
+    const std::string& provider,
+    int32_t num_threads) {
   if (samples.empty()) {
     return {};
   }
 
   std::lock_guard<std::mutex> lock(g_ort_cache_mutex);
-  EnsureOrtSessionCacheLocked(modelPath);
+  EnsureOrtSessionCacheLocked(modelPath, provider, num_threads);
   const OrtApi* api = g_ort_cache.api;
 
   OrtMemoryInfo* memoryInfo = nullptr;
@@ -1005,7 +1036,9 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
     const std::string& vocab_json_utf8,
     const float* samples,
     size_t sample_count,
-    int32_t source_sample_rate) {
+    int32_t source_sample_rate,
+    const std::string& provider,
+    int32_t num_threads) {
 #if !defined(SHERPA_ONNX_HAS_ORT_C_API)
   (void)model_path;
   (void)text_utf8;
@@ -1013,6 +1046,8 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
   (void)samples;
   (void)sample_count;
   (void)source_sample_rate;
+  (void)provider;
+  (void)num_threads;
   throw std::runtime_error(
       "Accurate alignment requires ONNX Runtime C API headers at build time (onnxruntime_c_api.h).");
 #else
@@ -1043,7 +1078,8 @@ CtcAlignmentResult RunCtcAlignmentFromFloatPcm(
     throw std::runtime_error("Audio is empty after preprocessing");
   }
 
-  std::vector<std::vector<float>> logProbs = RunOrtInference(model_path, normalized);
+  std::vector<std::vector<float>> logProbs =
+      RunOrtInference(model_path, normalized, provider, num_threads);
   if (logProbs.empty()) {
     throw std::runtime_error("Alignment model produced empty probabilities");
   }

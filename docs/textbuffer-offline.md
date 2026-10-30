@@ -2,7 +2,7 @@
 
 ## Introduction
 
-**Immutable offline text payloads** with optional metadata (tokens, timestamps, durations, lang, emotion, event). Used for **batch** STT outputs and consumers like alignment or offline TTS.
+**Immutable offline text payloads** with optional metadata (tokens, timestamps, durations, spatial spans, lang, emotion, event). Used for **batch** STT outputs, OCR results, and consumers like alignment or offline TTS.
 
 **Import path:** `react-native-sherpa-onnx/textbuffer`
 
@@ -187,6 +187,69 @@ function getOfflineTextBufferDurationsSlice(
 const durations = await getOfflineTextBufferDurationsSlice(out, 0, 128);
 ```
 
+#### `getOfflineTextBufferSpatialSpansSlice(buffer, start, maxCount)`
+
+Optional spatial provenance for OCR / PDF text-layer / EPUB markup. Each span links a UTF-16 range of the hypothesis to a pixel quad on a source image frame.
+
+STT populate leaves spans empty (`spatialSpanCount === 0`, `hasSpatialSpans === false`). OCR (and later PDF/EPUB paths) fill them at populate time.
+
+```ts
+function getOfflineTextBufferSpatialSpansSlice(
+  buffer: OfflineTextBufferIdSource,
+  start: number,
+  maxCount: number
+): Promise<TextSpatialSpan[]>;
+```
+
+```ts
+type TextSpatialSpanLevel = 'line' | 'word' | 'block';
+type TextSpatialSpanOrigin = 'ocr' | 'textLayer' | 'markup';
+// textLayer: PDF glyph layer (react-native-sherpa-onnx/pdf); see pdf-offline.md
+// markup: EPUB/FB2 extract (react-native-sherpa-onnx/document); see document-offline.md
+
+interface TextSpatialSpan {
+  utf16Start: number;
+  utf16End: number;
+  level: TextSpatialSpanLevel;
+  /** Required for `ocr`. Empty / omitted for `textLayer` (PDF) when no image frame. */
+  sourceImageBufferId?: string;
+  frameIndex: number;
+  /**
+   * Quad corners x0,y0,…x3,y3.
+   * OCR: decoded-frame pixels. textLayer: PDF user-space, top-left origin, y-down.
+   */
+  quad: [number, number, number, number, number, number, number, number];
+  confidence?: number;
+  origin: TextSpatialSpanOrigin;
+  /** 1-based PDF page when origin is textLayer. */
+  pageNumber?: number;
+  ptsMs?: number;
+  /** PDF user-space page size when origin is textLayer. */
+  pageWidth?: number;
+  pageHeight?: number;
+  /** 0-based reading-order section (EPUB spine / FB2 / comic). */
+  sectionIndex?: number;
+  /** EPUB path / FB2 id / archive path when known. */
+  href?: string;
+}
+```
+
+```ts
+const info = (await getPipelineTextBufferInfo(out)) as OfflineTextBufferInfo;
+if (info.hasSpatialSpans) {
+  const spans = await getOfflineTextBufferSpatialSpansSlice(
+    out,
+    0,
+    info.spatialSpanCount
+  );
+  console.log(spans[0]?.quad);
+}
+```
+
+To project quads onto a decoded ImageBuffer frame, use [`mapTextSpatialSpansToFrame`](imagebuffer-offline.md#maptextspatialspanstoframespans-options) from `react-native-sherpa-onnx/imagebuffer` (or [`OfflineImageBufferAnnotatedView`](imagebuffer-offline.md#offlineimagebufferannotatedview)).
+
+**Known limit:** Text-to-text transforms (e.g. punctuation) currently drop spatial spans (same class of issue as timestamp loss). Offset-mapping will come later.
+
 #### `getOfflineTextBufferLang(buffer)` / `getOfflineTextBufferEmotion(buffer)` / `getOfflineTextBufferEvent(buffer)`
 
 ```ts
@@ -233,6 +296,7 @@ import type {
   OfflineTextBufferInfo, // metadata for immutable offline text payload
   OfflineTextBufferIdSource, // ref/handle/id accepted by offline text APIs
   OfflineTextBufferFromLiveMode, // 'fullIfSpooled' | 'windowSnapshot'
+  TextSpatialSpan, // OCR / text-layer spatial provenance
   PipelineTextBufferInfo, // offline/live info union for shared info APIs
   PipelineTextBufferIdSource, // ref/info/handle/id accepted by shared APIs
   PipelineTextErrorCodeValue, // string union of textbuffer error codes
@@ -270,7 +334,11 @@ The following codes are the relevant runtime outcomes for offline text-buffer re
 
 - [Pipeline text buffers — live / streaming](textbuffer-streaming.md)
 - [Offline STT](stt-offline.md)
+- [Offline OCR](ocr-offline.md) (writes plain text + `origin: 'ocr'` spatial spans)
+- [Offline PDF](pdf-offline.md) (`origin: 'textLayer'`)
+- [Offline e-documents](document-offline.md) (`origin: 'markup'`)
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
+- [Offline ImageBuffer](imagebuffer-offline.md)
 
 ## Use case examples
 

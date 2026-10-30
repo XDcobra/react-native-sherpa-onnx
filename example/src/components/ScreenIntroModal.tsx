@@ -125,6 +125,14 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Runtime capability dashboard',
     body: 'This screen is for checking execution-provider support and other runtime capabilities. It helps you verify what the current build and device can actually use.',
   },
+  OCR: {
+    title: 'Offline OCR demo',
+    body: 'Showcase for extractPdfTextLayer and createOCR / recognize over OfflineImageBuffer → OfflineTextBuffer. Switch ppocr, doctr, doc_vlm, nemotron_parse, or paddleocr_vl packs, pick bundled images or PDFs, and inspect text plus spatial boxes (ocr pixels or mapped text-layer quads) on OfflineImageBufferAnnotatedView.',
+  },
+  Documents: {
+    title: 'Read documents aloud',
+    body: 'This screen shows document-to-speech with the SDK: extract text, then speak it with offline TTS. Supported formats are EPUB, FB2, MOBI, AZW3, PDF, and image-based mixed EPUB or CBZ via OCR.',
+  },
 };
 
 const STORAGE_FILE = `${DocumentDirectoryPath}/example-screen-intros.json`;

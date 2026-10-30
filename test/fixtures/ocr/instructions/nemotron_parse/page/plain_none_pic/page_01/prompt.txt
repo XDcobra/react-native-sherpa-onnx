@@ -1,0 +1,1 @@
+</s><s><no_bbox><no_classes><output_plain><predict_text_in_pic>

@@ -1,0 +1,31 @@
+{
+  "family": "paddleocr_vl",
+  "task": "table",
+  "profile": null,
+  "fixture_id": "table_03",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Table Recognition:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1003520,
+    "upscaled": false,
+    "image_size": [
+      720,
+      360
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/table_03.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 39,
+  "ort_token_count": 39,
+  "prefix_len": 39,
+  "grammar": {
+    "kind": "otsl",
+    "ok": true,
+    "unknown": [],
+    "cell_count": 16,
+    "notes": [],
+    "sample": "<fcel>Code<fcel>Status<fcel>Owner<nl><fcel>A-17<fcel>Open<fcel>Lee<nl><fcel>B-04<fcel>Closed<fcel>Patel<nl><fcel>C-22<fcel>Hold<fcel>Ng<nl></s>"
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/table/table_03",
+  "max_new_tokens": 128
+}

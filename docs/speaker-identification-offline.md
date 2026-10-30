@@ -566,6 +566,17 @@ await releasePipelineSegmentBuffer(labeledOut);
 
 </details>
 
+## Example app
+
+
+| ![Example 1](./images/example/speaker_identification_1.png) | ![Example 2](./images/example/speaker_identification_2.png) | ![Example 3](./images/example/speaker_identification_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Speaker identification** (`example/src/screens/speaker-identification/SpeakerIdentificationScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#speaker-identification).
+
+---
+
 ## See also
 
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)

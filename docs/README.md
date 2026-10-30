@@ -106,6 +106,18 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 ---
 
+## OCR
+
+| Guide | Description |
+|-------|-------------|
+| [ocr-offline.md](./ocr-offline.md) | Offline OCR — `createOCR` / `recognize` (ImageBuffer → TextBuffer + spatial spans); family `ppocr` · `doctr` · `doc_vlm` |
+| [pdf-offline.md](./pdf-offline.md) | Offline PDF text-layer extract + page raster → ImageBuffer (opt-in PDFium); OCR stays explicit |
+| [document-offline.md](./document-offline.md) | Offline e-documents (EPUB/FB2/MOBI markup → TextBuffer; CBZ/CBR / image-only → ImageBuffer); OCR stays explicit |
+
+> Streaming / live OCR is not yet available. `ocr-offline.md` is the sole OCR surface. PDF (`pdf-offline.md`) and e-documents (`document-offline.md`) are separate source adapters: extract markup or rasterize/decode images, then call OCR explicitly on the ImageBuffer.
+
+---
+
 ## Speaker Identification & Diarization
 
 | Guide | Description |
@@ -138,6 +150,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 | [textbuffer-streaming.md](./textbuffer-streaming.md) | Live text buffer — streaming segment production/consumption |
 | [segmentbuffer-offline.md](./segmentbuffer-offline.md) | Offline segment buffer — segment links, maps |
 | [segmentbuffer-streaming.md](./segmentbuffer-streaming.md) | Live segment buffer — streaming segment linking |
+| [imagebuffer-offline.md](./imagebuffer-offline.md) | Offline image buffer — decode files, multi-frame, spatial OCR input |
 
 ---
 

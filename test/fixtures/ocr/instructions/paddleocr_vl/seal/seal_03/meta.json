@@ -1,0 +1,29 @@
+{
+  "family": "paddleocr_vl",
+  "task": "seal",
+  "profile": null,
+  "fixture_id": "seal_03",
+  "pack_id": "paddleocr-vl-1.6-fp16",
+  "prompt_text": "<|begin_of_sentence|>User: <|IMAGE_START|><|IMAGE_PLACEHOLDER|><|IMAGE_END|>Seal Recognition:\nAssistant:\n",
+  "preprocess": {
+    "max_pixels": 1003520,
+    "upscaled": false,
+    "image_size": [
+      400,
+      400
+    ],
+    "image": "test/fixtures/ocr/instructions/_images/seal_03.png"
+  },
+  "token_identical": true,
+  "hf_token_count": 10,
+  "ort_token_count": 10,
+  "prefix_len": 10,
+  "grammar": {
+    "kind": "plain",
+    "ok": true,
+    "unknown": [],
+    "notes": []
+  },
+  "repo_relative_dir": "test/fixtures/ocr/instructions/paddleocr_vl/seal/seal_03",
+  "max_new_tokens": 128
+}

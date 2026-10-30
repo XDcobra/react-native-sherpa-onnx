@@ -1,0 +1,4 @@
+<code><loc_0><loc_0><loc_500><loc_500><_JavaScript_>function greet(name) {
+  return `hello ${name}`
+}
+</code><|end_of_text|>

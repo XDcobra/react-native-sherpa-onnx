@@ -1,0 +1,15 @@
+# Minimal rec_inference.yml fragment for CTC unit tests (not a real model).
+PostProcess:
+  name: CTCLabelDecode
+  character_dict:
+  - a
+  - b
+  - c
+  - ' '
+  - H
+  - e
+  - l
+  - o
+  - W
+  - r
+  - d

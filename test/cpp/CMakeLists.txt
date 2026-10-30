@@ -1,7 +1,7 @@
 # Host-side C++ tests (Linux/macOS CI): no Android NDK.
 # Layout: model_detect/ — host tests; production sources under android/.../jni/model_detect/{common,stt,tts,enhancement,vad}/; audio_conversion/ — FFmpeg (same sources as Android).
 cmake_minimum_required(VERSION 3.16)
-project(sherpa-onnx-host-cpp-tests LANGUAGES CXX)
+project(sherpa-onnx-host-cpp-tests LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -21,6 +21,8 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/common/model_language_catalog.cpp"
   "${MODEL_DETECT_DIR}/alignment/sherpa-onnx-model-detect-alignment.cpp"
   "${MODEL_DETECT_DIR}/alignment/sherpa-onnx-validate-alignment.cpp"
+  "${MODEL_DETECT_DIR}/ocr/sherpa-onnx-model-detect-ocr.cpp"
+  "${MODEL_DETECT_DIR}/ocr/sherpa-onnx-validate-ocr.cpp"
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-ort-guard-utils.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-stt-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-model-detect-stt.cpp"
@@ -81,6 +83,7 @@ target_include_directories(model_detect_test PRIVATE
   "${MODEL_DETECT_DIR}/punctuation"
   "${MODEL_DETECT_DIR}/vad"
   "${MODEL_DETECT_DIR}/alignment"
+  "${MODEL_DETECT_DIR}/ocr"
   "${MODEL_DETECT_DIR}/slid"
   "${MODEL_DETECT_DIR}/kws"
   "${MODEL_DETECT_DIR}/audio_tagging"
@@ -233,9 +236,11 @@ add_executable(diarization_core_test
   "${DIARIZATION_CORE_DIR}/sortformer-post-processor.cpp"
   "${DIARIZATION_CORE_DIR}/sortformer-streaming-model.cpp"
   "${DIARIZATION_CORE_DIR}/sherpa-onnx-streaming-diarization-wrapper.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
 )
 target_include_directories(diarization_core_test PRIVATE
   "${DIARIZATION_CORE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding"
   "${_ORT_API_WRAPPER}"
   "${_ORT_HOST_INCLUDE}"
@@ -280,6 +285,31 @@ set_tests_properties(speaker_embedding_core_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+set(OCR_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ocr")
+set(OCR_INSTRUCTION_SOURCES
+  "${OCR_CPP_ROOT}/OcrRecognizeSpec.cpp"
+  "${OCR_CPP_ROOT}/OcrCapabilities.cpp"
+  "${OCR_CPP_ROOT}/OcrGeometry.cpp"
+  "${OCR_CPP_ROOT}/OcrCrop.cpp"
+  "${OCR_CPP_ROOT}/markup/OcrTable.cpp"
+  "${OCR_CPP_ROOT}/markup/OcrOtsl.cpp"
+  "${OCR_CPP_ROOT}/markup/OcrElementKind.cpp"
+)
+add_executable(ocr_instruction_host_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/ocr/ocr_recognize_spec_host_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/ocr/ocr_geometry_host_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/ocr/ocr_markup_shared_host_test.cpp"
+  ${OCR_INSTRUCTION_SOURCES}
+)
+target_include_directories(ocr_instruction_host_test PRIVATE
+  "${OCR_CPP_ROOT}"
+)
+target_link_libraries(ocr_instruction_host_test PRIVATE ${SPEAKER_EMBEDDING_GTEST_LIBS})
+add_test(NAME ocr_instruction_host_test COMMAND $<TARGET_FILE:ocr_instruction_host_test>)
+set_tests_properties(ocr_instruction_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
 if(TARGET audio_f32le_to_format_host_test)
   add_test(NAME audio_f32le_to_format_host_test COMMAND $<TARGET_FILE:audio_f32le_to_format_host_test>)
   set_tests_properties(audio_f32le_to_format_host_test PROPERTIES
@@ -302,11 +332,14 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
   set(ALIGNMENT_CPP "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/alignment/sherpa_onnx_ctc_alignment.cpp")
   add_executable(ctc_alignment_host_test
     "${CMAKE_CURRENT_SOURCE_DIR}/alignment/ctc_alignment_host_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/ort/apply_ort_provider_host_test.cpp"
     "${ALIGNMENT_CPP}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
   )
   target_include_directories(ctc_alignment_host_test PRIVATE
     "${_ORT_API_WRAPPER}"
     "${_ORT_HOST_INCLUDE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/alignment"
   )
   target_link_directories(ctc_alignment_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
@@ -329,6 +362,469 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
   )
   message(STATUS "CTC alignment host test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  # --- OCR PpocrBackend host tests (unit + real ppocrv6-tiny golden) ---
+  set(OCR_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ocr")
+  set(OCR_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/ocr")
+  set(OCR_CONTEXT_SOURCE "${OCR_CPP_ROOT}/OcrRecognizeContext.cpp")
+  set(OCR_ORT_ENV_SOURCE "${OCR_CPP_ROOT}/OcrOrtEnv.cpp")
+  set(NEMOTRON_PARSE_SOURCES
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseBackend.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseImageOps.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseManifest.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseMarkup.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseNavit.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseNpy.cpp"
+    "${OCR_CPP_ROOT}/nemotron_parse/NemotronParseTokenizer.cpp"
+  )
+  set(PADDLEOCR_VL_SOURCES
+    "${OCR_CPP_ROOT}/OcrOrtHelpers.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlBackend.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlImageOps.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlManifest.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlMarkup.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlRope.cpp"
+    "${OCR_CPP_ROOT}/paddleocr_vl/PaddleocrVlTokenizer.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrOtsl.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrTable.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrElementKind.cpp"
+    "${OCR_CPP_ROOT}/OcrGeometry.cpp"
+    "${OCR_CPP_ROOT}/OcrCrop.cpp"
+  )
+  add_executable(ppocr_host_test
+    "${OCR_TEST_DIR}/ppocr_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    "${OCR_TEST_DIR}/ocr_recognize_context_host_test.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
+    "${OCR_CPP_ROOT}/OcrCapabilities.cpp"
+    "${OCR_CPP_ROOT}/OcrFactory.cpp"
+    ${PADDLEOCR_VL_SOURCES}
+    "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrDbPostprocess.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrImageOps.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrBackend.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrDbPostprocess.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrImageOps.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrManifest.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrRecDecode.cpp"
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTagsPrefix.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    ${NEMOTRON_PARSE_SOURCES}
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
+  )
+  target_include_directories(ppocr_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/doctr"
+    "${OCR_CPP_ROOT}/doc_vlm"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  # Homebrew ORT nests headers under include/onnxruntime/
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(ppocr_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(ppocr_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(ppocr_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(ppocr_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(ppocr_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(ppocr_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(ppocr_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME ppocr_host_test COMMAND $<TARGET_FILE:ppocr_host_test>)
+  set_tests_properties(ppocr_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "OCR ppocr_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  # --- OCR DoctrBackend host tests (unit + real doctr-mobile golden) ---
+  add_executable(doctr_host_test
+    "${OCR_TEST_DIR}/doctr_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
+    "${OCR_CPP_ROOT}/OcrFactory.cpp"
+    ${PADDLEOCR_VL_SOURCES}
+    "${OCR_CPP_ROOT}/ppocr/PpocrBackend.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrCtcDecoder.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrDbPostprocess.cpp"
+    "${OCR_CPP_ROOT}/ppocr/PpocrImageOps.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrBackend.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrDbPostprocess.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrImageOps.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrManifest.cpp"
+    "${OCR_CPP_ROOT}/doctr/DoctrRecDecode.cpp"
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTagsPrefix.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    ${NEMOTRON_PARSE_SOURCES}
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
+  )
+  target_include_directories(doctr_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/doctr"
+    "${OCR_CPP_ROOT}/doc_vlm"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(doctr_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(doctr_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(doctr_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(doctr_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(doctr_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(doctr_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(doctr_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME doctr_host_test COMMAND $<TARGET_FILE:doctr_host_test>)
+  set_tests_properties(doctr_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "OCR doctr_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  # --- OCR DocVlmBackend host tests (unit + granite-docling smoke) ---
+  add_executable(doc_vlm_host_test
+    "${OCR_TEST_DIR}/doc_vlm_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/OcrOrtHelpers.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmBackend.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTags.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmDocTagsPrefix.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmImageOps.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmManifest.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmPrompt.cpp"
+    "${OCR_CPP_ROOT}/doc_vlm/DocVlmTokenizer.cpp"
+    "${OCR_CPP_ROOT}/OcrGeometry.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrOtsl.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrElementKind.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
+  )
+  target_include_directories(doc_vlm_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/doc_vlm"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(doc_vlm_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(doc_vlm_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(doc_vlm_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(doc_vlm_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(doc_vlm_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(doc_vlm_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(doc_vlm_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME doc_vlm_host_test COMMAND $<TARGET_FILE:doc_vlm_host_test>)
+  set_tests_properties(doc_vlm_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    TIMEOUT 300
+  )
+  message(STATUS "OCR doc_vlm_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  add_executable(nemotron_parse_host_test
+    "${OCR_TEST_DIR}/nemotron_parse_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    "${OCR_CPP_ROOT}/OcrOrtHelpers.cpp"
+    ${NEMOTRON_PARSE_SOURCES}
+    "${OCR_CPP_ROOT}/OcrGeometry.cpp"
+    "${OCR_CPP_ROOT}/markup/OcrElementKind.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
+  )
+  target_include_directories(nemotron_parse_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/nemotron_parse"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(nemotron_parse_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(nemotron_parse_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(nemotron_parse_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(nemotron_parse_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(nemotron_parse_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(nemotron_parse_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(nemotron_parse_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME nemotron_parse_host_test COMMAND $<TARGET_FILE:nemotron_parse_host_test>)
+  set_tests_properties(nemotron_parse_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    TIMEOUT 600
+  )
+  message(STATUS "OCR nemotron_parse_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
+
+  add_executable(paddleocr_vl_host_test
+    "${OCR_TEST_DIR}/paddleocr_vl_host_test.cpp"
+    "${OCR_TEST_DIR}/ocr_test_image.cpp"
+    ${OCR_CONTEXT_SOURCE}
+    ${OCR_ORT_ENV_SOURCE}
+    "${OCR_CPP_ROOT}/OcrTextUtils.cpp"
+    ${PADDLEOCR_VL_SOURCES}
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
+  )
+  target_include_directories(paddleocr_vl_host_test PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+    "${OCR_CPP_ROOT}"
+    "${OCR_CPP_ROOT}/paddleocr_vl"
+    "${OCR_TEST_DIR}"
+    "${OCR_TEST_DIR}/vendor"
+    "${_ORT_API_WRAPPER}"
+    "${_ORT_HOST_INCLUDE}"
+  )
+  if(EXISTS "${_ORT_HOST_INCLUDE}/onnxruntime/onnxruntime_cxx_api.h")
+    target_include_directories(paddleocr_vl_host_test PRIVATE "${_ORT_HOST_INCLUDE}/onnxruntime")
+  endif()
+  target_link_directories(paddleocr_vl_host_test PRIVATE "${_ORT_HOST_LIBDIR}")
+  target_link_libraries(paddleocr_vl_host_test PRIVATE onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(paddleocr_vl_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(paddleocr_vl_host_test PROPERTIES
+    BUILD_RPATH "${_ORT_HOST_LIBDIR}"
+    INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(paddleocr_vl_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(paddleocr_vl_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME paddleocr_vl_host_test COMMAND $<TARGET_FILE:paddleocr_vl_host_test>)
+  set_tests_properties(paddleocr_vl_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    TIMEOUT 600
+  )
+  message(STATUS "OCR paddleocr_vl_host_test enabled (ORT lib: ${_ORT_HOST_LIBDIR})")
 else()
-  message(STATUS "CTC alignment host test skipped (set SHERPA_ONNX_HOST_ORT_ROOT or use Linux/macOS)")
+  message(STATUS "CTC alignment / OCR host tests skipped (set SHERPA_ONNX_HOST_ORT_ROOT or use Linux/macOS)")
 endif()
+
+# --- Offline ImageBuffer host tests (decode / registry / mmap) ---
+set(IMAGE_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image")
+set(IMAGEBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/imagebuffer")
+if(GTest_FOUND)
+  set(IMAGEBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+else()
+  set(IMAGEBUFFER_GTEST_LIBS gtest gtest_main)
+endif()
+
+set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
+
+add_executable(imagebuffer_host_test
+  "${IMAGEBUFFER_TEST_DIR}/image_test_utils.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_decode_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_registry_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_mmap_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_lazy_lru_test.cpp"
+  "${IMAGEBUFFER_TEST_DIR}/imagebuffer_export_test.cpp"
+  "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
+  "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
+  "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
+  "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+  "${PDF_CPP_ROOT}/PdfDocument.cpp"
+  "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
+  "${PDF_CPP_ROOT}/PdfLazySession.cpp"
+)
+target_include_directories(imagebuffer_host_test PRIVATE
+  "${IMAGE_CPP_ROOT}"
+  "${IMAGE_CPP_ROOT}/decode"
+  "${PDF_CPP_ROOT}"
+  "${IMAGEBUFFER_TEST_DIR}"
+)
+target_link_libraries(imagebuffer_host_test PRIVATE ${IMAGEBUFFER_GTEST_LIBS})
+# Threads for ImageRegistry neighbor prefetch (std::thread).
+find_package(Threads REQUIRED)
+target_link_libraries(imagebuffer_host_test PRIVATE Threads::Threads)
+
+# Optional libwebp for WebP decode tests
+find_package(PkgConfig QUIET)
+set(_IMAGEBUFFER_HAS_LIBWEBP OFF)
+if(PkgConfig_FOUND)
+  pkg_check_modules(LIBWEBP IMPORTED_TARGET libwebp)
+  if(TARGET PkgConfig::LIBWEBP)
+    target_link_libraries(imagebuffer_host_test PRIVATE PkgConfig::LIBWEBP)
+    target_compile_definitions(imagebuffer_host_test PRIVATE HAVE_LIBWEBP=1)
+    set(_IMAGEBUFFER_HAS_LIBWEBP ON)
+  endif()
+endif()
+if(NOT _IMAGEBUFFER_HAS_LIBWEBP)
+  # Homebrew / manual fallback
+  find_path(LIBWEBP_INCLUDE_DIR webp/decode.h
+    HINTS /opt/homebrew/include /usr/local/include /usr/include)
+  find_library(LIBWEBP_LIBRARY webp
+    HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+  if(LIBWEBP_INCLUDE_DIR AND LIBWEBP_LIBRARY)
+    target_include_directories(imagebuffer_host_test PRIVATE "${LIBWEBP_INCLUDE_DIR}")
+    target_link_libraries(imagebuffer_host_test PRIVATE "${LIBWEBP_LIBRARY}")
+    # libwebp often needs sharpyuv on modern builds
+    find_library(LIBSHARPYUV_LIBRARY sharpyuv
+      HINTS /opt/homebrew/lib /usr/local/lib /usr/lib)
+    if(LIBSHARPYUV_LIBRARY)
+      target_link_libraries(imagebuffer_host_test PRIVATE "${LIBSHARPYUV_LIBRARY}")
+    endif()
+    target_compile_definitions(imagebuffer_host_test PRIVATE HAVE_LIBWEBP=1)
+    set(_IMAGEBUFFER_HAS_LIBWEBP ON)
+  endif()
+endif()
+if(_IMAGEBUFFER_HAS_LIBWEBP)
+  message(STATUS "imagebuffer_host_test: libwebp enabled")
+else()
+  message(STATUS "imagebuffer_host_test: libwebp not found (WebP cases will GTEST_SKIP)")
+endif()
+
+add_test(NAME imagebuffer_host_test COMMAND $<TARGET_FILE:imagebuffer_host_test>)
+set_tests_properties(imagebuffer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+# PDF text-layer host test (disabled path by default; no PDFium required)
+set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+if(TARGET gtest AND TARGET gtest_main)
+  set(PDF_GTEST_LIBS gtest gtest_main)
+else()
+  find_package(GTest QUIET)
+  if(GTest_FOUND)
+    set(PDF_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  else()
+    set(PDF_GTEST_LIBS gtest gtest_main)
+  endif()
+endif()
+
+add_executable(pdf_text_layer_host_test
+  "${PDF_TEST_DIR}/pdf_text_layer_host_test.cpp"
+  "${PDF_CPP_ROOT}/PdfDocument.cpp"
+  "${PDF_CPP_ROOT}/PdfTextLayerExtractor.cpp"
+  "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
+  "${PDF_CPP_ROOT}/PdfLazySession.cpp"
+)
+target_include_directories(pdf_text_layer_host_test PRIVATE
+  "${PDF_CPP_ROOT}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image"
+)
+target_link_libraries(pdf_text_layer_host_test PRIVATE ${PDF_GTEST_LIBS})
+target_compile_definitions(pdf_text_layer_host_test PRIVATE
+  SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+# Default host builds leave HAVE_PDFIUM undefined (disabled stub).
+add_test(NAME pdf_text_layer_host_test COMMAND $<TARGET_FILE:pdf_text_layer_host_test>)
+set_tests_properties(pdf_text_layer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+# Offline e-document extractor (EPUB/FB2/CBZ; libarchive optional)
+set(DOC_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/document")
+set(DOC_IMAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image")
+set(DOC_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+set(LEXBOR_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_TESTS_CPP OFF CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(LEXBOR_BUILD_UTILS OFF CACHE BOOL "" FORCE)
+set(LEXBOR_INSTALL_HEADERS OFF CACHE BOOL "" FORCE)
+if(NOT TARGET lexbor_static)
+  add_subdirectory("${DOC_REPO_ROOT}/third_party/lexbor"
+                   "${CMAKE_CURRENT_BINARY_DIR}/lexbor" EXCLUDE_FROM_ALL)
+endif()
+
+add_executable(document_host_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/document/document_host_test.cpp"
+  "${DOC_CPP_ROOT}/DocumentExtractor.cpp"
+  "${DOC_CPP_ROOT}/DocArchive.cpp"
+  "${DOC_CPP_ROOT}/DocSniff.cpp"
+  "${DOC_CPP_ROOT}/DocHtmlText.cpp"
+  "${DOC_CPP_ROOT}/DocEpub.cpp"
+  "${DOC_CPP_ROOT}/DocFb2.cpp"
+  "${DOC_CPP_ROOT}/DocComic.cpp"
+  "${DOC_CPP_ROOT}/DocMobi.cpp"
+  "${DOC_REPO_ROOT}/third_party/pugixml/src/pugixml.cpp"
+  "${DOC_IMAGE_ROOT}/decode/ImageDecoder.cpp"
+)
+target_include_directories(document_host_test PRIVATE
+  "${DOC_CPP_ROOT}"
+  "${DOC_REPO_ROOT}/third_party/pugixml/src"
+  "${DOC_REPO_ROOT}/third_party/lexbor/source"
+  "${DOC_IMAGE_ROOT}"
+  "${DOC_IMAGE_ROOT}/decode"
+)
+target_link_libraries(document_host_test PRIVATE ${PDF_GTEST_LIBS} lexbor_static)
+find_path(LIBARCHIVE_INCLUDE_DIR archive.h
+  HINTS /opt/homebrew/opt/libarchive/include /opt/homebrew/include /usr/local/include /usr/include)
+find_library(LIBARCHIVE_LIBRARY archive
+  HINTS /opt/homebrew/opt/libarchive/lib /opt/homebrew/lib /usr/local/lib /usr/lib)
+if(LIBARCHIVE_INCLUDE_DIR AND LIBARCHIVE_LIBRARY)
+  target_include_directories(document_host_test PRIVATE "${LIBARCHIVE_INCLUDE_DIR}")
+  target_link_libraries(document_host_test PRIVATE "${LIBARCHIVE_LIBRARY}")
+  target_compile_definitions(document_host_test PRIVATE
+    HAVE_LIBARCHIVE=1
+    SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "document_host_test: libarchive enabled")
+else()
+  message(STATUS "document_host_test: libarchive not found (disabled-stub cases only)")
+endif()
+add_test(NAME document_host_test COMMAND $<TARGET_FILE:document_host_test>)
+set_tests_properties(document_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+

@@ -1,11 +1,14 @@
 package com.sherpaonnx
 
 import com.facebook.react.BaseReactPackage
+import com.facebook.react.bridge.ModuleSpec
 import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.module.model.ReactModuleInfo
 import com.facebook.react.module.model.ReactModuleInfoProvider
+import com.sherpaonnx.image.OfflineImageBufferFrameViewManager
 import java.util.HashMap
+import javax.inject.Provider
 
 class SherpaOnnxPackage : BaseReactPackage() {
   override fun getModule(name: String, reactContext: ReactApplicationContext): NativeModule? {
@@ -14,6 +17,14 @@ class SherpaOnnxPackage : BaseReactPackage() {
     } else {
       null
     }
+  }
+
+  override fun getViewManagers(reactContext: ReactApplicationContext): List<ModuleSpec> {
+    return listOf(
+      ModuleSpec.viewManagerSpec(
+        Provider { OfflineImageBufferFrameViewManager() }
+      )
+    )
   }
 
   override fun getReactModuleInfoProvider(): ReactModuleInfoProvider {

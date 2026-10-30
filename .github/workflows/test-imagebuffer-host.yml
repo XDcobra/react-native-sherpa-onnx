@@ -1,0 +1,53 @@
+# Host Offline ImageBuffer tests: decode / registry / mmap (C++ GTest).
+# WebP coverage requires libwebp-dev.
+
+name: Test – ImageBuffer host (C++)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/image/**'
+      - 'test/cpp/imagebuffer/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/imagebuffer/**'
+      - '.github/workflows/test-imagebuffer-host.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/image/**'
+      - 'test/cpp/imagebuffer/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/imagebuffer/**'
+      - '.github/workflows/test-imagebuffer-host.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-imagebuffer-host
+  cancel-in-progress: true
+
+jobs:
+  imagebuffer-host:
+    name: ImageBuffer host tests (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgtest-dev libwebp-dev pkg-config
+
+      - name: Configure and build imagebuffer_host_test
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target imagebuffer_host_test
+
+      - name: Run ImageBuffer host tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R imagebuffer_host_test --output-on-failure

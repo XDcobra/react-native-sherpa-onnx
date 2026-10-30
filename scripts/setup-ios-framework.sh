@@ -103,10 +103,26 @@ else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBARCHIVE is set. Skipping libarchive framework download.${NC}" >&2
 fi
 
+FRAMEWORK_SLUGS+=(lexbor)
+
+# libwebp is opt-in (default off) — only download when explicitly enabled.
+if [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-false}" = "true" ]; then
+  FRAMEWORK_SLUGS+=(libwebp)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_ENABLE_LIBWEBP not set. Skipping libwebp framework download.${NC}" >&2
+fi
+
 if [ "${SHERPA_ONNX_DISABLE_FFMPEG:-0}" != "1" ] && [ "${SHERPA_ONNX_DISABLE_FFMPEG:-false}" != "true" ]; then
   FRAMEWORK_SLUGS+=(ffmpeg)
 else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_FFMPEG is set. Skipping FFmpeg framework download.${NC}" >&2
+fi
+
+# PDFium is opt-in (default off) — only download when explicitly enabled.
+if [ "${SHERPA_ONNX_ENABLE_PDFIUM:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_PDFIUM:-false}" = "true" ]; then
+  FRAMEWORK_SLUGS+=(pdfium)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_ENABLE_PDFIUM not set. Skipping pdfium framework download.${NC}" >&2
 fi
 
 # Set config variables for a given framework slug. Call before using TAG_* XCFRAMEWORK_* etc.
@@ -146,6 +162,39 @@ get_framework_config() {
       HEADER_CHECK="Headers/archive.h"
       DISPLAY_NAME="libarchive"
       ;;
+    lexbor)
+      TAG_FILE="$PROJECT_ROOT/third_party/lexbor_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="lexbor-ios-v"
+      XCFRAMEWORK_NAME="lexbor.xcframework"
+      ZIP_ASSET_NAME="lexbor-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-lexbor"
+      LIB_DEVICE="liblexbor.a"
+      LIB_SIMULATOR="liblexbor.a"
+      HEADER_CHECK="Headers/lexbor/html/parser.h"
+      DISPLAY_NAME="lexbor"
+      ;;
+    libwebp)
+      TAG_FILE="$PROJECT_ROOT/third_party/libwebp_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="libwebp-ios-v"
+      XCFRAMEWORK_NAME="libwebp.xcframework"
+      ZIP_ASSET_NAME="libwebp-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-libwebp"
+      LIB_DEVICE="libwebp.a"
+      LIB_SIMULATOR="libwebp.a"
+      HEADER_CHECK="Headers/webp/decode.h"
+      DISPLAY_NAME="libwebp"
+      ;;
+    pdfium)
+      TAG_FILE="$PROJECT_ROOT/third_party/pdfium_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="pdfium-ios-v"
+      XCFRAMEWORK_NAME="pdfium.xcframework"
+      ZIP_ASSET_NAME="pdfium-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-pdfium"
+      LIB_DEVICE="pdfium.framework/pdfium"
+      LIB_SIMULATOR="pdfium.framework/pdfium"
+      HEADER_CHECK="pdfium.framework/Headers/fpdfview.h"
+      DISPLAY_NAME="pdfium"
+      ;;
     *)
       echo "Unknown framework: $slug" >&2
       return 1
@@ -163,6 +212,13 @@ framework_valid() {
   [ -f "$fw_root/ios-arm64_x86_64-simulator/$LIB_SIMULATOR" ] || return 1
   [ -f "$fw_root/ios-arm64_x86_64-simulator/$HEADER_CHECK" ] || return 1
   return 0
+}
+
+post_process_ios_frameworks() {
+  # Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
+  if [ -d "$FRAMEWORKS_DIR/FFmpeg.xcframework" ]; then
+    find "$FRAMEWORKS_DIR/FFmpeg.xcframework" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
+  fi
 }
 
 # Helper: get installed framework version (from version file or xcframework VERSION.txt)
@@ -282,11 +338,7 @@ if [ "$FORCE_DOWNLOAD" != true ] && [ "$SKIP_ALL" = true ]; then
     fi
   done
   
-  # Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
-  if [ -d "$FRAMEWORKS_DIR/FFmpeg.xcframework" ]; then
-    find "$FRAMEWORKS_DIR/FFmpeg.xcframework" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
-  fi
-
+  post_process_ios_frameworks
   exit 0
 fi
 
@@ -476,9 +528,5 @@ if [ "$INTERACTIVE" = true ]; then
   echo "" >&2
 fi
 
-# Fix CocoaPods header flattening: delete FFmpeg's time.h so it doesn't shadow system time.h
-if [ -d "$FRAMEWORKS_DIR/FFmpeg.xcframework" ]; then
-  find "$FRAMEWORKS_DIR/FFmpeg.xcframework" -name "time.h" -path "*/libavutil/time.h" -delete 2>/dev/null || true
-fi
-
+post_process_ios_frameworks
 exit 0

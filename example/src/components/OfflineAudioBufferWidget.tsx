@@ -746,7 +746,22 @@ export const OfflineAudioBufferWidget = forwardRef<
   if (sourceType === 'example') {
     return (
       <View>
-        <Text style={s.subsectionTitle}>Select Audio File:</Text>
+        <View style={s.sourceActionRow}>
+          <TouchableOpacity
+            style={[s.backButton, busy && s.buttonDisabled]}
+            onPress={() => {
+              setSourceType(null);
+              setDecodeError(null);
+            }}
+            disabled={busy}
+            accessibilityLabel="Back"
+          >
+            <Ionicons name="chevron-back" size={22} color="#007AFF" />
+          </TouchableOpacity>
+          <Text style={[s.subsectionTitle, s.sourceActionTitle]}>
+            Select Audio File:
+          </Text>
+        </View>
         <ExampleAudioFileList
           audioFiles={audioFiles}
           favoriteAudioFileIds={favoriteAudioFileIds}
@@ -758,16 +773,6 @@ export const OfflineAudioBufferWidget = forwardRef<
             <Text style={s.errorText}>{errorMsg}</Text>
           </View>
         ) : null}
-        <TouchableOpacity
-          style={[s.changeSourceButton, busy && s.buttonDisabled]}
-          onPress={() => {
-            setSourceType(null);
-            setDecodeError(null);
-          }}
-          disabled={busy}
-        >
-          <Text style={s.changeSourceButtonText}>← Change Audio Source</Text>
-        </TouchableOpacity>
       </View>
     );
   }
@@ -775,40 +780,42 @@ export const OfflineAudioBufferWidget = forwardRef<
   // ── Own file ──
   return (
     <View>
-      <Text style={s.subsectionTitle}>Select Audio File:</Text>
-      <TouchableOpacity
-        style={[s.pickButton, busy && s.buttonDisabled]}
-        onPress={handlePickOwnFile}
-        disabled={busy}
-      >
-        {decoding ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <View style={s.rowCenter}>
-            <Ionicons
-              name="folder-open-outline"
-              size={16}
-              style={s.iconInline}
-            />
-            <Text style={s.pickButtonText}>Choose Audio File</Text>
-          </View>
-        )}
-      </TouchableOpacity>
+      <View style={s.sourceActionRow}>
+        <TouchableOpacity
+          style={[s.backButton, busy && s.buttonDisabled]}
+          onPress={() => {
+            setSourceType(null);
+            setDecodeError(null);
+          }}
+          disabled={busy}
+          accessibilityLabel="Back"
+        >
+          <Ionicons name="chevron-back" size={22} color="#007AFF" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.pickButton, busy && s.buttonDisabled]}
+          onPress={handlePickOwnFile}
+          disabled={busy}
+        >
+          {decoding ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <View style={s.rowCenter}>
+              <Ionicons
+                name="folder-open-outline"
+                size={16}
+                style={s.iconInline}
+              />
+              <Text style={s.pickButtonText}>Choose Audio File</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
       {errorMsg ? (
         <View style={s.errorContainer}>
           <Text style={s.errorText}>{errorMsg}</Text>
         </View>
       ) : null}
-      <TouchableOpacity
-        style={[s.changeSourceButton, busy && s.buttonDisabled]}
-        onPress={() => {
-          setSourceType(null);
-          setDecodeError(null);
-        }}
-        disabled={busy}
-      >
-        <Text style={s.changeSourceButtonText}>← Change Audio Source</Text>
-      </TouchableOpacity>
     </View>
   );
 });

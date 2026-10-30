@@ -111,6 +111,64 @@ enum class AlignmentModelKind {
     kWav2Vec2
 };
 
+/** Offline OCR families: ppocr, doctr, doc_vlm, nemotron_parse, paddleocr_vl. */
+enum class OcrModelKind {
+    kUnknown,
+    kPpocr,
+    /** docTR / OnnxTR Det+Rec packs (`ocr_manifest.json`). */
+    kDoctr,
+    /** Granite-Docling packs: vision encoder, embed tokens, merged decoder, tokenizer, manifest. */
+    kDocVlm,
+    /** Nemotron-3.5-Parse: granite octet plus patch_embed + pos_embed.npy. */
+    kNemotronParse,
+    /** PaddleOCR-VL: vision_encoder + embedding + decoder (not embed_tokens / decoder_model_merged). */
+    kPaddleocrVl
+};
+
+/** Canonical family token. Alias only `paddleocr-vl` (never bare `paddleocr`). */
+inline OcrModelKind ParseOcrModelType(const std::string& modelType) {
+    const std::string t = model_detect::ToLower(modelType);
+    if (t == "paddleocr_vl" || t == "paddleocr-vl") {
+        return OcrModelKind::kPaddleocrVl;
+    }
+    if (t == "ppocr" || t == "paddleocr" || t == "pp-ocr") {
+        return OcrModelKind::kPpocr;
+    }
+    if (t == "nemotron_parse" || t == "nemotron-parse") {
+        return OcrModelKind::kNemotronParse;
+    }
+    if (t == "doc_vlm" || t == "docvlm" || t == "doc-vlm" ||
+        t == "granite-docling" || t == "docling") {
+        return OcrModelKind::kDocVlm;
+    }
+    if (t == "doctr" || t == "onnxtr" || t == "doc-tr" || t == "doc_tr") {
+        return OcrModelKind::kDoctr;
+    }
+    return OcrModelKind::kUnknown;
+}
+
+inline const char* OcrModelKindToLiteral(OcrModelKind kind) {
+    switch (kind) {
+        case OcrModelKind::kPpocr:
+            return "ppocr";
+        case OcrModelKind::kDoctr:
+            return "doctr";
+        case OcrModelKind::kDocVlm:
+            return "doc_vlm";
+        case OcrModelKind::kNemotronParse:
+            return "nemotron_parse";
+        case OcrModelKind::kPaddleocrVl:
+            return "paddleocr_vl";
+        default:
+            return "unknown";
+    }
+}
+
+inline bool IsOcrVlmKind(OcrModelKind kind) {
+    return kind == OcrModelKind::kDocVlm || kind == OcrModelKind::kNemotronParse ||
+           kind == OcrModelKind::kPaddleocrVl;
+}
+
 /** Offline source separation: Spleeter (vocals+accompaniment) or UVR (single MDX-Net ONNX). */
 enum class SeparationModelKind {
     kUnknown,
@@ -333,6 +391,43 @@ struct AlignmentModelPaths {
     std::string vocab;
 };
 
+struct OcrModelPaths {
+    /** Text-detection ONNX (DB/DB++ style). */
+    std::string det;
+    /** Text-recognition ONNX (CRNN/SVTR style). */
+    std::string rec;
+    /** Optional orientation / angle classifier ONNX. */
+    std::string cls;
+    /** Recognition dictionary / character list (yml or txt) — ppocr. */
+    std::string rec_dict;
+    /** Family/vocab/preprocess manifest (`ocr_manifest.json`) — doctr and doc_vlm. */
+    std::string manifest;
+    /** doc_vlm: `vision_encoder.onnx`. */
+    std::string vision_encoder;
+    /** doc_vlm: `vision_encoder.onnx_data` (underscore, not `.onnx.data`). */
+    std::string vision_encoder_data;
+    /** doc_vlm: `embed_tokens.onnx`. */
+    std::string embed_tokens;
+    /** doc_vlm: `embed_tokens.onnx_data`. */
+    std::string embed_tokens_data;
+    /** paddleocr_vl: `embedding.onnx` (not embed_tokens). */
+    std::string embedding;
+    /** paddleocr_vl: `embedding.onnx_data`. */
+    std::string embedding_data;
+    /** doc_vlm: `decoder_model_merged.onnx`. paddleocr_vl: `decoder.onnx`. Key name is `decoder`. */
+    std::string decoder;
+    /** doc_vlm: `decoder_model_merged.onnx_data`. */
+    std::string decoder_data;
+    /** doc_vlm / nemotron_parse: `tokenizer.json`. */
+    std::string tokenizer;
+    /** nemotron_parse: `patch_embed.onnx`. */
+    std::string patch_embed;
+    /** nemotron_parse: `patch_embed.onnx_data` (optional when the graph is self-contained). */
+    std::string patch_embed_data;
+    /** nemotron_parse: `pos_embed.npy`. */
+    std::string pos_embed;
+};
+
 struct LanguageIdModelPaths {
     std::string encoder;
     std::string decoder;
@@ -472,6 +567,19 @@ struct AlignmentDetectResult {
     std::vector<PublicLanguageRow> derivedLanguages;
     /** fp16, int8, int8-quantized, unknown — from folder name heuristics. */
     std::string quantization;
+};
+
+struct OcrDetectResult {
+    bool ok = false;
+    std::string error;
+    std::vector<DetectedModel> detectedModels;
+    OcrModelKind selectedKind = OcrModelKind::kUnknown;
+    OcrModelPaths paths;
+    std::vector<DetectionSource> detectionSources;
+    std::vector<PublicLanguageRow> derivedLanguages;
+    std::string quantization;
+    /** tiny / small / medium / large / unknown — from pack basename heuristics. */
+    std::string sizeTier;
 };
 
 struct LanguageIdDetectResult {
@@ -672,6 +780,18 @@ AlignmentDetectResult DetectAlignmentModel(
     const std::string& quantization = ""
 );
 
+/**
+ * OCR pack detection. Pass at least one of `model_dir` or `asset_name`.
+ * v1 family: ppocr via Det+Rec+dict co-occurrence (dynamic filename tokens).
+ * No ORT online-guard (offline multi-file layout; same rationale as Alignment).
+ */
+OcrDetectResult DetectOcrModel(
+    const std::optional<std::string>& model_dir,
+    const std::optional<std::string>& asset_name,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
 LanguageIdDetectResult DetectLanguageIdModel(
     const std::optional<std::string>& model_dir,
     const std::optional<std::string>& asset_name,
@@ -746,6 +866,14 @@ PunctuationDetectResult DetectPunctuationModelFromFileList(
 /** Test-only: Like DetectAlignmentModel but takes a pre-built file list; no filesystem access.
  *  Only used by the host-side C++ test suite (test/cpp/model_detect/model_detect_test.cpp). */
 AlignmentDetectResult DetectAlignmentModelFromFileList(
+    const std::vector<model_detect::FileEntry>& files,
+    const std::string& modelDir,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
+/** Test-only: Like DetectOcrModel but takes a pre-built file list; no filesystem access. */
+OcrDetectResult DetectOcrModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
     const std::string& modelDir,
     const std::string& modelType = "auto",

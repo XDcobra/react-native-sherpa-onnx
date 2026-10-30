@@ -37,7 +37,7 @@ Hardware acceleration support for ONNX Runtime: QNN (Qualcomm NPU), NNAPI, XNNPA
 | Provider list | ✅ | `getAvailableProviders()` — compiled ONNX Runtime EPs |
 | SoC detection | ✅ | `getDeviceQnnSoc()` — Android 12+ |
 
-All `get*Support()` methods return the same `AccelerationSupport` shape. Use `provider` in `createSTT()`/`createTTS()` options to select a backend.
+All `get*Support()` methods return the same `AccelerationSupport` shape. Use `provider` in `createSTT()`/`createTTS()`/`createOCR()` options to select a backend.
 
 ---
 
@@ -306,12 +306,24 @@ console.log('Available EPs:', providers);
 - Core ML with Neural Engine gives significant speedup on Apple A12+ and M1+ chips
 - Always measure latency with your specific model — `canInit` doesn't guarantee speed improvement
 
+## Example app
+
+
+| ![Example 1](./images/example/settings_1.png) | ![Example 2](./images/example/settings_2.png) | ![Example 3](./images/example/settings_3.png) |
+| --- | --- | --- |
+
+
+The monorepo example exposes **Settings** (provider diagnostics) as a developer showcase for execution-provider checks. See [example/README.md](../example/README.md#settings-and-provider-diagnostics).
+
 ---
 
 ## See also
 
 - [STT](stt-offline.md) — `provider` option in `createSTT()`
 - [TTS](tts-offline.md) — `provider` option in `createTTS()`
+- [OCR](ocr-offline.md) — `provider` option in `createOCR()`
+- [Alignment](alignment-offline.md) — `provider` option on accurate `alignTextToAudio`
+- [Diarization streaming](diarization-streaming.md) — `provider` option in `createStreamingDiarization()`
 - [Download Manager](download-manager.md) — QNN model category
 - [Model Setup](model-setup.md) — Model discovery and paths
 

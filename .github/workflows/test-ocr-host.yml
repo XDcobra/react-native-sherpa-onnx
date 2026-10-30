@@ -1,0 +1,181 @@
+# Host OCR tests: unit (CTC/DB/factory) + real PpocrBackend golden with ppocrv6-tiny
+# + DoctrBackend golden with doctr-mobile
+# + DocVlmBackend unit tests (grid math, DocTags, Family, empty extras).
+# + paddleocr_vl_host_test units (no multi-GB pack download).
+# The granite pack is not downloaded on pull_request or push; tokenizer, prompt,
+# and DocVlmSmoke.EnHello skip. Dispatch with run_doc_vlm_golden to download the
+# archive and run the smoke. Downloaded packs come from the ocr-models release.
+
+name: Test – OCR host (C++)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/ocr/**'
+      - 'test/cpp/ocr/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/ocr/**'
+      - '.github/workflows/test-ocr-host.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/ocr/**'
+      - 'test/cpp/ocr/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/ocr/**'
+      - '.github/workflows/test-ocr-host.yml'
+  workflow_dispatch:
+    inputs:
+      run_doc_vlm_golden:
+        description: Download docvlm-granite-258m-fp32 and run DocVlmSmoke.EnHello
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-ocr-host
+  cancel-in-progress: true
+
+jobs:
+  ocr-host:
+    name: OCR host tests — ppocr + doctr + doc_vlm + nemotron_parse + paddleocr_vl units (no VLM packs)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgtest-dev
+
+      # ── ppocr pack ──────────────────────────────────────────────
+      - name: Cache ppocrv6-tiny pack
+        id: cache-ocr-tiny
+        uses: actions/cache@v4
+        with:
+          path: build/ocr-models/ppocrv6-tiny
+          key: ocr-models-ppocrv6-tiny-v1
+
+      - name: Download and extract ppocrv6-tiny
+        if: steps.cache-ocr-tiny.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/ocr-models dist/ocr-models
+          curl -fsSL -o dist/ocr-models/ppocrv6-tiny.tar.bz2 \
+            "https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/ppocrv6-tiny.tar.bz2"
+          tar xjf dist/ocr-models/ppocrv6-tiny.tar.bz2 -C build/ocr-models
+          test -f build/ocr-models/ppocrv6-tiny/det.onnx
+          test -f build/ocr-models/ppocrv6-tiny/rec.onnx
+          test -f build/ocr-models/ppocrv6-tiny/rec_inference.yml
+
+      # ── doctr pack ──────────────────────────────────────────────
+      - name: Cache doctr-mobile pack
+        id: cache-doctr-mobile
+        uses: actions/cache@v4
+        with:
+          path: build/ocr-models/doctr-mobile
+          key: ocr-models-doctr-mobile-v1
+
+      - name: Download and extract doctr-mobile
+        if: steps.cache-doctr-mobile.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/ocr-models dist/ocr-models
+          curl -fsSL -o dist/ocr-models/doctr-mobile.tar.bz2 \
+            "https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/doctr-mobile.tar.bz2"
+          tar xjf dist/ocr-models/doctr-mobile.tar.bz2 -C build/ocr-models
+          test -f build/ocr-models/doctr-mobile/det.onnx
+          test -f build/ocr-models/doctr-mobile/rec.onnx
+          test -f build/ocr-models/doctr-mobile/ocr_manifest.json
+
+      # ── build + run ─────────────────────────────────────────────
+      - name: Configure and build ppocr_host_test + doctr_host_test + doc_vlm_host_test + nemotron_parse_host_test + paddleocr_vl_host_test + ocr_instruction_host_test
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target ppocr_host_test doctr_host_test doc_vlm_host_test nemotron_parse_host_test paddleocr_vl_host_test ocr_instruction_host_test
+
+      - name: Run ppocr host tests
+        working-directory: ${{ github.workspace }}
+        env:
+          PPOCR_MODEL_DIR: ${{ github.workspace }}/build/ocr-models/ppocrv6-tiny
+        run: |
+          ctest --test-dir test/cpp/build -R ppocr_host_test --output-on-failure
+
+      - name: Run doctr host tests
+        working-directory: ${{ github.workspace }}
+        env:
+          DOCTR_MODEL_DIR: ${{ github.workspace }}/build/ocr-models/doctr-mobile
+        run: |
+          ctest --test-dir test/cpp/build -R doctr_host_test --output-on-failure
+
+      # Pack-gated doc_vlm cases GTEST_SKIP. Do not set DOCVLM_MODEL_DIR.
+      - name: Run doc_vlm host unit tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R doc_vlm_host_test --output-on-failure
+
+      # Pack-gated nemotron_parse cases GTEST_SKIP. Do not set NEMOTRON_PARSE_MODEL_DIR.
+      - name: Run nemotron_parse host unit tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R nemotron_parse_host_test --output-on-failure
+
+      # Pack-gated paddleocr_vl cases GTEST_SKIP. Do not set PADDLEOCR_VL_MODEL_DIR.
+      - name: Run paddleocr_vl host unit tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R paddleocr_vl_host_test --output-on-failure
+
+      - name: Run OCR instruction host tests
+        working-directory: ${{ github.workspace }}
+        run: |
+          ctest --test-dir test/cpp/build -R '^ocr_instruction_host_test$' --output-on-failure
+
+  doc-vlm-golden:
+    name: OCR host smoke — doc_vlm granite (manual)
+    if: github.event_name == 'workflow_dispatch' && inputs.run_doc_vlm_golden == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgtest-dev
+
+      - name: Cache docvlm-granite-258m-fp32 archive
+        id: cache-docvlm-archive
+        uses: actions/cache@v4
+        with:
+          path: dist/ocr-models/docvlm-granite-258m-fp32.tar.bz2
+          key: ocr-models-docvlm-granite-258m-fp32-archive-v1
+
+      - name: Download docvlm-granite-258m-fp32 archive
+        if: steps.cache-docvlm-archive.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p dist/ocr-models
+          curl -fsSL -o dist/ocr-models/docvlm-granite-258m-fp32.tar.bz2 \
+            "https://github.com/XDcobra/react-native-sherpa-onnx/releases/download/ocr-models/docvlm-granite-258m-fp32.tar.bz2"
+
+      - name: Extract docvlm-granite-258m-fp32
+        run: |
+          mkdir -p build/ocr-models
+          tar xjf dist/ocr-models/docvlm-granite-258m-fp32.tar.bz2 -C build/ocr-models
+          test -f build/ocr-models/docvlm-granite-258m-fp32/decoder_model_merged.onnx_data
+
+      - name: Configure and build doc_vlm_host_test
+        run: |
+          mkdir -p test/cpp/build && cd test/cpp/build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --target doc_vlm_host_test
+
+      - name: Run doc_vlm host tests including EnHello smoke
+        working-directory: ${{ github.workspace }}
+        env:
+          DOCVLM_MODEL_DIR: ${{ github.workspace }}/build/ocr-models/docvlm-granite-258m-fp32
+        run: |
+          ctest --test-dir test/cpp/build -R doc_vlm_host_test --output-on-failure --timeout 1200
