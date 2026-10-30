@@ -4,6 +4,8 @@
 #include "VideoImageBridge.h"
 #include "VideoLog.h"
 #include "VideoRegistry.h"
+#include "encode/EncoderBackend.h"
+#include "encode/VideoExportSession.h"
 #include "audio/LiveAudioTap.h"
 #include "audio/VideoAudioExtractor.h"
 #include "core/Uuid.h"
@@ -16,6 +18,7 @@
 #import "SherpaOnnx+VideoModule.h"
 #import "VideoMemoryPressure.h"
 #import "VideoToolboxDecoder.h"
+#import "VideoToolboxEncoder.h"
 
 #include <atomic>
 #include <memory>
@@ -38,6 +41,7 @@ using sherpa_onnx::video::VideoBufferState;
 using sherpa_onnx::video::VideoKind;
 using sherpa_onnx::video::VideoRegistry;
 using sherpa_onnx::video::VideoToolboxDecoder;
+using sherpa_onnx::video::VideoToolboxEncoder;
 
 namespace {
 
@@ -65,6 +69,10 @@ void EnsureVideoInit() {
     RegisterDecoderFactory([]() {
       return std::unique_ptr<sherpa_onnx::video::DecoderBackend>(
           new VideoToolboxDecoder());
+    });
+    sherpa_onnx::video::RegisterEncoderFactory([]() {
+      return std::unique_ptr<sherpa_onnx::video::EncoderBackend>(
+          new VideoToolboxEncoder());
     });
     SherpaVideoInstallMemoryPressureObserver();
     (void)reg.SweepOrphans();
@@ -550,6 +558,106 @@ void BindVideoModule(SherpaOnnx *mod) {
             ?: @"",
         @"sourceSampleRate" : @(result.sourceSampleRate),
         @"sourceChannels" : @(result.sourceChannels),
+      });
+    });
+  });
+}
+
+- (void)exportVideo:(NSString *)bufferId
+        destination:(NSDictionary *)destination
+             format:(NSString *)format
+            options:(NSDictionary *)options
+            resolve:(RCTPromiseResolveBlock)resolve
+             reject:(RCTPromiseRejectBlock)reject {
+  BindVideoModule(self);
+  NSString *operationId = options[@"operationId"];
+  if (![operationId isKindOfClass:[NSString class]] || [operationId length] == 0) {
+    operationId = [[NSUUID UUID] UUIDString];
+  }
+  NSString *codecStr = [(options[@"codec"] ?: @"h264") lowercaseString];
+  int bitrate = 2000000;
+  if ([options[@"bitrate"] respondsToSelector:@selector(intValue)]) {
+    bitrate = [options[@"bitrate"] intValue];
+  }
+  int64_t fromUs = 0;
+  int64_t toUs = -1;
+  int maxSide = 0;
+  if ([options[@"fromUs"] respondsToSelector:@selector(longLongValue)]) {
+    fromUs = [options[@"fromUs"] longLongValue];
+  }
+  if ([options[@"toUs"] respondsToSelector:@selector(longLongValue)]) {
+    toUs = [options[@"toUs"] longLongValue];
+  }
+  if ([options[@"maxSide"] respondsToSelector:@selector(intValue)]) {
+    maxSide = [options[@"maxSide"] intValue];
+  }
+  NSString *fmt = [(format ?: @"mp4") lowercaseString];
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOWriteHandle *wh =
+      [FileIOResolver resolveDestination:destination
+                               overwrite:YES
+                  createParentDirectories:YES
+                                    error:&errCode
+                                  message:&errMsg];
+  if (!wh || wh.filePath.length == 0) {
+    reject(errCode ?: @"VIDEO_INVALID_ARGUMENT",
+           errMsg ?: @"Failed to resolve FileDestination", nil);
+    return;
+  }
+
+  auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+  std::string opId = [operationId UTF8String];
+  pa_register_decode_cancel(opId, cancelFlag);
+  std::string idStr = bufferId ? [bufferId UTF8String] : "";
+  std::string pathStr = [wh.filePath UTF8String];
+  std::string formatStr = [fmt UTF8String];
+  sherpa_onnx::video::VideoExportOptions opts;
+  opts.codec = [codecStr isEqualToString:@"hevc"]
+                   ? sherpa_onnx::video::VideoCodec::Hevc
+                   : sherpa_onnx::video::VideoCodec::H264;
+  opts.bitrate = bitrate;
+  opts.fromUs = fromUs;
+  opts.toUs = toUs;
+  opts.maxSide = maxSide;
+  __weak SherpaOnnx *weakSelf = self;
+  NSString *opIdNs = operationId;
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    auto st = sherpa_onnx::video::VideoExportSession::Run(
+        idStr, pathStr, formatStr, opts, cancelFlag.get(),
+        [weakSelf, opIdNs](int percent, int64_t encodedUs) {
+          SherpaOnnx *strongSelf = weakSelf;
+          if (!strongSelf) return;
+          dispatch_async(dispatch_get_main_queue(), ^{
+            [strongSelf sendEventWithName:@"decodeProgress"
+                                     body:@{
+                                       @"operationId" : opIdNs,
+                                       @"percent" : @(percent),
+                                       @"encodedUs" : @((double)encodedUs),
+                                       @"framesDecoded" : @((double)encodedUs),
+                                       @"totalFramesEstimate" : @(0),
+                                       @"sourceSampleRate" : @(0),
+                                       @"sourceChannels" : @(0),
+                                     }];
+          });
+        });
+    pa_unregister_decode_cancel(opId);
+    if (!st.ok) {
+      [wh cleanup];
+      [[NSFileManager defaultManager] removeItemAtPath:wh.filePath error:nil];
+      NSString *code = [NSString stringWithUTF8String:st.errorCode.c_str()];
+      NSString *msg = [NSString stringWithUTF8String:st.errorMessage.c_str()];
+      dispatch_async(dispatch_get_main_queue(), ^{
+        reject(code, msg, nil);
+      });
+      return;
+    }
+    NSString *resultPath = wh.resultPath.length > 0 ? wh.resultPath : wh.filePath;
+    [wh cleanup];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      resolve(@{
+        @"outputKind" : @"fs",
+        @"outputPath" : resultPath ?: wh.filePath,
       });
     });
   });

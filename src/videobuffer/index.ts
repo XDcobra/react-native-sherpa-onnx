@@ -12,6 +12,7 @@ import {
   exportOfflineImageBufferFrame,
   releaseOfflineImageBuffer,
 } from '../imagebuffer';
+import { assertFileDestinationSupportedOnPlatform } from '../fileio/platformValidation';
 import type {
   FileDestination,
   FileSource,
@@ -31,6 +32,7 @@ import type {
   CreateOfflineAudioFromVideoOptions,
   CreateOfflineImageFromVideoOptions,
   ExportVideoFrameOptions,
+  ExportVideoOptions,
   IngestFileToLiveOptions,
   LiveVideoBufferEvent,
   LiveVideoBufferFinishedRef,
@@ -46,9 +48,30 @@ import type {
   PipelineVideoBufferIdSource,
   PipelineVideoBufferInfo,
   VideoAudioExtractResult,
+  VideoExportCodec,
+  VideoExportContainer,
 } from './types';
 
 let extractOpId = 0;
+let exportOpId = 0;
+
+const VIDEO_EXPORT_FORMATS: readonly VideoExportContainer[] = [
+  'mp4',
+  'mov',
+  'mkv',
+  'webm',
+];
+const VIDEO_EXPORT_CODECS: readonly VideoExportCodec[] = ['h264', 'hevc'];
+
+function parseResolvedFileRef(result: {
+  outputKind: string;
+  outputPath: string;
+}): ResolvedFileRef {
+  if (result.outputKind === 'contentUri') {
+    return { kind: 'contentUri', uri: result.outputPath };
+  }
+  return { kind: 'fs', path: result.outputPath };
+}
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
@@ -539,6 +562,110 @@ export async function createLiveAudioBufferFromLiveVideo(
   };
 }
 
+export async function exportVideo(
+  video: OfflineVideoBufferIdSource,
+  output: FileDestination,
+  format: VideoExportContainer,
+  options?: ExportVideoOptions
+): Promise<ResolvedFileRef> {
+  const id = resolveOfflineVideoBufferId(video);
+  if (!(VIDEO_EXPORT_FORMATS as readonly string[]).includes(format)) {
+    throw new Error(
+      `VIDEO_INVALID_ARGUMENT: format must be one of ${VIDEO_EXPORT_FORMATS.join(
+        ', '
+      )}`
+    );
+  }
+  const codec: VideoExportCodec = options?.codec ?? 'h264';
+  if (!(VIDEO_EXPORT_CODECS as readonly string[]).includes(codec)) {
+    throw new Error(
+      `VIDEO_INVALID_ARGUMENT: codec must be one of ${VIDEO_EXPORT_CODECS.join(
+        ', '
+      )}`
+    );
+  }
+  const bitrate = options?.bitrate ?? 2_000_000;
+  if (!Number.isFinite(bitrate) || bitrate <= 0) {
+    throw new Error(
+      'VIDEO_INVALID_ARGUMENT: bitrate must be a finite number > 0'
+    );
+  }
+  const fromUs = options?.fromUs;
+  const toUs = options?.toUs;
+  if (fromUs !== undefined && (!Number.isFinite(fromUs) || fromUs < 0)) {
+    throw new Error(
+      'VIDEO_INVALID_ARGUMENT: fromUs must be a finite number >= 0'
+    );
+  }
+  if (toUs !== undefined && (!Number.isFinite(toUs) || toUs < 0)) {
+    throw new Error(
+      'VIDEO_INVALID_ARGUMENT: toUs must be a finite number >= 0'
+    );
+  }
+  if (fromUs !== undefined && toUs !== undefined && toUs <= fromUs) {
+    throw new Error('VIDEO_INVALID_ARGUMENT: toUs must be greater than fromUs');
+  }
+  const maxSide = options?.maxSide ?? 0;
+  if (!Number.isFinite(maxSide) || maxSide < 0) {
+    throw new Error(
+      'VIDEO_INVALID_ARGUMENT: maxSide must be a finite number >= 0'
+    );
+  }
+  assertFileDestinationSupportedOnPlatform(output);
+
+  const operationId = `vid_exp_${Date.now()}_${++exportOpId}`;
+  let progressSubscription: { remove: () => void } | null = null;
+  let abortHandler: (() => void) | null = null;
+  try {
+    if (options?.onProgress) {
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+      const onProgress = options.onProgress;
+      progressSubscription = emitter.addListener(
+        'decodeProgress',
+        (event: any) => {
+          if (event?.operationId === operationId) {
+            onProgress({
+              percent: event.percent ?? 0,
+              encodedUs: event.encodedUs ?? 0,
+            });
+          }
+        }
+      );
+    }
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        throw new Error('VIDEO_CANCELLED: Operation cancelled');
+      }
+      abortHandler = () => {
+        getNative().cancelDecode(operationId);
+      };
+      options.signal.addEventListener('abort', abortHandler);
+    }
+    const result = await getNative().exportVideo(
+      id,
+      output as unknown as Object,
+      format,
+      {
+        codec,
+        bitrate: Math.trunc(bitrate),
+        fromUs: fromUs !== undefined ? Math.trunc(fromUs) : undefined,
+        toUs: toUs !== undefined ? Math.trunc(toUs) : undefined,
+        maxSide: Math.trunc(maxSide),
+        operationId,
+      }
+    );
+    if (__DEV__) {
+      console.log('[SherpaOnnx:video] exportVideo', id, format, codec, result);
+    }
+    return parseResolvedFileRef(result);
+  } finally {
+    progressSubscription?.remove();
+    if (abortHandler && options?.signal) {
+      options.signal.removeEventListener('abort', abortHandler);
+    }
+  }
+}
+
 export async function exportVideoFrame(
   video: OfflineVideoBufferIdSource,
   ptsUs: number,
@@ -572,6 +699,7 @@ export type {
   CreateOfflineAudioFromVideoOptions,
   CreateOfflineImageFromVideoOptions,
   ExportVideoFrameOptions,
+  ExportVideoOptions,
   IngestFileToLiveOptions,
   LiveVideoBufferEvent,
   LiveVideoBufferEventType,
@@ -592,5 +720,7 @@ export type {
   VideoAudioExtractResult,
   VideoAudioTrackInfo,
   VideoDecoderBudget,
+  VideoExportCodec,
+  VideoExportContainer,
   VideoRetention,
 } from './types';

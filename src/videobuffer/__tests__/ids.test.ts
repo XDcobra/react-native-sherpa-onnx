@@ -17,8 +17,10 @@ jest.mock('react-native', () => {
     createOfflineAudioBufferFromVideo: jest.fn(),
     configureVideoBuffer: jest.fn(),
     cancelDecode: jest.fn(),
+    exportVideo: jest.fn(),
   };
   return {
+    Platform: { OS: 'ios' },
     NativeModules: { SherpaOnnx: {} },
     NativeEventEmitter: class {
       addListener(
@@ -49,6 +51,7 @@ import {
   createEmptyLiveVideoBuffer,
   createOfflineAudioBufferFromVideo,
   createOfflineVideoBufferFromFile,
+  exportVideo,
   finalizeLiveVideoBuffer,
   ingestFileToLiveVideoBuffer,
   resolveLiveVideoBufferId,
@@ -123,6 +126,7 @@ describe('videobuffer public API mapping', () => {
       finalizeLiveVideoBuffer: jest.Mock;
       createOfflineAudioBufferFromVideo: jest.Mock;
       configureVideoBuffer: jest.Mock;
+      exportVideo: jest.Mock;
     };
     __emitVideo: (event: unknown) => void;
     __listenerCount: () => number;
@@ -275,6 +279,48 @@ describe('videobuffer public API mapping', () => {
         rangeMs: { startMs: 5, endMs: 1 },
       })
     ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT/);
+  });
+
+  it('rejects unsupported export format and codec', async () => {
+    await expect(
+      exportVideo(OFF, { kind: 'fs', path: '/tmp/out.mp4' }, 'avi' as never)
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: format/);
+    await expect(
+      exportVideo(OFF, { kind: 'fs', path: '/tmp/out.mp4' }, 'mp4', {
+        codec: 'vp9' as never,
+      })
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: codec/);
+    expect(rn.__mockNative.exportVideo).not.toHaveBeenCalled();
+  });
+
+  it('rejects inverted export range', async () => {
+    await expect(
+      exportVideo(OFF, { kind: 'fs', path: '/tmp/out.mp4' }, 'mp4', {
+        fromUs: 1000,
+        toUs: 500,
+      })
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: toUs/);
+    expect(rn.__mockNative.exportVideo).not.toHaveBeenCalled();
+  });
+
+  it('maps exportVideo FileDestination and defaults codec/bitrate', async () => {
+    rn.__mockNative.exportVideo.mockResolvedValue({
+      outputKind: 'fs',
+      outputPath: '/tmp/out.mp4',
+    });
+    const dest = { kind: 'fs' as const, path: '/tmp/out.mp4' };
+    const ref = await exportVideo(OFF, dest, 'webm');
+    expect(ref).toEqual({ kind: 'fs', path: '/tmp/out.mp4' });
+    expect(rn.__mockNative.exportVideo).toHaveBeenCalledWith(
+      OFF,
+      dest,
+      'webm',
+      expect.objectContaining({
+        codec: 'h264',
+        bitrate: 2_000_000,
+        maxSide: 0,
+      })
+    );
   });
 
   it('forwards a valid decoderBudget to native', async () => {

@@ -21,7 +21,7 @@ cd "$OUT/build"
   --disable-swscale \
   --disable-everything \
   --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac \
-  --enable-muxer=wav,mp3,flac,mp4,ogg,matroska \
+  --enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska \
   --enable-protocol=file \
   --enable-avcodec \
   --enable-avformat \

@@ -145,6 +145,19 @@ export interface ExportVideoFrameOptions {
   quality?: number;
 }
 
+export type VideoExportContainer = 'mp4' | 'mov' | 'mkv' | 'webm';
+export type VideoExportCodec = 'h264' | 'hevc';
+
+export interface ExportVideoOptions {
+  codec?: VideoExportCodec;
+  bitrate?: number;
+  fromUs?: number;
+  toUs?: number;
+  maxSide?: number;
+  onProgress?: (e: { percent: number; encodedUs: number }) => void;
+  signal?: AbortSignal;
+}
+
 export interface VideoDecoderBudget {
   cpu?: number;
   display?: number;

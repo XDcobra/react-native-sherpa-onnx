@@ -99,6 +99,23 @@ internal object VideoBufferService : ComponentCallbacks2 {
       bufferId, startUs, endUs, targetRate, outPath, cancelFlagAddr, progress
     )
 
+  fun exportVideo(
+    bufferId: String,
+    outPath: String,
+    format: String,
+    codec: String,
+    bitrate: Int,
+    fromUs: Long,
+    toUs: Long,
+    maxSide: Int,
+    cancelFlagAddr: Long,
+    progress: Any?,
+  ): Map<String, Any>? =
+    VideoBufferNative.nativeExportVideo(
+      bufferId, outPath, format, codec, bitrate, fromUs, toUs, maxSide,
+      cancelFlagAddr, progress,
+    )
+
   /**
    * Called from JNI on a media thread. Marshals onto the JS queue.
    */

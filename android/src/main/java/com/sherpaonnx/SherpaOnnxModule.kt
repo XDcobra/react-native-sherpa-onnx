@@ -1195,6 +1195,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun emitVideoExportProgress(
+    operationId: String,
+    percent: Int,
+    encodedUs: Long,
+  ) {
+    try {
+      val eventEmitter = reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+      val payload = Arguments.createMap()
+      payload.putString("operationId", operationId)
+      payload.putInt("percent", percent)
+      payload.putDouble("encodedUs", encodedUs.toDouble())
+      payload.putDouble("framesDecoded", encodedUs.toDouble())
+      payload.putDouble("totalFramesEstimate", 0.0)
+      payload.putInt("sourceSampleRate", 0)
+      payload.putInt("sourceChannels", 0)
+      eventEmitter.emit("decodeProgress", payload)
+    } catch (_: Exception) {
+      // Ignore event emission failures (e.g. bridge teardown)
+    }
+  }
+
   private fun emitDecodeComplete(
     operationId: String,
     success: Boolean,
@@ -3964,6 +3986,125 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.resolve(map)
       } catch (e: Exception) {
         val msg = e.message ?: "extract failed"
+        val code = if (msg.startsWith("VIDEO_")) msg.substringBefore(":").trim() else "VIDEO_INTERNAL"
+        promise.reject(code, msg, e)
+      } finally {
+        nativeFreeCancelFlag(cancelFlagAddr)
+        cancelChecker.interrupt()
+        decodeCancelFlags.remove(operationId)
+      }
+    }
+  }
+
+  override fun exportVideo(
+    bufferId: String,
+    destination: ReadableMap,
+    format: String,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    val operationId =
+      if (options != null && options.hasKey("operationId") && !options.isNull("operationId")) {
+        options.getString("operationId") ?: "vid_exp_${java.util.UUID.randomUUID()}"
+      } else {
+        "vid_exp_${java.util.UUID.randomUUID()}"
+      }
+    val codec =
+      if (options != null && options.hasKey("codec") && !options.isNull("codec")) {
+        options.getString("codec") ?: "h264"
+      } else {
+        "h264"
+      }
+    val bitrate =
+      if (options != null && options.hasKey("bitrate") && !options.isNull("bitrate")) {
+        options.getDouble("bitrate").toInt()
+      } else {
+        2_000_000
+      }
+    val fromUs =
+      if (options != null && options.hasKey("fromUs") && !options.isNull("fromUs")) {
+        options.getDouble("fromUs").toLong()
+      } else {
+        0L
+      }
+    val toUs =
+      if (options != null && options.hasKey("toUs") && !options.isNull("toUs")) {
+        options.getDouble("toUs").toLong()
+      } else {
+        -1L
+      }
+    val maxSide =
+      if (options != null && options.hasKey("maxSide") && !options.isNull("maxSide")) {
+        options.getDouble("maxSide").toInt()
+      } else {
+        0
+      }
+    val fmt = format.lowercase()
+    val ext = when (fmt) {
+      "mov" -> "mov"
+      "mkv" -> "mkv"
+      "webm" -> "webm"
+      else -> "mp4"
+    }
+    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    decodeCancelFlags[operationId] = cancelFlag
+    decodeExecutor.execute {
+      var dest: ResolvedDestination? = null
+      val cancelFlagAddr = nativeAllocateCancelFlag()
+      val cancelChecker = Thread {
+        while (!cancelFlag.get()) {
+          try { Thread.sleep(50) } catch (_: InterruptedException) { break }
+        }
+        nativeSetCancelFlag(cancelFlagAddr, true)
+      }
+      cancelChecker.isDaemon = true
+      cancelChecker.start()
+      try {
+        com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+        val resolved = resolveDestinationForSave(destination, ext)
+        dest = resolved
+        val progressCallback = object {
+          @Suppress("unused")
+          fun onProgress(percent: Int, encodedUs: Long) {
+            emitVideoExportProgress(operationId, percent, encodedUs)
+          }
+        }
+        @Suppress("UNCHECKED_CAST")
+        val raw = com.sherpaonnx.video.VideoBufferService.exportVideo(
+          bufferId,
+          resolved.outputPath,
+          fmt,
+          codec,
+          bitrate,
+          fromUs,
+          toUs,
+          maxSide,
+          cancelFlagAddr,
+          progressCallback,
+        ) as? HashMap<String, Any>
+        if (raw == null) {
+          cleanupOutputFile(resolved.outputPath)
+          promise.reject("VIDEO_INTERNAL", "null export result")
+          return@execute
+        }
+        val err = raw["errorCode"] as? String
+        if (!err.isNullOrEmpty()) {
+          cleanupOutputFile(resolved.outputPath)
+          promise.reject(err, raw["errorMessage"] as? String ?: err)
+          return@execute
+        }
+        copyTmpToStreamIfNeeded(resolved)
+        val result = com.facebook.react.bridge.Arguments.createMap().apply {
+          putString("outputKind", sanitizeOutputKind(resolved))
+          putString("outputPath", sanitizeResolvedOutputPath(resolved))
+        }
+        promise.resolve(result)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        cleanupOutputFile(dest?.outputPath)
+        promise.reject(e.code, e.message, e)
+      } catch (e: Exception) {
+        cleanupOutputFile(dest?.outputPath)
+        val msg = e.message ?: "export failed"
         val code = if (msg.startsWith("VIDEO_")) msg.substringBefore(":").trim() else "VIDEO_INTERNAL"
         promise.reject(code, msg, e)
       } finally {

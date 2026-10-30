@@ -2,6 +2,8 @@
 
 #include "encode/EncoderBackend.h"
 
+#include <memory>
+
 namespace sherpa_onnx {
 namespace video {
 
@@ -13,10 +15,11 @@ class VideoToolboxEncoder : public EncoderBackend {
   Status Encode(const RawFrame& frame, std::vector<EncodedPacket>* out) override;
   Status Flush(std::vector<EncodedPacket>* out) override;
   void Close() override;
+  std::vector<uint8_t> CodecConfig() const override;
 
  private:
-  void* session_ = nullptr;
-  bool configured_ = false;
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace video

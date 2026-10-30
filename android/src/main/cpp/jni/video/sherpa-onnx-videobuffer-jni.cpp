@@ -9,6 +9,8 @@
 #include "decode/DecoderPool.h"
 #include "live/LiveIngest.h"
 #include "live/LiveVideoEntry.h"
+#include "encode/EncoderBackend.h"
+#include "encode/VideoExportSession.h"
 #include "platform/android/AMediaCodecDecoder.h"
 #include "platform/android/AMediaCodecEncoder.h"
 
@@ -209,6 +211,10 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeInit(JNIEnv* env, jclass,
   sherpa_onnx::video::RegisterDecoderFactory([]() {
     return std::unique_ptr<sherpa_onnx::video::DecoderBackend>(
         new sherpa_onnx::video::AMediaCodecDecoder());
+  });
+  sherpa_onnx::video::RegisterEncoderFactory([]() {
+    return std::unique_ptr<sherpa_onnx::video::EncoderBackend>(
+        new sherpa_onnx::video::AMediaCodecEncoder());
   });
   InstallAndroidEventSink(env);
   const int n = reg.SweepOrphans();
@@ -558,6 +564,56 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeStopLiveAudioTap(
   }
   if (tap) tap->Stop();
   return JNI_TRUE;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
+    JNIEnv* env, jclass, jstring jId, jstring jOutPath, jstring jFormat,
+    jstring jCodec, jint bitrate, jlong fromUs, jlong toUs, jint maxSide,
+    jlong cancelAddr, jobject progress) {
+  using sherpa_onnx::video::VideoCodec;
+  using sherpa_onnx::video::VideoExportOptions;
+  using sherpa_onnx::video::VideoExportSession;
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  VideoExportOptions opts;
+  const std::string codec = JstringToStd(env, jCodec);
+  opts.codec = codec == "hevc" ? VideoCodec::Hevc : VideoCodec::H264;
+  opts.bitrate = bitrate;
+  opts.fromUs = fromUs;
+  opts.toUs = toUs;
+  opts.maxSide = maxSide;
+  std::atomic<bool>* cancel =
+      cancelAddr != 0 ? reinterpret_cast<std::atomic<bool>*>(cancelAddr)
+                      : nullptr;
+  jmethodID progressMid = nullptr;
+  jobject progressGlobal = nullptr;
+  if (progress) {
+    progressGlobal = env->NewGlobalRef(progress);
+    jclass cls = env->GetObjectClass(progress);
+    progressMid = env->GetMethodID(cls, "onProgress", "(IJ)V");
+    env->DeleteLocalRef(cls);
+  }
+  auto st = VideoExportSession::Run(
+      JstringToStd(env, jId), JstringToStd(env, jOutPath),
+      JstringToStd(env, jFormat), opts, cancel,
+      [&](int percent, int64_t encodedUs) {
+        if (progressGlobal == nullptr || progressMid == nullptr) {
+          return;
+        }
+        env->CallVoidMethod(progressGlobal, progressMid, percent,
+                            static_cast<jlong>(encodedUs));
+      });
+  if (progressGlobal) {
+    env->DeleteGlobalRef(progressGlobal);
+  }
+  if (!st.ok) {
+    PutString(env, map, put, "errorCode", st.errorCode);
+    PutString(env, map, put, "errorMessage", st.errorMessage);
+    return map;
+  }
+  PutString(env, map, put, "ok", "true");
+  return map;
 }
 
 }  // extern "C"

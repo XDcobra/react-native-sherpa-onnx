@@ -45,6 +45,8 @@ inline const char* kErrTryAgain = "VIDEO_TRY_AGAIN";
 inline const char* kErrNoAudioTrack = "VIDEO_NO_AUDIO_TRACK";
 inline const char* kErrAudioCodecUnsupported = "VIDEO_AUDIO_CODEC_UNSUPPORTED";
 inline const char* kErrAudioDecodeFailed = "VIDEO_AUDIO_DECODE_FAILED";
+inline const char* kErrEncoderUnavailable = "VIDEO_ENCODER_UNAVAILABLE";
+inline const char* kErrEncodeFailed = "VIDEO_ENCODE_FAILED";
 
 struct Status {
   bool ok = true;

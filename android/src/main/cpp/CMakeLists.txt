@@ -279,6 +279,9 @@ set(SOURCES
     video/demux/BitstreamUtil.cpp
     video/decode/FakeDecoder.cpp
     video/decode/DecoderFactory.cpp
+    video/encode/EncoderFactory.cpp
+    video/encode/FakeEncoder.cpp
+    video/encode/VideoExportSession.cpp
     video/decode/DecoderPool.cpp
     video/decode/DecodeSession.cpp
     video/decode/ThinningPlanner.cpp

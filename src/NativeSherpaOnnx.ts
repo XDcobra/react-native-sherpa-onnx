@@ -3269,6 +3269,18 @@ export interface Spec extends TurboModule {
     errorMessage?: string;
   }>;
 
+  /**
+   * HW-transcode a VideoBuffer clip to a FileDestination (mp4/mov/mkv/webm).
+   * `destination` is a serialized FileDestination. `options`: codec, bitrate,
+   * fromUs, toUs, maxSide, operationId. Returns `{ outputKind, outputPath }`.
+   */
+  exportVideo(
+    bufferId: string,
+    destination: Object,
+    format: string,
+    options?: Object
+  ): Promise<{ outputKind: string; outputPath: string }>;
+
   createOfflineAudioBufferFromVideo(
     bufferId: string,
     options?: Object

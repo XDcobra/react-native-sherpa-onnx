@@ -72,4 +72,17 @@ internal object VideoBufferNative {
     cancelFlagAddr: Long,
     progress: Any?,
   ): HashMap<String, Any>?
+
+  external fun nativeExportVideo(
+    bufferId: String,
+    outPath: String,
+    format: String,
+    codec: String,
+    bitrate: Int,
+    fromUs: Long,
+    toUs: Long,
+    maxSide: Int,
+    cancelFlagAddr: Long,
+    progress: Any?,
+  ): HashMap<String, Any>?
 }
