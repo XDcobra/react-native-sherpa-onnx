@@ -59,7 +59,7 @@ Strict mode: `audio: { source: 'track', required: true }` rejects create instead
 
 ## Export audio into AudioBuffer
 
-Use `createOfflineAudioBufferFromVideo` / `createLiveAudioBufferFromLiveVideo` from `react-native-sherpa-onnx/videobuffer` for STT and other pipeline features. Preview does not play through an AudioBuffer.
+Use `createOfflineAudioBufferFromVideo` / `createLiveAudioBufferFromLiveVideo` from `react-native-sherpa-onnx/videobuffer` for STT and other pipeline features ([offline](videobuffer-offline.md), [live](videobuffer-streaming.md)). Preview does not play through an AudioBuffer.
 
 ## Decoder budget
 
