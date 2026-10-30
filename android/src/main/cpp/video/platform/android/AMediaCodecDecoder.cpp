@@ -379,16 +379,39 @@ Status AMediaCodecDecoder::CopyImageToFrame(AImage* image, DecodedRawFrame* out,
   return Status::Ok();
 }
 
+void AMediaCodecDecoder::DiscardImages() {
+  if (reader_ == nullptr) {
+    return;
+  }
+  int n = 0;
+  for (;;) {
+    AImage* image = nullptr;
+    const media_status_t acq = AImageReader_acquireNextImage(reader_, &image);
+    if (acq != AMEDIA_OK || image == nullptr) {
+      break;
+    }
+    AImage_delete(image);
+    ++n;
+  }
+  if (n > 0) {
+    VIDEO_LOGI("video.decode amc discard images=%d", n);
+  }
+}
+
 void AMediaCodecDecoder::Close() {
+  VIDEO_LOGI("video.decode amc close begin codec=%d reader=%d", codec_ != nullptr,
+             reader_ != nullptr);
   imageGen_.fetch_add(1);
   if (reader_) {
     AImageReader_setImageListener(reader_, nullptr);
+    DiscardImages();
   }
   if (codec_) {
     AMediaCodec_stop(codec_);
     AMediaCodec_delete(codec_);
     codec_ = nullptr;
   }
+  DiscardImages();
   if (reader_) {
     AImageReader_delete(reader_);
     reader_ = nullptr;
@@ -401,6 +424,7 @@ void AMediaCodecDecoder::Close() {
   }
   queuedSinceStart_ = false;
   configured_ = false;
+  VIDEO_LOGI("video.decode amc close end");
 }
 
 }  // namespace video

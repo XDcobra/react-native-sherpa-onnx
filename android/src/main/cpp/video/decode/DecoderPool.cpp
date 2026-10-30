@@ -254,5 +254,25 @@ void DecoderPool::ReleaseSlot(DecoderClass cls, const std::string& ownerId) {
   cv_.notify_all();
 }
 
+void DecoderPool::CloseUnused(DecoderClass cls, const std::string& ownerId) {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = slots_.find(Key(cls, ownerId));
+  if (it == slots_.end()) {
+    return;
+  }
+  if (it->second.refs > 0) {
+    VIDEO_LOGI("video.decode close-unused skip %s refs=%d", ownerId.c_str(),
+               it->second.refs);
+    return;
+  }
+  VIDEO_LOGI("video.decode close-unused %s class=%d", ownerId.c_str(),
+             static_cast<int>(cls));
+  if (it->second.decoder) {
+    it->second.decoder->Close();
+  }
+  slots_.erase(it);
+  cv_.notify_all();
+}
+
 }  // namespace video
 }  // namespace sherpa_onnx

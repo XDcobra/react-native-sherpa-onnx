@@ -102,6 +102,24 @@ TEST_F(DecoderPoolTest, LegacyAcquireUsesCpuClass) {
   EXPECT_EQ(DecoderPool::Instance().activeCount(DecoderClass::Cpu), 0);
 }
 
+TEST_F(DecoderPoolTest, CloseUnusedDropsReleasedSlot) {
+  auto d = DecoderPool::Instance().Acquire("vid_off_z", 0);
+  ASSERT_TRUE(d.ok());
+  DecoderPool::Instance().Release("vid_off_z");
+  EXPECT_EQ(DecoderPool::Instance().activeCount(DecoderClass::Cpu), 0);
+  EXPECT_GE(DecoderPool::Instance().activeCount(), 1);
+  DecoderPool::Instance().CloseUnused(DecoderClass::Cpu, "vid_off_z");
+  EXPECT_EQ(DecoderPool::Instance().activeCount(), 0);
+}
+
+TEST_F(DecoderPoolTest, CloseUnusedSkipsHeldSlot) {
+  auto d = DecoderPool::Instance().Acquire("vid_off_hold", 0);
+  ASSERT_TRUE(d.ok());
+  DecoderPool::Instance().CloseUnused(DecoderClass::Cpu, "vid_off_hold");
+  EXPECT_EQ(DecoderPool::Instance().activeCount(DecoderClass::Cpu), 1);
+  DecoderPool::Instance().Release("vid_off_hold");
+}
+
 TEST_F(DecoderPoolTest, ConfigureClampsToOneThroughFour) {
   DecoderPool::Instance().SetMaxSessions(DecoderClass::Cpu, 0);
   EXPECT_EQ(DecoderPool::Instance().maxSessions(DecoderClass::Cpu), 1);

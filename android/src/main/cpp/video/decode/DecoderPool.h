@@ -71,6 +71,8 @@ class DecoderPool {
                                                   int timeoutMs = 5000);
   void Release(const std::string& bufferId);
   void ReleaseSlot(DecoderClass cls, const std::string& ownerId);
+  /** Close and erase a slot whose refcount is already 0 (buffer gone). */
+  void CloseUnused(DecoderClass cls, const std::string& ownerId);
 
   void CloseIdle();
   void CloseAll();

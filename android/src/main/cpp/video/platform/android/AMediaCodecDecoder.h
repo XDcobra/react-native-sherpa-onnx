@@ -43,6 +43,7 @@ class AMediaCodecDecoder : public DecoderBackend {
   Status CopyImageToFrame(AImage* image, DecodedRawFrame* out, int64_t ptsUs);
   void PumpCodec(int64_t timeoutUs);
   void DrainImages();
+  void DiscardImages();
   bool PopDecoded(DecodedRawFrame* out);
 
   AMediaCodec* codec_ = nullptr;

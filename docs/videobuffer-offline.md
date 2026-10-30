@@ -489,7 +489,7 @@ FFmpeg is **demux-only**. Pixels: **HW only** (Android MediaCodec / iOS VideoToo
 | **Containers** | MP4 / MOV / M4V / 3GP (`mov`); MKV / WebM (`matroska`) | `'mp4'` \| `'mov'` \| `'mkv'` \| `'webm'` |
 | **Video codecs** | **H.264**, **HEVC** | `'h264'` (default) \| `'hevc'` (MediaCodec / VideoToolbox) |
 | **Audio** | AAC, MP3, Opus, Vorbis, FLAC, pcm_s16le, pcm_f32le (`decodable: true`) | mp4/mov → AAC; mkv/webm → Opus. No track → video-only |
-| **Else** | Other video codecs → `VIDEO_CODEC_UNSUPPORTED`. WebM+VP9 still rejected. No video stream → `VIDEO_NO_VIDEO_TRACK`; other containers → `VIDEO_CONTAINER_UNSUPPORTED` | VP8/VP9/AV1 encode is out of scope. WebM export is H.264/HEVC in a Matroska/WebM shell, not VP9 WebM. Current FFmpeg prebuilts may mux `mov` via the `mp4` muxer until rebuilt with `--enable-muxer=mov`. |
+| **Else** | Other video codecs → `VIDEO_CODEC_UNSUPPORTED`. WebM+VP9 still rejected. No video stream → `VIDEO_NO_VIDEO_TRACK`; other containers → `VIDEO_CONTAINER_UNSUPPORTED` | VP8/VP9/AV1 encode is out of scope. WebM export is H.264/HEVC in a Matroska/WebM shell, not VP9 WebM. `'mov'` needs the `mov` muxer in the FFmpeg prebuilt (pin ≥ 8.1.3-1); missing muxer → `VIDEO_ENCODE_FAILED`. |
 
 | Audio in container | |
 | --- | --- |

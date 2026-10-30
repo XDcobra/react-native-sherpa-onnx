@@ -37,6 +37,7 @@ void VideoEntry::DropStickySession() {
   if (stickyDecoder_) {
     DecoderPool::Instance().Release(id_);
     stickyDecoder_.reset();
+    DecoderPool::Instance().CloseUnused(DecoderClass::Cpu, id_);
   }
 }
 

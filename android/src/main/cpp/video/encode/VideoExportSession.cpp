@@ -194,10 +194,7 @@ const char* MuxerName(const std::string& format) {
     return "mp4";
   }
   if (format == "mov") {
-    if (av_guess_format("mov", nullptr, nullptr) != nullptr) {
-      return "mov";
-    }
-    return "mp4";
+    return av_guess_format("mov", nullptr, nullptr) != nullptr ? "mov" : nullptr;
   }
   if (format == "mkv" || format == "webm") {
     return "matroska";
@@ -215,7 +212,9 @@ struct AvFmt {
   ~AvFmt() {
     if (fmt) {
       if (header) {
+        VIDEO_LOGI("video.export trailer");
         av_write_trailer(fmt);
+        VIDEO_LOGI("video.export trailer done");
       }
       if (fmt->pb) {
         avio_closep(&fmt->pb);
@@ -509,6 +508,10 @@ Status VideoExportSession::Run(const std::string& bufferId,
   const char* muxer = MuxerName(format);
   if (muxer == nullptr) {
     encoder->Close();
+    if (format == "mov") {
+      return Status::Fail(kErrEncodeFailed,
+                          "mov muxer unavailable in this FFmpeg build");
+    }
     return Status::Fail(kErrInvalidArgument, "muxer");
   }
 
@@ -631,6 +634,10 @@ Status VideoExportSession::Run(const std::string& bufferId,
           encoder->Close();
           return Status::Fail(kErrEncodeFailed, "audio enc open");
         }
+        VIDEO_LOGI("video.export audio enc %s fmt=%d rate=%d frame=%d",
+                   codec->name ? codec->name : "?",
+                   static_cast<int>(aenc->sample_fmt), aenc->sample_rate,
+                   aenc->frame_size);
         as = avformat_new_stream(av.fmt, nullptr);
         if (!as) {
           encoder->Close();
@@ -723,11 +730,19 @@ Status VideoExportSession::Run(const std::string& bufferId,
     emitProgress(pts);
   }
 
+  // Drop the HW decoder (AImageReader) before Opus mux / return-to-JS so Mali
+  // is not holding GraphicBuffers while HWUI redraws the File I/O result.
+  it = VideoFrameIterator();
+  entry->DropStickySession();
+  VIDEO_LOGI("video.export decoder released format=%s", format.c_str());
+
   if (as && aenc && swr && !pcmPath.empty()) {
+    VIDEO_LOGI("video.export mux audio begin");
     auto ast = MuxAudioFromPcm(av.fmt, as, aenc, swr, pcmPath, pcmRate, cancel);
     if (!ast.ok) {
       return ast;
     }
+    VIDEO_LOGI("video.export mux audio end");
   }
 
   if (progress) {
