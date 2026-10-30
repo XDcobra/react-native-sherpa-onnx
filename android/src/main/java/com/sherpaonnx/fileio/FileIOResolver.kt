@@ -12,6 +12,7 @@ import java.io.FileInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicBoolean
 
 private const val LOG_TAG = "SherpaOnnxFileIO"
 
@@ -20,6 +21,17 @@ private const val LOG_TAG = "SherpaOnnxFileIO"
  * All file I/O operations go through this to avoid duplicated URI/path logic.
  */
 internal class FileIOResolver(private val context: ReactApplicationContext) {
+  private val noFdCache = NoFdCache(context)
+
+  init {
+    noFdCache.evict()
+  }
+
+  fun configureNoFdCache(maxBytes: Long?, maxAgeMs: Long?) {
+    noFdCache.configure(maxBytes, maxAgeMs)
+  }
+
+  fun isNofdCachePath(path: String): Boolean = noFdCache.isCachePath(path)
 
   /** Resolved read handle. Caller must close. */
   sealed class ReadHandle : Closeable {
@@ -173,16 +185,16 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
     return when (handle) {
       is ReadHandle.FilePath -> {
         Log.i(LOG_TAG, "demux FilePath path=${handle.file.absolutePath}")
-        DemuxableOpenedSource(handle.file.absolutePath, handle)
+        wrapDemux(handle.file.absolutePath, handle)
       }
       is ReadHandle.FileDescriptor -> {
         Log.i(LOG_TAG, "demux FileDescriptor fdPath=${handle.fdPath} len=${handle.length}")
-        DemuxableOpenedSource(handle.fdPath, handle)
+        wrapDemux(handle.fdPath, handle)
       }
       is ReadHandle.Stream -> {
         try {
           val file = materializeStreamToManagedCache(handle, source)
-          DemuxableOpenedSource(file.absolutePath, ReadHandle.FilePath(file))
+          wrapDemux(file.absolutePath, ReadHandle.FilePath(file))
         } finally {
           try {
             handle.close()
@@ -191,6 +203,21 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
         }
       }
     }
+  }
+
+  private fun wrapDemux(path: String, handle: ReadHandle): DemuxableOpenedSource {
+    if (!noFdCache.isCachePath(path)) {
+      return DemuxableOpenedSource(path, handle)
+    }
+    noFdCache.pin(path)
+    try {
+      noFdCache.touch(File(path))
+      noFdCache.evict()
+    } catch (e: Exception) {
+      noFdCache.unpin(path)
+      throw e
+    }
+    return DemuxableOpenedSource(path, handle) { noFdCache.unpin(path) }
   }
 
   /**
@@ -356,7 +383,7 @@ internal class FileIOResolver(private val context: ReactApplicationContext) {
     handle: ReadHandle.Stream,
     source: ReadableMap,
   ): File {
-    val cacheRoot = File(context.cacheDir, "fileio_nofd").canonicalFile
+    val cacheRoot = File(context.cacheDir, NoFdCache.DIR_NAME).canonicalFile
     cacheRoot.mkdirs()
     val key = sha256Hex(demuxCacheIdentity(source))
     val ext = extensionHint(source)
@@ -568,6 +595,19 @@ internal class SeekableOpenedSource(
 internal class DemuxableOpenedSource(
   val path: String,
   private val handle: FileIOResolver.ReadHandle,
+  private val onClose: (() -> Unit)? = null,
 ) : Closeable {
-  override fun close() = handle.close()
+  private val closed = AtomicBoolean(false)
+
+  override fun close() {
+    if (!closed.compareAndSet(false, true)) return
+    try {
+      handle.close()
+    } finally {
+      try {
+        onClose?.invoke()
+      } catch (_: Exception) {
+      }
+    }
+  }
 }

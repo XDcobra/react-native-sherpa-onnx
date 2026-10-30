@@ -81,6 +81,15 @@ extern NSString * const kFIOErrPathTraversalBlocked;
                                             error:(NSString * _Nullable * _Nullable)errorCode
                                           message:(NSString * _Nullable * _Nullable)errorMessage;
 
++ (BOOL)isNofdCachePath:(NSString *)path;
++ (void)unpinNofdPath:(NSString *)path;
++ (void)retainNofdPinForBuffer:(NSString *)bufferId path:(NSString *)path;
++ (void)releaseNofdPinForBuffer:(NSString *)bufferId;
++ (void)configureNoFdCacheMaxBytes:(NSNumber *)maxBytes
+                          maxAgeMs:(NSNumber *)maxAgeMs
+                             error:(NSString * _Nullable * _Nullable)errorCode
+                           message:(NSString * _Nullable * _Nullable)errorMessage;
+
 @end
 
 #endif /* FileIOResolver_h */

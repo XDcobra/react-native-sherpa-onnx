@@ -146,6 +146,29 @@ export interface ShareFileOptions {
   title?: string;
 }
 
+/**
+ * LRU + age policy for stream-only FileSources copied into `<cache>/fileio_nofd/`.
+ * Does not apply to `apkAsset`. Omitted fields keep the current native value.
+ */
+export interface NoFdCacheOptions {
+  /**
+   * Hard size cap in bytes. Evicts unpinned files, oldest access first.
+   * Must be an integer `> 0`.
+   * @default 536870912 (512 MiB)
+   */
+  maxBytes?: number;
+  /**
+   * Max age in milliseconds since last open/copy. `0` deletes as soon as
+   * unpinned. Must be an integer `>= 0`.
+   * @default 86400000 (24 h)
+   */
+  maxAgeMs?: number;
+}
+
+export interface ConfigureFileIOOptions {
+  noFdCache?: NoFdCacheOptions;
+}
+
 // ========== Error Codes ==========
 
 export const FileIOErrorCode = {

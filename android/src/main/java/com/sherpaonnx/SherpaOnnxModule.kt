@@ -215,6 +215,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val offlineTtsHelper = SherpaOnnxOfflineTtsHelper(ttsHelper)
   private val commonTtsHelper = SherpaOnnxCommonTtsHelper(ttsHelper)
   private val fileIOHelper = com.sherpaonnx.fileio.FileIOHelper(reactApplicationContext)
+  private val videoNofdPins =
+    ConcurrentHashMap<String, com.sherpaonnx.fileio.DemuxableOpenedSource>()
   private val alignmentHelper = SherpaOnnxAlignmentHelper()
   private val enhancementHelper = SherpaOnnxEnhancementHelper(
     reactApplicationContext,
@@ -3693,11 +3695,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         "SherpaOnnx:video",
         "createOfflineFromFile kind=${source.getString("kind")} path=${demux.path}",
       )
-      promise.resolve(
-        videoInfoToWritableMap(
-          com.sherpaonnx.video.VideoBufferService.createOfflineFromFile(demux.path),
-        ),
-      )
+      val info = com.sherpaonnx.video.VideoBufferService.createOfflineFromFile(demux.path)
+      val bufferId = info?.get("bufferId") as? String
+      val err = info?.get("errorCode") as? String
+      if (err.isNullOrEmpty() &&
+        !bufferId.isNullOrEmpty() &&
+        fileIOHelper.isNofdCachePath(demux.path)
+      ) {
+        videoNofdPins.put(bufferId, demux)?.close()
+        demux = null
+      }
+      promise.resolve(videoInfoToWritableMap(info))
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       android.util.Log.w("SherpaOnnx:video", "createOfflineFromFile fileio: ${e.message}")
       promise.reject(e.code, e.message, e)
@@ -3847,6 +3855,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
       com.sherpaonnx.video.VideoBufferService.release(bufferId)
+      try {
+        videoNofdPins.remove(bufferId)?.close()
+      } catch (_: Exception) {
+      }
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("VIDEO_INTERNAL", e.message, e)
@@ -7110,6 +7122,50 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun cancelFileIO(operationId: String, promise: Promise) {
     fileIOHelper.cancelFileIO(operationId, promise)
+  }
+
+  override fun configureFileIO(options: ReadableMap?, promise: Promise) {
+    try {
+      var maxBytes: Long? = null
+      var maxAgeMs: Long? = null
+      if (options != null && options.hasKey("noFdCache") && !options.isNull("noFdCache")) {
+        val cache = options.getMap("noFdCache")
+          ?: throw com.sherpaonnx.fileio.FileIOException(
+            com.sherpaonnx.fileio.FileIOErrorCodes.INVALID_ARGUMENT,
+            "noFdCache must be an object",
+          )
+        if (cache.hasKey("maxBytes") && !cache.isNull("maxBytes")) {
+          val v = cache.getDouble("maxBytes")
+          if (v <= 0.0 || v != kotlin.math.floor(v)) {
+            throw com.sherpaonnx.fileio.FileIOException(
+              com.sherpaonnx.fileio.FileIOErrorCodes.INVALID_ARGUMENT,
+              "noFdCache.maxBytes must be an integer > 0",
+            )
+          }
+          maxBytes = v.toLong()
+        }
+        if (cache.hasKey("maxAgeMs") && !cache.isNull("maxAgeMs")) {
+          val v = cache.getDouble("maxAgeMs")
+          if (v < 0.0 || v != kotlin.math.floor(v)) {
+            throw com.sherpaonnx.fileio.FileIOException(
+              com.sherpaonnx.fileio.FileIOErrorCodes.INVALID_ARGUMENT,
+              "noFdCache.maxAgeMs must be an integer >= 0",
+            )
+          }
+          maxAgeMs = v.toLong()
+        }
+      }
+      fileIOHelper.configureNoFdCache(maxBytes, maxAgeMs)
+      promise.resolve(null)
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      promise.reject(
+        com.sherpaonnx.fileio.FileIOErrorCodes.INVALID_ARGUMENT,
+        e.message,
+        e,
+      )
+    }
   }
 
   /**

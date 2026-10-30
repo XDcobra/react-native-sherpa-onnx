@@ -9,12 +9,14 @@ import type {
   SaveTextOptions,
   ShareFileOptions,
   FileIOProgressEvent,
+  ConfigureFileIOOptions,
 } from './types';
 import { FileIOErrorCode } from './types';
 import {
   assertFileDestinationSupportedOnPlatform,
   assertFileLocationsSupportedOnPlatform,
   assertFileSourceSupportedOnPlatform,
+  createFileIOError,
 } from './platformValidation';
 
 // Re-export all types
@@ -30,6 +32,8 @@ export type {
   ShareFileOptions,
   FileIOProgressEvent,
   FileIOErrorCodeValue,
+  NoFdCacheOptions,
+  ConfigureFileIOOptions,
 } from './types';
 
 export { FileIOErrorCode } from './types';
@@ -194,4 +198,43 @@ export async function shareFile(
     options?.mimeType ?? '',
     options?.title ?? ''
   );
+}
+
+function assertNonNegInt(name: string, value: number, min: number): void {
+  if (!Number.isInteger(value) || value < min) {
+    throw createFileIOError(
+      FileIOErrorCode.INVALID_ARGUMENT,
+      `${name} must be an integer >= ${min}`
+    );
+  }
+}
+
+/**
+ * Configure the stream-only demux cache (`fileio_nofd`).
+ * Default: 512 MiB LRU and 24 h max age. Unpinned files only; `apkAsset` is unchanged.
+ */
+export async function configureFileIO(
+  options?: ConfigureFileIOOptions
+): Promise<void> {
+  const cache = options?.noFdCache;
+  if (cache != null) {
+    if (typeof cache !== 'object' || Array.isArray(cache)) {
+      throw createFileIOError(
+        FileIOErrorCode.INVALID_ARGUMENT,
+        'noFdCache must be an object'
+      );
+    }
+    if (cache.maxBytes !== undefined) {
+      if (!Number.isInteger(cache.maxBytes) || cache.maxBytes <= 0) {
+        throw createFileIOError(
+          FileIOErrorCode.INVALID_ARGUMENT,
+          'noFdCache.maxBytes must be an integer > 0'
+        );
+      }
+    }
+    if (cache.maxAgeMs !== undefined) {
+      assertNonNegInt('noFdCache.maxAgeMs', cache.maxAgeMs, 0);
+    }
+  }
+  await SherpaOnnx.configureFileIO((options ?? {}) as Object);
 }

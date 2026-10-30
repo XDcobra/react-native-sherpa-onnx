@@ -175,6 +175,41 @@ createParentDirectories:(BOOL)createParentDirectories
   resolve(nil);
 }
 
+- (void)configureFileIO:(NSDictionary *)options
+                resolve:(RCTPromiseResolveBlock)resolve
+                 reject:(RCTPromiseRejectBlock)reject
+{
+  NSDictionary *cache = nil;
+  if ([options isKindOfClass:[NSDictionary class]]) {
+    id raw = options[@"noFdCache"];
+    if ([raw isKindOfClass:[NSDictionary class]]) {
+      cache = (NSDictionary *)raw;
+    } else if (raw != nil && raw != [NSNull null]) {
+      reject(kFIOErrInvalidArgument, @"noFdCache must be an object", nil);
+      return;
+    }
+  }
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  NSNumber *maxBytes = nil;
+  NSNumber *maxAgeMs = nil;
+  if (cache[@"maxBytes"] != nil && cache[@"maxBytes"] != [NSNull null]) {
+    maxBytes = cache[@"maxBytes"];
+  }
+  if (cache[@"maxAgeMs"] != nil && cache[@"maxAgeMs"] != [NSNull null]) {
+    maxAgeMs = cache[@"maxAgeMs"];
+  }
+  [FileIOResolver configureNoFdCacheMaxBytes:maxBytes
+                                    maxAgeMs:maxAgeMs
+                                       error:&errCode
+                                     message:&errMsg];
+  if (errCode) {
+    reject(errCode, errMsg, nil);
+    return;
+  }
+  resolve(nil);
+}
+
 - (void)emitFileIOProgress:(NSString *)operationId
           bytesTransferred:(int64_t)bytesTransferred
                 totalBytes:(int64_t)totalBytes

@@ -175,8 +175,15 @@ void BindVideoModule(SherpaOnnx *mod) {
   auto r = VideoRegistry::Instance().CreateOfflineFromFile([path UTF8String]);
   [readHandle cleanup];
   if (!r.ok()) {
+    if ([FileIOResolver isNofdCachePath:path]) {
+      [FileIOResolver unpinNofdPath:path];
+    }
     resolve(VideoError(r.status.errorCode.c_str(), r.status.errorMessage));
     return;
+  }
+  if ([FileIOResolver isNofdCachePath:path]) {
+    NSString *bid = [NSString stringWithUTF8String:r.value->id().c_str()];
+    [FileIOResolver retainNofdPinForBuffer:bid path:path];
   }
   resolve(VideoInfoDict(r.value->Info()));
 }
@@ -261,6 +268,9 @@ void BindVideoModule(SherpaOnnx *mod) {
              [path UTF8String]);
   auto st = LiveIngest::Run([path UTF8String], live.get(), opts);
   [readHandle cleanup];
+  if ([FileIOResolver isNofdCachePath:path]) {
+    [FileIOResolver unpinNofdPath:path];
+  }
   if (!st.ok) {
     resolve(VideoError(st.errorCode.c_str(), st.errorMessage));
     return;
@@ -394,6 +404,9 @@ void BindVideoModule(SherpaOnnx *mod) {
                     reject:(RCTPromiseRejectBlock)reject {
   BindVideoModule(self);
   VideoRegistry::Instance().Release(bufferId ? [bufferId UTF8String] : "");
+  if (bufferId.length > 0) {
+    [FileIOResolver releaseNofdPinForBuffer:bufferId];
+  }
   resolve(nil);
 }
 

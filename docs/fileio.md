@@ -38,7 +38,8 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'a
 |------|---------|-----|
 | `fs` | Absolute path | Absolute path |
 | `app` | `cache`/`documents`/`files`/`tmp`/`externalFiles`; Android: `apkAsset` (APK zip entry — native copies to `<cache>/fileio_apkasset/` on first open, then reuses that file); iOS: `appBundle` | `cache`/`documents`/`files`/`tmp` (`externalFiles` unsupported) |
-| `contentUri` | SAF document URI (PFD when the provider allows, otherwise a stream) | Rejects |
+| `contentUri` with ParcelFileDescriptor | Opened via `/proc/self/fd/N` (seekable) | Rejects |
+| `contentUri` stream (no PFD) | Resolver yields a stream. **Video demux** copies to `<cache>/fileio_nofd/<sha256>` (cache hit on reuse; unpinned copies follow the [fileio_nofd policy](#configurefileiooptions), default 512 MiB / 24 h). **Image** reads the stream in memory. **PDF/document** reject (`ERR_*_OPEN_FAILED`). **Audio decode** uses a temp file deleted after decode. | Rejects |
 | `contentTree` | SAF tree URI (creates document) | Rejects |
 | `securityScoped` | Rejects | Security-scoped bookmark URL |
 | `pad` | Installed PAD pack path (Android) | Rejects — use [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) on iOS |
@@ -47,10 +48,12 @@ type AppBaseDir = 'cache' | 'documents' | 'files' | 'tmp' | 'externalFiles' | 'a
 
 FFmpeg demux (`createOfflineVideoBufferFromFile`, `ingestFileToLiveVideoBuffer`) also needs a seekable file. An Android `contentUri` without a ParcelFileDescriptor is copied to `<cache>/fileio_nofd/` on first open; the same URI is a cache hit later. PDF/document still reject a stream-only source.
 
+`fileio_nofd` is a demux scratch cache, not user storage. Default policy: **512 MiB LRU** and **24 h** max age, **unpinned files only** (an open offline VideoBuffer keeps its copy). Deleting a cache file does not delete the original URI; the next still-valid open recopies. Override with [`configureFileIO`](#configurefileiooptions). `apkAsset` is separate and is not evicted by this policy.
+
 ## Quick start
 
 ```ts
-import { copyFile, saveText, shareFile } from 'react-native-sherpa-onnx/fileio';
+import { copyFile, saveText, shareFile, configureFileIO } from 'react-native-sherpa-onnx/fileio';
 import type { FileSource, FileDestination } from 'react-native-sherpa-onnx/fileio';
 
 // Copy a user-picked content URI to app cache
@@ -77,6 +80,11 @@ await saveText('Hello', {
   treeUri: dirUri,
   filename: 'note.txt',
   mimeType: 'text/plain',
+});
+
+// Optional: tighter stream-copy cache (default 512 MiB / 24 h)
+await configureFileIO({
+  noFdCache: { maxBytes: 256 * 1024 * 1024, maxAgeMs: 60 * 60 * 1000 },
 });
 ```
 
@@ -152,10 +160,31 @@ Open the system share sheet for the given file.
 
 - `mimeType?: string` — MIME type hint
 
+### `configureFileIO(options?)`
+
+```ts
+function configureFileIO(options?: ConfigureFileIOOptions): Promise<void>;
+```
+
+```ts
+await configureFileIO({
+  noFdCache: { maxBytes: 256 * 1024 * 1024, maxAgeMs: 0 },
+});
+```
+
+Applies to `<cache>/fileio_nofd/` only. Omitted fields keep the current native value.
+
+| `noFdCache` | Default | Meaning |
+| --- | --- | --- |
+| `maxBytes` | `536870912` (512 MiB) | Hard cap. Evicts **unpinned** files, oldest last-open first. Integer `> 0`. |
+| `maxAgeMs` | `86400000` (24 h) | Max age since last open/copy. `0` = delete as soon as unpinned. Integer `>= 0`. |
+
+A file is **pinned** while an offline VideoBuffer still has it open. Ingest pins only for the duration of the call. Eviction runs on process start, after each nofd copy/hit, after unpin, and when you call `configureFileIO`.
+
 ## Types and constants
 
 ```ts
-import { copyFile, saveText, shareFile, FileIOErrorCode } from 'react-native-sherpa-onnx/fileio'; // runtime APIs + error code constants
+import { copyFile, saveText, shareFile, configureFileIO, FileIOErrorCode } from 'react-native-sherpa-onnx/fileio'; // runtime APIs + error code constants
 
 import type {
   FileSource, // unified input source descriptor
@@ -168,6 +197,8 @@ import type {
   ShareFileOptions, // share sheet options
   FileIOProgressEvent, // copy progress payload
   FileIOErrorCodeValue, // string union of FILEIO_* codes
+  NoFdCacheOptions, // fileio_nofd LRU / age
+  ConfigureFileIOOptions, // configureFileIO payload
 } from 'react-native-sherpa-onnx/fileio';
 ```
 

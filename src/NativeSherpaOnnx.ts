@@ -2851,6 +2851,12 @@ export interface Spec extends TurboModule {
    */
   cancelFileIO(operationId: string): Promise<void>;
 
+  /**
+   * Configure FileIO stream-materialize cache (`fileio_nofd`).
+   * `noFdCache.maxBytes` integer > 0; `noFdCache.maxAgeMs` integer >= 0.
+   */
+  configureFileIO(options?: Object): Promise<void>;
+
   // ==================== Helper - Assets ====================
 
   /**
