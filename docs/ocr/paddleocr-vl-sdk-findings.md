@@ -1,6 +1,6 @@
 # PaddleOCR-VL-1.6 — SDK findings
 
-> Status: research done; Q1–Q7 locked. Implementation plan: [`paddleocr-vl-sdk-plan.md`](paddleocr-vl-sdk-plan.md)
+> Status: research done; Q1–Q7 locked. Phase 0 generate gate: **18/18** CPU HF fp32 greedy ≡ CPU ORT (`paddleocr-vl-1.6-fp16`), including spotting. Implementation plan: [`paddleocr-vl-sdk-plan.md`](paddleocr-vl-sdk-plan.md) / [`ocr-instructions-sdk-plan.md`](ocr-instructions-sdk-plan.md)
 > Export scripts: [`scripts/ocr-models/paddleocr-vl/`](../../scripts/ocr-models/paddleocr-vl/)
 > Official weights: [`PaddlePaddle/PaddleOCR-VL-1.6`](https://huggingface.co/PaddlePaddle/PaddleOCR-VL-1.6)
 > Granite pattern (do not copy classes): [`phase2-doc-vlm-backend-plan.md`](phase2-doc-vlm-backend-plan.md)
@@ -36,7 +36,7 @@ Native C++ **backends stay one class per family** (Q1). Shared C++ is helpers, n
 | 4 | SDK archive | **One quant per `.tar.bz2`**, flatten to pack root. Canonical names: `vision_encoder.onnx`, **`embedding.onnx`** (not `embed_tokens.onnx`), **`decoder.onnx`** (not `decoder_model_merged.onnx`), plus `*_data`, `tokenizer.json`, `ocr_manifest.json`. Hub twins stay desktop. |
 | 5 | Decode | **Greedy argmax**. No repetition penalty (unlike Nemotron). Stop EOS id **`2`** (`</s>`). Host computes **3D M-RoPE** `position_ids` `[3, B, S]` (port `rope_index.py`). Image tokens **splice** at id `100295`. |
 | 6 | Vision positions | **Inside `vision_encoder.onnx`** (`Resize` of the 27×27 field). No `pos_embed.npy`, no host NaViT interpolate. Dynamo export is required so that resize stays dynamic. |
-| 7 | Result extras | New `paddleocr_vl` arm: **`raw`** + **`markdown`** + `complete` / `stopReason` (`eos` \| `max_new_tokens`). Never `doctags`. v1 prompt is **`OCR:`** (page parse). **Spans stay empty** in v1 (`Spotting:` / `<LOC_*>` later). |
+| 7 | Result extras | Public result is **`raw`** + **`content`** + **`instruction`** + `complete` / `stopReason` (no `markdown` / `doctags` keys). Default prompt **`OCR:`**. **`spotting` fills line spans** from LOC quads; other Paddle tasks keep spans empty. |
 
 Prompt (hardcoded, no Jinja). One `<|IMAGE_PLACEHOLDER|>` is expanded to **N** copies *before* encode, `N = t·h·w / 4`:
 
@@ -46,6 +46,21 @@ Assistant:
 ```
 
 `max_new_tokens`: `0` → 8192, then clamp to remaining context. Reuse the shared createOCR field `maxNewTokens` (same as granite / Nemotron). Do **not** nest a third options object.
+
+### Phase 0 generate gate (2026-10-29)
+
+CPU HF transformers 4.57 fp32 greedy vs CPU ORT pack `paddleocr-vl-1.6-fp16`. Pass = `token_identical` on ≥ 3 fixtures + grammar ok.
+
+| Task | Fixtures | Identical | Grammar |
+|------|----------|-----------|---------|
+| `ocr` | 3 | 3/3 | `markdown_html` |
+| `table` | 3 | 3/3 | OTSL |
+| `formula` | 3 | 3/3 | LaTeX |
+| `chart` | 3 | 3/3 | **GFM pipe table** (`chart_form=gfm`), not OTSL |
+| `seal` | 3 | 3/3 | plain |
+| `spotting` | 3 | 3/3 | `spotting_loc` (3 quads / 24 LOC, 2× LANCZOS) |
+
+Init `maxPixels` is a **cap** (`effective = min(cap, taskDefault)`). Spotting default area is 1 605 632 + 2× LANCZOS when both sides &lt; 1500. Task is recognize-time `instruction.task`, not init.
 
 ---
 
@@ -62,7 +77,7 @@ All three VLMs are “vision + embed + greedy decoder”, but the contracts diff
 | KV geometry | 3 KV heads, dim 64 | 10 layers, 8 KV heads, dim 64, vocab 72512 | **18 layers, 2 KV heads, dim 128, vocab 103424**, hidden 1024 |
 | Tokenizer | GPT-2 byte BPE | mBART BPE + NFKC Sequence | Llama BPE + `▁` + byte_fallback |
 | Prompt | `Convert this page to docling.` | control tokens `<predict_bbox>…` | chat + **`OCR:`** |
-| Output | DocTags / OTSL | markdown + `<x_*>` `<y_*>` `<class_*>` | native markdown / HTML (OCR:). Spotting `<LOC_*>` not in v1 |
+| Output | DocTags / OTSL | markdown + `<x_*>` `<y_*>` `<class_*>` | native markdown / HTML (`OCR:`); spotting `text` + 8× `<\|LOC_n\|>` |
 | Stop | `</doctag>` + prefix stack | EOS `2` + repetition 1.1 | EOS `2`, **no** penalty |
 
 `DocVlmBackend::Load` / `NemotronParseBackend::Load` hard-check their own KV / vocab / file names. A PaddleOCR-VL folder that happens to contain `vision_encoder.onnx` would fail those checks even if detect mis-labeled it.
@@ -213,9 +228,9 @@ v1 task prompt is **`OCR:`** (document parse). The model emits markdown and/or l
 | `raw_utf8` | tokenizer decode of generated ids, keep specials, strip trailing `</s>` |
 | `markdown_utf8` | that body with leftover `<|…|>` / BOS/EOS stripped; keep model markdown/HTML |
 | `text_utf8` | `layout_text(markdown)` — tags and ticks removed, whitespace collapsed |
-| spans | **empty** |
+| spans | empty on `ocr` / `table` / `formula` / `chart` / `seal`; **line spans from LOC quads on `spotting`** |
 
-**Spotting** (`Spotting:` prompt, eight `<LOC_*>` coords, 4-point quads) is a second task in the 1.5/1.6 papers. It is **not** what `infer_ort.py` / the HF card default does. Do not invent boxes from the OCR: stream. A later recognize option can add spotting; `OcrSpan` already has quads.
+**Spotting** (`Spotting:` prompt, eight `<\|LOC_*\|>` coords, 4-point quads) is a second task in the 1.5/1.6 papers. Do not invent boxes from the `OCR:` stream. Phase 0 CPU HF fp32 greedy ≡ CPU ORT on 3/3 fixtures (`spotting_01`–`03`); grammar `spotting_loc`, 2× LANCZOS, `max_pixels=1605632`. Public `instruction.task: 'spotting'` fills `OcrSpan` line quads via `OcrGeometry` grid 1000.
 
 Never run `ParseDocTags` or Nemotron xy/class markup on this family.
 
@@ -233,7 +248,7 @@ Public extras: see **Result extras (Q7)**.
 | Shared `maxNewTokens` / VLM extras types | Yes — one public shape |
 | Detect `MatchesQuantization` / suffix groups | Yes, **new** complete group (`embedding.onnx` + `decoder.onnx`) |
 | `IsOcrVlmKind` | Yes — add this kind |
-| `OfflineImageBufferAnnotatedView` | Yes — overlay is a no-op until spotting |
+| `OfflineImageBufferAnnotatedView` | Yes — spotting line quads overlay; other Paddle tasks stay empty spans |
 | Granite / Nemotron **backend**, image, tokenizer, NaViT, DocTags, markup | **No** — family-owned |
 | Generic `VlmBackend` base with `if (family)` | **No** |
 
@@ -285,7 +300,42 @@ Today `OcrRecognizeResult` discriminates on `family`. Prefer **one shared VLM ex
 
 Do not put this stream in `doctags`. Kotlin / TS extras checks branch on family: granite still needs `doctags`; this family needs `raw` and must not treat missing `doctags` as failure.
 
-Example tabs: `Spans | Markdown | Raw` (Spans empty until spotting).
+Example tabs: `Spans | Content | Raw | Elements` (`spotting` fills Spans; other Paddle tasks leave them empty).
+
+---
+
+## Instruction prompt ids (Phase 0, 2026-10-29)
+
+Processor dump of the official task suffixes, 18 prompts (6 tasks × 3
+fixtures). Chat template is unchanged; only the suffix after
+`<|IMAGE_END|>` varies. Token counts include image placeholders:
+
+| Task | Suffix | Prompt tokens |
+|------|--------|---------------|
+| `ocr` | `OCR:` | 1243 |
+| `table` | `Table Recognition:` | 351 |
+| `formula` | `Formula Recognition:` | 174 |
+| `chart` | `Chart Recognition:` | 403 |
+| `seal` | `Seal Recognition:` | 210 |
+| `spotting` | `Spotting:` | 622 |
+
+`ocr/page_01` dump ids match the HF generate `prompt_ids` from the 64-token
+cache.
+
+### HF greedy vs ORT pack (128-token cap, 2026-10-29)
+
+Gate is **CPU** HF transformers 4.57 fp32 greedy ≡ CPU ORT pack `paddleocr-vl-1.6-fp16` (CUDA does not satisfy). Spotting OOMed on a 12 GB GPU (2× LANCZOS); CPU with KV cache (`use_cache=True`, same greedy as `test_parity.py`) finished 3/3 token-identical. Pack `generation_config.json` defaults `use_cache: false`; that path recomputes the ~2000 visual tokens every step and is not the gate.
+
+| Task | Fixtures | Identical | Tokens to EOS | Grammar | Semantic |
+|------|----------|-----------|---------------|---------|----------|
+| `ocr` | 3/3 | yes | 89–91 | markdown/plain page text | titles + paragraphs + table header match the PNGs |
+| `table` | 3/3 | yes | 39–53 | OTSL `<fcel>`/`<nl>`/`<ecel>`, no wrapping `<otsl>` | cell text matches |
+| `formula` | 3/3 | yes | 14–20 | LaTeX `\[…\]` | `E=mc^2`, `a^2+b^2=c^2`, `F=ma` |
+| `chart` | 3/3 | yes | 26–35 | **GFM pipe table**, not OTSL | values match (Mon 12…, Q1 40…, A 8…) |
+| `seal` | 3/3 | yes | 9–11 | plain text | `CITY HALL` / `PORT AUTH` / `UNI SEAL` |
+| `spotting` | 3/3 | yes | 31–35 | `spotting_loc`, 3 quads / 24 LOC | `Hello World`/`Dock 12`/`Gate B`; `Lot 44`/`Hold`/`Clear`; `Bravo`/`Alpha`/`Charlie` (reading order) |
+
+**Chart grammar locked:** parse GFM pipes (`Month | Units` / `Mon | 12` …) into `OcrTable`. Do not share the OTSL path.
 
 ---
 
@@ -300,7 +350,6 @@ None. Q1–Q7 are locked. Quant variant to **publish** first is not a backend co
 - Implementing the backend, detect, catalog, or example wiring (see the plan).
 - Publishing HF / GitHub release packs.
 - PP-DocLayoutV3 two-stage pipeline.
-- `Spotting:` / chart / seal task prompts.
-- Recognize-time `maxPixels` / `maxSide`.
+- Recognize-time `maxPixels` / `maxSide` (init `maxPixels` is a cap only).
 - A generic `VlmBackend` base (helpers are fine; one class per family is not optional).
 - Using the community `iaa2005` int8 graphs.

@@ -44,6 +44,32 @@ Download and run these on-device models in your pocket — anytime, anywhere —
 Do not use a 4-bit C-RADIO vision graph. Uniform / MLP-only Q4 on the 27-layer
 ViT dropped encoder cosine to ~0.87–0.91 and flipped bounding-box tokens.
 
+## Instruction parity (CPU HF fp32 greedy ≡ `onnx/int8`)
+
+Gate: same image, same control-token profile, greedy decode, **CPU**.
+Hugging Face Transformers 5.14.1 fp32 vs ONNX Runtime on **`onnx/int8`**.
+A row is **identical** when every generated token matches. Three page
+fixtures per profile. 14 profiles × 3 = 42 runs. CUDA is not this gate.
+
+| Profile | Identical |
+| --- | ---: |
+| `markdown_none_pic` | **3/3** |
+| `markdown_none_nopic` | 2/3 |
+| `plain_none_nopic` | 2/3 |
+| `plain_none_pic` | 1/3 |
+| all 10 `boxes` / `boxesAndClasses` profiles (includes the NVIDIA card default `markdown_boxesAndClasses_nopic`) | **0/3** |
+
+**8/42** token-identical overall. Only **`markdown_none_pic`** matches on all
+three fixtures. Recommended control prompt for this INT8 pack:
+
+```text
+</s><s><no_bbox><no_classes><output_markdown><predict_text_in_pic>
+```
+
+The Hello World / OmniDoc numbers below used a layout-token prompt (boxes +
+classes). Those profiles are **not** token-identical to HF on `onnx/int8`.
+This 14-profile gate was not re-run on `onnx/fp16`.
+
 ## Quality tests (ORT CPU vs Transformers 5.14.1)
 
 Same two pages for every pack. **Layout coverage** is the share of Hugging Face

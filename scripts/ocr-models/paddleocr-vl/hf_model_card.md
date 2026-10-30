@@ -47,6 +47,25 @@ int8-only graphs on full pages. The author reports Cyrillic→Latin collapse and
 once the image-token count grows. This export keeps the embedding table in FP32 when
 quantizing, and still **does not publish** INT8 / Q4: the photo fixture loops (`-T-T-T…`).
 
+## Instruction parity (CPU HF fp32 greedy ≡ this pack)
+
+Gate: same image, same official control prompt, greedy decode, **CPU**.
+Hugging Face Transformers 4.57 fp32 vs ONNX Runtime on **`onnx/fp16`**.
+A row is **identical** when every generated token matches. Three fixtures
+per prompt (18 runs). CUDA is not this gate.
+
+| Prompt | Identical |
+| --- | ---: |
+| `OCR:` | **3/3** |
+| `Table Recognition:` | **3/3** |
+| `Formula Recognition:` | **3/3** |
+| `Chart Recognition:` | **3/3** |
+| `Seal Recognition:` | **3/3** |
+| `Spotting:` | **3/3** |
+
+**18/18** token-identical. These six prompts are the supported control set
+for the published FP16 pack.
+
 ## Quality tests (ORT CPU vs Transformers 4.57.6)
 
 Same three pages for every pack. **Layout coverage** is the share of Hugging Face
