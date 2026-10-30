@@ -221,14 +221,12 @@ Status ProbeVideoFile(const std::string& path, VideoFileProbe* out) {
     return Status::Fail(kErrContainerUnsupported, buf);
   }
 
-  AVDictionary* infoOpts = nullptr;
-  av_dict_set(&infoOpts, "probesize", "32768", 0);
-  av_dict_set(&infoOpts, "analyzeduration", "2000000", 0);
-  if (avformat_find_stream_info(fmt, &infoOpts) < 0) {
-    av_dict_free(&infoOpts);
+  // Second arg is AVDictionary**[nb_streams] (per-stream codec options), not
+  // format probesize. Passing a format dict here made avcodec_open2/av_dict_free
+  // SIGSEGV on clips with a video+audio track (File I/O sample.mp4).
+  if (avformat_find_stream_info(fmt, nullptr) < 0) {
     return Status::Fail(kErrContainerUnsupported, "stream info");
   }
-  av_dict_free(&infoOpts);
 
   int videoStream = -1;
   int audioStream = -1;

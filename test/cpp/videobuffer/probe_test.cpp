@@ -62,6 +62,17 @@ TEST(FfmpegProbe, H264Mkv) {
   EXPECT_NE(p.codecName.find("h264"), std::string::npos) << p.codecName;
 }
 
+TEST(FfmpegProbe, VideoPlusAudioSample) {
+  VideoFileProbe p;
+  auto st = ProbeVideoFile(
+      "example/android/app/src/main/assets/test_videos/sample.mp4", &p);
+  ASSERT_TRUE(st.ok) << st.errorMessage;
+  EXPECT_NE(p.codecName.find("h264"), std::string::npos) << p.codecName;
+  ASSERT_TRUE(p.audioCodecName.has_value());
+  EXPECT_NE(p.audioCodecName->find("aac"), std::string::npos)
+      << *p.audioCodecName;
+}
+
 TEST(FfmpegProbe, Vp9ReportsCodecWithoutOpen) {
   VideoFileProbe p;
   auto st = ProbeVideoFile(Fixture("vp9.webm"), &p);
