@@ -25,6 +25,7 @@ std::shared_ptr<LiveVideoEntry> LiveVideoEntry::Create(
         MemoryBudget::Instance().ramClass());
   }
   e->ring_.Configure(opts.ringSeconds, ringBytes);
+  e->audioRing_.Configure(opts.ringSeconds, ringBytes / 4);
   return e;
 }
 
@@ -43,9 +44,19 @@ Status LiveVideoEntry::SetCodecConfig(VideoCodec codec,
     if (opts_.spool.directory.empty()) {
       opts_.spool.directory = cacheDir_;
     }
-    auto st = spool_.Open(cacheDir_, id_, track_, opts_.spool);
+    auto st = spool_.Open(cacheDir_, id_, track_, opts_.spool,
+                         audio_ ? &*audio_ : nullptr);
     (void)st;
   }
+  return Status::Ok();
+}
+
+Status LiveVideoEntry::SetAudioConfig(const AudioTrackInfo& audio) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (state_ != VideoBufferState::Recording) {
+    return Status::Fail(kErrInvalidState, "not recording");
+  }
+  audio_ = audio;
   return Status::Ok();
 }
 
@@ -67,6 +78,25 @@ Status LiveVideoEntry::AppendPacket(const EncodedPacket& pkt) {
     eventFn_("packetsAppended");
   }
   VideoRegistry::Instance().Emit("packetsAppended", id_, "{}");
+  audioRing_.EvictBefore(ring_.rangeUs().startUs);
+  return Status::Ok();
+}
+
+Status LiveVideoEntry::AppendAudioPacket(const EncodedPacket& pkt) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (state_ != VideoBufferState::Recording) {
+    return Status::Fail(kErrInvalidState, "append after finish");
+  }
+  if (!audio_) {
+    return Status::Fail(kErrNoAudioTrack, "no audio config");
+  }
+  auto st = audioRing_.Append(pkt, &audioTimeline_);
+  if (!st.ok) return st;
+  if (spool_.active()) {
+    spool_.EnqueueAudio(pkt);
+  }
+  ++appendGen_;
+  cv_.notify_all();
   return Status::Ok();
 }
 
@@ -106,7 +136,23 @@ VideoBufferInfo LiveVideoEntry::Info() const {
   i.totalFramesWritten = timeline_.frameCount() + ring_.droppedBeforeKey();
   i.ringEvictedFrames = ring_.evictedFrames();
   i.hasActiveSpool = spool_.active();
+  if (audio_) {
+    i.audio = audio_;
+    i.audioRange.startUs = audioTimeline_.startUs();
+    i.audioRange.endUs = audioTimeline_.endUs();
+    i.audioPacketsWritten = audioTimeline_.size();
+  }
   return i;
+}
+
+Status LiveVideoEntry::ReadAudioPacket(int64_t index, EncodedPacket* out) {
+  if (audioRing_.Contains(index)) {
+    return audioRing_.Read(index, out);
+  }
+  if (spool_.active()) {
+    return spool_.ReadAudio(index, out);
+  }
+  return Status::Fail(kErrFrameEvicted, "audio evicted");
 }
 
 Status LiveVideoEntry::GetSample(int64_t decodeIndex, SampleEntry* out) const {

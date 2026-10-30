@@ -24,6 +24,9 @@ class OfflineVideoEntry : public VideoEntry {
   VideoBufferState state() const override { return VideoBufferState::Immutable; }
 
   int64_t openBytesRead() const { return openBytesRead_; }
+  const AudioTrackInfo* audioTrack() const override;
+  const AudioTimeline* audioTimeline() const override;
+  Status ReadAudioPacket(int64_t index, EncodedPacket* out) override;
 
  private:
   std::unique_ptr<PacketSource> source_;

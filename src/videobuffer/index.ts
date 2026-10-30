@@ -14,7 +14,17 @@ import {
 } from '../imagebuffer';
 import type { FileDestination, ResolvedFileRef } from '../fileio/types';
 import type {
+  LiveAudioBufferRef,
+  OfflineAudioBufferRef,
+} from '../audiobuffer/types';
+import {
+  createEmptyLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+} from '../audiobuffer';
+import type {
+  ConfigureVideoBufferOptions,
   CreateEmptyLiveVideoBufferOptions,
+  CreateOfflineAudioFromVideoOptions,
   CreateOfflineImageFromVideoOptions,
   ExportVideoFrameOptions,
   IngestFileToLiveOptions,
@@ -31,7 +41,10 @@ import type {
   OfflineVideoBufferRef,
   PipelineVideoBufferIdSource,
   PipelineVideoBufferInfo,
+  VideoAudioExtractResult,
 } from './types';
+
+let extractOpId = 0;
 
 const getNative = (): Spec =>
   TurboModuleRegistry.getEnforcing<Spec>('SherpaOnnx');
@@ -92,6 +105,25 @@ export function resolvePipelineVideoBufferId(
   return id;
 }
 
+function mapAudio(raw: {
+  audioCodec?: string;
+  audioDecodable?: string;
+  audioSampleRate?: number;
+  audioChannels?: number;
+  audioStartUs?: number;
+  audioDurationUs?: number;
+}): import('./types').VideoAudioTrackInfo | null {
+  if (!raw.audioCodec) return null;
+  return {
+    codec: raw.audioCodec,
+    decodable: raw.audioDecodable === 'true',
+    sampleRate: raw.audioSampleRate ?? 0,
+    channels: raw.audioChannels ?? 0,
+    startMs: (raw.audioStartUs ?? 0) / 1000,
+    durationMs: (raw.audioDurationUs ?? 0) / 1000,
+  };
+}
+
 function mapInfo(raw: {
   bufferId: string;
   kind: string;
@@ -103,12 +135,19 @@ function mapInfo(raw: {
   hasActiveSpool?: string;
   seekableStartUs?: number;
   seekableEndUs?: number;
+  audioCodec?: string;
+  audioDecodable?: string;
+  audioSampleRate?: number;
+  audioChannels?: number;
+  audioStartUs?: number;
+  audioDurationUs?: number;
   errorCode?: string;
   errorMessage?: string;
 }): PipelineVideoBufferInfo {
   if (raw.errorCode) {
     throw new Error(`${raw.errorCode}: ${raw.errorMessage ?? ''}`);
   }
+  const audio = mapAudio(raw);
   if (raw.kind === 'liveVideoBuffer') {
     const info: LiveVideoBufferInfo = {
       bufferId: raw.bufferId,
@@ -121,6 +160,7 @@ function mapInfo(raw: {
       liveEdgeUs: raw.liveEdgeUs,
       seekableStartUs: raw.seekableStartUs,
       seekableEndUs: raw.seekableEndUs,
+      audio,
     };
     return info;
   }
@@ -131,6 +171,7 @@ function mapInfo(raw: {
     frameCount: raw.frameCount ?? 0,
     seekableStartUs: raw.seekableStartUs,
     seekableEndUs: raw.seekableEndUs,
+    audio,
   };
   return info;
 }
@@ -181,6 +222,7 @@ export async function ingestFileToLiveVideoBuffer(
   const id = resolveLiveVideoBufferId(live);
   const raw = await getNative().ingestFileToLiveVideoBuffer(id, path, {
     pacing: options?.pacing ?? 'asFast',
+    includeAudio: options?.includeAudio ?? true,
   });
   return mapInfo(raw) as LiveVideoBufferInfo;
 }
@@ -285,6 +327,162 @@ export function subscribeLiveVideoBufferEvents(
   return () => sub.remove();
 }
 
+function assertBudgetLimit(value: number | undefined, field: string): void {
+  if (value === undefined) return;
+  if (!Number.isInteger(value) || value < 1 || value > 4) {
+    throw new Error(
+      `VIDEO_INVALID_ARGUMENT: decoderBudget.${field} must be an integer in [1, 4]`
+    );
+  }
+}
+
+export async function createOfflineAudioBufferFromVideo(
+  video: OfflineVideoBufferIdSource,
+  options?: CreateOfflineAudioFromVideoOptions
+): Promise<VideoAudioExtractResult> {
+  const id = resolveOfflineVideoBufferId(video);
+  const targetSampleRateHz =
+    options?.targetSampleRateHz === undefined
+      ? 16000
+      : options.targetSampleRateHz;
+  if (
+    typeof targetSampleRateHz !== 'number' ||
+    !Number.isFinite(targetSampleRateHz) ||
+    targetSampleRateHz < 0
+  ) {
+    throw new Error(
+      'VIDEO_INVALID_ARGUMENT: targetSampleRateHz must be a finite number >= 0'
+    );
+  }
+  let startUs = 0;
+  let endUs = -1;
+  if (options?.rangeMs) {
+    const { startMs, endMs } = options.rangeMs;
+    if (
+      !Number.isFinite(startMs) ||
+      !Number.isFinite(endMs) ||
+      endMs <= startMs
+    ) {
+      throw new Error(
+        'VIDEO_INVALID_ARGUMENT: rangeMs must have endMs > startMs'
+      );
+    }
+    startUs = Math.round(startMs * 1000);
+    endUs = Math.round(endMs * 1000);
+  }
+  const operationId = `vid_aud_${Date.now()}_${++extractOpId}`;
+  let progressSubscription: { remove: () => void } | null = null;
+  let abortHandler: (() => void) | null = null;
+  try {
+    if (options?.onProgress) {
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+      const onProgress = options.onProgress;
+      progressSubscription = emitter.addListener(
+        'decodeProgress',
+        (event: any) => {
+          if (event?.operationId === operationId) {
+            onProgress({
+              percent: event.percent ?? 0,
+              decodedMs: event.framesDecoded ?? 0,
+            });
+          }
+        }
+      );
+    }
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        throw new Error('VIDEO_CANCELLED: Operation cancelled');
+      }
+      abortHandler = () => {
+        getNative().cancelDecode(operationId);
+      };
+      options.signal.addEventListener('abort', abortHandler);
+    }
+    const raw = await getNative().createOfflineAudioBufferFromVideo(id, {
+      startUs,
+      endUs,
+      targetSampleRateHz,
+      operationId,
+    });
+    if (raw.errorCode) {
+      throw new Error(`${raw.errorCode}: ${raw.errorMessage ?? ''}`);
+    }
+    const info = {
+      bufferId: raw.bufferId ?? '',
+      kind: 'offlinePcmBuffer' as const,
+      state: 'immutable' as const,
+      sampleRate: raw.sampleRate ?? 0,
+      channelCount: raw.channelCount ?? 1,
+      numSamples: raw.numSamples ?? 0,
+      durationMs: raw.durationMs ?? 0,
+      storageKind: raw.storageKind as 'ram' | 'mmap' | undefined,
+    };
+    const audio: OfflineAudioBufferRef = {
+      info,
+      bufferId: info.bufferId as OfflineAudioBufferRef['bufferId'],
+    };
+    return {
+      audio,
+      mediaStartMs: raw.mediaStartMs ?? 0,
+      sourceCodec: raw.sourceCodec ?? '',
+      sourceSampleRate: raw.sourceSampleRate ?? 0,
+      sourceChannels: raw.sourceChannels ?? 0,
+    };
+  } finally {
+    progressSubscription?.remove();
+    if (abortHandler && options?.signal) {
+      options.signal.removeEventListener('abort', abortHandler);
+    }
+  }
+}
+
+export async function configureVideoBuffer(
+  options?: ConfigureVideoBufferOptions
+): Promise<void> {
+  const cpu = options?.decoderBudget?.cpu;
+  const display = options?.decoderBudget?.display;
+  assertBudgetLimit(cpu, 'cpu');
+  assertBudgetLimit(display, 'display');
+  await getNative().configureVideoBuffer({
+    decoderBudget:
+      cpu !== undefined || display !== undefined
+        ? {
+            ...(cpu !== undefined ? { cpu } : {}),
+            ...(display !== undefined ? { display } : {}),
+          }
+        : undefined,
+  });
+}
+
+export async function createLiveAudioBufferFromLiveVideo(
+  live: LiveVideoBufferIdSource,
+  options?: {
+    targetSampleRateHz?: number;
+    windowSeconds?: number;
+    startAt?: 'oldest' | 'liveEdge';
+  }
+): Promise<{
+  audio: LiveAudioBufferRef;
+  mediaStartMs: number;
+  stop(): Promise<void>;
+}> {
+  const id = resolveLiveVideoBufferId(live);
+  const target = options?.targetSampleRateHz ?? 16000;
+  const audio = await createEmptyLiveAudioBuffer({
+    sampleRate: target,
+    channelCount: 1,
+  });
+  await getNative().startLiveVideoAudioTap(id, audio.bufferId, target);
+  return {
+    audio,
+    mediaStartMs: 0,
+    stop: async () => {
+      await getNative().stopLiveVideoAudioTap(id);
+      await finalizeLiveAudioBuffer(audio.bufferId);
+    },
+  };
+}
+
 export async function exportVideoFrame(
   video: OfflineVideoBufferIdSource,
   ptsUs: number,
@@ -313,7 +511,9 @@ export async function exportVideoFrame(
 }
 
 export type {
+  ConfigureVideoBufferOptions,
   CreateEmptyLiveVideoBufferOptions,
+  CreateOfflineAudioFromVideoOptions,
   CreateOfflineImageFromVideoOptions,
   ExportVideoFrameOptions,
   IngestFileToLiveOptions,
@@ -333,5 +533,8 @@ export type {
   PipelineVideoBufferIdSource,
   PipelineVideoBufferInfo,
   PipelineVideoBufferKind,
+  VideoAudioExtractResult,
+  VideoAudioTrackInfo,
+  VideoDecoderBudget,
   VideoRetention,
 } from './types';

@@ -851,6 +851,12 @@ set(VIDEOBUFFER_CORE_SOURCES
   "${VIDEO_CPP_ROOT}/core/MemoryBudget.cpp"
   "${VIDEO_CPP_ROOT}/core/FrameSlab.cpp"
   "${VIDEO_CPP_ROOT}/core/DecodedFrameCache.cpp"
+  "${VIDEO_CPP_ROOT}/audio/AudioTimeline.cpp"
+  "${VIDEO_CPP_ROOT}/audio/AudioPacketReader.cpp"
+  "${VIDEO_CPP_ROOT}/audio/FfmpegAudioDecoder.cpp"
+  "${VIDEO_CPP_ROOT}/audio/VideoAudioExtractor.cpp"
+  "${VIDEO_CPP_ROOT}/audio/LiveAudioTap.cpp"
+  "${VIDEO_CPP_ROOT}/live/AudioPacketRing.cpp"
   "${VIDEO_CPP_ROOT}/demux/BitstreamUtil.cpp"
   "${VIDEO_CPP_ROOT}/demux/FfmpegDemuxer.cpp"
   "${VIDEO_CPP_ROOT}/decode/FakeDecoder.cpp"
@@ -885,6 +891,9 @@ add_executable(videobuffer_core_host_test
   "${VIDEOBUFFER_TEST_DIR}/live_ring_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/live_spool_test.cpp"
   "${VIDEOBUFFER_TEST_DIR}/iterator_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/decoder_pool_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/audio_timeline_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/live_audio_test.cpp"
   ${VIDEOBUFFER_CORE_SOURCES}
 )
 set(IMAGE_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image")
@@ -933,6 +942,10 @@ set_tests_properties(videobuffer_core_host_test PROPERTIES
 if(TARGET PkgConfig::LIBAV)
   add_executable(videobuffer_demux_host_test
     "${VIDEOBUFFER_TEST_DIR}/demux_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/audio_demux_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/audio_decode_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/audio_extract_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/live_audio_test.cpp"
     ${VIDEOBUFFER_CORE_SOURCES}
     "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
     "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
@@ -955,6 +968,12 @@ if(TARGET PkgConfig::LIBAV)
   target_link_libraries(videobuffer_demux_host_test PRIVATE
     PkgConfig::LIBAV ${VIDEOBUFFER_GTEST_LIBS} yuv Threads::Threads
   )
+  if(VIDEOBUFFER_SANITIZE STREQUAL "address")
+    target_compile_options(videobuffer_demux_host_test PRIVATE
+      -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(videobuffer_demux_host_test PRIVATE
+      -fsanitize=address,undefined)
+  endif()
   add_test(NAME videobuffer_demux_host_test COMMAND $<TARGET_FILE:videobuffer_demux_host_test>)
   set_tests_properties(videobuffer_demux_host_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."

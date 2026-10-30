@@ -6,6 +6,12 @@
 namespace sherpa_onnx {
 namespace video {
 
+Status VideoEntry::ReadAudioPacket(int64_t index, EncodedPacket* out) {
+  (void)index;
+  (void)out;
+  return Status::Fail(kErrNoAudioTrack, "no audio track");
+}
+
 std::shared_ptr<DecodeSession> VideoEntry::StickySession() {
   std::lock_guard<std::mutex> lock(mu_);
   if (sticky_) {

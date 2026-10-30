@@ -270,6 +270,12 @@ set(SOURCES
     video/core/MemoryBudget.cpp
     video/core/FrameSlab.cpp
     video/core/DecodedFrameCache.cpp
+    video/audio/AudioTimeline.cpp
+    video/audio/AudioPacketReader.cpp
+    video/audio/FfmpegAudioDecoder.cpp
+    video/audio/VideoAudioExtractor.cpp
+    video/audio/LiveAudioTap.cpp
+    video/live/AudioPacketRing.cpp
     video/demux/BitstreamUtil.cpp
     video/decode/FakeDecoder.cpp
     video/decode/DecoderFactory.cpp

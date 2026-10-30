@@ -19,6 +19,9 @@ Status LiveIngest::Run(const std::string& path, LiveVideoEntry* live,
   if (!st.ok) {
     return st;
   }
+  if (opts.includeAudio && demux.hasAudio() && demux.audioTrack()) {
+    (void)live->SetAudioConfig(*demux.audioTrack());
+  }
   st = live->SetCodecConfig(demux.track().codec, demux.track().codecConfig,
                             demux.track());
   if (!st.ok) {
@@ -26,6 +29,7 @@ Status LiveIngest::Run(const std::string& path, LiveVideoEntry* live,
   }
   int64_t prevPts = 0;
   const int64_t n = demux.sampleCount();
+  int64_t audioIndex = 0;
   for (int64_t i = 0; i < n; ++i) {
     EncodedPacket pkt;
     st = demux.ReadPacket(i, &pkt);
@@ -42,6 +46,17 @@ Status LiveIngest::Run(const std::string& path, LiveVideoEntry* live,
     st = live->AppendPacket(pkt);
     if (!st.ok) {
       return st;
+    }
+    if (opts.includeAudio && demux.hasAudio()) {
+      while (true) {
+        EncodedPacket ap;
+        auto ast = demux.ReadAudioPacket(audioIndex, &ap);
+        if (!ast.ok) break;
+        if (ap.ptsUs > pkt.ptsUs + 50000) break;
+        st = live->AppendAudioPacket(ap);
+        if (!st.ok) return st;
+        ++audioIndex;
+      }
     }
   }
   VIDEO_LOGI("video.live ingest done frames=%lld", static_cast<long long>(n));

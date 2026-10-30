@@ -16,7 +16,7 @@ namespace {
 
 constexpr uint32_t kFileMagic = 0x56425350;  // VBSP
 constexpr uint32_t kRecMagic = 0x56425243;   // VBRC
-constexpr uint32_t kVersion = 1;
+constexpr uint32_t kVersion = 2;
 constexpr size_t kMaxQueue = 64;
 
 bool WriteU32(FileIo& io, int fd, int64_t* off, uint32_t v) {
@@ -118,16 +118,40 @@ Status PacketSpool::WriteHeader(int fd, const VideoTrackInfo& track) {
         static_cast<int64_t>(clen)) {
       return Status::Fail(kErrSpoolIo, "header config");
     }
+    off += clen;
+  }
+  const uint32_t hasAudio = audio_ ? 1u : 0u;
+  if (!WriteU32(io, fd, &off, hasAudio)) {
+    return Status::Fail(kErrSpoolIo, "header audio flag");
+  }
+  if (audio_) {
+    if (!WriteU32(io, fd, &off, static_cast<uint32_t>(audio_->codec)) ||
+        !WriteU32(io, fd, &off, static_cast<uint32_t>(audio_->sampleRate)) ||
+        !WriteU32(io, fd, &off, static_cast<uint32_t>(audio_->channels))) {
+      return Status::Fail(kErrSpoolIo, "header audio");
+    }
+    const uint32_t elen = static_cast<uint32_t>(audio_->extradata.size());
+    if (!WriteU32(io, fd, &off, elen)) {
+      return Status::Fail(kErrSpoolIo, "header extra");
+    }
+    if (elen > 0) {
+      if (io.Pwrite(fd, audio_->extradata.data(), elen, off) !=
+          static_cast<int64_t>(elen)) {
+        return Status::Fail(kErrSpoolIo, "header extra bytes");
+      }
+    }
   }
   return Status::Ok();
 }
 
 Status PacketSpool::Open(const std::string& cacheDir, const std::string& uuid,
-                         const VideoTrackInfo& track, const SpoolOptions& opts) {
+                         const VideoTrackInfo& track, const SpoolOptions& opts,
+                         const AudioTrackInfo* audio) {
   std::lock_guard<std::mutex> lock(mu_);
   opts_ = opts;
   track_ = track;
   uuid_ = uuid;
+  if (audio) audio_ = *audio;
   if (opts.mode == SpoolRetentionMode::None) {
     active_ = false;
     return Status::Ok();
@@ -323,6 +347,57 @@ Status PacketSpool::Read(int64_t presentationIndex, EncodedPacket* out) {
   return Status::Ok();
 }
 
+int64_t PacketSpool::audioCount() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return static_cast<int64_t>(audioOffsets_.size());
+}
+
+Status PacketSpool::EnqueueAudio(const EncodedPacket& pkt) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (!active_ || segments_.empty()) return Status::Ok();
+  auto& cur = segments_.back();
+  int64_t off = cur.bytes;
+  auto st = WriteRecord(cur.fd, pkt, &off);
+  if (!st.ok) return st;
+  audioOffsets_.push_back(cur.bytes);
+  audioSegmentOf_.push_back(static_cast<int>(segments_.size() - 1));
+  cur.bytes = off;
+  return Status::Ok();
+}
+
+Status PacketSpool::ReadAudio(int64_t index, EncodedPacket* out) {
+  std::lock_guard<std::mutex> lock(mu_);
+  if (out == nullptr || index < 0 ||
+      static_cast<size_t>(index) >= audioOffsets_.size()) {
+    return Status::Fail(kErrFrameEvicted, "audio spool index");
+  }
+  const int si = audioSegmentOf_[static_cast<size_t>(index)];
+  const int64_t off0 = audioOffsets_[static_cast<size_t>(index)];
+  auto& io = DefaultFileIo();
+  int fd = segments_[static_cast<size_t>(si)].fd;
+  int64_t off = off0;
+  uint32_t magic = 0, len = 0, flags = 0, crc = 0;
+  int64_t pts = 0, dts = 0;
+  if (!ReadU32(io, fd, &off, &magic) || magic != kRecMagic ||
+      !ReadU32(io, fd, &off, &len) || !ReadI64(io, fd, &off, &pts) ||
+      !ReadI64(io, fd, &off, &dts) || !ReadU32(io, fd, &off, &flags) ||
+      !ReadU32(io, fd, &off, &crc)) {
+    return Status::Fail(kErrFileCorrupt, "audio spool record");
+  }
+  EncodedPacket pkt;
+  pkt.ptsUs = pts;
+  pkt.dtsUs = dts;
+  pkt.flags = flags;
+  pkt.payload.resize(len);
+  if (len > 0) {
+    if (io.Pread(fd, pkt.payload.data(), len, off) != static_cast<int64_t>(len)) {
+      return Status::Fail(kErrFileCorrupt, "audio spool payload");
+    }
+  }
+  *out = std::move(pkt);
+  return Status::Ok();
+}
+
 Status PacketSpool::Finish() {
   std::lock_guard<std::mutex> lock(mu_);
   for (auto& s : segments_) {
@@ -348,6 +423,8 @@ void PacketSpool::CloseAndDelete() {
   segments_.clear();
   offsets_.clear();
   segmentOf_.clear();
+  audioOffsets_.clear();
+  audioSegmentOf_.clear();
   active_ = false;
 }
 
@@ -370,6 +447,18 @@ bool PacketSpool::Recover() {
   ReadU32(io, seg.fd, &off, &h);
   ReadU32(io, seg.fd, &off, &clen);
   off += clen;
+  if (ver >= 2) {
+    uint32_t hasAudio = 0;
+    ReadU32(io, seg.fd, &off, &hasAudio);
+    if (hasAudio) {
+      uint32_t ac = 0, sr = 0, ch = 0, elen = 0;
+      ReadU32(io, seg.fd, &off, &ac);
+      ReadU32(io, seg.fd, &off, &sr);
+      ReadU32(io, seg.fd, &off, &ch);
+      ReadU32(io, seg.fd, &off, &elen);
+      off += elen;
+    }
+  }
   int64_t lastGood = off;
   int64_t lastGop = off;
   while (true) {

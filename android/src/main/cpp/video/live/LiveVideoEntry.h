@@ -5,11 +5,13 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "VideoEntry.h"
 #include "core/PacketSource.h"
+#include "live/AudioPacketRing.h"
 #include "live/EncodedPacketRing.h"
 #include "live/PacketSpool.h"
 
@@ -29,7 +31,9 @@ class LiveVideoEntry : public VideoEntry, public PacketSource {
 
   Status SetCodecConfig(VideoCodec codec, std::vector<uint8_t> config,
                         const VideoTrackInfo& track);
+  Status SetAudioConfig(const AudioTrackInfo& audio);
   Status AppendPacket(const EncodedPacket& pkt);
+  Status AppendAudioPacket(const EncodedPacket& pkt);
   Status Finish();
 
   VideoBufferInfo Info() const override;
@@ -37,6 +41,14 @@ class LiveVideoEntry : public VideoEntry, public PacketSource {
   const Timeline* timeline() const override { return &timeline_; }
   std::shared_ptr<DecodedFrameCache> cache() override { return cache_; }
   VideoBufferState state() const override { return state_; }
+
+  const AudioTrackInfo* audioTrack() const override {
+    return audio_ ? &*audio_ : nullptr;
+  }
+  const AudioTimeline* audioTimeline() const override {
+    return audio_ ? &audioTimeline_ : nullptr;
+  }
+  Status ReadAudioPacket(int64_t index, EncodedPacket* out) override;
 
   const VideoTrackInfo& track() const override { return track_; }
   int64_t sampleCount() const override { return timeline_.frameCount(); }
@@ -58,6 +70,9 @@ class LiveVideoEntry : public VideoEntry, public PacketSource {
   LiveVideoOptions opts_;
   std::string cacheDir_;
   VideoTrackInfo track_;
+  std::optional<AudioTrackInfo> audio_;
+  AudioTimeline audioTimeline_;
+  AudioPacketRing audioRing_;
   uint64_t appendGen_ = 0;
   Timeline timeline_;
   EncodedPacketRing ring_;

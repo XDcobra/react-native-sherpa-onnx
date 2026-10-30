@@ -3236,6 +3236,12 @@ export interface Spec extends TurboModule {
     hasActiveSpool?: string;
     seekableStartUs?: number;
     seekableEndUs?: number;
+    audioCodec?: string;
+    audioDecodable?: string;
+    audioSampleRate?: number;
+    audioChannels?: number;
+    audioStartUs?: number;
+    audioDurationUs?: number;
   }>;
 
   getVideoKeyframeTimes(
@@ -3256,6 +3262,60 @@ export interface Spec extends TurboModule {
     errorCode?: string;
     errorMessage?: string;
   }>;
+
+  createOfflineAudioBufferFromVideo(
+    bufferId: string,
+    options?: Object
+  ): Promise<{
+    bufferId?: string;
+    kind?: string;
+    state?: string;
+    sampleRate?: number;
+    channelCount?: number;
+    numSamples?: number;
+    durationMs?: number;
+    storageKind?: string;
+    mediaStartMs?: number;
+    sourceCodec?: string;
+    sourceSampleRate?: number;
+    sourceChannels?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  configureVideoBuffer(options?: Object): Promise<void>;
+
+  startLiveVideoAudioTap(
+    videoBufferId: string,
+    liveAudioBufferId: string,
+    targetSampleRateHz: number
+  ): Promise<void>;
+  stopLiveVideoAudioTap(videoBufferId: string): Promise<void>;
+
+  createVideoPreviewPlayer(bufferId: string, options?: Object): Promise<Object>;
+  videoPreviewPlay(playerId: string, requestId: string): Promise<void>;
+  videoPreviewPause(playerId: string, requestId: string): Promise<void>;
+  videoPreviewSeek(
+    playerId: string,
+    positionMs: number,
+    mode: string,
+    relative: boolean,
+    requestId: string
+  ): Promise<Object>;
+  videoPreviewSeekToLiveEdge(
+    playerId: string,
+    requestId: string
+  ): Promise<Object>;
+  videoPreviewStepFrame(
+    playerId: string,
+    direction: number,
+    requestId: string
+  ): Promise<Object>;
+  videoPreviewSetVolume(playerId: string, volume: number): Promise<void>;
+  videoPreviewSetMuted(playerId: string, muted: boolean): Promise<void>;
+  videoPreviewSetLoop(playerId: string, loop: boolean): Promise<void>;
+  videoPreviewSnapshot(playerId: string): Promise<Object>;
+  releaseVideoPreviewPlayer(playerId: string): Promise<void>;
 
   /** Required by NativeEventEmitter on RN iOS/Android. */
   addListener(eventName: string): void;

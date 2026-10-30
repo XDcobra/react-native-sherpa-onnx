@@ -5,15 +5,25 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.util.Log
+import com.facebook.react.bridge.Arguments
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.File
 
 internal object VideoBufferService : ComponentCallbacks2 {
   private const val TAG = "SherpaOnnx:video"
   @Volatile private var initialized = false
+  @Volatile private var reactContext: ReactApplicationContext? = null
 
   fun ensureInitialized(context: Context) {
+    if (context is ReactApplicationContext) {
+      reactContext = context
+    }
     if (initialized) return
     synchronized(this) {
+      if (context is ReactApplicationContext) {
+        reactContext = context
+      }
       if (initialized) return
       val cacheDir = File(context.cacheDir, "sherpa-video").apply { mkdirs() }
       val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -45,8 +55,19 @@ internal object VideoBufferService : ComponentCallbacks2 {
   fun finalizeLive(bufferId: String): Map<String, Any>? =
     VideoBufferNative.nativeFinalizeLive(bufferId)
 
-  fun ingestFile(liveId: String, path: String, realtime: Boolean): Map<String, Any>? =
-    VideoBufferNative.nativeIngestFile(liveId, path, realtime)
+  fun ingestFile(
+    liveId: String,
+    path: String,
+    realtime: Boolean,
+    includeAudio: Boolean = true,
+  ): Map<String, Any>? =
+    VideoBufferNative.nativeIngestFile(liveId, path, realtime, includeAudio)
+
+  fun startLiveAudioTap(videoId: String, audioId: String, targetRate: Int): Map<String, Any>? =
+    VideoBufferNative.nativeStartLiveAudioTap(videoId, audioId, targetRate)
+
+  fun stopLiveAudioTap(videoId: String): Boolean =
+    VideoBufferNative.nativeStopLiveAudioTap(videoId)
 
   fun createImageFromVideo(
     bufferId: String,
@@ -60,6 +81,47 @@ internal object VideoBufferService : ComponentCallbacks2 {
 
   fun keyframeTimes(bufferId: String, fromUs: Long, toUs: Long, maxCount: Int): List<Long> =
     VideoBufferNative.nativeKeyframeTimes(bufferId, fromUs, toUs, maxCount) ?: emptyList()
+
+  fun configureDecoderBudget(cpu: Int, display: Int) {
+    VideoBufferNative.nativeConfigureDecoderBudget(cpu, display)
+  }
+
+  fun extractAudioFromVideo(
+    bufferId: String,
+    startUs: Long,
+    endUs: Long,
+    targetRate: Int,
+    outPath: String?,
+    cancelFlagAddr: Long,
+    progress: Any?,
+  ): Map<String, Any>? =
+    VideoBufferNative.nativeExtractAudioFromVideo(
+      bufferId, startUs, endUs, targetRate, outPath, cancelFlagAddr, progress
+    )
+
+  /**
+   * Called from JNI on a media thread. Marshals onto the JS queue.
+   */
+  @JvmStatic
+  fun emitNative(eventName: String, type: String, bufferId: String, json: String) {
+    val ctx = reactContext ?: return
+    val emit = Runnable {
+      try {
+        val map = Arguments.createMap()
+        map.putString("type", type)
+        map.putString("playerId", bufferId)
+        map.putString("liveBufferId", bufferId)
+        map.putString("payload", json)
+        ctx.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          .emit(eventName, map)
+      } catch (e: Exception) {
+        Log.w(TAG, "emit $eventName failed: ${e.message}")
+      }
+    }
+    if (ctx.hasActiveReactInstance()) {
+      ctx.runOnJSQueueThread(emit)
+    }
+  }
 
   override fun onTrimMemory(level: Int) {
     VideoBufferNative.nativeOnTrimMemory(level)

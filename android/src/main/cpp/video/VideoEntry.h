@@ -7,6 +7,7 @@
 #include <string>
 
 #include "VideoTypes.h"
+#include "audio/AudioTimeline.h"
 #include "core/DecodedFrameCache.h"
 #include "core/PacketSource.h"
 #include "core/Timeline.h"
@@ -30,6 +31,9 @@ class VideoEntry {
   virtual const Timeline* timeline() const = 0;
   virtual std::shared_ptr<DecodedFrameCache> cache() = 0;
   virtual VideoBufferState state() const = 0;
+  virtual const AudioTrackInfo* audioTrack() const { return nullptr; }
+  virtual const AudioTimeline* audioTimeline() const { return nullptr; }
+  virtual Status ReadAudioPacket(int64_t index, EncodedPacket* out);
 
   std::shared_ptr<DecodeSession> StickySession();
   void DropStickySession();

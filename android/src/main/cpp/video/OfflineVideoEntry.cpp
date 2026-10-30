@@ -54,7 +54,35 @@ VideoBufferInfo OfflineVideoEntry::Info() const {
     i.seekableRange.startUs = timeline()->startUs();
     i.seekableRange.endUs = timeline()->endUs();
   }
+  if (auto* a = audioTrack()) {
+    i.audio = *a;
+    if (auto* tl = audioTimeline()) {
+      i.audioRange.startUs = tl->startUs();
+      i.audioRange.endUs = tl->endUs();
+    }
+  }
   return i;
+}
+
+const AudioTrackInfo* OfflineVideoEntry::audioTrack() const {
+  if (auto* d = dynamic_cast<const FfmpegDemuxer*>(source_.get())) {
+    return d->audioTrack();
+  }
+  return nullptr;
+}
+
+const AudioTimeline* OfflineVideoEntry::audioTimeline() const {
+  if (auto* d = dynamic_cast<const FfmpegDemuxer*>(source_.get())) {
+    return &d->audioTimeline();
+  }
+  return nullptr;
+}
+
+Status OfflineVideoEntry::ReadAudioPacket(int64_t index, EncodedPacket* out) {
+  if (auto* d = dynamic_cast<FfmpegDemuxer*>(source_.get())) {
+    return d->ReadAudioPacket(index, out);
+  }
+  return Status::Fail(kErrNoAudioTrack, "no audio");
 }
 
 PacketSource* OfflineVideoEntry::packets() { return source_.get(); }

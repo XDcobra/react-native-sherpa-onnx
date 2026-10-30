@@ -72,6 +72,36 @@ FFMPEG=(ffmpeg -y -hide_banner -loglevel error)
 "${FFMPEG[@]}" -f lavfi -i "sine=frequency=440:duration=0.2" -c:a aac \
   "$OUT/audio_only.m4a"
 
+# H.264 + AAC (48 kHz stereo), 5 s, GOP 30, clapper: white + 1 kHz beep each second
+"${FFMPEG[@]}" -f lavfi -i "color=c=black:s=640x360:r=30:d=5" \
+  -f lavfi -i "sine=frequency=1000:sample_rate=48000:duration=5" \
+  -c:v libx264 -g 30 -pix_fmt yuv420p -c:a aac -ac 2 -ar 48000 -b:a 64k \
+  -shortest "$OUT/av_h264_aac.mp4"
+
+# H.264 + Opus in MKV
+"${FFMPEG[@]}" -f lavfi -i "color=c=black:s=320x240:r=30:d=2" \
+  -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=2" \
+  -c:v libx264 -g 30 -pix_fmt yuv420p -c:a libopus -ac 2 -ar 48000 -b:a 32k \
+  -shortest "$OUT/av_h264_opus.mkv" || true
+
+# AAC with start offset (late audio)
+"${FFMPEG[@]}" -f lavfi -i "color=c=black:s=320x240:r=30:d=2" \
+  -itsoffset 0.5 -f lavfi -i "sine=frequency=880:sample_rate=48000:duration=1.5" \
+  -c:v libx264 -g 30 -pix_fmt yuv420p -c:a aac -ac 1 -ar 48000 \
+  -shortest "$OUT/av_audio_late.mp4" || true
+
+# Ramp AAC for sample-accurate trim tests
+"${FFMPEG[@]}" -f lavfi -i "color=c=black:s=160x120:r=30:d=1" \
+  -f lavfi -i "aevalsrc=t:s=48000:d=1" \
+  -c:v libx264 -g 30 -pix_fmt yuv420p -c:a aac -ac 1 -ar 48000 \
+  -shortest "$OUT/av_ramp_aac.mp4" || true
+
+# AC-3 audio (unsupported in shipped FFmpeg) — skip if encoder missing
+"${FFMPEG[@]}" -f lavfi -i "color=c=black:s=160x120:r=30:d=1" \
+  -f lavfi -i "sine=frequency=440:duration=1" \
+  -c:v libx264 -g 30 -pix_fmt yuv420p -c:a ac3 -ac 2 -ar 48000 \
+  -shortest "$OUT/av_h264_ac3.mp4" || true
+
 # Truncated MP4: copy then truncate
 cp "$OUT/h264_gop15_b.mp4" "$OUT/truncated.mp4"
 python3 - "$OUT/truncated.mp4" <<'PY'
@@ -102,6 +132,8 @@ probe "$OUT/hevc_hvc1.mov" hevc_hvc1
 probe "$OUT/h264.mkv" h264_mkv
 probe "$OUT/vp9.webm" vp9
 probe "$OUT/audio_only.m4a" audio_only
+ffprobe -v error -select_streams a:0 -show_entries stream=codec_name,sample_rate,channels \
+  -of json "$OUT/av_h264_aac.mp4" > "$EXP/av_h264_aac.json" || true
 
 rm -f "$OUT/identity.y4m"
 echo "fixtures written under $OUT"

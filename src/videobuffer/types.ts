@@ -10,6 +10,15 @@ export type PipelineVideoBufferKind = 'offlineVideoBuffer' | 'liveVideoBuffer';
 export type OfflineVideoBufferState = 'immutable';
 export type LiveVideoBufferState = 'recording' | 'finished';
 
+export interface VideoAudioTrackInfo {
+  codec: string;
+  decodable: boolean;
+  sampleRate: number;
+  channels: number;
+  startMs: number;
+  durationMs: number;
+}
+
 export interface OfflineVideoBufferInfo {
   bufferId: string;
   kind: 'offlineVideoBuffer';
@@ -17,6 +26,7 @@ export interface OfflineVideoBufferInfo {
   frameCount: number;
   seekableStartUs?: number;
   seekableEndUs?: number;
+  audio: VideoAudioTrackInfo | null;
 }
 
 export interface LiveVideoBufferInfo {
@@ -30,6 +40,7 @@ export interface LiveVideoBufferInfo {
   liveEdgeUs?: number;
   seekableStartUs?: number;
   seekableEndUs?: number;
+  audio: VideoAudioTrackInfo | null;
 }
 
 export type PipelineVideoBufferInfo =
@@ -102,6 +113,7 @@ export interface CreateEmptyLiveVideoBufferOptions {
 
 export interface IngestFileToLiveOptions {
   pacing?: 'realtime' | 'asFast';
+  includeAudio?: boolean;
 }
 
 export interface CreateOfflineImageFromVideoOptions {
@@ -131,4 +143,28 @@ export interface ExportVideoFrameOptions {
   format?: 'jpeg' | 'png' | 'webp';
   maxSide?: number;
   quality?: number;
+}
+
+export interface VideoDecoderBudget {
+  cpu?: number;
+  display?: number;
+}
+
+export interface ConfigureVideoBufferOptions {
+  decoderBudget?: VideoDecoderBudget;
+}
+
+export interface CreateOfflineAudioFromVideoOptions {
+  targetSampleRateHz?: number;
+  rangeMs?: { startMs: number; endMs: number };
+  onProgress?: (e: { percent: number; decodedMs: number }) => void;
+  signal?: AbortSignal;
+}
+
+export interface VideoAudioExtractResult {
+  audio: import('../audiobuffer/types').OfflineAudioBufferRef;
+  mediaStartMs: number;
+  sourceCodec: string;
+  sourceSampleRate: number;
+  sourceChannels: number;
 }

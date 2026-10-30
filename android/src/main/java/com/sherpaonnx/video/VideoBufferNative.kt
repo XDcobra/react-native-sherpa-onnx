@@ -7,6 +7,8 @@ internal object VideoBufferNative {
 
   external fun nativeInit(cacheDir: String, totalRamBytes: Long, debug: Boolean)
 
+  external fun nativeConfigureDecoderBudget(cpu: Int, display: Int)
+
   external fun nativeSetHwCodecs(
     h264Decoder: String?,
     hevcDecoder: String?,
@@ -34,7 +36,16 @@ internal object VideoBufferNative {
     liveBufferId: String,
     path: String,
     realtime: Boolean,
+    includeAudio: Boolean,
   ): HashMap<String, Any>?
+
+  external fun nativeStartLiveAudioTap(
+    videoBufferId: String,
+    liveAudioBufferId: String,
+    targetRate: Int,
+  ): HashMap<String, Any>?
+
+  external fun nativeStopLiveAudioTap(videoBufferId: String): Boolean
 
   external fun nativeCreateImageFromVideo(
     bufferId: String,
@@ -51,4 +62,14 @@ internal object VideoBufferNative {
     toUs: Long,
     maxCount: Int,
   ): ArrayList<Long>?
+
+  external fun nativeExtractAudioFromVideo(
+    bufferId: String,
+    startUs: Long,
+    endUs: Long,
+    targetRate: Int,
+    outPath: String?,
+    cancelFlagAddr: Long,
+    progress: Any?,
+  ): HashMap<String, Any>?
 }

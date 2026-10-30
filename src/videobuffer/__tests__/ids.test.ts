@@ -14,6 +14,9 @@ jest.mock('react-native', () => {
     getVideoKeyframeTimes: jest.fn(),
     releaseVideoBuffer: jest.fn(),
     createOfflineImageBufferFromVideo: jest.fn(),
+    createOfflineAudioBufferFromVideo: jest.fn(),
+    configureVideoBuffer: jest.fn(),
+    cancelDecode: jest.fn(),
   };
   return {
     NativeModules: { SherpaOnnx: {} },
@@ -22,7 +25,8 @@ jest.mock('react-native', () => {
         event: string,
         cb: (event: unknown) => void
       ): { remove: () => void } {
-        if (event === 'SherpaOnnxVideoEvent') listeners.push(cb);
+        if (event === 'SherpaOnnxVideoEvent' || event === 'decodeProgress')
+          listeners.push(cb);
         return {
           remove: () => {
             const i = listeners.indexOf(cb);
@@ -41,7 +45,9 @@ jest.mock('react-native', () => {
 });
 
 import {
+  configureVideoBuffer,
   createEmptyLiveVideoBuffer,
+  createOfflineAudioBufferFromVideo,
   createOfflineVideoBufferFromFile,
   finalizeLiveVideoBuffer,
   resolveLiveVideoBufferId,
@@ -64,6 +70,7 @@ describe('videobuffer id resolvers', () => {
           kind: 'offlineVideoBuffer',
           state: 'immutable',
           frameCount: 1,
+          audio: null,
         },
       })
     ).toBe(OFF);
@@ -82,6 +89,7 @@ describe('videobuffer id resolvers', () => {
           totalFramesWritten: 2,
           ringEvictedFrames: 0,
           hasActiveSpool: false,
+          audio: null,
         },
       })
     ).toBe(LIVE);
@@ -111,6 +119,8 @@ describe('videobuffer public API mapping', () => {
       createOfflineVideoBufferFromFile: jest.Mock;
       createEmptyLiveVideoBuffer: jest.Mock;
       finalizeLiveVideoBuffer: jest.Mock;
+      createOfflineAudioBufferFromVideo: jest.Mock;
+      configureVideoBuffer: jest.Mock;
     };
     __emitVideo: (event: unknown) => void;
     __listenerCount: () => number;
@@ -175,5 +185,62 @@ describe('videobuffer public API mapping', () => {
     expect(seen).toEqual(['packetsAppended']);
     unsub();
     expect(rn.__listenerCount()).toBe(0);
+  });
+
+  it('rejects decoderBudget outside [1, 4]', async () => {
+    await expect(
+      configureVideoBuffer({ decoderBudget: { cpu: 0 } })
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT/);
+    await expect(
+      configureVideoBuffer({ decoderBudget: { display: 5 } })
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT/);
+  });
+
+  it('maps createOfflineAudioBufferFromVideo and defaults 16 kHz', async () => {
+    rn.__mockNative.createOfflineAudioBufferFromVideo.mockResolvedValue({
+      bufferId: 'off_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      kind: 'offlinePcmBuffer',
+      state: 'immutable',
+      sampleRate: 16000,
+      channelCount: 1,
+      numSamples: 16000,
+      durationMs: 1000,
+      mediaStartMs: 12.5,
+      sourceCodec: 'aac',
+      sourceSampleRate: 48000,
+      sourceChannels: 2,
+    });
+    const result = await createOfflineAudioBufferFromVideo(OFF, {
+      rangeMs: { startMs: 0, endMs: 1000 },
+    });
+    expect(result.audio.info.kind).toBe('offlinePcmBuffer');
+    expect(result.mediaStartMs).toBe(12.5);
+    expect(result.sourceCodec).toBe('aac');
+    expect(
+      rn.__mockNative.createOfflineAudioBufferFromVideo
+    ).toHaveBeenCalledWith(
+      OFF,
+      expect.objectContaining({
+        targetSampleRateHz: 16000,
+        startUs: 0,
+        endUs: 1000000,
+      })
+    );
+  });
+
+  it('rejects inverted extract range', async () => {
+    await expect(
+      createOfflineAudioBufferFromVideo(OFF, {
+        rangeMs: { startMs: 5, endMs: 1 },
+      })
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT/);
+  });
+
+  it('forwards a valid decoderBudget to native', async () => {
+    rn.__mockNative.configureVideoBuffer.mockResolvedValue(undefined);
+    await configureVideoBuffer({ decoderBudget: { cpu: 1, display: 1 } });
+    expect(rn.__mockNative.configureVideoBuffer).toHaveBeenCalledWith({
+      decoderBudget: { cpu: 1, display: 1 },
+    });
   });
 });

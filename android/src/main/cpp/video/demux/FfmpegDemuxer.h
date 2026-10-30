@@ -2,9 +2,11 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "audio/AudioTimeline.h"
 #include "core/PacketSource.h"
 #include "core/Timeline.h"
 
@@ -30,10 +32,21 @@ class FfmpegDemuxer : public PacketSource {
   int64_t bytesReadDuringOpen() const { return openBytes_; }
   bool usesPread() const { return usesPread_; }
 
+  bool hasAudio() const { return audio_.has_value(); }
+  const AudioTrackInfo* audioTrack() const {
+    return audio_ ? &*audio_ : nullptr;
+  }
+  const AudioTimeline& audioTimeline() const { return audioTimeline_; }
+  Status ReadAudioPacket(int64_t index, EncodedPacket* out);
+
  private:
   Status BuildIndex();
+  Status BuildAudioIndex();
   Status ReadMovByPread(int64_t decodeIndex, EncodedPacket* out);
   Status ReadMatroska(int64_t decodeIndex, EncodedPacket* out);
+  Status ReadAudioMov(int64_t index, EncodedPacket* out);
+  Status ReadAudioMatroska(int64_t index, EncodedPacket* out);
+  Status EnsureAudioContext();
 
  public:
   struct Impl;
@@ -42,6 +55,8 @@ class FfmpegDemuxer : public PacketSource {
   std::unique_ptr<Impl> impl_;
   VideoTrackInfo track_;
   Timeline timeline_;
+  std::optional<AudioTrackInfo> audio_;
+  AudioTimeline audioTimeline_;
   bool frameCountExact_ = true;
   IndexState indexState_ = IndexState::Complete;
   int64_t openBytes_ = 0;

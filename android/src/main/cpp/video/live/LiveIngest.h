@@ -12,6 +12,7 @@ enum class IngestPacing { Realtime, AsFast };
 
 struct LiveIngestOptions {
   IngestPacing pacing = IngestPacing::AsFast;
+  bool includeAudio = true;
 };
 
 class LiveIngest {

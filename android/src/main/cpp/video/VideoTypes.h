@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,17 @@ inline const char* kErrMemoryBudget = "VIDEO_MEMORY_BUDGET_EXCEEDED";
 inline const char* kErrSpoolIo = "VIDEO_SPOOL_IO";
 inline const char* kErrCancelled = "VIDEO_CANCELLED";
 inline const char* kErrFileCorrupt = "VIDEO_FILE_CORRUPT";
+inline const char* kErrPreviewDecoderBusy = "VIDEO_PREVIEW_DECODER_BUSY";
+inline const char* kErrPreviewNotFound = "VIDEO_PREVIEW_NOT_FOUND";
+inline const char* kErrPreviewReleased = "VIDEO_PREVIEW_RELEASED";
+inline const char* kErrPreviewInvalidState = "VIDEO_PREVIEW_INVALID_STATE";
+inline const char* kErrPreviewInvalidArgument = "VIDEO_PREVIEW_INVALID_ARGUMENT";
+inline const char* kErrPreviewRenderFailed = "VIDEO_PREVIEW_RENDER_FAILED";
+inline const char* kErrPreviewAudioUnsupported = "VIDEO_PREVIEW_AUDIO_UNSUPPORTED";
+inline const char* kErrPreviewAudioOutputFailed = "VIDEO_PREVIEW_AUDIO_OUTPUT_FAILED";
+inline const char* kErrNoAudioTrack = "VIDEO_NO_AUDIO_TRACK";
+inline const char* kErrAudioCodecUnsupported = "VIDEO_AUDIO_CODEC_UNSUPPORTED";
+inline const char* kErrAudioDecodeFailed = "VIDEO_AUDIO_DECODE_FAILED";
 
 struct Status {
   bool ok = true;
@@ -56,6 +68,17 @@ struct Result {
 };
 
 enum class VideoCodec { H264, Hevc };
+
+enum class AudioCodec : uint32_t {
+  Aac = 1,
+  Mp3 = 2,
+  Opus = 3,
+  Vorbis = 4,
+  Flac = 5,
+  PcmS16le = 6,
+  PcmF32le = 7,
+  Unsupported = 255
+};
 
 enum class ColorMatrix { Bt601, Bt709, Bt2020 };
 
@@ -89,6 +112,26 @@ struct VideoTransform {
 struct Rational {
   int num = 0;
   int den = 1;
+};
+
+struct AudioTrackInfo {
+  AudioCodec codec = AudioCodec::Unsupported;
+  std::string codecName;
+  int sampleRate = 0;
+  int channels = 0;
+  uint64_t channelLayoutMask = 0;
+  int frameSize = 0;
+  int64_t initialPaddingSamples = 0;
+  Rational timeBase;
+  std::vector<uint8_t> extradata;
+  bool decodable = false;
+};
+
+struct AudioPacketEntry {
+  int64_t ptsUs = 0;
+  int32_t durationUs = 0;
+  uint32_t size = 0;
+  int64_t fileOffset = -1;
 };
 
 struct VideoTrackInfo {
@@ -226,6 +269,30 @@ struct VideoBufferInfo {
   int64_t totalFramesWritten = 0;
   int64_t ringEvictedFrames = 0;
   bool hasActiveSpool = false;
+  std::optional<AudioTrackInfo> audio;
+  TimeRange audioRange;
+  int64_t audioPacketsWritten = 0;
+};
+
+inline const char* AudioCodecName(AudioCodec c) {
+  switch (c) {
+    case AudioCodec::Aac:
+      return "aac";
+    case AudioCodec::Mp3:
+      return "mp3";
+    case AudioCodec::Opus:
+      return "opus";
+    case AudioCodec::Vorbis:
+      return "vorbis";
+    case AudioCodec::Flac:
+      return "flac";
+    case AudioCodec::PcmS16le:
+      return "pcm_s16le";
+    case AudioCodec::PcmF32le:
+      return "pcm_f32le";
+    default:
+      return "unsupported";
+  }
 };
 
 inline const char* VideoCodecName(VideoCodec c) {

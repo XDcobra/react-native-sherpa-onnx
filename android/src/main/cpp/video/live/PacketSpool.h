@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -31,10 +32,14 @@ class PacketSpool {
  public:
   ~PacketSpool();
   Status Open(const std::string& cacheDir, const std::string& uuid,
-              const VideoTrackInfo& track, const SpoolOptions& opts);
+              const VideoTrackInfo& track, const SpoolOptions& opts,
+              const AudioTrackInfo* audio = nullptr);
   /** Non-blocking enqueue. Overflow drops until next key + discontinuity. */
   Status Enqueue(const EncodedPacket& pkt);
+  Status EnqueueAudio(const EncodedPacket& pkt);
   Status Read(int64_t presentationIndex, EncodedPacket* out);
+  Status ReadAudio(int64_t index, EncodedPacket* out);
+  int64_t audioCount() const;
   Status Finish();
   void CloseAndDelete();
   bool active() const;
@@ -64,6 +69,9 @@ class PacketSpool {
   std::vector<Segment> segments_;
   std::vector<int64_t> offsets_;  // file offset per presentation index
   std::vector<int> segmentOf_;
+  std::vector<int64_t> audioOffsets_;
+  std::vector<int> audioSegmentOf_;
+  std::optional<AudioTrackInfo> audio_;
   std::vector<EncodedPacket> queue_;
   std::vector<SpoolEvent> events_;
   bool active_ = false;
