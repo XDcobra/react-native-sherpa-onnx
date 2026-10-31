@@ -1,0 +1,33 @@
+{
+    "maxSide": 0,
+    "fixtureKind": "phone-24mp",
+    "loggedAt": "2026-10-30T14:58:14.579Z",
+    "width": 5712,
+    "needsPlatformHw": true,
+    "suite": "platform_hw_decode",
+    "repeats": 5,
+    "jpegPath": "/Users/felix/Library/Developer/CoreSimulator/Devices/B6800F46-62D6-4AE2-A4FB-E2A625E16CC6/data/Containers/Data/Application/F8FD656D-C322-42F6-8FDE-4E979897A097/Library/Caches/imagebuffer-bench/phone-24mp.jpg",
+    "rows": [
+        {
+            "p95Ms": 1246.86,
+            "rssBytes": 447234048,
+            "mpPerSec": 19.7338,
+            "name": "baseline.portable_turbo",
+            "ok": true,
+            "p50Ms": 1240.01
+        },
+        {
+            "ok": true,
+            "p50Ms": 1545.577125,
+            "p95Ms": 1556.066083,
+            "speedupVsBaseline": 0.802295776731297,
+            "mpPerSec": 15.832408233914563,
+            "rgbBytes": 73410624,
+            "error": "",
+            "name": "candidate.platform_ImageIO"
+        }
+    ],
+    "height": 4284,
+    "pageCount": 0,
+    "jpegBytes": 3280007
+}

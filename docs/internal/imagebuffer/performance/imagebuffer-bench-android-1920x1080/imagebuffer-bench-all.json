@@ -1,0 +1,442 @@
+{
+    "suites": {
+        "decode_jpeg_stb_vs_turbo": {
+            "suite": "decode_jpeg_stb_vs_turbo",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 0,
+            "rows": [
+                {
+                    "name": "baseline.stb",
+                    "ok": true,
+                    "p50Ms": 81.0212,
+                    "p95Ms": 82.1392,
+                    "mpPerSec": 25.5933,
+                    "rssBytes": 476733440
+                },
+                {
+                    "name": "candidate.turbo",
+                    "ok": true,
+                    "p50Ms": 182.922,
+                    "p95Ms": 183.936,
+                    "mpPerSec": 11.336,
+                    "rssBytes": 477044736,
+                    "speedupVsBaseline": 0.442926
+                }
+            ],
+            "jpegPath": "/data/user/0/com.xdcobra.voicelab/cache/imagebuffer-bench/bench_photo.jpg",
+            "jpegBytes": 65491,
+            "loggedAt": "2026-10-30T19:20:05.433+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 406721
+            }
+        },
+        "decode_jpeg_full_then_scale_vs_idct": {
+            "suite": "decode_jpeg_full_then_scale_vs_idct",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 1024,
+            "rows": [
+                {
+                    "name": "baseline.turbo_full_then_scale",
+                    "ok": true,
+                    "p50Ms": 256.895,
+                    "p95Ms": 257.616,
+                    "mpPerSec": 8.07179,
+                    "rssBytes": 486715392
+                },
+                {
+                    "name": "candidate.turbo_idct_scale",
+                    "ok": true,
+                    "p50Ms": 257.458,
+                    "p95Ms": 259.115,
+                    "mpPerSec": 8.05412,
+                    "rssBytes": 486748160,
+                    "speedupVsBaseline": 0.997811
+                }
+            ],
+            "loggedAt": "2026-10-30T19:22:53.450+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 409487
+            }
+        },
+        "scale_scalar_vs_libyuv": {
+            "suite": "scale_scalar_vs_libyuv",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 1024,
+            "rows": [
+                {
+                    "name": "baseline.scalar_bilinear",
+                    "ok": true,
+                    "p50Ms": 104.306,
+                    "p95Ms": 104.711,
+                    "mpPerSec": 19.8799,
+                    "rssBytes": 484057088
+                },
+                {
+                    "name": "candidate.libyuv",
+                    "ok": true,
+                    "p50Ms": 147.531,
+                    "p95Ms": 151.727,
+                    "mpPerSec": 14.0554,
+                    "rssBytes": 484446208,
+                    "speedupVsBaseline": 0.707014
+                }
+            ],
+            "loggedAt": "2026-10-30T19:23:41.656+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 405619
+            }
+        },
+        "exif_scalar_vs_libyuv": {
+            "suite": "exif_scalar_vs_libyuv",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 0,
+            "rows": [
+                {
+                    "name": "baseline.scalar_exif6",
+                    "ok": true,
+                    "p50Ms": 115.851,
+                    "p95Ms": 121.211,
+                    "mpPerSec": 17.8989,
+                    "rssBytes": 480628736
+                },
+                {
+                    "name": "candidate.libyuv_exif6",
+                    "ok": true,
+                    "p50Ms": 247.471,
+                    "p95Ms": 257.551,
+                    "mpPerSec": 8.37916,
+                    "rssBytes": 480976896,
+                    "speedupVsBaseline": 0.468138
+                }
+            ],
+            "loggedAt": "2026-10-30T19:24:17.420+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 403297
+            }
+        },
+        "png_stb_vs_wuffs": {
+            "suite": "png_stb_vs_wuffs",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 0,
+            "rows": [
+                {
+                    "name": "baseline.stb",
+                    "ok": true,
+                    "p50Ms": 76.2982,
+                    "p95Ms": 76.6031,
+                    "mpPerSec": 27.1776,
+                    "rssBytes": 481374208
+                },
+                {
+                    "name": "candidate.wuffs",
+                    "ok": true,
+                    "p50Ms": 141.895,
+                    "p95Ms": 142.35,
+                    "mpPerSec": 14.6136,
+                    "rssBytes": 481370112,
+                    "speedupVsBaseline": 0.537707
+                }
+            ],
+            "pngBytes": 97616,
+            "loggedAt": "2026-10-30T19:24:52.021+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 403589
+            }
+        },
+        "webp_full_vs_scaled": {
+            "suite": "webp_full_vs_scaled",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 1024,
+            "rows": [
+                {
+                    "name": "baseline.webp_full_then_scale",
+                    "ok": true,
+                    "p50Ms": 112.637,
+                    "p95Ms": 113.347,
+                    "mpPerSec": 18.4096,
+                    "rssBytes": 484347904
+                },
+                {
+                    "name": "candidate.webp_use_scaling",
+                    "ok": true,
+                    "p50Ms": 16.9338,
+                    "p95Ms": 17.6141,
+                    "mpPerSec": 122.453,
+                    "rssBytes": 485961728,
+                    "speedupVsBaseline": 6.65157
+                }
+            ],
+            "loggedAt": "2026-10-30T19:25:25.192+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 408530
+            }
+        },
+        "eager_vs_lazy_30page": {
+            "suite": "eager_vs_lazy_30page",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 30,
+            "maxSide": 0,
+            "rows": [
+                {
+                    "name": "baseline.eager_create",
+                    "ok": true,
+                    "p50Ms": 2983.11,
+                    "p95Ms": 3028.54,
+                    "mpPerSec": 0,
+                    "rssBytes": 485113856
+                },
+                {
+                    "name": "candidate.lazy_create",
+                    "ok": true,
+                    "p50Ms": 0.028615,
+                    "p95Ms": 0.0602454,
+                    "mpPerSec": 0,
+                    "rssBytes": 485113856,
+                    "speedupVsBaseline": 104250
+                },
+                {
+                    "name": "candidate.lazy_create_plus_ensure0",
+                    "ok": true,
+                    "p50Ms": 105.634,
+                    "p95Ms": 106.106,
+                    "mpPerSec": 0,
+                    "rssBytes": 485130240
+                }
+            ],
+            "loggedAt": "2026-10-30T19:26:18.399+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 408573
+            }
+        },
+        "packed_vs_aligned_stride": {
+            "suite": "packed_vs_aligned_stride",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 1024,
+            "rows": [
+                {
+                    "name": "baseline.packed_libyuv",
+                    "ok": true,
+                    "p50Ms": 191.972,
+                    "p95Ms": 193.104,
+                    "mpPerSec": 10.8016,
+                    "rssBytes": 485916672
+                },
+                {
+                    "name": "candidate.aligned64_libyuv",
+                    "ok": true,
+                    "p50Ms": 193.053,
+                    "p95Ms": 193.296,
+                    "mpPerSec": 10.7411,
+                    "rssBytes": 485912576,
+                    "speedupVsBaseline": 0.994401
+                }
+            ],
+            "loggedAt": "2026-10-30T19:27:12.921+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 407810
+            }
+        },
+        "mmap_per_frame_vs_slab": {
+            "suite": "mmap_per_frame_vs_slab",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 2,
+            "maxSide": 0,
+            "rows": [
+                {
+                    "name": "baseline.mmap_per_frame",
+                    "ok": true,
+                    "p50Ms": 298.19,
+                    "p95Ms": 318.286,
+                    "mpPerSec": 0,
+                    "rssBytes": 477560832
+                },
+                {
+                    "name": "candidate.mmap_slab",
+                    "ok": true,
+                    "p50Ms": 293.153,
+                    "p95Ms": 299.619,
+                    "mpPerSec": 0,
+                    "rssBytes": 477581312,
+                    "speedupVsBaseline": 1.01718
+                }
+            ],
+            "loggedAt": "2026-10-30T19:28:02.611+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 406471
+            }
+        },
+        "serial_vs_parallel_create": {
+            "suite": "serial_vs_parallel_create",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 8,
+            "maxSide": 0,
+            "rows": [
+                {
+                    "name": "baseline.serial",
+                    "ok": true,
+                    "p50Ms": 975.155,
+                    "p95Ms": 988.99,
+                    "mpPerSec": 0,
+                    "rssBytes": 491266048
+                },
+                {
+                    "name": "candidate.parallel",
+                    "ok": true,
+                    "p50Ms": 790.061,
+                    "p95Ms": 821.029,
+                    "mpPerSec": 0,
+                    "rssBytes": 500838400,
+                    "speedupVsBaseline": 1.23428
+                }
+            ],
+            "loggedAt": "2026-10-30T19:28:44.344+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 420481
+            }
+        },
+        "jpeg_turbo_encode": {
+            "suite": "jpeg_turbo_encode",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 0,
+            "rows": [
+                {
+                    "name": "baseline.stb_write_jpg",
+                    "ok": true,
+                    "p50Ms": 107.224,
+                    "p95Ms": 112.419,
+                    "mpPerSec": 19.339,
+                    "rssBytes": 481787904
+                },
+                {
+                    "name": "candidate.turbo_encode",
+                    "ok": true,
+                    "p50Ms": 314.019,
+                    "p95Ms": 314.988,
+                    "mpPerSec": 6.60341,
+                    "rssBytes": 482836480,
+                    "speedupVsBaseline": 0.341456
+                }
+            ],
+            "loggedAt": "2026-10-30T19:29:25.798+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 406765
+            }
+        },
+        "platform_hw_decode": {
+            "suite": "platform_hw_decode",
+            "width": 1920,
+            "height": 1080,
+            "repeats": 5,
+            "pageCount": 0,
+            "maxSide": 0,
+            "rows": [
+                {
+                    "name": "baseline.portable_turbo",
+                    "ok": true,
+                    "p50Ms": 235.689,
+                    "p95Ms": 238.027,
+                    "mpPerSec": 8.79802,
+                    "rssBytes": 494546944
+                },
+                {
+                    "name": "candidate.platform_ImageDecoder",
+                    "ok": true,
+                    "p50Ms": 14.286846,
+                    "p95Ms": 16.328692,
+                    "mpPerSec": 145.14050196943396,
+                    "rssBytes": 427744256,
+                    "speedupVsBaseline": 16.496923113750928,
+                    "error": ""
+                }
+            ],
+            "jpegPath": "/data/user/0/com.xdcobra.voicelab/cache/imagebuffer-bench/bench_photo.jpg",
+            "jpegBytes": 65491,
+            "needsPlatformHw": true,
+            "loggedAt": "2026-10-30T19:30:11.040+07:00",
+            "device": {
+                "manufacturer": "Nothing",
+                "model": "A142P",
+                "sdk": 36,
+                "pssKb": 418143
+            }
+        }
+    },
+    "order": [
+        "decode_jpeg_stb_vs_turbo",
+        "decode_jpeg_full_then_scale_vs_idct",
+        "scale_scalar_vs_libyuv",
+        "exif_scalar_vs_libyuv",
+        "png_stb_vs_wuffs",
+        "webp_full_vs_scaled",
+        "eager_vs_lazy_30page",
+        "packed_vs_aligned_stride",
+        "mmap_per_frame_vs_slab",
+        "serial_vs_parallel_create",
+        "jpeg_turbo_encode",
+        "platform_hw_decode"
+    ],
+    "updatedAt": "2026-10-30T19:30:11.040+07:00"
+}
