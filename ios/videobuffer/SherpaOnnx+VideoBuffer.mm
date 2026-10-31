@@ -25,7 +25,10 @@
 #import "VideoToolboxDecoder.h"
 #import "VideoToolboxEncoder.h"
 
+#import <VideoToolbox/VideoToolbox.h>
+
 #include <atomic>
+#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -120,8 +123,13 @@ void EnsureVideoInit() {
         CodecCatalog::Instance().Register(std::move(p));
       };
       for (const char* codec : {"h264", "hevc"}) {
+        const CMVideoCodecType ctype = strcmp(codec, "hevc") == 0
+                                           ? kCMVideoCodecType_HEVC
+                                           : kCMVideoCodecType_H264;
+        const bool hwDec = VTIsHardwareDecodeSupported(ctype);
         add("vt.hw", codec, Direction::Decode,
-            ios17 ? Tier::Hardware : Tier::Unknown, true, Reason::None);
+            ios17 ? Tier::Hardware : Tier::Unknown, hwDec,
+            hwDec ? Reason::None : Reason::NotPresent);
         add("vt.sw", codec, Direction::Decode, Tier::Software, ios17,
             ios17 ? Reason::None : Reason::OsTooOld);
         add("vt.hw", codec, Direction::Encode,
@@ -822,8 +830,10 @@ void BindVideoModule(SherpaOnnx *mod) {
   __weak SherpaOnnx *weakSelf = self;
   NSString *opIdNs = operationId;
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    // ObjC blocks capture locals as const; Run() writes decision fields.
+    sherpa_onnx::video::VideoExportOptions mutOpts = opts;
     auto st = sherpa_onnx::video::VideoExportSession::Run(
-        idStr, pathStr, formatStr, opts, cancelFlag.get(),
+        idStr, pathStr, formatStr, mutOpts, cancelFlag.get(),
         [weakSelf, opIdNs](int percent, int64_t encodedUs) {
           SherpaOnnx *strongSelf = weakSelf;
           if (!strongSelf) return;
