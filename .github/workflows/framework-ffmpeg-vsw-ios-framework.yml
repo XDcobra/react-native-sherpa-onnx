@@ -2,14 +2,12 @@
 # Tag: third_party/ffmpeg_prebuilt/IOS_VSW_RELEASE_TAG
 # Asset: ffmpeg-vsw-ios-framework.zip — must not collide with audio-only ffmpeg-ios.
 #
+# When to run: Actions → Framework - FFmpeg video-SW (iOS) Release → Run workflow
+# (or: gh workflow run framework-ffmpeg-vsw-ios-framework.yml --ref <branch>)
+#
 name: Framework - FFmpeg video-SW (iOS) Release
 
 on:
-  push:
-    paths:
-      - '.github/workflows/framework-ffmpeg-vsw-ios-framework.yml'
-      - 'third_party/ffmpeg_prebuilt/IOS_VSW_RELEASE_TAG'
-      - 'third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh'
   workflow_dispatch:
 
 concurrency:

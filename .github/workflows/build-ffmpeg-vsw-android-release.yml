@@ -3,18 +3,12 @@
 # Tag: third_party/ffmpeg_prebuilt/ANDROID_VSW_RELEASE_TAG
 # Must not share cache keys or Maven coordinates with the audio-only ffmpeg job.
 #
-# Trigger: workflow_dispatch (gh workflow run --ref) and push of this workflow /
-# the vsw tag / the Android FFmpeg build script so the workflow is registered
-# on feature branches (GitHub only indexes workflows after a push).
+# When to run: Actions → Prebuilt - FFmpeg video-SW (Android) Release → Run workflow
+# (or: gh workflow run build-ffmpeg-vsw-android-release.yml --ref <branch>)
 #
 name: Prebuilt - FFmpeg video-SW (Android) Release
 
 on:
-  push:
-    paths:
-      - '.github/workflows/build-ffmpeg-vsw-android-release.yml'
-      - 'third_party/ffmpeg_prebuilt/ANDROID_VSW_RELEASE_TAG'
-      - 'third_party/ffmpeg_prebuilt/build_ffmpeg.sh'
   workflow_dispatch:
 
 concurrency:
