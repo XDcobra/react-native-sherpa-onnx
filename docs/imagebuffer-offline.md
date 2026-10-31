@@ -149,6 +149,7 @@ Options (`CreateOfflineImageBufferOptions`):
 | Option | Notes |
 |--------|--------|
 | `maxSide` | Longest-edge cap after decode; default `4096`; `<= 0` disables. WebP uses libwebp `use_scaling` when this hits; JPEG/PNG still full-decode then scalar scale. |
+| `decodePolicy` | Image decode policy (`hardware` / `software` / `preferHardware`). Default `preferHardware`. See [codecs.md](./codecs.md). |
 | `hotFrames` | Max decoded RGB frames kept hot (default 8, clamped 1..32). Same contract as PDF. |
 | `onProgress` | `ImageProgressEvent` (`done`, `total`, `phase`) during create. Phase is `index` while files are registered, then `done`. |
 | `signal` | Abort → `ERR_IMAGE_CANCELLED` |
@@ -394,7 +395,7 @@ Sniff is by magic bytes, not extension. Each source becomes **one** packed **RGB
 | BMP | yes | |
 | GIF | yes, **first frame only** | |
 | WebP | **opt-in libwebp** | Default off → `ERR_IMAGE_WEBP_DISABLED`. First frame. Enable: [Opt-in libwebp](#opt-in-libwebp-default-off). |
-| HEIC / HEIF | platform | Brands `heic` / `heix` / `hevc` / `hevx` / `mif1` / `msf1`. **Android API 28+**; older → `ERR_IMAGE_FORMAT_UNSUPPORTED`. **iOS** ImageIO, index 0. |
+| HEIC / HEIF | platform | Brands `heic` / `heix` / `hevc` / `hevx` / `mif1` / `msf1`. **Android API 30+** `AImageDecoder`; **API 28–29** Kotlin `ImageDecoder`; older → `os-too-old`. `software` + HEIC → `ERR_IMAGE_SW_DECODER_UNAVAILABLE`. **iOS** ImageIO. See [codecs.md](./codecs.md). |
 
 | Export (`exportOfflineImageBufferFrame`) | |
 |---|---|

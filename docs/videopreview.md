@@ -97,4 +97,4 @@ Buffer ingest events (live ring) are on the videobuffer API: [videobuffer-stream
 
 ## Decoder budget
 
-Preview uses the **display** decoder class (default 1). OCR/export use **cpu** (default 1). Configure with `configureVideoBuffer({ decoderBudget: { cpu, display } })`. A busy display decoder returns `VIDEO_PREVIEW_DECODER_BUSY`; audio-only play is still allowed.
+Preview uses the **display** resource (`hwVideoDisplay`, default 1). OCR/export use `hwVideoDecode`. Configure with `configureCodecs({ budgets, video: { display } })` — see [codecs.md](./codecs.md). Pass `decodePolicy` on `createVideoPreviewPlayer` to override. A busy display decoder returns `VIDEO_PREVIEW_DECODER_BUSY`; audio-only play is still allowed. `software` preview on iOS uses decoded NV12 frames (`DecodedSampleBufferRenderer`); `hardware` keeps the system `SampleBufferVideoRenderer`.

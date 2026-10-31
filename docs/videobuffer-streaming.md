@@ -259,7 +259,7 @@ Creates `state: 'recording'` with no packets yet. A native camera/producer or `i
 | `retention: { mode: 'maxSeconds', seconds }` | — | Spool capped at `seconds` (plus the ring). Overflow → event `spoolOverflow`. |
 | `retention: { mode: 'path', directory }` | — | Spool files under `directory`. |
 
-`configureVideoBuffer({ decoderBudget })` is documented on the [offline](videobuffer-offline.md) page (preview = `display`, OCR/export after finalize = `cpu`).
+Decoder budgets and policies live in [`configureCodecs`](./codecs.md) (preview = `display`, OCR/export after finalize = `cpu`). See the [offline](videobuffer-offline.md) page.
 
 #### `ingestFileToLiveVideoBuffer(source, live, options?)`
 
