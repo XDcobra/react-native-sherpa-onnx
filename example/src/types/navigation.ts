@@ -28,7 +28,6 @@ export type RootStackParamList = {
   VideoPreview: undefined;
   VideoOcrPipeline: undefined;
   Documents: undefined;
-  CodecSmoke: undefined;
 };
 
 export type FeatureId =
@@ -58,8 +57,7 @@ export type FeatureId =
   | 'ocr'
   | 'video_preview'
   | 'video_ocr_pipeline'
-  | 'documents'
-  | 'codec_smoke';
+  | 'documents';
 
 export interface Feature {
   id: FeatureId;
