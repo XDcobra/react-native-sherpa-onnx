@@ -87,10 +87,18 @@ export function subscribeCodecEvents(
     NativeModules.SherpaOnnx ?? (getNative() as never)
   );
   const sub = emitter.addListener('SherpaOnnxCodecEvent', (raw: unknown) => {
+    let evt: unknown = raw;
+    if (typeof raw === 'string') {
+      try {
+        evt = JSON.parse(raw);
+      } catch {
+        return;
+      }
+    }
     const payload =
-      raw && typeof raw === 'object' && 'payload' in raw
-        ? (raw as { payload?: unknown }).payload
-        : raw;
+      evt && typeof evt === 'object' && 'payload' in evt
+        ? (evt as { payload?: unknown }).payload
+        : evt;
     let parsed: unknown = payload;
     if (typeof payload === 'string') {
       try {

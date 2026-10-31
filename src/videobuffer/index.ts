@@ -468,25 +468,33 @@ export function subscribeLiveVideoBufferEvents(
 ): () => void {
   const id = resolveLiveVideoBufferId(live);
   const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
-  const sub = emitter.addListener(
-    'SherpaOnnxVideoEvent',
-    (raw: {
-      type?: string;
-      liveBufferId?: string;
-      frameCount?: number;
-      totalFramesWritten?: number;
-      liveEdgeUs?: number;
-    }) => {
-      if (!raw || raw.liveBufferId !== id) return;
-      onEvent({
-        type: (raw.type as LiveVideoBufferEvent['type']) ?? 'packetsAppended',
-        liveBufferId: raw.liveBufferId,
-        frameCount: raw.frameCount,
-        totalFramesWritten: raw.totalFramesWritten,
-        liveEdgeUs: raw.liveEdgeUs,
-      });
+  type LiveEventRaw = {
+    type?: string;
+    liveBufferId?: string;
+    frameCount?: number;
+    totalFramesWritten?: number;
+    liveEdgeUs?: number;
+  };
+  const sub = emitter.addListener('SherpaOnnxVideoEvent', (raw: unknown) => {
+    let evt: LiveEventRaw | null = null;
+    if (typeof raw === 'string') {
+      try {
+        evt = JSON.parse(raw) as LiveEventRaw;
+      } catch {
+        return;
+      }
+    } else if (raw && typeof raw === 'object') {
+      evt = raw as LiveEventRaw;
     }
-  );
+    if (!evt || evt.liveBufferId !== id) return;
+    onEvent({
+      type: (evt.type as LiveVideoBufferEvent['type']) ?? 'packetsAppended',
+      liveBufferId: evt.liveBufferId,
+      frameCount: evt.frameCount,
+      totalFramesWritten: evt.totalFramesWritten,
+      liveEdgeUs: evt.liveEdgeUs,
+    });
+  });
   return () => sub.remove();
 }
 

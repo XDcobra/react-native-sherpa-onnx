@@ -107,4 +107,20 @@ describe('getCodecInfo + events', () => {
     ]);
     unsub();
   });
+
+  it('delivers slotFreed from a JSON string envelope', () => {
+    const seen: unknown[] = [];
+    const unsub = subscribeCodecEvents((e) => seen.push(e));
+    rn.__emit(
+      JSON.stringify({
+        type: 'codec',
+        payload:
+          '{"type":"slotFreed","resource":"hwVideoEncode","max":1,"inUse":0}',
+      })
+    );
+    expect(seen).toEqual([
+      { type: 'slotFreed', resource: 'hwVideoEncode', max: 1, inUse: 0 },
+    ]);
+    unsub();
+  });
 });

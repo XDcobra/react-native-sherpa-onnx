@@ -5,10 +5,10 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.util.Log
-import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.File
+import org.json.JSONObject
 
 internal object VideoBufferService : ComponentCallbacks2 {
   private const val TAG = "SherpaOnnx:video"
@@ -171,17 +171,33 @@ internal object VideoBufferService : ComponentCallbacks2 {
   @JvmStatic
   fun emitNative(eventName: String, type: String, bufferId: String, json: String) {
     val ctx = reactContext ?: return
+    val safeType = type
+    val safeId = bufferId
+    val safeJson = json
     val emit = Runnable {
+      if (!ctx.hasActiveReactInstance()) {
+        Log.w(TAG, "emit $eventName skip: no active RN instance")
+        return@Runnable
+      }
       try {
-        val map = Arguments.createMap()
-        map.putString("type", type)
-        map.putString("playerId", bufferId)
-        map.putString("liveBufferId", bufferId)
-        map.putString("payload", json)
+        // Bridgeless: WritableNativeMap.putString on the JS queue UAF'd
+        // folly::dynamic (tombstone 13:45:43, S2.4 slotFreed). Emit one
+        // JSON string instead — JS already accepts string or {payload}.
+        val wrapped =
+          JSONObject()
+            .put("type", safeType)
+            .put("playerId", safeId)
+            .put("liveBufferId", safeId)
+            .put("payload", safeJson)
+            .toString()
+        Log.i(
+          TAG,
+          "emit $eventName type=$safeType id=$safeId payloadBytes=${safeJson.length}"
+        )
         ctx.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-          .emit(eventName, map)
-      } catch (e: Exception) {
-        Log.w(TAG, "emit $eventName failed: ${e.message}")
+          .emit(eventName, wrapped)
+      } catch (t: Throwable) {
+        Log.w(TAG, "emit $eventName failed: ${t.message}")
       }
     }
     if (ctx.hasActiveReactInstance()) {
