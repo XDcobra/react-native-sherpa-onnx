@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <functional>
+#include <mutex>
 #include <vector>
 
 #if defined(HAVE_LIBWEBP)
@@ -20,6 +22,9 @@ namespace sherpa_onnx {
 namespace image {
 
 namespace {
+
+std::mutex gHeicMu;
+ImageDecoder::PlatformHeicDecodeFn gHeicDecoder;
 
 DecodeResult Fail(const char* code, const std::string& message,
                   DecodeFormat format = DecodeFormat::Unknown) {
@@ -257,19 +262,73 @@ DecodeResult ImageDecoder::DecodeBytes(const uint8_t* data, size_t size,
   RgbFrame frame;
   int orientation = 1;
 
+  float scale = 1.f;
+  bool skipApplyMaxSide = false;
+
   if (format == DecodeFormat::Webp) {
 #if defined(HAVE_LIBWEBP)
     int w = 0;
     int h = 0;
-    uint8_t* decoded = WebPDecodeRGB(data, size, &w, &h);
-    if (!decoded || w <= 0 || h <= 0) {
-      if (decoded) WebPFree(decoded);
-      return Fail("ERR_IMAGE_DECODE_FAILED", "libwebp decode failed", format);
+    if (!WebPGetInfo(data, size, &w, &h) || w <= 0 || h <= 0) {
+      return Fail("ERR_IMAGE_DECODE_FAILED", "libwebp getinfo failed", format);
     }
-    frame.width = w;
-    frame.height = h;
-    frame.rgb.assign(decoded, decoded + static_cast<size_t>(w) * static_cast<size_t>(h) * 3u);
-    WebPFree(decoded);
+
+    int outW = w;
+    int outH = h;
+    if (opts.maxSide > 0) {
+      const int longest = std::max(w, h);
+      if (longest > opts.maxSide) {
+        scale = static_cast<float>(opts.maxSide) / static_cast<float>(longest);
+        outW = std::max(1, static_cast<int>(std::lround(static_cast<float>(w) * scale)));
+        outH = std::max(1, static_cast<int>(std::lround(static_cast<float>(h) * scale)));
+      }
+    }
+
+    if (outW != w || outH != h) {
+      WebPDecoderConfig config;
+      if (!WebPInitDecoderConfig(&config)) {
+        return Fail("ERR_IMAGE_DECODE_FAILED", "libwebp init config failed", format);
+      }
+      config.options.use_scaling = 1;
+      config.options.scaled_width = outW;
+      config.options.scaled_height = outH;
+      config.output.colorspace = MODE_RGB;
+      if (WebPDecode(data, size, &config) != VP8_STATUS_OK ||
+          config.output.u.RGBA.rgba == nullptr || config.output.width <= 0 ||
+          config.output.height <= 0) {
+        WebPFreeDecBuffer(&config.output);
+        return Fail("ERR_IMAGE_DECODE_FAILED", "libwebp scaled decode failed", format);
+      }
+      frame.width = config.output.width;
+      frame.height = config.output.height;
+      const int stride = config.output.u.RGBA.stride;
+      const size_t packed =
+          static_cast<size_t>(frame.width) * static_cast<size_t>(frame.height) * 3u;
+      frame.rgb.resize(packed);
+      const uint8_t* src = config.output.u.RGBA.rgba;
+      if (stride == frame.width * 3) {
+        std::memcpy(frame.rgb.data(), src, packed);
+      } else {
+        for (int y = 0; y < frame.height; ++y) {
+          std::memcpy(frame.rgb.data() + static_cast<size_t>(y) *
+                                            static_cast<size_t>(frame.width) * 3u,
+                      src + static_cast<size_t>(y) * static_cast<size_t>(stride),
+                      static_cast<size_t>(frame.width) * 3u);
+        }
+      }
+      WebPFreeDecBuffer(&config.output);
+      skipApplyMaxSide = true;
+    } else {
+      uint8_t* decoded = WebPDecodeRGB(data, size, &w, &h);
+      if (!decoded || w <= 0 || h <= 0) {
+        if (decoded) WebPFree(decoded);
+        return Fail("ERR_IMAGE_DECODE_FAILED", "libwebp decode failed", format);
+      }
+      frame.width = w;
+      frame.height = h;
+      frame.rgb.assign(decoded, decoded + static_cast<size_t>(w) * static_cast<size_t>(h) * 3u);
+      WebPFree(decoded);
+    }
 #else
     return Fail("ERR_IMAGE_WEBP_DISABLED",
                 "libwebp is not linked. Rebuild with sherpaOnnxEnableLibwebp=true "
@@ -303,7 +362,9 @@ DecodeResult ImageDecoder::DecodeBytes(const uint8_t* data, size_t size,
     return Fail("ERR_IMAGE_DECODE_FAILED", "invalid RGB frame after decode", format);
   }
 
-  const float scale = ApplyMaxSide(frame, opts.maxSide);
+  if (!skipApplyMaxSide) {
+    scale = ApplyMaxSide(frame, opts.maxSide);
+  }
 
   DecodeResult out;
   out.ok = true;
@@ -330,6 +391,29 @@ DecodeResult ImageDecoder::DecodeFile(const std::string& path, const DecodeOptio
     return Fail("ERR_IMAGE_DECODE_FAILED", "read failed: " + path);
   }
   return DecodeBytes(buf.data(), buf.size(), opts);
+}
+
+void ImageDecoder::SetPlatformHeicDecoder(PlatformHeicDecodeFn fn) {
+  std::lock_guard<std::mutex> lock(gHeicMu);
+  gHeicDecoder = std::move(fn);
+}
+
+DecodeResult ImageDecoder::DecodeHeicBytes(const uint8_t* data, size_t size,
+                                           const DecodeOptions& opts) {
+  PlatformHeicDecodeFn fn;
+  {
+    std::lock_guard<std::mutex> lock(gHeicMu);
+    fn = gHeicDecoder;
+  }
+  if (!fn) {
+    return Fail("ERR_IMAGE_FORMAT_UNSUPPORTED",
+                "HEIC requires platform decoder (ImageIO / ImageDecoder)",
+                DecodeFormat::Heic);
+  }
+  if (!data || size == 0) {
+    return Fail("ERR_IMAGE_DECODE_FAILED", "empty image bytes", DecodeFormat::Heic);
+  }
+  return fn(data, size, opts);
 }
 
 }  // namespace image
