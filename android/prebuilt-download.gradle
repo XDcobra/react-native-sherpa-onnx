@@ -438,7 +438,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       logPrebuilt("FFmpeg", "skipped", "disabled", "sherpaOnnxDisableFfmpeg=true")
     } else if (ffmpegNeedsUpdate) {
       // Stage 1: THIRD_PARTY (jni/<abi>/ or build_ffmpeg.sh <abi>/lib/; libshine from shine_prebuilt if needed)
-      def tpJni = hasFfmpegThirdPartyLibs()
+      // third_party/ffmpeg_prebuilt/android is the audio-only pin. The vsw
+      // variant is Maven/GitHub only (sherpaOnnxEnableVideoSwDecoders=true).
+      def tpJni = !sherpaOnnxEnableVideoSwDecoders && hasFfmpegThirdPartyLibs()
       def tpHdr = new File(thirdPartyFfmpegDir, "include/libavcodec/avcodec.h").exists()
       if (tpJni && tpHdr) {
         copyFfmpegThirdPartyLibsToJniLibs()
@@ -449,6 +451,8 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         ffmpegVersionFile.text = currentFfmpegStamp
         ffmpegResolved = true
         logPrebuilt("FFmpeg", "native", "THIRD_PARTY", currentFfmpegStamp)
+      } else if (sherpaOnnxEnableVideoSwDecoders) {
+        println "[FFmpeg] THIRD_PARTY skipped: sherpaOnnxEnableVideoSwDecoders=true → MAVEN_AAR / GITHUB_RELEASE"
       }
 
       // Stage 3: MAVEN_AAR
