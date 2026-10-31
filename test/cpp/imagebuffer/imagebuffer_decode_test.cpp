@@ -117,6 +117,42 @@ TEST(ImageBufferDecode, Decode_Webp_WhenLibwebpAvailable) {
 #endif
 }
 
+TEST(ImageBufferDecode, Decode_Webp_MaxSide_UsesScaledDecode) {
+#if !defined(HAVE_LIBWEBP)
+  GTEST_SKIP() << "HAVE_LIBWEBP not set";
+#else
+  DecodeOptions opts;
+  opts.maxSide = 32;
+  const auto r =
+      ImageDecoder::DecodeFile(FixturePath("solid_red_64x48.webp"), opts);
+  ASSERT_TRUE(r.ok) << r.errorMessage;
+  EXPECT_EQ(r.format, DecodeFormat::Webp);
+  EXPECT_LE(std::max(r.frame.width, r.frame.height), 32);
+  EXPECT_EQ(std::max(r.frame.width, r.frame.height), 32);
+  EXPECT_LT(r.scaleApplied, 1.f);
+  ASSERT_TRUE(r.frame.valid());
+  EXPECT_EQ(r.frame.rgb.size(),
+            static_cast<size_t>(r.frame.width) * static_cast<size_t>(r.frame.height) *
+                3u);
+#endif
+}
+
+TEST(ImageBufferDecode, Decode_Webp_MaxSideDisabled_KeepsNativeSize) {
+#if !defined(HAVE_LIBWEBP)
+  GTEST_SKIP() << "HAVE_LIBWEBP not set";
+#else
+  DecodeOptions opts;
+  opts.maxSide = 0;
+  const auto r =
+      ImageDecoder::DecodeFile(FixturePath("solid_red_64x48.webp"), opts);
+  ASSERT_TRUE(r.ok) << r.errorMessage;
+  EXPECT_EQ(r.frame.width, 64);
+  EXPECT_EQ(r.frame.height, 48);
+  EXPECT_FLOAT_EQ(r.scaleApplied, 1.f);
+  ASSERT_TRUE(r.frame.valid());
+#endif
+}
+
 TEST(ImageBufferDecode, Decode_Webp_WhenLibwebpDisabled) {
 #if defined(HAVE_LIBWEBP)
   GTEST_SKIP() << "HAVE_LIBWEBP set";

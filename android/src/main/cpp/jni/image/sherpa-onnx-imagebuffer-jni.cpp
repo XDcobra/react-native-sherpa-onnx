@@ -6,6 +6,7 @@
 #include <android/log.h>
 #include <jni.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -89,8 +90,16 @@ jobject InfoToMap(JNIEnv* env, const sherpa_onnx::image::ImageBufferInfo& info) 
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!map) return nullptr;
+  PutBool(env, map, put, "ok", JNI_TRUE);
   PutString(env, map, put, "bufferId", info.bufferId);
-  PutString(env, map, put, "kind", "offlineImageBuffer");
+  PutString(env, map, put, "kind",
+            sherpa_onnx::image::BufferKindName(info.kind));
+  if (info.kind == sherpa_onnx::image::ImageBufferKind::Live) {
+    PutLong(env, map, put, "totalFramesWritten", info.totalFramesWritten);
+    PutLong(env, map, put, "ringEvictedFrames", info.ringEvictedFrames);
+    PutBool(env, map, put, "hasActiveSpool",
+            info.hasActiveSpool ? JNI_TRUE : JNI_FALSE);
+  }
   PutString(env, map, put, "state",
             sherpa_onnx::image::BufferStateName(info.state));
   PutInt(env, map, put, "frameCount", info.frameCount);
@@ -98,6 +107,121 @@ jobject InfoToMap(JNIEnv* env, const sherpa_onnx::image::ImageBufferInfo& info) 
   PutString(env, map, put, "storageKind",
             sherpa_onnx::image::StorageKindName(info.storageKind));
   return map;
+}
+
+JavaVM* gJvm = nullptr;
+jclass gHeicClass = nullptr;
+jmethodID gHeicMethod = nullptr;
+
+void InstallAndroidHeicHook(JNIEnv* env) {
+  env->GetJavaVM(&gJvm);
+  jclass cls = env->FindClass("com/sherpaonnx/image/ImageBufferService");
+  if (!cls) {
+    LOGI("HEIC hook: ImageBufferService class not found");
+    return;
+  }
+  if (gHeicClass) env->DeleteGlobalRef(gHeicClass);
+  gHeicClass = static_cast<jclass>(env->NewGlobalRef(cls));
+  env->DeleteLocalRef(cls);
+  gHeicMethod = env->GetStaticMethodID(
+      gHeicClass, "decodeHeicToRgbNative", "([BI)Ljava/util/HashMap;");
+  if (!gHeicMethod) {
+    LOGI("HEIC hook: decodeHeicToRgbNative not found");
+    return;
+  }
+  sherpa_onnx::image::ImageDecoder::SetPlatformHeicDecoder(
+      [](const uint8_t* data, size_t size,
+         const sherpa_onnx::image::DecodeOptions& opts)
+          -> sherpa_onnx::image::DecodeResult {
+        sherpa_onnx::image::DecodeResult fail;
+        fail.ok = false;
+        fail.errorCode = "ERR_IMAGE_FORMAT_UNSUPPORTED";
+        fail.errorMessage = "HEIC JNI decode failed";
+        fail.format = sherpa_onnx::image::DecodeFormat::Heic;
+        if (!gJvm || !gHeicClass || !gHeicMethod || !data || size == 0) {
+          return fail;
+        }
+        JNIEnv* env = nullptr;
+        bool attached = false;
+        if (gJvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) !=
+            JNI_OK) {
+          if (gJvm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) {
+            return fail;
+          }
+          attached = true;
+        }
+        jbyteArray arr = env->NewByteArray(static_cast<jsize>(size));
+        if (!arr) {
+          if (attached) gJvm->DetachCurrentThread();
+          return fail;
+        }
+        env->SetByteArrayRegion(arr, 0, static_cast<jsize>(size),
+                                reinterpret_cast<const jbyte*>(data));
+        jobject map = env->CallStaticObjectMethod(gHeicClass, gHeicMethod, arr,
+                                                  static_cast<jint>(opts.maxSide));
+        env->DeleteLocalRef(arr);
+        if (!map || env->ExceptionCheck()) {
+          if (env->ExceptionCheck()) env->ExceptionClear();
+          if (attached) gJvm->DetachCurrentThread();
+          return fail;
+        }
+        jclass mapClass = env->GetObjectClass(map);
+        jmethodID get = env->GetMethodID(
+            mapClass, "get", "(Ljava/lang/Object;)Ljava/lang/Object;");
+        auto getObj = [&](const char* key) -> jobject {
+          jstring jkey = env->NewStringUTF(key);
+          jobject v = env->CallObjectMethod(map, get, jkey);
+          env->DeleteLocalRef(jkey);
+          return v;
+        };
+        jobject okObj = getObj("ok");
+        jclass boolClass = env->FindClass("java/lang/Boolean");
+        jmethodID boolValue = env->GetMethodID(boolClass, "booleanValue", "()Z");
+        const bool ok =
+            okObj && boolValue && env->CallBooleanMethod(okObj, boolValue);
+        env->DeleteLocalRef(boolClass);
+        if (okObj) env->DeleteLocalRef(okObj);
+        if (!ok) {
+          env->DeleteLocalRef(mapClass);
+          env->DeleteLocalRef(map);
+          if (attached) gJvm->DetachCurrentThread();
+          return fail;
+        }
+        jobject wObj = getObj("width");
+        jobject hObj = getObj("height");
+        jobject rgbObj = getObj("rgb");
+        jclass intClass = env->FindClass("java/lang/Integer");
+        jmethodID intValue = env->GetMethodID(intClass, "intValue", "()I");
+        const int width = wObj && intValue ? env->CallIntMethod(wObj, intValue) : 0;
+        const int height = hObj && intValue ? env->CallIntMethod(hObj, intValue) : 0;
+        env->DeleteLocalRef(intClass);
+        if (wObj) env->DeleteLocalRef(wObj);
+        if (hObj) env->DeleteLocalRef(hObj);
+        auto* rgbArr = reinterpret_cast<jbyteArray>(rgbObj);
+        sherpa_onnx::image::DecodeResult okRes;
+        if (width > 0 && height > 0 && rgbArr) {
+          const size_t need =
+              static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
+          const jsize len = env->GetArrayLength(rgbArr);
+          if (static_cast<size_t>(len) >= need) {
+            jbyte* rgb = env->GetByteArrayElements(rgbArr, nullptr);
+            if (rgb) {
+              okRes.ok = true;
+              okRes.format = sherpa_onnx::image::DecodeFormat::Heic;
+              okRes.frame.width = width;
+              okRes.frame.height = height;
+              okRes.frame.rgb.assign(reinterpret_cast<uint8_t*>(rgb),
+                                     reinterpret_cast<uint8_t*>(rgb) + need);
+              env->ReleaseByteArrayElements(rgbArr, rgb, JNI_ABORT);
+            }
+          }
+        }
+        if (rgbObj) env->DeleteLocalRef(rgbObj);
+        env->DeleteLocalRef(mapClass);
+        env->DeleteLocalRef(map);
+        if (attached) gJvm->DetachCurrentThread();
+        return okRes.ok ? okRes : fail;
+      });
 }
 
 }  // namespace
@@ -112,7 +236,99 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeInit(
   reg.ConfigureThreshold(sherpa_onnx::image::ImageThresholdPlatform::Android,
                          static_cast<uint64_t>(totalRamBytes));
   const int n = reg.SweepOrphanedTempFiles();
+  InstallAndroidHeicHook(env);
   LOGI("ImageBuffer init cacheDir set, orphanSweep deleted=%d", n);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromFiles(
+    JNIEnv* env, jclass, jobjectArray jPaths, jint maxSide, jint hotFrames) {
+  jmethodID put = nullptr;
+  jobject errMap = NewHashMap(env, &put);
+  if (!jPaths) {
+    if (errMap) {
+      PutBool(env, errMap, put, "ok", JNI_FALSE);
+      PutString(env, errMap, put, "errorCode", "ERR_IMAGE_INVALID_ARGUMENT");
+      PutString(env, errMap, put, "errorMessage", "paths required");
+    }
+    return errMap;
+  }
+  const jsize n = env->GetArrayLength(jPaths);
+  std::vector<std::string> paths;
+  paths.reserve(static_cast<size_t>(n));
+  for (jsize i = 0; i < n; ++i) {
+    auto jstr = static_cast<jstring>(env->GetObjectArrayElement(jPaths, i));
+    paths.push_back(JstringToStd(env, jstr));
+    if (jstr) env->DeleteLocalRef(jstr);
+  }
+  sherpa_onnx::image::DecodeOptions opts;
+  opts.maxSide = maxSide;
+  opts.hotFrames = hotFrames;
+  auto result =
+      sherpa_onnx::image::ImageRegistry::Instance().CreateFromFiles(paths, opts);
+  if (!result.ok) {
+    if (errMap) {
+      PutBool(env, errMap, put, "ok", JNI_FALSE);
+      PutString(env, errMap, put, "errorCode", result.errorCode);
+      PutString(env, errMap, put, "errorMessage", result.errorMessage);
+    }
+    return errMap;
+  }
+  if (errMap) env->DeleteLocalRef(errMap);
+  return InfoToMap(env, result.info);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromBytesList(
+    JNIEnv* env, jclass, jobjectArray jBlobs, jint maxSide, jint hotFrames,
+    jboolean fileOrigin) {
+  jmethodID put = nullptr;
+  jobject errMap = NewHashMap(env, &put);
+  if (!jBlobs) {
+    if (errMap) {
+      PutBool(env, errMap, put, "ok", JNI_FALSE);
+      PutString(env, errMap, put, "errorCode", "ERR_IMAGE_INVALID_ARGUMENT");
+      PutString(env, errMap, put, "errorMessage", "blobs required");
+    }
+    return errMap;
+  }
+  const jsize n = env->GetArrayLength(jBlobs);
+  std::vector<std::vector<uint8_t>> blobs;
+  blobs.reserve(static_cast<size_t>(n));
+  for (jsize i = 0; i < n; ++i) {
+    auto arr = static_cast<jbyteArray>(env->GetObjectArrayElement(jBlobs, i));
+    if (!arr) {
+      blobs.emplace_back();
+      continue;
+    }
+    const jsize len = env->GetArrayLength(arr);
+    jbyte* bytes = env->GetByteArrayElements(arr, nullptr);
+    std::vector<uint8_t> blob(static_cast<size_t>(len));
+    if (bytes && len > 0) {
+      std::memcpy(blob.data(), bytes, static_cast<size_t>(len));
+      env->ReleaseByteArrayElements(arr, bytes, JNI_ABORT);
+    }
+    blobs.push_back(std::move(blob));
+    env->DeleteLocalRef(arr);
+  }
+  sherpa_onnx::image::DecodeOptions opts;
+  opts.maxSide = maxSide;
+  opts.hotFrames = hotFrames;
+  const auto pathType =
+      fileOrigin ? sherpa_onnx::image::ImageThresholdPathType::FileOrigin
+                 : sherpa_onnx::image::ImageThresholdPathType::HeapOrigin;
+  auto result = sherpa_onnx::image::ImageRegistry::Instance().CreateFromBytesList(
+      blobs, opts, pathType);
+  if (!result.ok) {
+    if (errMap) {
+      PutBool(env, errMap, put, "ok", JNI_FALSE);
+      PutString(env, errMap, put, "errorCode", result.errorCode);
+      PutString(env, errMap, put, "errorMessage", result.errorMessage);
+    }
+    return errMap;
+  }
+  if (errMap) env->DeleteLocalRef(errMap);
+  return InfoToMap(env, result.info);
 }
 
 JNIEXPORT jstring JNICALL
@@ -472,6 +688,67 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFrameBitmap(
   }
   AndroidBitmap_unlockPixels(env, bitmap);
   return bitmap;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateLive(
+    JNIEnv* env, jclass, jint ringFrames, jboolean sessionRetention) {
+  sherpa_onnx::image::LiveImageOptions opts;
+  opts.ringFrames = ringFrames;
+  opts.retention = sessionRetention ? sherpa_onnx::image::ImageRetention::Session
+                                    : sherpa_onnx::image::ImageRetention::None;
+  auto created =
+      sherpa_onnx::image::ImageRegistry::Instance().CreateLive(opts);
+  return InfoToMap(env, created.info);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeAppendLive(
+    JNIEnv* env, jclass, jstring jBufferId, jbyteArray jBytes) {
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  const std::string bufferId = JstringToStd(env, jBufferId);
+  if (!jBytes) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    PutString(env, map, put, "errorCode", "ERR_IMAGE_INVALID_ARGUMENT");
+    PutString(env, map, put, "errorMessage", "bytes required");
+    return map;
+  }
+  const jsize len = env->GetArrayLength(jBytes);
+  jbyte* bytes = env->GetByteArrayElements(jBytes, nullptr);
+  std::vector<uint8_t> blob(static_cast<size_t>(len));
+  if (bytes && len > 0) {
+    std::memcpy(blob.data(), bytes, static_cast<size_t>(len));
+    env->ReleaseByteArrayElements(jBytes, bytes, JNI_ABORT);
+  }
+  auto st = sherpa_onnx::image::ImageRegistry::Instance().AppendLiveCompressed(
+      bufferId, std::move(blob));
+  PutBool(env, map, put, "ok", st.ok ? JNI_TRUE : JNI_FALSE);
+  if (!st.ok) {
+    PutString(env, map, put, "errorCode", st.errorCode);
+    PutString(env, map, put, "errorMessage", st.errorMessage);
+  }
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeFinishLive(JNIEnv* env, jclass,
+                                                             jstring jBufferId) {
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  auto st = sherpa_onnx::image::ImageRegistry::Instance().FinishLive(
+      JstringToStd(env, jBufferId));
+  if (!st.ok) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    PutString(env, map, put, "errorCode", st.errorCode);
+    PutString(env, map, put, "errorMessage", st.errorMessage);
+    return map;
+  }
+  sherpa_onnx::image::ImageBufferInfo info;
+  sherpa_onnx::image::ImageRegistry::Instance().GetInfo(
+      JstringToStd(env, jBufferId), info);
+  if (map) env->DeleteLocalRef(map);
+  return InfoToMap(env, info);
 }
 
 }  // extern "C"

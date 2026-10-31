@@ -1,0 +1,32 @@
+{
+    "height": 1080,
+    "suite": "platform_hw_decode",
+    "needsPlatformHw": true,
+    "width": 1920,
+    "pageCount": 0,
+    "rows": [
+        {
+            "p95Ms": 90.6033,
+            "rssBytes": 392904704,
+            "mpPerSec": 22.9109,
+            "name": "baseline.portable_turbo",
+            "ok": true,
+            "p50Ms": 90.507
+        },
+        {
+            "ok": true,
+            "p50Ms": 103.640167,
+            "p95Ms": 103.946875,
+            "speedupVsBaseline": 0.8732811092440637,
+            "mpPerSec": 20.007686788077056,
+            "rgbBytes": 6220800,
+            "error": "",
+            "name": "candidate.platform_ImageIO"
+        }
+    ],
+    "repeats": 5,
+    "jpegPath": "/Users/felix/Library/Developer/CoreSimulator/Devices/B6800F46-62D6-4AE2-A4FB-E2A625E16CC6/data/Containers/Data/Application/FCC09579-DBF5-4495-BEF9-C66EE75742DD/tmp/imagebuffer-bench/bench_photo.jpg",
+    "jpegBytes": 65491,
+    "maxSide": 0,
+    "loggedAt": "2026-10-30T14:33:23.850Z"
+}

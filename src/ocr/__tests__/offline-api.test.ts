@@ -5,6 +5,7 @@ jest.mock('react-native', () => {
     ocrRecognize: jest.fn(),
     unloadOcr: jest.fn(),
     cancelOcrRecognize: jest.fn(),
+    getOfflineImageBufferInfo: jest.fn(),
   };
   return {
     NativeEventEmitter: jest.fn().mockImplementation(() => ({

@@ -1,0 +1,369 @@
+{
+    "suites": {
+        "decode_jpeg_full_then_scale_vs_idct": {
+            "height": 4284,
+            "suite": "decode_jpeg_full_then_scale_vs_idct",
+            "maxSide": 1024,
+            "fixtureKind": "phone-24mp",
+            "loggedAt": "2026-10-30T14:45:05.822Z",
+            "rows": [
+                {
+                    "p95Ms": 1327.18,
+                    "rssBytes": 359645184,
+                    "mpPerSec": 18.5217,
+                    "name": "baseline.turbo_full_then_scale",
+                    "ok": true,
+                    "p50Ms": 1321.17
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 433.959,
+                    "p95Ms": 440.568,
+                    "speedupVsBaseline": 3.04445,
+                    "mpPerSec": 56.3883,
+                    "rssBytes": 359710720,
+                    "name": "candidate.turbo_idct_scale"
+                }
+            ],
+            "idctDenom": 4,
+            "longestEdge": 5712,
+            "width": 5712,
+            "repeats": 5,
+            "pageCount": 0
+        },
+        "webp_full_vs_scaled": {
+            "height": 4284,
+            "suite": "webp_full_vs_scaled",
+            "width": 5712,
+            "pageCount": 0,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 290.946,
+                    "rssBytes": 506855424,
+                    "mpPerSec": 86.1106,
+                    "name": "baseline.webp_full_then_scale",
+                    "ok": true,
+                    "p50Ms": 284.172
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 64.2913,
+                    "p95Ms": 65.1426,
+                    "speedupVsBaseline": 4.42007,
+                    "mpPerSec": 380.615,
+                    "rssBytes": 506871808,
+                    "name": "candidate.webp_use_scaling"
+                }
+            ],
+            "loggedAt": "2026-10-30T14:49:37.075Z",
+            "maxSide": 1024
+        },
+        "scale_scalar_vs_libyuv": {
+            "height": 4284,
+            "suite": "scale_scalar_vs_libyuv",
+            "width": 5712,
+            "pageCount": 0,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 224.541,
+                    "rssBytes": 511049728,
+                    "mpPerSec": 110.484,
+                    "name": "baseline.scalar_bilinear",
+                    "ok": true,
+                    "p50Ms": 221.481
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 717.872,
+                    "p95Ms": 728.999,
+                    "speedupVsBaseline": 0.308525,
+                    "mpPerSec": 34.0871,
+                    "rssBytes": 428343296,
+                    "name": "candidate.libyuv"
+                }
+            ],
+            "loggedAt": "2026-10-30T14:45:57.472Z",
+            "maxSide": 1024
+        },
+        "serial_vs_parallel_create": {
+            "height": 4284,
+            "suite": "serial_vs_parallel_create",
+            "width": 5712,
+            "pageCount": 4,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 3011.84,
+                    "rssBytes": 442974208,
+                    "mpPerSec": 0,
+                    "name": "baseline.serial",
+                    "ok": true,
+                    "p50Ms": 2970.45
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 1378.36,
+                    "p95Ms": 1431.59,
+                    "speedupVsBaseline": 2.15506,
+                    "mpPerSec": 0,
+                    "rssBytes": 287653888,
+                    "name": "candidate.parallel"
+                }
+            ],
+            "loggedAt": "2026-10-30T14:55:07.644Z",
+            "maxSide": 0
+        },
+        "packed_vs_aligned_stride": {
+            "height": 4284,
+            "suite": "packed_vs_aligned_stride",
+            "width": 5712,
+            "pageCount": 0,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 750.234,
+                    "rssBytes": 518160384,
+                    "mpPerSec": 32.8562,
+                    "name": "baseline.packed_libyuv",
+                    "ok": true,
+                    "p50Ms": 744.766
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 713.437,
+                    "p95Ms": 720.639,
+                    "speedupVsBaseline": 1.04391,
+                    "mpPerSec": 34.2991,
+                    "rssBytes": 517783552,
+                    "name": "candidate.aligned64_libyuv"
+                }
+            ],
+            "loggedAt": "2026-10-30T14:52:52.900Z",
+            "maxSide": 1024
+        },
+        "png_stb_vs_wuffs": {
+            "height": 4284,
+            "suite": "png_stb_vs_wuffs",
+            "width": 5712,
+            "pageCount": 0,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 1007.18,
+                    "rssBytes": 439009280,
+                    "mpPerSec": 24.4524,
+                    "name": "baseline.stb",
+                    "ok": true,
+                    "p50Ms": 1000.73
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 2542.14,
+                    "p95Ms": 2557.35,
+                    "speedupVsBaseline": 0.393657,
+                    "mpPerSec": 9.62584,
+                    "rssBytes": 399884288,
+                    "name": "candidate.wuffs"
+                }
+            ],
+            "pngBytes": 23107552,
+            "maxSide": 0,
+            "loggedAt": "2026-10-30T14:48:22.616Z"
+        },
+        "platform_hw_decode": {
+            "maxSide": 0,
+            "fixtureKind": "phone-24mp",
+            "loggedAt": "2026-10-30T14:58:14.579Z",
+            "width": 5712,
+            "needsPlatformHw": true,
+            "suite": "platform_hw_decode",
+            "repeats": 5,
+            "jpegPath": "/Users/felix/Library/Developer/CoreSimulator/Devices/B6800F46-62D6-4AE2-A4FB-E2A625E16CC6/data/Containers/Data/Application/F8FD656D-C322-42F6-8FDE-4E979897A097/Library/Caches/imagebuffer-bench/phone-24mp.jpg",
+            "rows": [
+                {
+                    "p95Ms": 1246.86,
+                    "rssBytes": 447234048,
+                    "mpPerSec": 19.7338,
+                    "name": "baseline.portable_turbo",
+                    "ok": true,
+                    "p50Ms": 1240.01
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 1545.577125,
+                    "p95Ms": 1556.066083,
+                    "speedupVsBaseline": 0.802295776731297,
+                    "mpPerSec": 15.832408233914563,
+                    "rgbBytes": 73410624,
+                    "error": "",
+                    "name": "candidate.platform_ImageIO"
+                }
+            ],
+            "height": 4284,
+            "pageCount": 0,
+            "jpegBytes": 3280007
+        },
+        "exif_scalar_vs_libyuv": {
+            "height": 4284,
+            "suite": "exif_scalar_vs_libyuv",
+            "width": 5712,
+            "pageCount": 0,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 753.158,
+                    "rssBytes": 430522368,
+                    "mpPerSec": 32.6566,
+                    "name": "baseline.scalar_exif6",
+                    "ok": true,
+                    "p50Ms": 749.32
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 1611.96,
+                    "p95Ms": 1619.99,
+                    "speedupVsBaseline": 0.464849,
+                    "mpPerSec": 15.1804,
+                    "rssBytes": 423247872,
+                    "name": "candidate.libyuv_exif6"
+                }
+            ],
+            "loggedAt": "2026-10-30T14:46:55.665Z",
+            "maxSide": 0
+        },
+        "jpeg_turbo_encode": {
+            "height": 4284,
+            "suite": "jpeg_turbo_encode",
+            "width": 5712,
+            "pageCount": 0,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 758.273,
+                    "rssBytes": 516538368,
+                    "mpPerSec": 32.8702,
+                    "name": "baseline.stb_write_jpg",
+                    "ok": true,
+                    "p50Ms": 744.45
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 1292.11,
+                    "p95Ms": 1294.92,
+                    "speedupVsBaseline": 0.576153,
+                    "mpPerSec": 18.9382,
+                    "rssBytes": 522502144,
+                    "name": "candidate.turbo_encode"
+                }
+            ],
+            "loggedAt": "2026-10-30T14:57:00.175Z",
+            "maxSide": 0
+        },
+        "decode_jpeg_stb_vs_turbo": {
+            "height": 4284,
+            "suite": "decode_jpeg_stb_vs_turbo",
+            "repeats": 5,
+            "loggedAt": "2026-10-30T14:42:30.189Z",
+            "width": 5712,
+            "pageCount": 0,
+            "fixtureKind": "phone-24mp",
+            "jpegPath": "/Users/felix/Library/Developer/CoreSimulator/Devices/B6800F46-62D6-4AE2-A4FB-E2A625E16CC6/data/Containers/Data/Application/F8FD656D-C322-42F6-8FDE-4E979897A097/Library/Caches/imagebuffer-bench/phone-24mp.jpg",
+            "rows": [
+                {
+                    "p95Ms": 723.332,
+                    "rssBytes": 410075136,
+                    "mpPerSec": 34.0826,
+                    "name": "baseline.stb",
+                    "ok": true,
+                    "p50Ms": 717.968
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 1274.03,
+                    "p95Ms": 1298.77,
+                    "speedupVsBaseline": 0.56354,
+                    "mpPerSec": 19.2069,
+                    "rssBytes": 410566656,
+                    "name": "candidate.turbo"
+                }
+            ],
+            "jpegBytes": 3280007,
+            "maxSide": 0
+        },
+        "mmap_per_frame_vs_slab": {
+            "height": 4284,
+            "suite": "mmap_per_frame_vs_slab",
+            "width": 5712,
+            "pageCount": 2,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 406.736,
+                    "rssBytes": 517505024,
+                    "mpPerSec": 0,
+                    "name": "baseline.mmap_per_frame",
+                    "ok": true,
+                    "p50Ms": 392.577
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 387.444,
+                    "p95Ms": 397.454,
+                    "speedupVsBaseline": 1.01325,
+                    "mpPerSec": 0,
+                    "rssBytes": 517505024,
+                    "name": "candidate.mmap_slab"
+                }
+            ],
+            "loggedAt": "2026-10-30T14:53:53.879Z",
+            "maxSide": 0
+        },
+        "eager_vs_lazy_30page": {
+            "height": 4284,
+            "suite": "eager_vs_lazy_30page",
+            "width": 5712,
+            "pageCount": 8,
+            "fixtureKind": "phone-24mp",
+            "repeats": 5,
+            "rows": [
+                {
+                    "p95Ms": 6114.23,
+                    "rssBytes": 351387648,
+                    "mpPerSec": 0,
+                    "name": "baseline.eager_create",
+                    "ok": true,
+                    "p50Ms": 6029.64
+                },
+                {
+                    "ok": true,
+                    "p50Ms": 0.006125,
+                    "p95Ms": 0.0162666,
+                    "speedupVsBaseline": 984430,
+                    "mpPerSec": 0,
+                    "rssBytes": 351387648,
+                    "name": "candidate.lazy_create"
+                },
+                {
+                    "p95Ms": 772.256,
+                    "rssBytes": 351420416,
+                    "mpPerSec": 0,
+                    "name": "candidate.lazy_create_plus_ensure0",
+                    "ok": true,
+                    "p50Ms": 767.013
+                }
+            ],
+            "loggedAt": "2026-10-30T14:50:56.714Z",
+            "maxSide": 0
+        }
+    }
+}

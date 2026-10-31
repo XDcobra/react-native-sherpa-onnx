@@ -6,7 +6,7 @@ Offline image buffers hold one or more image frames for batch OCR, PDF page rast
 
 **Import path:** `react-native-sherpa-onnx/imagebuffer`
 
-Live / streaming ImageBuffer is not implemented yet (types may be reserved). File sources use [fileio.md](fileio.md).
+Live / streaming ImageBuffer: [imagebuffer-streaming.md](imagebuffer-streaming.md). File sources use [fileio.md](fileio.md). After **`finalizeLiveImageBuffer`**, the same `img_live_*` id is a **finished** live buffer and is accepted by the offline APIs below (OCR, FrameView, export, ensure).
 
 ---
 
@@ -14,8 +14,8 @@ Live / streaming ImageBuffer is not implemented yet (types may be reserved). Fil
 
 | Kind | What it is | Typical use |
 | --- | --- | --- |
-| **Offline image buffer** | Multi-frame buffer after create. Usually `state: 'immutable'` (all frames ready). PDF [`lazy-lru`](pdf-offline.md#raster-strategies) uses `state: 'lazy'`: call [`ensureOfflineImageBufferFrame`](#ensureofflineimagebufferframebuffer-frameindex) (or FrameView / OCR) before using a cold frame; at most `hotFrames` stay decoded. | Batch OCR `recognize`, multi-page prep / PDF slider. |
-| **Live image buffer** | Reserved (`liveImageBuffer` types only). | Future camera / streaming OCR. |
+| **Offline image buffer** | Multi-frame buffer after create. File/base64 create is `state: 'lazy'` (RGB on ensure / FrameView / OCR; at most `hotFrames` stay decoded, default 8). PDF [`lazy-lru`](pdf-offline.md#raster-strategies) uses the same `state: 'lazy'`. `CreateFromRgbFrames` / video extract remain `immutable`. | Batch OCR `recognize`, multi-page prep / PDF slider. |
+| **Live image buffer** | Compressed JPEG/WebP/HEIC ring (`img_live_*`). See [imagebuffer-streaming.md](imagebuffer-streaming.md). Finished live ids are valid `OfflineImageBufferIdSource`s. | Ingest stills while recording; OCR after finalize. |
 
 ## Opt-in libwebp (default OFF)
 
@@ -29,24 +29,6 @@ Default SDK builds do **not** include libwebp.
 Prebuilts: [third_party/libwebp_prebuilt/README.md](../third_party/libwebp_prebuilt/README.md).
 
 Without enable, WebP decode (`createOfflineImageBufferFromFiles` / `FromBase64`) and `exportOfflineImageBufferFrame({ format: 'webp' })` reject with `ERR_IMAGE_WEBP_DISABLED`. JPEG/PNG/BMP/GIF are unchanged. The example app opts in (`sherpaOnnxEnableLibwebp=true` / `SHERPA_ONNX_ENABLE_LIBWEBP=1`).
-
----
-
-## Main API (summary)
-
-- `createEmptyOfflineImageBuffer`
-- `createOfflineImageBufferFromFiles`
-- `createOfflineImageBufferFromBase64`
-- `getOfflineImageBufferInfo`
-- `getOfflineImageBufferFrameInfo`
-- `ensureOfflineImageBufferFrame` — ensure a frame is ready (`lazy` PDF buffers; no-op for `immutable`)
-- `releaseOfflineImageBuffer`
-- `exportOfflineImageBufferFrame` — write one frame to a [`FileDestination`](fileio.md) → `ResolvedFileRef`
-- `OfflineImageBufferFrameView` — in-app preview of one frame
-- `OfflineImageBufferAnnotatedView` — FrameView plus mapped spatial-span boxes
-- `mapTextSpatialSpansToFrame` — project `ocr` / `textLayer` quads onto one frame
-
-Create helpers return **`OfflineImageBufferRef`** (`info` + `OfflineImageBufferHandle`). Buffer parameters accept **`OfflineImageBufferIdSource`**: ref, `OfflineImageBufferInfo`, branded handle, or string id.
 
 ---
 
@@ -99,7 +81,9 @@ Typical flow: create once → preview and/or pass to [offline OCR](ocr-offline.m
 
 ## API reference
 
-Exported from `react-native-sherpa-onnx/imagebuffer`. Buffer arguments accept **`OfflineImageBufferIdSource`** unless noted. Prefer the buffer ref; malformed string ids reject with `ERR_IMAGE_INVALID_ARGUMENT`.
+Exported from `react-native-sherpa-onnx/imagebuffer`. Create helpers return **`OfflineImageBufferRef`** (`info` + `OfflineImageBufferHandle`). Buffer arguments accept **`OfflineImageBufferIdSource`**: ref, `OfflineImageBufferInfo`, branded handle, or string id. Prefer the buffer ref; malformed string ids reject with `ERR_IMAGE_INVALID_ARGUMENT`.
+
+Live create / append / ingest / finalize / subscribe live in [imagebuffer-streaming.md](imagebuffer-streaming.md). A **finished** live ref (`img_live_*`) is a valid `OfflineImageBufferIdSource` for frame info, ensure, export, FrameView, AnnotatedView, release, and [OCR `recognize`](ocr-offline.md) below — recording live rejects those with `ERR_IMAGE_INVALID_STATE`. `getOfflineImageBufferInfo` is offline-only; use `getPipelineImageBufferInfo` for live ids. `releaseOfflineImageBuffer` / `releasePipelineImageBuffer` accept both prefixes.
 
 ### Offline buffer creation
 
@@ -164,8 +148,9 @@ Options (`CreateOfflineImageBufferOptions`):
 
 | Option | Notes |
 |--------|--------|
-| `maxSide` | Longest-edge cap after decode; default `4096`; `<= 0` disables |
-| `onProgress` | `ImageProgressEvent` (`done`, `total`, `phase`) during create |
+| `maxSide` | Longest-edge cap after decode; default `4096`; `<= 0` disables. WebP uses libwebp `use_scaling` when this hits; JPEG/PNG still full-decode then scalar scale. |
+| `hotFrames` | Max decoded RGB frames kept hot (default 8, clamped 1..32). Same contract as PDF. |
+| `onProgress` | `ImageProgressEvent` (`done`, `total`, `phase`) during create. Phase is `index` while files are registered, then `done`. |
 | `signal` | Abort → `ERR_IMAGE_CANCELLED` |
 
 #### `createOfflineImageBufferFromBase64(base64List, options?)`
@@ -204,7 +189,7 @@ console.log(info.kind, info.state, info.frameCount, info.storageKind);
 |-------|--------|--------|
 | `bufferId` | `img_off_…` | Buffer id |
 | `kind` | `'offlineImageBuffer'` | Discriminator |
-| `state` | `'immutable'` \| `'lazy'` | `'lazy'` from PDF [`rasterizePdfPages({ strategy: 'lazy-lru' })`](pdf-offline.md) |
+| `state` | `'immutable'` \| `'lazy'` | `'lazy'` from file/base64 create and PDF [`rasterizePdfPages({ strategy: 'lazy-lru' })`](pdf-offline.md) |
 | `frameCount` | number | Number of frames (lazy includes not-yet-ensured frames) |
 | `totalBytes` | number | Approximate decoded size; for `'lazy'`, currently ensured frames only |
 | `storageKind` | `'ram'` \| `'mmap'` | How decoded frames are held |
@@ -240,7 +225,7 @@ const frame = await ensureOfflineImageBufferFrame(offline, 0);
 console.log(frame.width, frame.height);
 ```
 
-Makes frame `frameIndex` ready and returns its info. For `'immutable'` buffers this is a no-op (returns current info). For PDF `'lazy'` buffers, ensures that page is decoded (may drop older decoded pages when over `hotFrames`). Optional before `recognize` if you want explicit control; FrameView and OCR also ensure on access.
+Makes frame `frameIndex` ready and returns its info. For `'immutable'` buffers this is a no-op (returns current info). For file/PDF `'lazy'` buffers, ensures that frame is decoded (may drop older decoded frames when over `hotFrames`). Optional before `recognize` if you want explicit control; FrameView and OCR also ensure on access. Recording live buffers reject with `ERR_IMAGE_INVALID_STATE`.
 
 #### `releaseOfflineImageBuffer(buffer)`
 
@@ -459,7 +444,8 @@ import type {
   CreateOfflineImageBufferOptions,
   ImageProgressEvent,
   ImageStorageKind, // 'ram' | 'mmap'
-  LiveImageBufferInfo, // reserved
+  LiveImageBufferInfo,
+  CreateEmptyLiveImageBufferOptions,
   OfflineImageBufferAnnotatedViewProps,
   OfflineImageBufferSpanPressEvent,
   OfflineImageBufferSpanRange,

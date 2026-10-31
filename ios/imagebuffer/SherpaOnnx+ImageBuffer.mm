@@ -18,8 +18,10 @@
 using sherpa_onnx::image::DecodeOptions;
 using sherpa_onnx::image::ImageDecoder;
 using sherpa_onnx::image::ImageRegistry;
+using sherpa_onnx::image::ImageRetention;
 using sherpa_onnx::image::ImageThresholdPathType;
 using sherpa_onnx::image::ImageThresholdPlatform;
+using sherpa_onnx::image::LiveImageOptions;
 using sherpa_onnx::image::RgbFrame;
 
 namespace {
@@ -33,6 +35,8 @@ bool IsCancelled(NSString *operationId) {
   auto it = gCancelFlags.find([operationId UTF8String]);
   return it != gCancelFlags.end() && it->second;
 }
+
+bool DecodeHeicToRgb(NSData *data, int maxSide, RgbFrame &out, NSString **errOut);
 
 void SetCancel(NSString *operationId, bool value) {
   if (operationId.length == 0) return;
@@ -57,20 +61,50 @@ void EnsureImageRegistryInit() {
     uint64_t ram = [[NSProcessInfo processInfo] physicalMemory];
     reg.ConfigureThreshold(ImageThresholdPlatform::Ios, ram);
     reg.SweepOrphanedTempFiles();
+    ImageDecoder::SetPlatformHeicDecoder(
+        [](const uint8_t *data, size_t size, const DecodeOptions &opts) {
+          sherpa_onnx::image::DecodeResult r;
+          r.format = sherpa_onnx::image::DecodeFormat::Heic;
+          if (!data || size == 0) {
+            r.ok = false;
+            r.errorCode = "ERR_IMAGE_DECODE_FAILED";
+            r.errorMessage = "empty image bytes";
+            return r;
+          }
+          NSData *ns = [NSData dataWithBytes:data length:size];
+          RgbFrame frame;
+          NSString *err = nil;
+          if (!DecodeHeicToRgb(ns, opts.maxSide, frame, &err)) {
+            r.ok = false;
+            r.errorCode = "ERR_IMAGE_FORMAT_UNSUPPORTED";
+            r.errorMessage = err ? [err UTF8String] : "HEIC decode failed";
+            return r;
+          }
+          r.ok = true;
+          r.frame = std::move(frame);
+          return r;
+        });
   });
 }
 
 NSDictionary *InfoDict(const sherpa_onnx::image::ImageBufferInfo &info) {
-  return @{
+  NSMutableDictionary *dict = [@{
     @"bufferId" : [NSString stringWithUTF8String:info.bufferId.c_str()],
-    @"kind" : @"offlineImageBuffer",
+    @"kind" : [NSString
+        stringWithUTF8String:sherpa_onnx::image::BufferKindName(info.kind)],
     @"state" : [NSString
         stringWithUTF8String:sherpa_onnx::image::BufferStateName(info.state)],
     @"frameCount" : @(info.frameCount),
     @"totalBytes" : @(info.totalBytes),
     @"storageKind" :
         [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
-  };
+  } mutableCopy];
+  if (info.kind == sherpa_onnx::image::ImageBufferKind::Live) {
+    dict[@"totalFramesWritten"] = @(info.totalFramesWritten);
+    dict[@"ringEvictedFrames"] = @(info.ringEvictedFrames);
+    dict[@"hasActiveSpool"] = @(info.hasActiveSpool);
+  }
+  return dict;
 }
 
 NSDictionary *FrameInfoDict(const sherpa_onnx::image::ImageFrameInfo &info) {
@@ -234,6 +268,11 @@ int MaxSideFromOptions(NSDictionary *options) {
   return 4096;
 }
 
+int HotFramesFromOptions(NSDictionary *options) {
+  if (options[@"hotFrames"] != nil) return [options[@"hotFrames"] intValue];
+  return 0;
+}
+
 }  // namespace
 
 @implementation SherpaOnnx (ImageBuffer)
@@ -257,23 +296,24 @@ int MaxSideFromOptions(NSDictionary *options) {
     return;
   }
   int maxSide = MaxSideFromOptions(options);
+  int hotFrames = HotFramesFromOptions(options);
   NSString *operationId = options[@"operationId"];
   if (operationId.length > 0) SetCancel(operationId, false);
 
-  std::string bufferId = ImageRegistry::Instance().CreateEmpty();
   NSInteger total = sources.count;
+  std::vector<std::string> paths;
+  std::vector<std::vector<uint8_t>> blobs;
+  BOOL allFiles = YES;
   for (NSInteger i = 0; i < total; ++i) {
     if (IsCancelled(operationId)) {
-      ImageRegistry::Instance().Release(bufferId);
       SetCancel(operationId, false);
       reject(@"ERR_IMAGE_CANCELLED", @"cancelled", nil);
       return;
     }
-    EmitProgress(self, operationId, (int)i, (int)total, @"decode");
+    EmitProgress(self, operationId, (int)i, (int)total, @"index");
 
     id item = sources[i];
     if (![item isKindOfClass:[NSDictionary class]]) {
-      ImageRegistry::Instance().Release(bufferId);
       reject(@"ERR_IMAGE_INVALID_ARGUMENT",
              [NSString stringWithFormat:@"source[%ld] must be a FileSource map", (long)i], nil);
       return;
@@ -285,44 +325,89 @@ int MaxSideFromOptions(NSDictionary *options) {
                                                            error:&errCode
                                                          message:&errMsg];
     if (!readHandle) {
-      ImageRegistry::Instance().Release(bufferId);
       reject(errCode ?: @"ERR_IMAGE_DECODE_FAILED", errMsg ?: @"Failed to resolve FileSource", nil);
       return;
     }
 
-    NSData *data = nil;
     if (readHandle.isFilePath && readHandle.filePath.length > 0) {
-      data = [NSData dataWithContentsOfFile:readHandle.filePath];
-    } else if (readHandle.stream != nil) {
-      [readHandle.stream open];
-      NSMutableData *buf = [NSMutableData data];
-      uint8_t chunk[65536];
-      NSInteger n;
-      while ((n = [readHandle.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
-        [buf appendBytes:chunk length:(NSUInteger)n];
+      paths.push_back([readHandle.filePath UTF8String]);
+    } else {
+      allFiles = NO;
+      NSData *data = nil;
+      if (readHandle.stream != nil) {
+        [readHandle.stream open];
+        NSMutableData *buf = [NSMutableData data];
+        uint8_t chunk[65536];
+        NSInteger n;
+        while ((n = [readHandle.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
+          [buf appendBytes:chunk length:(NSUInteger)n];
+        }
+        data = buf;
       }
-      data = buf;
+      [readHandle cleanup];
+      if (!data || data.length == 0) {
+        reject(@"ERR_IMAGE_DECODE_FAILED", @"empty or unreadable FileSource", nil);
+        return;
+      }
+      const auto *bytes = (const uint8_t *)data.bytes;
+      blobs.emplace_back(bytes, bytes + data.length);
+      continue;
     }
     [readHandle cleanup];
+  }
 
-    if (!data || data.length == 0) {
-      ImageRegistry::Instance().Release(bufferId);
-      reject(@"ERR_IMAGE_DECODE_FAILED", @"empty or unreadable FileSource", nil);
-      return;
+  DecodeOptions opts;
+  opts.maxSide = maxSide;
+  opts.hotFrames = hotFrames;
+  ImageRegistry::CreateResult created;
+  if (allFiles && paths.size() == static_cast<size_t>(total)) {
+    created = ImageRegistry::Instance().CreateFromFiles(paths, opts);
+  } else {
+    blobs.clear();
+    for (NSInteger i = 0; i < total; ++i) {
+      NSDictionary *source = sources[i];
+      NSString *errCode = nil;
+      NSString *errMsg = nil;
+      FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source
+                                                             error:&errCode
+                                                           message:&errMsg];
+      if (!readHandle) {
+        reject(errCode ?: @"ERR_IMAGE_DECODE_FAILED", errMsg ?: @"Failed to resolve FileSource",
+               nil);
+        return;
+      }
+      NSData *data = nil;
+      if (readHandle.isFilePath && readHandle.filePath.length > 0) {
+        data = [NSData dataWithContentsOfFile:readHandle.filePath];
+      } else if (readHandle.stream != nil) {
+        [readHandle.stream open];
+        NSMutableData *buf = [NSMutableData data];
+        uint8_t chunk[65536];
+        NSInteger n;
+        while ((n = [readHandle.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
+          [buf appendBytes:chunk length:(NSUInteger)n];
+        }
+        data = buf;
+      }
+      [readHandle cleanup];
+      if (!data || data.length == 0) {
+        reject(@"ERR_IMAGE_DECODE_FAILED", @"empty or unreadable FileSource", nil);
+        return;
+      }
+      const auto *bytes = (const uint8_t *)data.bytes;
+      blobs.emplace_back(bytes, bytes + data.length);
     }
-    NSString *err = nil;
-    if (!AppendBytes(bufferId, data, maxSide, true, &err)) {
-      ImageRegistry::Instance().Release(bufferId);
-      reject(@"ERR_IMAGE_DECODE_FAILED", err ?: @"decode failed", nil);
-      return;
-    }
+    created = ImageRegistry::Instance().CreateFromBytesList(
+        blobs, opts, ImageThresholdPathType::FileOrigin);
+  }
+  if (!created.ok) {
+    reject(@(created.errorCode.c_str()), @(created.errorMessage.c_str()), nil);
+    SetCancel(operationId, false);
+    return;
   }
   EmitProgress(self, operationId, (int)total, (int)total, @"done");
-  ImageRegistry::Instance().MaybeUpgradeToMmap(bufferId, ImageThresholdPathType::FileOrigin);
-  sherpa_onnx::image::ImageBufferInfo info;
-  ImageRegistry::Instance().GetInfo(bufferId, info);
   SetCancel(operationId, false);
-  resolve(InfoDict(info));
+  resolve(InfoDict(created.info));
 }
 
 - (void)createOfflineImageBufferFromBase64:(NSArray *)base64List
@@ -335,39 +420,42 @@ int MaxSideFromOptions(NSDictionary *options) {
     return;
   }
   int maxSide = MaxSideFromOptions(options);
+  int hotFrames = HotFramesFromOptions(options);
   NSString *operationId = options[@"operationId"];
   if (operationId.length > 0) SetCancel(operationId, false);
 
-  std::string bufferId = ImageRegistry::Instance().CreateEmpty();
   NSInteger total = base64List.count;
+  std::vector<std::vector<uint8_t>> blobs;
+  blobs.reserve(static_cast<size_t>(total));
   for (NSInteger i = 0; i < total; ++i) {
     if (IsCancelled(operationId)) {
-      ImageRegistry::Instance().Release(bufferId);
       SetCancel(operationId, false);
       reject(@"ERR_IMAGE_CANCELLED", @"cancelled", nil);
       return;
     }
-    EmitProgress(self, operationId, (int)i, (int)total, @"decode");
+    EmitProgress(self, operationId, (int)i, (int)total, @"index");
     NSString *b64 = [base64List[i] description];
     NSData *data = [[NSData alloc] initWithBase64EncodedString:b64 options:0];
     if (!data) {
-      ImageRegistry::Instance().Release(bufferId);
       reject(@"ERR_IMAGE_DECODE_FAILED", @"invalid base64", nil);
       return;
     }
-    NSString *err = nil;
-    if (!AppendBytes(bufferId, data, maxSide, false, &err)) {
-      ImageRegistry::Instance().Release(bufferId);
-      reject(@"ERR_IMAGE_DECODE_FAILED", err ?: @"decode failed", nil);
-      return;
-    }
+    const auto *bytes = (const uint8_t *)data.bytes;
+    blobs.emplace_back(bytes, bytes + data.length);
+  }
+  DecodeOptions opts;
+  opts.maxSide = maxSide;
+  opts.hotFrames = hotFrames;
+  auto created = ImageRegistry::Instance().CreateFromBytesList(
+      blobs, opts, ImageThresholdPathType::HeapOrigin);
+  if (!created.ok) {
+    reject(@(created.errorCode.c_str()), @(created.errorMessage.c_str()), nil);
+    SetCancel(operationId, false);
+    return;
   }
   EmitProgress(self, operationId, (int)total, (int)total, @"done");
-  ImageRegistry::Instance().MaybeUpgradeToMmap(bufferId, ImageThresholdPathType::HeapOrigin);
-  sherpa_onnx::image::ImageBufferInfo info;
-  ImageRegistry::Instance().GetInfo(bufferId, info);
   SetCancel(operationId, false);
-  resolve(InfoDict(info));
+  resolve(InfoDict(created.info));
 }
 
 - (void)getOfflineImageBufferInfo:(NSString *)bufferId
@@ -484,6 +572,134 @@ int MaxSideFromOptions(NSDictionary *options) {
   NSString *resultPath = wh.resultPath.length > 0 ? wh.resultPath : wh.filePath;
   [wh cleanup];
   resolve(@{ @"outputKind" : @"fs", @"outputPath" : resultPath ?: wh.filePath });
+}
+
+- (void)emitLiveImageAppendEvents:(NSString *)bufferId
+                           before:(NSDictionary *)before
+                            after:(NSDictionary *)after {
+  long long evictedBefore = [before[@"ringEvictedFrames"] longLongValue];
+  long long evictedAfter = [after[@"ringEvictedFrames"] longLongValue];
+  if (evictedAfter > evictedBefore) {
+    [self emitLiveImageEvent:@"overflow" bufferId:bufferId info:after];
+  }
+  [self emitLiveImageEvent:@"framesAppended" bufferId:bufferId info:after];
+}
+
+- (void)emitLiveImageEvent:(NSString *)type bufferId:(NSString *)bufferId info:(NSDictionary *)info {
+  NSMutableDictionary *body = [@{
+    @"type" : type ?: @"framesAppended",
+    @"liveBufferId" : bufferId ?: @"",
+  } mutableCopy];
+  if (info[@"frameCount"] != nil) body[@"frameCount"] = info[@"frameCount"];
+  if (info[@"totalFramesWritten"] != nil)
+    body[@"totalFramesWritten"] = info[@"totalFramesWritten"];
+  [self sendEventWithName:@"SherpaOnnxImageLiveEvent" body:body];
+}
+
+- (void)createEmptyLiveImageBuffer:(NSDictionary *)options
+                           resolve:(RCTPromiseResolveBlock)resolve
+                            reject:(RCTPromiseRejectBlock)reject {
+  EnsureImageRegistryInit();
+  LiveImageOptions opts;
+  if (options[@"ringFrames"] != nil) opts.ringFrames = [options[@"ringFrames"] intValue];
+  NSString *retention = [options[@"retention"] description];
+  if ([retention isEqualToString:@"none"]) {
+    opts.retention = ImageRetention::None;
+  }
+  auto created = ImageRegistry::Instance().CreateLive(opts);
+  resolve(InfoDict(created.info));
+}
+
+- (void)appendLiveImageFrame:(NSString *)bufferId
+                 base64Bytes:(NSString *)base64Bytes
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject {
+  EnsureImageRegistryInit();
+  NSData *data = [[NSData alloc] initWithBase64EncodedString:base64Bytes options:0];
+  if (!data) {
+    reject(@"ERR_IMAGE_INVALID_ARGUMENT", @"invalid base64", nil);
+    return;
+  }
+  const auto *bytes = (const uint8_t *)data.bytes;
+  std::vector<uint8_t> blob(bytes, bytes + data.length);
+  sherpa_onnx::image::ImageBufferInfo beforeInfo;
+  ImageRegistry::Instance().GetInfo([bufferId UTF8String], beforeInfo);
+  NSDictionary *beforeDict = InfoDict(beforeInfo);
+  auto st = ImageRegistry::Instance().AppendLiveCompressed([bufferId UTF8String], std::move(blob));
+  if (!st.ok) {
+    reject(@(st.errorCode.c_str()), @(st.errorMessage.c_str()), nil);
+    return;
+  }
+  sherpa_onnx::image::ImageBufferInfo info;
+  ImageRegistry::Instance().GetInfo([bufferId UTF8String], info);
+  NSDictionary *dict = InfoDict(info);
+  [self emitLiveImageAppendEvents:bufferId before:beforeDict after:dict];
+  resolve(dict);
+}
+
+- (void)ingestFileToLiveImageBuffer:(NSDictionary *)source
+                           bufferId:(NSString *)bufferId
+                            resolve:(RCTPromiseResolveBlock)resolve
+                             reject:(RCTPromiseRejectBlock)reject {
+  EnsureImageRegistryInit();
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source
+                                                         error:&errCode
+                                                       message:&errMsg];
+  if (!readHandle) {
+    reject(errCode ?: @"ERR_IMAGE_DECODE_FAILED", errMsg ?: @"Failed to resolve FileSource", nil);
+    return;
+  }
+  NSData *data = nil;
+  if (readHandle.isFilePath && readHandle.filePath.length > 0) {
+    data = [NSData dataWithContentsOfFile:readHandle.filePath];
+  } else if (readHandle.stream != nil) {
+    [readHandle.stream open];
+    NSMutableData *buf = [NSMutableData data];
+    uint8_t chunk[65536];
+    NSInteger n;
+    while ((n = [readHandle.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
+      [buf appendBytes:chunk length:(NSUInteger)n];
+    }
+    data = buf;
+  }
+  [readHandle cleanup];
+  if (!data || data.length == 0) {
+    reject(@"ERR_IMAGE_DECODE_FAILED", @"empty or unreadable FileSource", nil);
+    return;
+  }
+  const auto *bytes = (const uint8_t *)data.bytes;
+  std::vector<uint8_t> blob(bytes, bytes + data.length);
+  sherpa_onnx::image::ImageBufferInfo beforeInfo;
+  ImageRegistry::Instance().GetInfo([bufferId UTF8String], beforeInfo);
+  NSDictionary *beforeDict = InfoDict(beforeInfo);
+  auto st = ImageRegistry::Instance().AppendLiveCompressed([bufferId UTF8String], std::move(blob));
+  if (!st.ok) {
+    reject(@(st.errorCode.c_str()), @(st.errorMessage.c_str()), nil);
+    return;
+  }
+  sherpa_onnx::image::ImageBufferInfo info;
+  ImageRegistry::Instance().GetInfo([bufferId UTF8String], info);
+  NSDictionary *dict = InfoDict(info);
+  [self emitLiveImageAppendEvents:bufferId before:beforeDict after:dict];
+  resolve(dict);
+}
+
+- (void)finalizeLiveImageBuffer:(NSString *)bufferId
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject {
+  EnsureImageRegistryInit();
+  auto st = ImageRegistry::Instance().FinishLive([bufferId UTF8String]);
+  if (!st.ok) {
+    reject(@(st.errorCode.c_str()), @(st.errorMessage.c_str()), nil);
+    return;
+  }
+  sherpa_onnx::image::ImageBufferInfo info;
+  ImageRegistry::Instance().GetInfo([bufferId UTF8String], info);
+  NSDictionary *dict = InfoDict(info);
+  [self emitLiveImageEvent:@"finished" bufferId:bufferId info:dict];
+  resolve(dict);
 }
 
 @end

@@ -1,8 +1,10 @@
 #pragma once
 
+#include "ImageFileLazyBackend.h"
 #include "ImageMmapThreshold.h"
 #include "ImageTypes.h"
 #include "decode/ImageDecoder.h"
+#include "live/LiveImageEntry.h"
 
 #include <cstdint>
 #include <functional>
@@ -23,8 +25,8 @@ namespace image {
 /**
  * Offline ImageBuffer registry (C++ source of truth).
  * Buffer ids: img_off_<uuid>. Per-frame backing: RAM or mmap (.rgb8 temp file).
- * Lazy-lru PDF buffers: placeholder slots + retained PdfLazyBackend; at most
- * hotFrames hold decoded RGB.
+ * Lazy-lru PDF / file buffers: placeholder slots + retained backend; at most
+ * hotFrames hold decoded RGB. File create (CreateFromFiles / Bytes) is lazy.
  */
 class ImageRegistry {
  public:
@@ -41,10 +43,6 @@ class ImageRegistry {
 
   std::string CreateEmpty();
 
-  /**
-   * Decode files into a new buffer. pathOrigin=FileOrigin for threshold.
-   * On cancel: releases partial buffer and returns empty string + error.
-   */
   struct CreateResult {
     bool ok = false;
     std::string bufferId;
@@ -53,6 +51,15 @@ class ImageRegistry {
     ImageBufferInfo info;
   };
 
+  CreateResult CreateLive(const LiveImageOptions& opts);
+  LiveImageEntry::Status AppendLiveCompressed(const std::string& bufferId,
+                                              std::vector<uint8_t> bytes);
+  LiveImageEntry::Status FinishLive(const std::string& bufferId);
+
+  /**
+   * Index files into a lazy buffer (no RGB until EnsureFrame / GetFrameRgbPtr).
+   * pathOrigin=FileOrigin for threshold. On cancel: no buffer registered.
+   */
   CreateResult CreateFromFiles(const std::vector<std::string>& paths,
                                const DecodeOptions& opts,
                                ProgressFn progress = {},
@@ -116,6 +123,12 @@ class ImageRegistry {
   /** Re-evaluate threshold after appends (post-adopt upgrade). */
   void MaybeUpgradeToMmap(const std::string& bufferId, ImageThresholdPathType pathType);
 
+  /** Host-test helper: file-lazy DecodeFrame call count, or -1 if not file-lazy. */
+  int FileLazyDecodeCount(const std::string& bufferId) const;
+
+  /** Host-test helper: live decoder count, or -1 if not a live buffer. */
+  int LiveDecodeCount(const std::string& bufferId) const;
+
  private:
   ImageRegistry() = default;
 
@@ -157,6 +170,7 @@ class ImageRegistry {
     uint64_t lruClock = 0;
     uint64_t generation = 0;
     std::unique_ptr<pdf::PdfLazyBackend> pdfLazy;
+    std::unique_ptr<ImageFileLazyBackend> fileLazy;
 
     Entry();
     ~Entry();
@@ -173,12 +187,14 @@ class ImageRegistry {
 
   mutable std::mutex mu_;
   std::unordered_map<std::string, Entry> entries_;
+  std::unordered_map<std::string, std::shared_ptr<LiveImageEntry>> liveEntries_;
   std::string cacheDir_;
   ImageThresholdPlatform platform_ = ImageThresholdPlatform::Android;
   ImageRamClass ramClass_ = ImageRamClass::Mid;
   bool thresholdConfigured_ = false;
 
   std::string NewBufferId();
+  std::string NewLiveBufferId();
   int64_t ThresholdFor(ImageThresholdPathType pathType) const;
   bool WriteFrameToMmap(Frame& frame, const std::string& bufferId, int frameIndex);
   bool UpgradeEntryLocked(Entry& entry);

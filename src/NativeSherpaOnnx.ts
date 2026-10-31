@@ -1053,7 +1053,7 @@ export interface Spec extends TurboModule {
 
   /**
    * Decode one or more images from serialized {@link FileSource} maps into an offline ImageBuffer.
-   * Native options: `{ maxSide?: number, operationId?: string }`.
+   * Native options: `{ maxSide?: number, hotFrames?: number, operationId?: string }`.
    * Progress events: `SherpaOnnxImageProgress` with `{ operationId, done, total, phase }`.
    * Public JS API wraps this with `onProgress` / `AbortSignal`.
    */
@@ -1071,7 +1071,7 @@ export interface Spec extends TurboModule {
 
   /**
    * Decode image blobs (base64 strings) into an offline ImageBuffer.
-   * Native options: `{ maxSide?: number, operationId?: string }`.
+   * Native options: `{ maxSide?: number, hotFrames?: number, operationId?: string }`.
    */
   createOfflineImageBufferFromBase64(
     base64List: string[],
@@ -1092,6 +1092,9 @@ export interface Spec extends TurboModule {
     frameCount: number;
     totalBytes: number;
     storageKind: string;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: boolean | string;
   }>;
 
   getOfflineImageBufferFrameInfo(
@@ -1114,7 +1117,8 @@ export interface Spec extends TurboModule {
 
   /**
    * Ensure a frame's RGB is resident (no-op info for non-lazy buffers).
-   * For lazy-lru PDF buffers: rasterize cold slot, update LRU, may prefetch ±1.
+   * For lazy file/PDF buffers: decode/rasterize cold slot, update LRU, may prefetch ±1.
+   * Finished live (`img_live_*`) decodes from the compressed ring/spool.
    */
   ensureOfflineImageBufferFrame(
     bufferId: string,
@@ -1151,6 +1155,62 @@ export interface Spec extends TurboModule {
     destination: Object,
     options?: Object
   ): Promise<{ outputKind: string; outputPath: string }>;
+
+  // ==================== Live ImageBuffer ====================
+
+  createEmptyLiveImageBuffer(options?: Object): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes?: number;
+    storageKind?: string;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: boolean | string;
+  }>;
+
+  appendLiveImageFrame(
+    bufferId: string,
+    base64Bytes: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes?: number;
+    storageKind?: string;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: boolean | string;
+  }>;
+
+  ingestFileToLiveImageBuffer(
+    source: Object,
+    bufferId: string
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes?: number;
+    storageKind?: string;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: boolean | string;
+  }>;
+
+  finalizeLiveImageBuffer(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    totalBytes?: number;
+    storageKind?: string;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: boolean | string;
+  }>;
 
   // ==================== Offline OCR ====================
 

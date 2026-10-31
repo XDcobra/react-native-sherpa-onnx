@@ -27,7 +27,7 @@ function resolveBufferId(source: OfflineImageBufferIdSource): string {
 }
 
 export type OfflineImageBufferFrameViewProps = {
-  /** Offline ImageBuffer ref, info, handle, or raw id. */
+  /** Offline ImageBuffer, or a finished live (`img_live_*`) id. Recording live is rejected natively. */
   buffer: OfflineImageBufferIdSource;
   /** Frame index (default 0). */
   frameIndex?: number;

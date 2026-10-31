@@ -96,7 +96,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 ### Pipeline & orchestration
 
 - ✅ Offline pipeline buffers: [Audio](./docs/audiobuffer-offline.md) · [Text](./docs/textbuffer-offline.md) · [Segment](./docs/segmentbuffer-offline.md) · [Image](./docs/imagebuffer-offline.md) · [Video](./docs/videobuffer-offline.md)
-- ✅ Live pipeline buffers: [Audio](./docs/audiobuffer-streaming.md) · [Text](./docs/textbuffer-streaming.md) · [Segment](./docs/segmentbuffer-streaming.md) · [Video](./docs/videobuffer-streaming.md)
+- ✅ Live pipeline buffers: [Audio](./docs/audiobuffer-streaming.md) · [Text](./docs/textbuffer-streaming.md) · [Segment](./docs/segmentbuffer-streaming.md) · [Image](./docs/imagebuffer-streaming.md) · [Video](./docs/videobuffer-streaming.md)
 - ✅ Native chaining & recipes: [Feature pipelines](./docs/feature-pipelines.md) · [Streaming pipeline lifecycle](./docs/streaming-pipelines-overview.md)
 - ✅ Long audio & OOM mitigation: [Segmentation engine](./docs/segmentation-engine.md)
 - ✅ Audio session and routing: [Pipeline Audio Session](./docs/audio-session.md)

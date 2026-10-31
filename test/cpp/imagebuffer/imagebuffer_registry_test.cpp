@@ -56,17 +56,25 @@ TEST_F(RegistryFixture, Registry_CreateFromFiles_MultiFrame_InfoAndFrameInfo) {
       DecodeOptions{});
   ASSERT_TRUE(result.ok) << result.errorMessage;
   EXPECT_EQ(result.info.frameCount, 2);
+  EXPECT_EQ(result.info.state, ImageBufferState::Lazy);
   EXPECT_EQ(result.info.storageKind, ImageStorageKind::Ram);
-  EXPECT_GT(result.info.totalBytes, 0);
+  EXPECT_EQ(result.info.totalBytes, 0);
+  EXPECT_EQ(reg.FileLazyDecodeCount(result.bufferId), 0);
 
   ImageFrameInfo f0;
   ImageFrameInfo f1;
   ASSERT_TRUE(reg.GetFrameInfo(result.bufferId, 0, f0));
   ASSERT_TRUE(reg.GetFrameInfo(result.bufferId, 1, f1));
-  EXPECT_EQ(f0.width, 64);
-  EXPECT_EQ(f0.height, 48);
-  EXPECT_EQ(f1.width, 64);
-  EXPECT_EQ(f1.height, 48);
+  EXPECT_EQ(f0.width, 0);
+  EXPECT_EQ(f0.height, 0);
+  EXPECT_EQ(f1.width, 0);
+  EXPECT_EQ(f1.height, 0);
+
+  auto ensured = reg.EnsureFrame(result.bufferId, 0);
+  ASSERT_TRUE(ensured.ok) << ensured.errorMessage;
+  EXPECT_EQ(ensured.info.width, 64);
+  EXPECT_EQ(ensured.info.height, 48);
+  EXPECT_EQ(reg.FileLazyDecodeCount(result.bufferId), 1);
 
   EXPECT_TRUE(reg.Release(result.bufferId));
 }
@@ -80,7 +88,9 @@ TEST_F(RegistryFixture, Registry_CreateFromBytesList_HeapOrigin) {
       {jpeg}, DecodeOptions{}, ImageThresholdPathType::HeapOrigin);
   ASSERT_TRUE(result.ok) << result.errorMessage;
   EXPECT_EQ(result.info.frameCount, 1);
+  EXPECT_EQ(result.info.state, ImageBufferState::Lazy);
   EXPECT_EQ(result.info.storageKind, ImageStorageKind::Ram);
+  EXPECT_EQ(result.info.totalBytes, 0);
   EXPECT_TRUE(reg.Release(result.bufferId));
 }
 
@@ -106,7 +116,7 @@ TEST_F(RegistryFixture, CreateFromFiles_ProgressCallbacks) {
       });
   ASSERT_TRUE(result.ok) << result.errorMessage;
   ASSERT_GE(events.size(), 3u);
-  EXPECT_EQ(std::get<2>(events.front()), "decode");
+  EXPECT_EQ(std::get<2>(events.front()), "index");
   EXPECT_EQ(std::get<0>(events.front()), 0);
   EXPECT_EQ(std::get<1>(events.front()), 2);
   EXPECT_EQ(std::get<2>(events.back()), "done");

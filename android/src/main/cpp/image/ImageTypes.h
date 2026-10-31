@@ -43,15 +43,59 @@ inline const char* StorageKindName(ImageStorageKind kind) {
   return kind == ImageStorageKind::Mmap ? "mmap" : "ram";
 }
 
+/** Buffer kind: offline (`img_off_`) vs live (`img_live_`). */
+enum class ImageBufferKind {
+  Offline,
+  Live,
+};
+
+inline const char* BufferKindName(ImageBufferKind kind) {
+  return kind == ImageBufferKind::Live ? "liveImageBuffer" : "offlineImageBuffer";
+}
+
 /** Buffer lifecycle state exposed to JS. */
 enum class ImageBufferState {
   Immutable,
   Lazy,
+  Recording,
+  Finished,
 };
 
 inline const char* BufferStateName(ImageBufferState state) {
-  return state == ImageBufferState::Lazy ? "lazy" : "immutable";
+  switch (state) {
+    case ImageBufferState::Lazy:
+      return "lazy";
+    case ImageBufferState::Recording:
+      return "recording";
+    case ImageBufferState::Finished:
+      return "finished";
+    default:
+      return "immutable";
+  }
 }
+
+enum class ImageRetention {
+  Session,
+  None,
+};
+
+/** Decode options. maxSide <= 0 means no downscale. Default 4096. */
+struct DecodeOptions {
+  int maxSide = 4096;
+  /** Lazy file create only. 0 = default 8, clamped 1..32. Ignored by ImageDecoder. */
+  int hotFrames = 0;
+};
+
+struct LiveImageOptions {
+  int ringFrames = 16;
+  ImageRetention retention = ImageRetention::Session;
+  DecodeOptions decode;
+};
+
+struct CompressedImageFrame {
+  int64_t index = 0;
+  std::vector<uint8_t> bytes;
+};
 
 struct ImageFrameInfo {
   int index = 0;
@@ -73,15 +117,14 @@ struct ImageFrameInfo {
 
 struct ImageBufferInfo {
   std::string bufferId;
+  ImageBufferKind kind = ImageBufferKind::Offline;
   int frameCount = 0;
   int64_t totalBytes = 0;
   ImageStorageKind storageKind = ImageStorageKind::Ram;
   ImageBufferState state = ImageBufferState::Immutable;
-};
-
-/** Decode options. maxSide <= 0 means no downscale. Default 4096. */
-struct DecodeOptions {
-  int maxSide = 4096;
+  int64_t totalFramesWritten = 0;
+  int64_t ringEvictedFrames = 0;
+  bool hasActiveSpool = false;
 };
 
 enum class DecodeFormat {

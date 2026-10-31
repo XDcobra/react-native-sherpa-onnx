@@ -23,11 +23,13 @@ internal object ImageBufferService {
 
   private val cancelFlags = ConcurrentHashMap<String, AtomicBoolean>()
   @Volatile private var initialized = false
+  @Volatile private var appContext: Context? = null
 
   fun ensureInitialized(context: Context) {
     if (initialized) return
     synchronized(this) {
       if (initialized) return
+      appContext = context.applicationContext
       val cacheDir = File(context.cacheDir, "sherpa-image").apply { mkdirs() }
       val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
       val memInfo = ActivityManager.MemoryInfo()
@@ -63,6 +65,36 @@ internal object ImageBufferService {
         "totalBytes" to 0L,
         "storageKind" to "ram",
       )
+  }
+
+  fun createLive(ringFrames: Int = 16, sessionRetention: Boolean = true): Map<String, Any> {
+    val info = ImageBufferNative.nativeCreateLive(ringFrames, sessionRetention)
+      ?: throw RuntimeException("ERR_IMAGE_INTERNAL: nativeCreateLive null")
+    Log.i(TAG, "createLive ringFrames=$ringFrames session=$sessionRetention id=${info["bufferId"]}")
+    return info
+  }
+
+  fun appendLive(bufferId: String, bytes: ByteArray): Map<String, Any> {
+    val result = ImageBufferNative.nativeAppendLive(bufferId, bytes)
+      ?: throw RuntimeException("ERR_IMAGE_INTERNAL: nativeAppendLive null")
+    if (result["ok"] == false) {
+      val code = result["errorCode"] as? String ?: "ERR_IMAGE_INTERNAL"
+      val msg = result["errorMessage"] as? String ?: "append live failed"
+      throw RuntimeException("$code: $msg")
+    }
+    return result
+  }
+
+  fun finishLive(bufferId: String): Map<String, Any> {
+    val result = ImageBufferNative.nativeFinishLive(bufferId)
+      ?: throw RuntimeException("ERR_IMAGE_INTERNAL: nativeFinishLive null")
+    if (result["ok"] == false) {
+      val code = result["errorCode"] as? String ?: "ERR_IMAGE_INVALID_STATE"
+      val msg = result["errorMessage"] as? String ?: "finish live failed"
+      throw RuntimeException("$code: $msg")
+    }
+    Log.i(TAG, "finishLive $bufferId")
+    return result
   }
 
   fun release(bufferId: String): Boolean = ImageBufferNative.nativeRelease(bufferId)
@@ -151,12 +183,54 @@ internal object ImageBufferService {
    * Create from already-resolved image bytes.
    * [fileOrigin] selects mmap threshold path (true for FileSource create, false for base64/heap).
    */
+  fun createFromFiles(
+    context: Context,
+    paths: List<String>,
+    maxSide: Int = DEFAULT_MAX_SIDE,
+    hotFrames: Int = 0,
+    operationId: String? = null,
+    onProgress: ((done: Int, total: Int, phase: String) -> Unit)? = null,
+  ): Map<String, Any> {
+    ensureInitialized(context)
+    if (paths.isEmpty()) {
+      throw RuntimeException("ERR_IMAGE_INVALID_ARGUMENT: no paths")
+    }
+    if (!operationId.isNullOrEmpty()) {
+      cancelFlags[operationId] = AtomicBoolean(false)
+    }
+    try {
+      val total = paths.size
+      paths.forEachIndexed { index, _ ->
+        if (isCancelled(operationId)) {
+          throw RuntimeException("ERR_IMAGE_CANCELLED: cancelled")
+        }
+        onProgress?.invoke(index, total, "index")
+      }
+      val result = ImageBufferNative.nativeCreateFromFiles(
+        paths.toTypedArray(),
+        maxSide,
+        hotFrames,
+      ) ?: throw RuntimeException("ERR_IMAGE_DECODE_FAILED: nativeCreateFromFiles null")
+      if (result["ok"] == false) {
+        val code = result["errorCode"] as? String ?: "ERR_IMAGE_DECODE_FAILED"
+        val msg = result["errorMessage"] as? String ?: "createFromFiles failed"
+        throw RuntimeException("$code: $msg")
+      }
+      onProgress?.invoke(total, total, "done")
+      Log.i(TAG, "createFromFiles lazy frames=$total hotFrames=$hotFrames")
+      return result
+    } finally {
+      if (!operationId.isNullOrEmpty()) clearCancel(operationId)
+    }
+  }
+
   fun createFromBytesList(
     context: Context,
     blobs: List<ByteArray>,
     maxSide: Int = DEFAULT_MAX_SIDE,
     operationId: String? = null,
     fileOrigin: Boolean = false,
+    hotFrames: Int = 0,
     onProgress: ((done: Int, total: Int, phase: String) -> Unit)? = null,
   ): Map<String, Any> {
     ensureInitialized(context)
@@ -166,67 +240,63 @@ internal object ImageBufferService {
     if (!operationId.isNullOrEmpty()) {
       cancelFlags[operationId] = AtomicBoolean(false)
     }
-    val bufferId = ImageBufferNative.nativeCreateEmpty()
     try {
       val total = blobs.size
       blobs.forEachIndexed { index, bytes ->
         if (isCancelled(operationId)) {
-          ImageBufferNative.nativeRelease(bufferId)
           throw RuntimeException("ERR_IMAGE_CANCELLED: cancelled")
         }
-        onProgress?.invoke(index, total, "decode")
-        appendDecoded(
-          context,
-          bufferId,
-          bytes,
-          maxSide,
-          fileOrigin = fileOrigin,
-          sourceHint = "bytes[$index]",
-        )
+        if (bytes.isEmpty()) {
+          throw RuntimeException("ERR_IMAGE_DECODE_FAILED: empty image bytes")
+        }
+        onProgress?.invoke(index, total, "index")
+      }
+      val result = ImageBufferNative.nativeCreateFromBytesList(
+        blobs.toTypedArray(),
+        maxSide,
+        hotFrames,
+        fileOrigin,
+      ) ?: throw RuntimeException("ERR_IMAGE_DECODE_FAILED: nativeCreateFromBytesList null")
+      if (result["ok"] == false) {
+        val code = result["errorCode"] as? String ?: "ERR_IMAGE_DECODE_FAILED"
+        val msg = result["errorMessage"] as? String ?: "createFromBytes failed"
+        throw RuntimeException("$code: $msg")
       }
       onProgress?.invoke(total, total, "done")
-      ImageBufferNative.nativeMaybeUpgrade(bufferId, fileOrigin)
-      return ImageBufferNative.nativeGetInfo(bufferId)
-        ?: throw RuntimeException("ERR_IMAGE_DECODE_FAILED: missing info after create")
-    } catch (e: Exception) {
-      ImageBufferNative.nativeRelease(bufferId)
-      throw e
+      Log.i(TAG, "createFromBytes lazy frames=$total hotFrames=$hotFrames fileOrigin=$fileOrigin")
+      return result
     } finally {
       if (!operationId.isNullOrEmpty()) clearCancel(operationId)
     }
   }
 
-  private fun appendDecoded(
-    context: Context,
-    bufferId: String,
-    bytes: ByteArray,
-    maxSide: Int,
-    fileOrigin: Boolean,
-    sourceHint: String,
-  ) {
-    val format = ImageBufferNative.nativeDetectFormat(bytes)
-    if (format == "heic") {
-      val rgb = decodeHeicToRgb(context, bytes, maxSide)
-        ?: throw RuntimeException("ERR_IMAGE_FORMAT_UNSUPPORTED: HEIC decode failed ($sourceHint)")
-      val result = ImageBufferNative.nativeAppendRgb(
-        bufferId, rgb.width, rgb.height, rgb.rgb, fileOrigin
-      ) ?: throw RuntimeException("ERR_IMAGE_DECODE_FAILED: appendRgb null")
-      if (result["ok"] != true) {
-        val code = result["errorCode"] as? String ?: "ERR_IMAGE_DECODE_FAILED"
-        val msg = result["errorMessage"] as? String ?: "HEIC append failed"
-        throw RuntimeException("$code: $msg ($sourceHint)")
-      }
-      Log.i(TAG, "HEIC decoded ${rgb.width}x${rgb.height} -> $bufferId ($sourceHint)")
-      return
+  /**
+   * JNI HEIC hook (called from C++ EnsureFrame on a possibly detached thread).
+   */
+  @JvmStatic
+  fun decodeHeicToRgbNative(bytes: ByteArray, maxSide: Int): HashMap<String, Any> {
+    val ctx = appContext
+    if (ctx == null) {
+      return hashMapOf(
+        "ok" to false,
+        "errorCode" to "ERR_IMAGE_FORMAT_UNSUPPORTED",
+        "errorMessage" to "HEIC decoder not initialized",
+      )
     }
-
-    val result = ImageBufferNative.nativeDecodeAndAppend(bufferId, bytes, maxSide, fileOrigin)
-      ?: throw RuntimeException("ERR_IMAGE_DECODE_FAILED: decodeAndAppend null ($sourceHint)")
-    if (result["ok"] != true) {
-      val code = result["errorCode"] as? String ?: "ERR_IMAGE_DECODE_FAILED"
-      val msg = result["errorMessage"] as? String ?: "decode failed"
-      throw RuntimeException("$code: $msg ($sourceHint)")
+    val pack = decodeHeicToRgb(ctx, bytes, maxSide)
+    if (pack == null) {
+      return hashMapOf(
+        "ok" to false,
+        "errorCode" to "ERR_IMAGE_FORMAT_UNSUPPORTED",
+        "errorMessage" to "HEIC ImageDecoder failed",
+      )
     }
+    return hashMapOf(
+      "ok" to true,
+      "width" to pack.width,
+      "height" to pack.height,
+      "rgb" to pack.rgb,
+    )
   }
 
   private data class RgbPack(val width: Int, val height: Int, val rgb: ByteArray)

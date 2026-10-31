@@ -1,0 +1,39 @@
+{
+    "suite": "platform_hw_decode",
+    "width": 5712,
+    "height": 4284,
+    "repeats": 5,
+    "pageCount": 0,
+    "maxSide": 0,
+    "fixtureKind": "phone-24mp",
+    "rows": [
+        {
+            "name": "baseline.portable_turbo",
+            "ok": true,
+            "p50Ms": 3273.83,
+            "p95Ms": 3346.12,
+            "mpPerSec": 7.47449,
+            "rssBytes": 470441984
+        },
+        {
+            "name": "candidate.platform_ImageDecoder",
+            "ok": true,
+            "p50Ms": 325.359616,
+            "p95Ms": 326.896384,
+            "mpPerSec": 75.20972731907821,
+            "rssBytes": 404733952,
+            "speedupVsBaseline": 10.062189156259638,
+            "error": ""
+        }
+    ],
+    "jpegPath": "/data/user/0/com.xdcobra.voicelab/cache/imagebuffer-bench/phone-24mp.jpg",
+    "jpegBytes": 3280007,
+    "needsPlatformHw": true,
+    "loggedAt": "2026-10-30T21:58:20.789+07:00",
+    "device": {
+        "manufacturer": "Nothing",
+        "model": "A142P",
+        "sdk": 36,
+        "pssKb": 395813
+    }
+}

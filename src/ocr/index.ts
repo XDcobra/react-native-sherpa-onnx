@@ -608,6 +608,17 @@ export async function createOCR<O extends OcrInitializeOptions>(
       }
       const imageId = resolveOfflineImageBufferId(imageBuffer);
       const textId = resolveOfflineTextBufferId(textOut);
+      if (imageId.startsWith('img_live_')) {
+        const liveInfo = await getNative().getOfflineImageBufferInfo(imageId);
+        if (liveInfo.state !== 'finished') {
+          throw Object.assign(
+            new Error(
+              `ERR_IMAGE_INVALID_STATE: OCR requires a finished live image buffer`
+            ),
+            { code: 'ERR_IMAGE_INVALID_STATE' }
+          );
+        }
+      }
       if (recognizeOptions?.granularity) {
         const allowed = OCR_CAPABILITIES[resolvedFamily]
           .granularities as readonly string[];

@@ -122,11 +122,13 @@ describe('offline ImageBuffer public API', () => {
     ];
     const result = await createOfflineImageBufferFromFiles(sources, {
       maxSide: 2048,
+      hotFrames: 2,
     });
     expect(mockNative.createOfflineImageBufferFromFiles).toHaveBeenCalledWith(
       sources,
       expect.objectContaining({
         maxSide: 2048,
+        hotFrames: 2,
         operationId: expect.stringMatching(/^img_create_/),
       })
     );
@@ -151,6 +153,21 @@ describe('offline ImageBuffer public API', () => {
       /ERR_IMAGE_INVALID_ARGUMENT/
     );
     expect(mockNative.getOfflineImageBufferInfo).not.toHaveBeenCalled();
+  });
+
+  it('maps file-create state lazy from native', async () => {
+    mockNative.createOfflineImageBufferFromFiles.mockResolvedValue({
+      ...infoPayload,
+      state: 'lazy',
+      totalBytes: 0,
+      storageKind: 'ram',
+    });
+    const result = await createOfflineImageBufferFromFiles({
+      kind: 'fs',
+      path: '/tmp/a.jpg',
+    });
+    expect(result.info.state).toBe('lazy');
+    expect(result.info.totalBytes).toBe(0);
   });
 
   it('maps storageKind and frame info from native', async () => {
@@ -189,13 +206,13 @@ describe('offline ImageBuffer public API', () => {
           operationId: 'other-op',
           done: 0,
           total: 2,
-          phase: 'decode',
+          phase: 'index',
         });
         reactNativeMock.__emitImageProgress({
           operationId: opts.operationId,
           done: 1,
           total: 2,
-          phase: 'decode',
+          phase: 'index',
         });
         return infoPayload;
       }
@@ -206,7 +223,7 @@ describe('offline ImageBuffer public API', () => {
       { onProgress: (e) => seen.push(e) }
     );
 
-    expect(seen).toEqual([{ done: 1, total: 2, phase: 'decode' }]);
+    expect(seen).toEqual([{ done: 1, total: 2, phase: 'index' }]);
     expect(reactNativeMock.__listenerCount()).toBe(0);
   });
 

@@ -9,7 +9,7 @@ Maintainer notes, plans, and evidence. Public API guides live one level up (`doc
 | [audiobuffer/](./audiobuffer/) | Offline + live PCM internals |
 | [textbuffer/](./textbuffer/) | Offline + live text internals, spool v2 |
 | [segmentbuffer/](./segmentbuffer/) | Offline + live segment internals, spool v2 |
-| [imagebuffer/](./imagebuffer/) | Storage / mmap |
+| [imagebuffer/](./imagebuffer/) | Storage / mmap; live ring invariants; [performance/](./imagebuffer/performance/) benches |
 | [videobuffer/](./videobuffer/) | VideoBuffer + VideoPreview internals and plans; [performance/](./videobuffer/performance/) benches |
 
 ## Features
