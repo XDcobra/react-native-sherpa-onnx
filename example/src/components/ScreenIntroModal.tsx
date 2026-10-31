@@ -141,6 +141,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Read documents aloud',
     body: 'This screen shows document-to-speech with the SDK: extract text, then speak it with offline TTS. Supported formats are EPUB, FB2, MOBI, AZW3, PDF, and image-based mixed EPUB or CBZ via OCR.',
   },
+  CodecSmoke: {
+    title: 'Codec smoke',
+    body: 'Device-only HW/SW codec checks for the shared layer. Host tests do not replace these. Filter Android with adb logcat -s SherpaOnnxCodec SherpaOnnx. Paste failures with logs.',
+  },
 };
 
 const STORAGE_FILE = `${DocumentDirectoryPath}/example-screen-intros.json`;

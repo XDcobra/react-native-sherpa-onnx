@@ -28,6 +28,7 @@ const SECTION_ORDER = [
   'Punctuation',
   'Speakers',
   'Source Separation',
+  'Debug',
 ] as const;
 
 const FEATURES: HomeFeature[] = [
@@ -99,6 +100,20 @@ const FEATURES: HomeFeature[] = [
     screen: 'VideoPreview',
     implemented: true,
   },
+  ...(__DEV__
+    ? [
+        {
+          id: 'codec_smoke' as const,
+          sectionTitle: 'Debug',
+          title: 'Codec smoke',
+          description:
+            'Device-only HW/SW codec checks (catalog dump, policies, fallback). Not a host test.',
+          icon: 'flash-outline',
+          screen: 'CodecSmoke' as const,
+          implemented: true,
+        },
+      ]
+    : []),
   {
     id: 'documents',
     sectionTitle: 'Documents (EPUB, MOBI, PDF, …)',
