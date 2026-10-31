@@ -476,6 +476,10 @@ Status VideoExportSession::Run(const std::string& bufferId,
   }
   if (!entry->StickySession(opts.decodePolicy)) {
     encoder->Close();
+    const Status sticky = entry->lastStickyError();
+    if (!sticky.ok) {
+      return sticky;
+    }
     return Status::Fail(kErrDecoderUnavailable, "cpu decoder busy");
   }
   opts.decoderDecision = entry->lastDecoderDecision();

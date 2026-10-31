@@ -105,7 +105,20 @@ VideoFrameIterator::VideoFrameIterator(std::shared_ptr<VideoEntry> entry,
 
 Result<VideoFrameLease> VideoFrameIterator::Next() {
   Result<VideoFrameLease> r;
-  if (done() || entry_ == nullptr || session_ == nullptr) {
+  if (entry_ == nullptr) {
+    r.status = Status::Fail(kErrFrameOutOfRange, "iterator done");
+    return r;
+  }
+  if (session_ == nullptr) {
+    r.status = entry_->lastStickyError().ok
+                   ? Status::Fail(kErrDecoderUnavailable, "session")
+                   : entry_->lastStickyError();
+    VIDEO_LOGE("video.iterate no-session code=%s msg=%s reason=%s",
+               r.status.errorCode.c_str(), r.status.errorMessage.c_str(),
+               r.status.codecReason.c_str());
+    return r;
+  }
+  if (done()) {
     r.status = Status::Fail(kErrFrameOutOfRange, "iterator done");
     return r;
   }
