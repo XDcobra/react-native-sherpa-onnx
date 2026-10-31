@@ -1,5 +1,12 @@
 #ifdef __ANDROID__
 
+// minSdk 24 + NDK 29 marks AImageDecoder (API 30) hard-unavailable.
+// Weak imports keep the .so loadable on API 24–29; Decode() still
+// runtime-checks API 30 via __builtin_available.
+#ifndef __ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__
+#define __ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__
+#endif
+
 #include "platform/android/AImageDecoderBackend.h"
 
 #include "ImageDecoder.h"

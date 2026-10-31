@@ -537,8 +537,8 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
   }
 
 
-  pdf::PdfLazyBackend* session = nullptr;
-  ImageFileLazyBackend* fileLazy = nullptr;
+  std::shared_ptr<pdf::PdfLazyBackend> session;
+  std::shared_ptr<ImageFileLazyBackend> fileLazy;
   int pageNumber = 0;
   uint64_t generation = 0;
   int frameCount = 0;
@@ -580,8 +580,8 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
         r.errorMessage = "lazy session missing";
         return r;
       }
-      session = entry.pdfLazy.get();
-      fileLazy = entry.fileLazy.get();
+      session = entry.pdfLazy;
+      fileLazy = entry.fileLazy;
       pageNumber = entry.frames[static_cast<size_t>(frameIndex)].pageNumber;
       generation = entry.generation;
       frameCount = static_cast<int>(entry.frames.size());
@@ -645,9 +645,14 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
     }
 
     if (entry.isHot(static_cast<size_t>(frameIndex))) {
+      Frame& hot = entry.frames[static_cast<size_t>(frameIndex)];
+      if (fileLazy && hot.decoderProvider.empty()) {
+        hot.decoderProvider = fileLazy->lastProvider();
+        hot.decoderTier = fileLazy->lastTier();
+        hot.decoderOrigin = fileLazy->lastOrigin();
+      }
       TouchLruLocked(entry, frameIndex);
-      FillFrameInfoLocked(entry.frames[static_cast<size_t>(frameIndex)], frameIndex,
-                          r.info);
+      FillFrameInfoLocked(hot, frameIndex, r.info);
       r.ok = true;
     } else {
       Frame& f = entry.frames[static_cast<size_t>(frameIndex)];
@@ -710,7 +715,7 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromFiles(
     return r;
   }
 
-  auto backend = std::make_unique<ImageFileLazyBackend>(opts);
+  auto backend = std::make_shared<ImageFileLazyBackend>(opts);
   const int total = static_cast<int>(paths.size());
   for (int i = 0; i < total; ++i) {
     if (cancel && cancel()) {
@@ -767,7 +772,7 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromBytesList(
     return r;
   }
 
-  auto backend = std::make_unique<ImageFileLazyBackend>(opts);
+  auto backend = std::make_shared<ImageFileLazyBackend>(opts);
   const int total = static_cast<int>(blobs.size());
   for (int i = 0; i < total; ++i) {
     if (cancel && cancel()) {

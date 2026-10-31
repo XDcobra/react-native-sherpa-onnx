@@ -4,6 +4,7 @@
 #include "decode/ImageDecoder.h"
 
 #include <fstream>
+#include <mutex>
 
 namespace sherpa_onnx {
 namespace image {
@@ -77,11 +78,29 @@ bool ImageFileLazyBackend::DecodeFrame(int index, RgbFrame* out,
                                           : decoded.errorCode.c_str(),
                 decoded.errorMessage);
   }
-  lastProvider_ = decoded.codecProvider;
-  lastTier_ = decoded.codecTier;
-  lastOrigin_ = decoded.codecOrigin;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    lastProvider_ = decoded.codecProvider;
+    lastTier_ = decoded.codecTier;
+    lastOrigin_ = decoded.codecOrigin;
+  }
   *out = std::move(decoded.frame);
   return true;
+}
+
+std::string ImageFileLazyBackend::lastProvider() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return lastProvider_;
+}
+
+std::string ImageFileLazyBackend::lastTier() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return lastTier_;
+}
+
+std::string ImageFileLazyBackend::lastOrigin() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return lastOrigin_;
 }
 
 }  // namespace image

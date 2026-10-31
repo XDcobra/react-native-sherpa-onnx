@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -38,14 +39,15 @@ class ImageFileLazyBackend {
   bool DecodeFrame(int index, RgbFrame* out, std::string* err_code,
                    std::string* err_message);
 
-  const std::string& lastProvider() const { return lastProvider_; }
-  const std::string& lastTier() const { return lastTier_; }
-  const std::string& lastOrigin() const { return lastOrigin_; }
+  std::string lastProvider() const;
+  std::string lastTier() const;
+  std::string lastOrigin() const;
 
  private:
   DecodeOptions opts_;
   std::vector<Slot> slots_;
   std::atomic<int> decode_count_{0};
+  mutable std::mutex mu_;
   std::string lastProvider_;
   std::string lastTier_;
   std::string lastOrigin_;

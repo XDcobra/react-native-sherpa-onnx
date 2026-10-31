@@ -172,8 +172,8 @@ class ImageRegistry {
     int hotFramesLimit = 0;
     uint64_t lruClock = 0;
     uint64_t generation = 0;
-    std::unique_ptr<pdf::PdfLazyBackend> pdfLazy;
-    std::unique_ptr<ImageFileLazyBackend> fileLazy;
+    std::shared_ptr<pdf::PdfLazyBackend> pdfLazy;
+    std::shared_ptr<ImageFileLazyBackend> fileLazy;
 
     Entry();
     ~Entry();
