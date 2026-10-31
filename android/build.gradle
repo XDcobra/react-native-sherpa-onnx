@@ -177,7 +177,7 @@ repositories {
 
 // Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR --> jniLibs + headers),
 // extractSherpaOnnxClasses (sherpa-onnx classes.jar), extractOnnxruntimeClasses (onnxruntime classes.jar).
-configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; lexborAar; libwebpAar; pdfiumAar; onnxruntimeAar }
+configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; lexborAar; libyuvAar; libwebpAar; pdfiumAar; onnxruntimeAar }
 
 // Registers downloadNativeLibsIfNeeded, checkJniLibs, extractSherpaOnnxClasses, extractOnnxruntimeClasses; wires preBuild.dependsOn checkJniLibs.
 apply from: file("${project.projectDir}/prebuilt-download.gradle")
@@ -187,7 +187,7 @@ def kotlin_version = getExtOrDefault("kotlinVersion")
 dependencies {
   // React Native dependency: explicit version for IDE (VS Code Kotlin LSP). When consumed by a React Native app,
   // Gradle's dependency resolution picks the app's react-android version (typically higher).
-  implementation "com.facebook.react:react-android:0.83.0"
+  implementation "com.facebook.react:react-android:0.83.10"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
   // Versions from prebuilt-versions.gradle; AARs used by prebuilt-download.gradle tasks.
@@ -195,6 +195,7 @@ dependencies {
   ffmpegAar "com.xdcobra.sherpa:ffmpeg:${ffmpegVersion}@aar"
   libarchiveAar "com.xdcobra.sherpa:libarchive:${libarchiveVersion}@aar"
   lexborAar "com.xdcobra.sherpa:lexbor:${lexborVersion}@aar"
+  libyuvAar "com.xdcobra.sherpa:libyuv:${libyuvVersion}@aar"
   def enableLibwebpDep = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
   if (enableLibwebpDep) {
     libwebpAar "com.xdcobra.sherpa:libwebp:${libwebpVersion}@aar"

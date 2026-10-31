@@ -2,14 +2,14 @@
 # Create a lexbor AAR from the prebuilt layout.
 # Layout: <layout_dir>/arm64-v8a/, armeabi-v7a/, x86/, x86_64/ (.so) and include/ (headers).
 # Usage: ./create_lexbor_aar.sh <layout_dir> <version> [output_path]
-# Example: ./create_lexbor_aar.sh lexbor-android-layout 3.0.0
+# Example: ./create_lexbor_aar.sh lexbor-android-layout 3.0.0-1
 
 set -e
 
 if [ $# -lt 2 ]; then
   echo "Usage: $0 <layout_dir> <version> [output_path]"
   echo "  layout_dir  e.g. lexbor-android-layout (has arm64-v8a/, …, include/)"
-  echo "  version     Maven-style version, e.g. 3.0.0"
+  echo "  version     Maven-style version, e.g. 3.0.0-1"
   echo "  output_path optional; default lexbor-<version>.aar"
   exit 1
 fi

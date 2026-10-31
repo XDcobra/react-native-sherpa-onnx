@@ -203,6 +203,7 @@ set(SOURCES
     image/ImageFrameEncoder.cpp
     image/decode/ImageDecoder.cpp
     jni/image/sherpa-onnx-imagebuffer-jni.cpp
+    jni/video/sherpa-onnx-videobuffer-jni.cpp
     ocr/OcrFactory.cpp
     ocr/OcrDetect.cpp
     ocr/OcrTextUtils.cpp
@@ -262,6 +263,49 @@ set(SOURCES
     document/DocMobi.cpp
     ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
     jni/document/sherpa-onnx-document-jni.cpp
+    video/core/AlignedBuffer.cpp
+    video/core/FileIo.cpp
+    video/core/ColorConvert.cpp
+    video/core/Timeline.cpp
+    video/core/MemoryBudget.cpp
+    video/core/FrameSlab.cpp
+    video/core/DecodedFrameCache.cpp
+    video/audio/AudioTimeline.cpp
+    video/audio/AudioPacketReader.cpp
+    video/audio/FfmpegAudioDecoder.cpp
+    video/audio/VideoAudioExtractor.cpp
+    video/audio/LiveAudioTap.cpp
+    video/live/AudioPacketRing.cpp
+    video/demux/BitstreamUtil.cpp
+    video/decode/FakeDecoder.cpp
+    video/decode/DecoderFactory.cpp
+    video/encode/EncoderFactory.cpp
+    video/encode/FakeEncoder.cpp
+    video/encode/VideoExportSession.cpp
+    video/decode/DecoderPool.cpp
+    video/decode/DecodeSession.cpp
+    video/decode/ThinningPlanner.cpp
+    video/demux/FfmpegDemuxer.cpp
+    video/demux/FfmpegProbe.cpp
+    video/VideoEntry.cpp
+    video/OfflineVideoEntry.cpp
+    video/VideoRegistry.cpp
+    video/VideoFrameAccess.cpp
+    video/VideoPacketReader.cpp
+    video/VideoImageBridge.cpp
+    video/live/EncodedPacketRing.cpp
+    video/live/PacketSpool.cpp
+    video/live/LiveVideoEntry.cpp
+    video/live/LiveIngest.cpp
+    video/preview/PlaybackController.cpp
+    video/preview/PlaybackClock.cpp
+    video/preview/FrameScheduler.cpp
+    video/preview/PreviewPlayer.cpp
+    video/platform/android/MediaCodecSurfaceRenderer.cpp
+    video/platform/android/JniAudioTrackRenderer.cpp
+    jni/video/sherpa-onnx-videopreview-jni.cpp
+    video/platform/android/AMediaCodecDecoder.cpp
+    video/platform/android/AMediaCodecEncoder.cpp
 )
 
 # lexbor: prebuilt shared .so (TAG + Gradle download). No in-tree source build.
@@ -293,6 +337,36 @@ if(NOT USE_LEXBOR_PREBUILT OR NOT LEXBOR_INCLUDE_DIR)
         "third_party/lexbor_prebuilt (see README).")
 endif()
 message(STATUS "lexbor: using prebuilt (libs: ${LEXBOR_LIB_DIR}, include: ${LEXBOR_INCLUDE_DIR})")
+
+# libyuv: prebuilt shared .so (TAG + Gradle download). No in-tree source build.
+set(LIBYUV_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/libyuv_prebuilt/android")
+set(LIBYUV_PREBUILT_LIB "${LIBYUV_PREBUILT_BASE}/${ANDROID_ABI}/lib")
+set(LIBYUV_PREBUILT_JNI_ABI "${LIBYUV_PREBUILT_BASE}/jni/${ANDROID_ABI}")
+set(LIBYUV_JNILIBS "${PROJECT_ROOT}/src/main/jniLibs/${ANDROID_ABI}")
+set(LIBYUV_INCLUDE_CPP "${PROJECT_ROOT}/src/main/cpp/include")
+set(USE_LIBYUV_PREBUILT OFF)
+if(EXISTS "${LIBYUV_PREBUILT_LIB}/libyuv.so")
+    set(USE_LIBYUV_PREBUILT ON)
+    set(LIBYUV_LIB_DIR "${LIBYUV_PREBUILT_LIB}")
+elseif(EXISTS "${LIBYUV_PREBUILT_JNI_ABI}/libyuv.so")
+    set(USE_LIBYUV_PREBUILT ON)
+    set(LIBYUV_LIB_DIR "${LIBYUV_PREBUILT_JNI_ABI}")
+elseif(EXISTS "${LIBYUV_JNILIBS}/libyuv.so")
+    set(USE_LIBYUV_PREBUILT ON)
+    set(LIBYUV_LIB_DIR "${LIBYUV_JNILIBS}")
+endif()
+if(EXISTS "${LIBYUV_PREBUILT_BASE}/include/libyuv/convert.h")
+    set(LIBYUV_INCLUDE_DIR "${LIBYUV_PREBUILT_BASE}/include")
+elseif(EXISTS "${LIBYUV_INCLUDE_CPP}/libyuv/convert.h")
+    set(LIBYUV_INCLUDE_DIR "${LIBYUV_INCLUDE_CPP}")
+endif()
+if(NOT USE_LIBYUV_PREBUILT OR NOT LIBYUV_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "libyuv prebuilt not found (libyuv.so + libyuv/convert.h). "
+        "Run a Gradle Android build so prebuilts download, or publish "
+        "third_party/libyuv_prebuilt (see README).")
+endif()
+message(STATUS "libyuv: using prebuilt (libs: ${LIBYUV_LIB_DIR}, include: ${LIBYUV_INCLUDE_DIR})")
 
 if(USE_LIBARCHIVE)
 # libarchive: (1) prebuilt from third_party/libarchive_prebuilt or jniLibs + cpp/include/libarchive (Maven/GitHub), or (2) build from source.
@@ -482,6 +556,8 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/jni/audio
     ${CMAKE_CURRENT_SOURCE_DIR}/image
     ${CMAKE_CURRENT_SOURCE_DIR}/image/decode
+    ${CMAKE_CURRENT_SOURCE_DIR}/video
+    ${LIBYUV_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/ppocr
     ${CMAKE_CURRENT_SOURCE_DIR}/ocr/doctr
@@ -540,6 +616,9 @@ endif()
 if(USE_LEXBOR_PREBUILT AND LEXBOR_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${LEXBOR_LIB_DIR})
 endif()
+if(USE_LIBYUV_PREBUILT AND LIBYUV_LIB_DIR)
+    target_link_directories(sherpaonnx PRIVATE ${LIBYUV_LIB_DIR})
+endif()
 if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
     target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
@@ -573,7 +652,7 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor)
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor yuv mediandk)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

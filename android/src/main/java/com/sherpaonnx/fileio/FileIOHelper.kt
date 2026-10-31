@@ -22,6 +22,12 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
   private val logTag = "SherpaOnnxFileIO"
   private val resolver = FileIOResolver(context)
 
+  fun configureNoFdCache(maxBytes: Long?, maxAgeMs: Long?) {
+    resolver.configureNoFdCache(maxBytes, maxAgeMs)
+  }
+
+  fun isNofdCachePath(path: String): Boolean = resolver.isNofdCachePath(path)
+
   fun copyFile(
     source: ReadableMap,
     destination: ReadableMap,
@@ -257,6 +263,15 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
   fun resolveSource(source: ReadableMap): FileIOResolver.ReadHandle = resolver.resolveSource(source)
 
   /**
+   * Path FFmpeg / libavformat can open. `apkAsset` is a cache file after
+   * [FileIOResolver.resolveSource]. Stream-only sources (content URI without
+   * a PFD) are copied to `<cache>/fileio_nofd/` with a cache hit on reuse.
+   * Caller must [close][DemuxableOpenedSource.close] after native open.
+   */
+  fun resolveDemuxableSource(source: ReadableMap): DemuxableOpenedSource =
+    resolver.resolveDemuxableSource(source)
+
+  /**
    * Seekable path or PFD for document/ and pdf/. `apkAsset` is copied to
    * cache then opened as a path. Throws [FileIOException] for a stream or a
    * PFD with no length.
@@ -300,6 +315,9 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
    * - `fileio_save_*` — temp path used when encoding to a [FileIOResolver.WriteHandle.Stream] destination.
    * - `fileio_tmp_*` — temp files from [FileIOResolver.resolveSourceToFilePath] stream→disk copy.
    * - `fileio-staging/fileio-temp-*` — same naming as the example app’s `saveAudioAsFile` staging step.
+   *
+   * Persistent caches: `fileio_apkasset/` is not swept. `fileio_nofd/` is evicted
+   * by [NoFdCache] (LRU + age, unpinned only), not by this scratch sweep.
    *
    * Only files with [File.lastModified] older than [maxAgeMs] are deleted (default 1 hour, same order of
    * magnitude as [com.sherpaonnx.audio.pipeline.OfflineEntry.sweepOrphanedTempFiles]).

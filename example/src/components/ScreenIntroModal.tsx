@@ -63,7 +63,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   FileIO: {
     title: 'File I/O sandbox',
-    body: 'Codec and FileDestination sandbox: probe/decode/encode bundled test_codec assets or a picked file, then export via saveAudioAsFile to fs, app, contentUri, and other destination kinds.',
+    body: 'Codec and FileDestination sandbox: probe/decode/encode bundled test_codec audio and 1 s 144p test_videos clips (or a picked file). Audio uses saveAudioAsFile; video uses probeVideoFile* / exportVideoFrame / exportVideo.',
   },
   AudioVisualization: {
     title: 'Audio visualization API',
@@ -128,6 +128,14 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   OCR: {
     title: 'Offline OCR demo',
     body: 'Showcase for extractPdfTextLayer and createOCR / recognize over OfflineImageBuffer → OfflineTextBuffer. Switch ppocr, doctr, doc_vlm, nemotron_parse, or paddleocr_vl packs, pick bundled images or PDFs, and inspect text plus spatial boxes (ocr pixels or mapped text-layer quads) on OfflineImageBufferAnnotatedView.',
+  },
+  VideoPreview: {
+    title: 'Video preview player',
+    body: 'Loads a bundled H.264 + AAC clip from test_videos/ into an OfflineVideoBuffer, then attaches VideoPreviewView. Use play, pause, seek, and frame step to smoke-test the preview player. Unsupported audio keeps video playing and surfaces audioUnavailable.',
+  },
+  VideoOcrPipeline: {
+    title: 'Video to OCR pipeline',
+    body: 'Developer pipeline for createOfflineImageBufferFromVideo: play a bundled clip with burned-in captions, sample frames (default fps=1), preview the ImageBuffer, initialize OCR, then recognize every frame into a TextBuffer.',
   },
   Documents: {
     title: 'Read documents aloud',

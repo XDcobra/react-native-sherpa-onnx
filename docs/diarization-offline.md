@@ -296,7 +296,7 @@ ORT, powerset decode, timeline stitch, sherpa C-API embedding extractor (refcoun
 registry), and own agglomerative clustering (optional silhouette confidence,
 ported from upstream `compute_confidence`). It does **not** wrap the upstream
 `SherpaOnnxOfflineSpeakerDiarization` monolith (`_Exit` risk). See
-[internal/speaker-embedding-foundation.md](./internal/speaker-embedding-foundation.md) §10.
+[internal/speaker-embedding-foundation.md](./internal/speaker-embedding/speaker-embedding-foundation.md) §10.
 
 ## Status
 

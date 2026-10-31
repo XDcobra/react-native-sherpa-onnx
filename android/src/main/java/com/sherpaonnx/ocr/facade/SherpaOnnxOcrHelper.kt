@@ -455,6 +455,15 @@ class SherpaOnnxOcrHelper(
     for (i in 0 until 8) {
       quad[i] = (quadList.getOrNull(i) as? Number)?.toFloat() ?: 0f
     }
+    var ptsMs: Double? = null
+    try {
+      val info = com.sherpaonnx.image.ImageBufferService.getFrameInfo(imageBufferId, frameIndex)
+      val us = (info?.get("sourcePtsUs") as? Number)?.toLong()
+      if (us != null && us >= 0) {
+        ptsMs = us / 1000.0
+      }
+    } catch (_: Exception) {
+    }
     return TextSpatialSpan(
       utf16Start = utf16Start,
       utf16End = utf16End,
@@ -464,6 +473,7 @@ class SherpaOnnxOcrHelper(
       quad = quad,
       confidence = confidence,
       origin = "ocr",
+      ptsMs = ptsMs,
     )
   }
 

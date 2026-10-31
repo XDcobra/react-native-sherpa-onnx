@@ -24,7 +24,14 @@ Without enable, both APIs reject with `ERR_PDF_PDFIUM_DISABLED`.
 
 ## FileSource I/O
 
-`source` is a `FileSource` (see [fileio.md](fileio.md)). Android `apkAsset` copies into app cache on first open. A `contentUri` that is only a stream (no ParcelFileDescriptor) → `ERR_PDF_OPEN_FAILED`. `extractPdfTextLayer` and `rasterize-all` close the handle when the call returns. **`lazy-lru` keeps the open PDFium document (and the fd / security-scoped URL) until `releaseOfflineImageBuffer`.** Standard PDF encryption: pass `options.password` (user or owner). Missing or wrong → `ERR_PDF_ENCRYPTED`. Not Adobe DRM / FileOpen.
+`source` is a `FileSource` (see [fileio.md](fileio.md)). `extractPdfTextLayer` and `rasterize-all` close the handle when the call returns. **`lazy-lru` keeps the open PDFium document (and the fd / security-scoped URL) until `releaseOfflineImageBuffer`.** Standard PDF encryption: pass `options.password` (user or owner). Missing or wrong → `ERR_PDF_ENCRYPTED`. Not Adobe DRM / FileOpen.
+
+| Kind | How the file is opened |
+| --- | --- |
+| `fs` / `app` (`cache`, `files`, …) / `pad` / iOS `appBundle` / iOS `securityScoped` | Direct seekable path. |
+| Android `app` + `apkAsset` | APK zip entry has no fd. Copied to `<cache>/fileio_apkasset/…` on first open; later opens are a cache hit. |
+| Android `contentUri` with ParcelFileDescriptor | Opened via `/proc/self/fd/N` (seekable). |
+| Android `contentUri` stream (no PFD) | `ERR_PDF_OPEN_FAILED` (not `fileio_nofd`). |
 
 ## Quick start — text layer
 
@@ -188,6 +195,21 @@ Returns a new OfflineImageBuffer (no OCR). See [Raster strategies](#raster-strat
 | `hotFrames` | `8` | `lazy-lru` only; clamped **1..32** |
 | `password` | — | user or owner password for standard PDF encryption |
 | `signal` / `onProgress` | — | cancel / progress |
+
+## Formats
+
+Seekable PDF file. Sniff is the PDF signature (`%PDF`), not the extension. Needs opt-in PDFium.
+
+| Input | `extractPdfTextLayer` | `rasterizePdfPages` |
+| --- | --- | --- |
+| Digital PDF (text layer) | UTF-16 `origin: 'textLayer'` | RGB8 ImageBuffer pages |
+| Scan-only PDF | `ERR_PDF_NO_TEXT_LAYER` | RGB8 ImageBuffer pages |
+| Standard encryption | `options.password` (user or owner); wrong/missing → `ERR_PDF_ENCRYPTED` | same |
+| Adobe DRM / FileOpen | not supported | not supported |
+
+Raster default **144 dpi**, `maxSide` **4096**. Non-seekable Android `contentUri` stream → `ERR_PDF_OPEN_FAILED`.
+
+Out of scope: EPUB / Office ([`document/`](document-offline.md)), OCR (call `createOCR().recognize` on rasters), incremental save/edit.
 
 ## Spans and coordinates (text layer)
 

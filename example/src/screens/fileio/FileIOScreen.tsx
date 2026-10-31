@@ -16,7 +16,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import type { AudioOutputFormat } from 'react-native-sherpa-onnx/audio';
 import type { FileDestination } from 'react-native-sherpa-onnx/fileio';
+import type { VideoExportContainer } from 'react-native-sherpa-onnx/videobuffer';
 import { CODEC_ASSET_ENTRIES, type CodecAssetFormat } from '../../audioConfig';
+import {
+  VIDEO_CODEC_ASSET_ENTRIES,
+  type VideoCodecSampleFormat,
+} from '../../videoConfig';
 import { describeFileSource } from '../../utils/fileSourceFromUri';
 import {
   type AudioSourceChoice,
@@ -25,12 +30,15 @@ import {
   type FileioOperation,
   type FileioSampleSelection,
   FILEIO_OUTPUT_FORMATS,
+  FILEIO_VIDEO_OUTPUT_FORMATS,
+  fileioSampleMedia,
   listFileioInputChannels,
   pickFileioInputForChannel,
   resolveFileioInputSource,
   runFileioCopy,
   runFileioDecode,
   runFileioProbe,
+  runFileioVideoEncode,
 } from './fileioActions';
 import {
   buildFileioBatchMatrix,
@@ -82,7 +90,7 @@ const OPERATIONS: { id: FileioOperation; label: string }[] = [
   { id: 'encode', label: 'Encode' },
 ];
 
-function formatLabel(format: AudioOutputFormat): string {
+function formatLabel(format: string): string {
   return format.toUpperCase();
 }
 
@@ -110,6 +118,7 @@ export default function FileIOScreen() {
     useState<FileDestination['kind']>('fs');
   const [destMenuOpen, setDestMenuOpen] = useState(false);
   const [formatMenuOpen, setFormatMenuOpen] = useState(false);
+  const [videoFormatMenuOpen, setVideoFormatMenuOpen] = useState(false);
 
   const [operation, setOperation] = useState<FileioOperation>('probe');
   const [sample, setSample] = useState<FileioSampleSelection>({
@@ -132,13 +141,16 @@ export default function FileIOScreen() {
   const [audioSource, setAudioSource] =
     useState<AudioSourceChoice>('liveAudioBuffer');
   const [outputFormat, setOutputFormat] = useState<AudioOutputFormat>('wav');
+  const [videoOutputFormat, setVideoOutputFormat] =
+    useState<VideoExportContainer>('mp4');
 
-  const [batchAllSamples, setBatchAllSamples] = useState(false);
+  const [batchAllAudioSamples, setBatchAllAudioSamples] = useState(false);
+  const [batchAllVideoSamples, setBatchAllVideoSamples] = useState(false);
   const [batchAllChannels, setBatchAllChannels] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [resultText, setResultText] = useState(
-    'Choose a sample and FileSource channel, then run Probe, Decode, or Encode.'
+    'Choose an audio or video sample and FileSource channel, then run Probe, Decode, or Encode.'
   );
 
   const showResult = useCallback((text: string) => {
@@ -219,6 +231,10 @@ export default function FileIOScreen() {
     setSample({ kind: 'legacy' });
   }, []);
 
+  const selectVideoSample = useCallback((format: VideoCodecSampleFormat) => {
+    setSample({ kind: 'video', format });
+  }, []);
+
   const selectInputChannel = useCallback(
     (id: FileioInputChannelId) => {
       setInputChannel(id);
@@ -246,6 +262,7 @@ export default function FileIOScreen() {
   }, [inputChannel]);
 
   const runPrimary = useCallback(async () => {
+    const batchAllSamples = batchAllAudioSamples || batchAllVideoSamples;
     const isBatch = batchAllSamples || batchAllChannels;
 
     if (batchAllSamples && !batchAllChannels && !activeChannelMeta.automatic) {
@@ -262,7 +279,7 @@ export default function FileIOScreen() {
         inputResolveError ??
           (activeChannelMeta.automatic
             ? 'Still preparing input…'
-            : 'Choose an audio file for this FileSource channel.')
+            : 'Choose a file for this FileSource channel.')
       );
       return;
     }
@@ -271,7 +288,8 @@ export default function FileIOScreen() {
     try {
       if (isBatch) {
         const { samples, channelIds } = buildFileioBatchMatrix({
-          batchAllSamples,
+          batchAllAudioSamples,
+          batchAllVideoSamples,
           batchAllChannels,
           currentSample: sample,
           currentChannelId: inputChannel,
@@ -284,6 +302,7 @@ export default function FileIOScreen() {
           destinationKind,
           audioSource,
           outputFormat,
+          videoOutputFormat,
         });
         showResult(text);
         if (operation === 'encode') {
@@ -315,13 +334,21 @@ export default function FileIOScreen() {
         return;
       }
 
-      const copyResult = await runFileioCopy({
-        destinationKind,
-        audioSource,
-        inputSource: inputSource!.fileSource,
-        inputLabel: inputSource!.label,
-        outputFormat,
-      });
+      const copyResult =
+        fileioSampleMedia(sample) === 'video'
+          ? await runFileioVideoEncode({
+              destinationKind,
+              inputSource: inputSource!.fileSource,
+              inputLabel: inputSource!.label,
+              outputFormat: videoOutputFormat,
+            })
+          : await runFileioCopy({
+              destinationKind,
+              audioSource,
+              inputSource: inputSource!.fileSource,
+              inputLabel: inputSource!.label,
+              outputFormat,
+            });
 
       if (copyResult.status === 'canceled') {
         showResult('Encode canceled.');
@@ -348,7 +375,8 @@ export default function FileIOScreen() {
     resolvingInput,
     inputResolveError,
     activeChannelMeta.automatic,
-    batchAllSamples,
+    batchAllAudioSamples,
+    batchAllVideoSamples,
     batchAllChannels,
     sample,
     inputChannel,
@@ -356,16 +384,24 @@ export default function FileIOScreen() {
     destinationKind,
     audioSource,
     outputFormat,
+    videoOutputFormat,
   ]);
 
+  const batchAllSamples = batchAllAudioSamples || batchAllVideoSamples;
   const isBatch = batchAllSamples || batchAllChannels;
+  const currentIsVideo = fileioSampleMedia(sample) === 'video';
+  const encodingAudio =
+    operation === 'encode' && (batchAllAudioSamples || !currentIsVideo);
+  const encodingVideo =
+    operation === 'encode' && (batchAllVideoSamples || currentIsVideo);
 
   const activeInputBatchSummary = useMemo(() => {
     if (!isBatch) {
       return null;
     }
     return describeFileioActiveInputSummary({
-      batchAllSamples,
+      batchAllAudioSamples,
+      batchAllVideoSamples,
       batchAllChannels,
       currentSample: sample,
       currentChannelId: inputChannel,
@@ -373,7 +409,8 @@ export default function FileIOScreen() {
     });
   }, [
     isBatch,
-    batchAllSamples,
+    batchAllAudioSamples,
+    batchAllVideoSamples,
     batchAllChannels,
     sample,
     inputChannel,
@@ -418,28 +455,28 @@ export default function FileIOScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Sample file</Text>
           <Text style={styles.sectionHint}>
-            Format chips pick which bundled test_codec file automatic channels
-            use.
+            Audio chips use bundled test_codec files. Video chips use 1 s 144p
+            H.264 clips under test_videos/. Both batch switches can be on.
           </Text>
           <View style={styles.batchToggleRow}>
             <View style={styles.batchToggleTextCol}>
-              <Text style={styles.batchToggleLabel}>Run all samples</Text>
+              <Text style={styles.batchToggleLabel}>Run all audio samples</Text>
               <Text style={styles.batchToggleHint}>
-                On Run: every format chip (+ Legacy), current FileSource channel
+                On Run: every audio format chip (+ Legacy)
               </Text>
             </View>
             <Switch
-              value={batchAllSamples}
-              onValueChange={setBatchAllSamples}
-              accessibilityLabel="Run all sample formats on Run"
+              value={batchAllAudioSamples}
+              onValueChange={setBatchAllAudioSamples}
+              accessibilityLabel="Run all audio samples on Run"
             />
           </View>
           <View
             style={[
               styles.chipRow,
-              batchAllSamples && styles.selectionGroupDisabled,
+              batchAllAudioSamples && styles.selectionGroupDisabled,
             ]}
-            pointerEvents={batchAllSamples ? 'none' : 'auto'}
+            pointerEvents={batchAllAudioSamples ? 'none' : 'auto'}
           >
             {CODEC_ASSET_ENTRIES.map((entry) => {
               const active =
@@ -450,21 +487,21 @@ export default function FileIOScreen() {
                   style={[
                     styles.chip,
                     active && styles.chipActive,
-                    batchAllSamples && styles.chipDisabled,
+                    batchAllAudioSamples && styles.chipDisabled,
                   ]}
                   onPress={() => selectCodecSample(entry.format)}
-                  disabled={batchAllSamples}
+                  disabled={batchAllAudioSamples}
                   accessibilityRole="button"
                   accessibilityState={{
                     selected: active,
-                    disabled: batchAllSamples,
+                    disabled: batchAllAudioSamples,
                   }}
                 >
                   <Text
                     style={[
                       styles.chipText,
                       active && styles.chipTextActive,
-                      batchAllSamples && styles.chipTextDisabled,
+                      batchAllAudioSamples && styles.chipTextDisabled,
                     ]}
                   >
                     {entry.label}
@@ -476,23 +513,75 @@ export default function FileIOScreen() {
               style={[
                 styles.chip,
                 sample.kind === 'legacy' && styles.chipActive,
-                batchAllSamples && styles.chipDisabled,
+                batchAllAudioSamples && styles.chipDisabled,
               ]}
               onPress={selectLegacySample}
-              disabled={batchAllSamples}
+              disabled={batchAllAudioSamples}
               accessibilityRole="button"
-              accessibilityState={{ disabled: batchAllSamples }}
+              accessibilityState={{ disabled: batchAllAudioSamples }}
             >
               <Text
                 style={[
                   styles.chipText,
                   sample.kind === 'legacy' && styles.chipTextActive,
-                  batchAllSamples && styles.chipTextDisabled,
+                  batchAllAudioSamples && styles.chipTextDisabled,
                 ]}
               >
                 Legacy
               </Text>
             </Pressable>
+          </View>
+          <View style={styles.batchToggleRow}>
+            <View style={styles.batchToggleTextCol}>
+              <Text style={styles.batchToggleLabel}>Run all video samples</Text>
+              <Text style={styles.batchToggleHint}>
+                On Run: MP4, MOV, MKV, WebM (1 s 144p H.264)
+              </Text>
+            </View>
+            <Switch
+              value={batchAllVideoSamples}
+              onValueChange={setBatchAllVideoSamples}
+              accessibilityLabel="Run all video samples on Run"
+            />
+          </View>
+          <View
+            style={[
+              styles.chipRow,
+              batchAllVideoSamples && styles.selectionGroupDisabled,
+            ]}
+            pointerEvents={batchAllVideoSamples ? 'none' : 'auto'}
+          >
+            {VIDEO_CODEC_ASSET_ENTRIES.map((entry) => {
+              const active =
+                sample.kind === 'video' && sample.format === entry.format;
+              return (
+                <Pressable
+                  key={entry.format}
+                  style={[
+                    styles.chip,
+                    active && styles.chipActive,
+                    batchAllVideoSamples && styles.chipDisabled,
+                  ]}
+                  onPress={() => selectVideoSample(entry.format)}
+                  disabled={batchAllVideoSamples}
+                  accessibilityRole="button"
+                  accessibilityState={{
+                    selected: active,
+                    disabled: batchAllVideoSamples,
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      active && styles.chipTextActive,
+                      batchAllVideoSamples && styles.chipTextDisabled,
+                    ]}
+                  >
+                    {entry.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
@@ -613,10 +702,10 @@ export default function FileIOScreen() {
               onPress={pickInputForChannel}
               disabled={batchAllChannels}
               accessibilityRole="button"
-              accessibilityLabel="Choose audio file"
+              accessibilityLabel="Choose file"
             >
               <Ionicons name="folder-open" size={22} color="#FFFFFF" />
-              <Text style={styles.pickFileButtonText}>Choose audio file</Text>
+              <Text style={styles.pickFileButtonText}>Choose file</Text>
             </Pressable>
           )}
 
@@ -650,7 +739,7 @@ export default function FileIOScreen() {
                 {inputResolveError ??
                   (activeChannelMeta.automatic
                     ? 'Preparing input…'
-                    : 'Tap “Choose audio file” to set this channel.')}
+                    : 'Tap “Choose file” to set this channel.')}
               </Text>
             )}
           </View>
@@ -703,119 +792,149 @@ export default function FileIOScreen() {
               </Pressable>
             </View>
 
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Audio source (encode)</Text>
-              <View style={styles.sourceCardsRow}>
-                <Pressable
-                  style={[
-                    styles.sourceCard,
-                    audioSource === 'liveAudioBuffer' &&
-                      styles.sourceCardActive,
-                  ]}
-                  onPress={() => setAudioSource('liveAudioBuffer')}
-                  accessibilityRole="button"
-                  accessibilityState={{
-                    selected: audioSource === 'liveAudioBuffer',
-                  }}
-                >
-                  <Ionicons
-                    name="pulse-outline"
-                    size={22}
-                    color={
-                      audioSource === 'liveAudioBuffer' ? '#007AFF' : '#8E8E93'
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.sourceCardTitle,
-                      audioSource === 'liveAudioBuffer' &&
-                        styles.sourceCardTitleActive,
-                    ]}
+            {encodingAudio && (
+              <>
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Audio source (encode)</Text>
+                  <View style={styles.sourceCardsRow}>
+                    <Pressable
+                      style={[
+                        styles.sourceCard,
+                        audioSource === 'liveAudioBuffer' &&
+                          styles.sourceCardActive,
+                      ]}
+                      onPress={() => setAudioSource('liveAudioBuffer')}
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        selected: audioSource === 'liveAudioBuffer',
+                      }}
+                    >
+                      <Ionicons
+                        name="pulse-outline"
+                        size={22}
+                        color={
+                          audioSource === 'liveAudioBuffer'
+                            ? '#007AFF'
+                            : '#8E8E93'
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.sourceCardTitle,
+                          audioSource === 'liveAudioBuffer' &&
+                            styles.sourceCardTitleActive,
+                        ]}
+                      >
+                        Live
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.sourceCard,
+                        audioSource === 'offlineAudioBuffer' &&
+                          styles.sourceCardActive,
+                      ]}
+                      onPress={() => setAudioSource('offlineAudioBuffer')}
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        selected: audioSource === 'offlineAudioBuffer',
+                      }}
+                    >
+                      <Ionicons
+                        name="layers-outline"
+                        size={22}
+                        color={
+                          audioSource === 'offlineAudioBuffer'
+                            ? '#007AFF'
+                            : '#8E8E93'
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.sourceCardTitle,
+                          audioSource === 'offlineAudioBuffer' &&
+                            styles.sourceCardTitleActive,
+                        ]}
+                      >
+                        Offline
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[
+                        styles.sourceCard,
+                        audioSource === 'assetAudioFile' &&
+                          styles.sourceCardActive,
+                      ]}
+                      onPress={() => setAudioSource('assetAudioFile')}
+                      accessibilityRole="button"
+                      accessibilityState={{
+                        selected: audioSource === 'assetAudioFile',
+                      }}
+                    >
+                      <Ionicons
+                        name="cube-outline"
+                        size={22}
+                        color={
+                          audioSource === 'assetAudioFile'
+                            ? '#007AFF'
+                            : '#8E8E93'
+                        }
+                      />
+                      <Text
+                        style={[
+                          styles.sourceCardTitle,
+                          audioSource === 'assetAudioFile' &&
+                            styles.sourceCardTitleActive,
+                        ]}
+                      >
+                        File
+                      </Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>Audio output format</Text>
+                  <Pressable
+                    style={styles.dropdownTrigger}
+                    onPress={() => setFormatMenuOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose audio output format"
                   >
-                    Live
-                  </Text>
-                </Pressable>
+                    <View style={styles.dropdownTriggerText}>
+                      <Text style={styles.dropdownKind}>
+                        {formatLabel(outputFormat)}
+                      </Text>
+                      <Text style={styles.dropdownHint}>
+                        FFmpeg encode via saveAudioAsFile
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-down" size={20} color="#007AFF" />
+                  </Pressable>
+                </View>
+              </>
+            )}
+            {encodingVideo && (
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>Video output format</Text>
                 <Pressable
-                  style={[
-                    styles.sourceCard,
-                    audioSource === 'offlineAudioBuffer' &&
-                      styles.sourceCardActive,
-                  ]}
-                  onPress={() => setAudioSource('offlineAudioBuffer')}
+                  style={styles.dropdownTrigger}
+                  onPress={() => setVideoFormatMenuOpen(true)}
                   accessibilityRole="button"
-                  accessibilityState={{
-                    selected: audioSource === 'offlineAudioBuffer',
-                  }}
+                  accessibilityLabel="Choose video output format"
                 >
-                  <Ionicons
-                    name="layers-outline"
-                    size={22}
-                    color={
-                      audioSource === 'offlineAudioBuffer'
-                        ? '#007AFF'
-                        : '#8E8E93'
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.sourceCardTitle,
-                      audioSource === 'offlineAudioBuffer' &&
-                        styles.sourceCardTitleActive,
-                    ]}
-                  >
-                    Offline
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={[
-                    styles.sourceCard,
-                    audioSource === 'assetAudioFile' && styles.sourceCardActive,
-                  ]}
-                  onPress={() => setAudioSource('assetAudioFile')}
-                  accessibilityRole="button"
-                  accessibilityState={{
-                    selected: audioSource === 'assetAudioFile',
-                  }}
-                >
-                  <Ionicons
-                    name="cube-outline"
-                    size={22}
-                    color={
-                      audioSource === 'assetAudioFile' ? '#007AFF' : '#8E8E93'
-                    }
-                  />
-                  <Text
-                    style={[
-                      styles.sourceCardTitle,
-                      audioSource === 'assetAudioFile' &&
-                        styles.sourceCardTitleActive,
-                    ]}
-                  >
-                    File
-                  </Text>
+                  <View style={styles.dropdownTriggerText}>
+                    <Text style={styles.dropdownKind}>
+                      {formatLabel(videoOutputFormat)}
+                    </Text>
+                    <Text style={styles.dropdownHint}>
+                      HW encode via exportVideo (H.264)
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-down" size={20} color="#007AFF" />
                 </Pressable>
               </View>
-            </View>
-
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Output format</Text>
-              <Pressable
-                style={styles.dropdownTrigger}
-                onPress={() => setFormatMenuOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Choose output format"
-              >
-                <View style={styles.dropdownTriggerText}>
-                  <Text style={styles.dropdownKind}>
-                    {formatLabel(outputFormat)}
-                  </Text>
-                  <Text style={styles.dropdownHint}>
-                    FFmpeg encode via saveAudioAsFile
-                  </Text>
-                </View>
-                <Ionicons name="chevron-down" size={20} color="#007AFF" />
-              </Pressable>
-            </View>
+            )}
           </>
         )}
 
@@ -920,6 +1039,55 @@ export default function FileIOScreen() {
                     onPress={() => {
                       setOutputFormat(fmt);
                       setFormatMenuOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.optionKind,
+                        active && styles.optionKindActive,
+                      ]}
+                    >
+                      {formatLabel(fmt)}
+                    </Text>
+                    {active && (
+                      <Ionicons name="checkmark" size={22} color="#007AFF" />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={videoFormatMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVideoFormatMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setVideoFormatMenuOpen(false)}
+        >
+          <Pressable
+            style={styles.modalSheet}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.modalTitle}>Video output format</Text>
+            <ScrollView
+              style={styles.modalList}
+              keyboardShouldPersistTaps="handled"
+            >
+              {FILEIO_VIDEO_OUTPUT_FORMATS.map((fmt) => {
+                const active = fmt === videoOutputFormat;
+                return (
+                  <Pressable
+                    key={fmt}
+                    style={[styles.optionRow, active && styles.optionRowActive]}
+                    onPress={() => {
+                      setVideoOutputFormat(fmt);
+                      setVideoFormatMenuOpen(false);
                     }}
                   >
                     <Text

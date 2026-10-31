@@ -74,7 +74,7 @@ Synchrones JSI ist **bereits** nur für **Offline-/Live-Audio-Samples** angebund
 | TS-Oberfläche | `src/audiobuffer/jsi.ts` — `getOfflineBufferSamples`, `createOfflineFromSamples`, `getLiveBufferSamples`, `appendSamplesToLive`; Installation über `installJSI()` → `global.__SherpaOnnxJSI` |
 | iOS | `ios/audiobuffer/SherpaOnnxJSI.cpp` / `SherpaOnnx+JSI.mm` (`installJSIBindings`) |
 | Android | `android/src/main/cpp/jni/audiobuffer/SherpaOnnxJSI.cpp` (+ Install-Bridge) |
-| Verhalten | `docs/internal/liveaudiobuffer-internal.md` (JSI-Fast-Path für Append/Slice) |
+| Verhalten | `docs/internal/audiobuffer/liveaudiobuffer-internal.md` (JSI-Fast-Path für Append/Slice) |
 
 **Folgerung:** Die frühere 2b-Kandidatenliste (Text/Segment) ist **weiterhin vollständig offen** — es sind **keine** neuen Implementierungen für `setPartial` / `getSegments` / … als JSI hinzugekommen; Audio-JSI war schon vorher da und ist **kein** 2b-Kandidat, sondern **bereits umgesetzter** Hot-Path (Abgrenzung unten).
 

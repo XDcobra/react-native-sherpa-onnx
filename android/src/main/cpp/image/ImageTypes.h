@@ -20,6 +20,10 @@ struct RgbFrame {
   int sectionIndex = -1;
   /** EPUB path / archive member. */
   std::string href;
+  /** Optional VideoBuffer origin (VideoImageBridge). */
+  std::string sourceVideoBufferId;
+  int64_t sourcePtsUs = -1;
+  int64_t sourceFrameIndex = -1;
 
   size_t byteSize() const {
     return static_cast<size_t>(width) * static_cast<size_t>(height) * 3u;
@@ -62,6 +66,9 @@ struct ImageFrameInfo {
   /** 0-based document section; -1 = unset. */
   int sectionIndex = -1;
   std::string href;
+  std::string sourceVideoBufferId;
+  int64_t sourcePtsUs = -1;
+  int64_t sourceFrameIndex = -1;
 };
 
 struct ImageBufferInfo {

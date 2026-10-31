@@ -13,9 +13,7 @@ Content placed here is copied into the app at build time by the “Copy Sherpa m
 
   The Xcode “Download SherpaOnnx Models” phase only fetches models listed in
   `example/scripts/model-download-config.json` (currently includes Spleeter, not UVR;
-  OCR packs (smallest published per family: `ppocrv6-tiny`,
-  `doctr-mobile`, `docvlm-granite-258m-q4f16`, `nemotron-3.5-parse-int8`,
-  `paddleocr-vl-1.6-fp16`) come from the
+  OCR pack `ppocrv6-tiny` comes from the
   `XDcobra/react-native-sherpa-onnx` `ocr-models` release).
   Place UVR (and any other unlisted packs) here so the Copy build phase bundles them.
 
@@ -27,6 +25,9 @@ In the app, use e.g. `resolveModelPath({ type: 'asset', path: 'models/my-whisper
   Place example WAV files here (e.g. `0-en.wav`, `1-en.wav`, `0-zh.wav`) for the STT “Example English 1” etc. They are copied to `App.app/test_wavs/` and resolved as asset paths like `test_wavs/0-en.wav` via `resolveModelPath({ type: 'asset', path: 'test_wavs/0-en.wav' })`.
 
 If the folder is empty, the example app’s sample-audio options will show “Path not found” until you add the WAV files (you can obtain test files from the same source as in `example/scripts/download-models.js` or record your own).
+
+- **`test_videos/` folder**  
+  Bundled clips for Video Preview (`preview_h264_aac.mp4`), Video → OCR (`ocr_subtitles_h264_aac.mp4`), and File I/O (`sample.mp4` / `.mov` / `.mkv` / `.webm`, 1 s 144p). Copied to `App.app/test_videos/`.
 
 ## Layout
 
@@ -42,4 +43,7 @@ sherpa_models/
     0-en.wav         --> App.app/test_wavs/0-en.wav
     1-en.wav
     ...
+  test_videos/
+    preview_h264_aac.mp4 --> App.app/test_videos/preview_h264_aac.mp4
+    ocr_subtitles_h264_aac.mp4 --> App.app/test_videos/ocr_subtitles_h264_aac.mp4
 ```

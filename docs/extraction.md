@@ -43,6 +43,7 @@ Use this path when model archives are shipped via **PAD / ODR / main bundle** (s
   - [`listBundledArchives`](#listbundledarchivesdirectorypath)
   - [`extractArchive`](#extractarchivearchive-targetpath-options)
   - [`Types`](#types)
+- [Formats](#formats)
 - [Function overview table](#function-overview-table)
 - [Path expectations table](#path-expectations-table)
 - [Examples](#examples)
@@ -204,6 +205,17 @@ type ExtractProgressEvent = {
   entryIndex?: number;   // 0-based archive entry (when native provides it)
 };
 ```
+
+## Formats
+
+Sniff is by archive signature (libarchive auto-detect), not extension.
+
+| API | Formats |
+| --- | --- |
+| `listBundledArchives*` (`BundledArchive.format`) | **`.tar.zst`**, **`.tar.bz2` only** |
+| `extractArchive` | also **`.tar.gz`**, **`.tar.xz`** if you pass a path |
+
+Out of scope: **zip**, 7z, RAR (RAR is [`document/`](document-offline.md) CBR, not extraction). Disable libarchive → extract fails.
 
 ## Types and constants
 

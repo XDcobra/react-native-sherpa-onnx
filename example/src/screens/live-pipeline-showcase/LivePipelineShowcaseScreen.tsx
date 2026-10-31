@@ -76,6 +76,7 @@ import {
   type EngineMode,
 } from '../../components/EngineModeModelSelector';
 import { PipelineOfflineAudioResultCard } from '../../components/PipelineOfflineAudioResultCard';
+import { PipelineStepStrip } from '../../components/PipelineStepStrip';
 import { styles } from './LivePipelineShowcaseScreen.styles';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
@@ -933,47 +934,21 @@ export default function LivePipelineShowcaseScreen() {
         {/* Pipeline diagram */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pipeline</Text>
-          <View style={styles.pipelineDiagram}>
-            {(['input', 'stt', 'tts'] as PipelineStep[]).map((step, i) => {
-              const isActive = activeSteps.has(step);
-              const labels: Record<PipelineStep, string> = {
-                input: sourceMode === 'mic' ? '🎤 Input' : '📁 File',
-                stt: '📝 STT',
-                tts: '🔊 TTS',
-              };
-              return (
-                <>
-                  {i > 0 && (
-                    <Text
-                      key={`arrow-${step}`}
-                      style={[
-                        styles.pipelineArrow,
-                        isActive && styles.pipelineArrowActive,
-                      ]}
-                    >
-                      →
-                    </Text>
-                  )}
-                  <View
-                    key={step}
-                    style={[
-                      styles.pipelineStep,
-                      isActive && styles.pipelineStepActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pipelineStepLabel,
-                        isActive && styles.pipelineStepLabelActive,
-                      ]}
-                    >
-                      {labels[step]}
-                    </Text>
-                  </View>
-                </>
-              );
-            })}
-          </View>
+          <PipelineStepStrip
+            steps={(
+              [
+                {
+                  id: 'input',
+                  label: sourceMode === 'mic' ? '🎤 Input' : '📁 File',
+                },
+                { id: 'stt', label: '📝 STT' },
+                { id: 'tts', label: '🔊 TTS' },
+              ] as const
+            ).map((step) => ({
+              ...step,
+              active: activeSteps.has(step.id as PipelineStep),
+            }))}
+          />
         </View>
 
         {/* Source selector */}

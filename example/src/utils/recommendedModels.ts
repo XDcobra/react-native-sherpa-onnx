@@ -36,12 +36,8 @@ export const RECOMMENDED_MODEL_IDS: Record<string, string[]> = {
   [ModelCategory.Punctuation]: [],
   [ModelCategory.Qnn]: [],
   [ModelCategory.Ocr]: [
-    // Smallest published pack per family (example/scripts/model-download-config.json)
+    // Bundled via example/scripts/model-download-config.json
     'ppocrv6-tiny',
-    'doctr-mobile',
-    'docvlm-granite-258m-q4f16',
-    'nemotron-3.5-parse-int8',
-    'paddleocr-vl-1.6-fp16',
   ],
 };
 

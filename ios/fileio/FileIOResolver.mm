@@ -1,5 +1,9 @@
 #import "FileIOResolver.h"
 
+#import <CommonCrypto/CommonDigest.h>
+#include <math.h>
+#include <string.h>
+
 // Error code constants
 NSString * const kFIOErrInvalidArgument       = @"FILEIO_INVALID_ARGUMENT";
 NSString * const kFIOErrUnsupportedLocationKind = @"FILEIO_UNSUPPORTED_LOCATION_KIND";
@@ -12,6 +16,161 @@ NSString * const kFIOErrWriteError            = @"FILEIO_WRITE_ERROR";
 NSString * const kFIOErrResolveError          = @"FILEIO_RESOLVE_ERROR";
 NSString * const kFIOErrCancelled             = @"FILEIO_CANCELLED";
 NSString * const kFIOErrPathTraversalBlocked  = @"FILEIO_PATH_TRAVERSAL_BLOCKED";
+
+static const uint64_t kNoFdDefaultMaxBytes = 512ull * 1024ull * 1024ull;
+static const int64_t kNoFdDefaultMaxAgeMs = 24ll * 60ll * 60ll * 1000ll;
+static uint64_t gNoFdMaxBytes = kNoFdDefaultMaxBytes;
+static int64_t gNoFdMaxAgeMs = kNoFdDefaultMaxAgeMs;
+static NSLock *gNoFdLock;
+static NSMutableDictionary<NSString *, NSNumber *> *gNoFdPins;
+static NSMutableDictionary<NSString *, NSString *> *gNoFdBufferPins;
+
+static NSString *nofdCacheRoot(void) {
+  NSArray<NSString *> *caches =
+      NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES);
+  return [[caches firstObject] stringByAppendingPathComponent:@"fileio_nofd"];
+}
+
+static NSString *nofdCanonical(NSString *path) {
+  return path.stringByStandardizingPath ?: path;
+}
+
+static void nofdEnsureLocks(void) {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    gNoFdLock = [[NSLock alloc] init];
+    gNoFdPins = [NSMutableDictionary dictionary];
+    gNoFdBufferPins = [NSMutableDictionary dictionary];
+  });
+}
+
+static BOOL nofdIsCachePath(NSString *path) {
+  if (path.length == 0) return NO;
+  NSString *root = nofdCacheRoot().stringByStandardizingPath;
+  NSString *canon = nofdCanonical(path);
+  return [canon isEqualToString:root] ||
+         [canon hasPrefix:[root stringByAppendingString:@"/"]];
+}
+
+static void nofdEvict(void);
+
+static void nofdPin(NSString *path) {
+  if (!nofdIsCachePath(path)) return;
+  NSString *key = nofdCanonical(path);
+  nofdEnsureLocks();
+  [gNoFdLock lock];
+  NSInteger n = gNoFdPins[key].integerValue + 1;
+  gNoFdPins[key] = @(n);
+  [gNoFdLock unlock];
+  NSLog(@"[SherpaOnnxFileIO] nofd pin path=%@ count=%ld", key, (long)n);
+}
+
+static void nofdUnpin(NSString *path) {
+  if (!nofdIsCachePath(path)) return;
+  NSString *key = nofdCanonical(path);
+  nofdEnsureLocks();
+  [gNoFdLock lock];
+  NSInteger n = gNoFdPins[key].integerValue - 1;
+  if (n <= 0) {
+    [gNoFdPins removeObjectForKey:key];
+  } else {
+    gNoFdPins[key] = @(n);
+  }
+  [gNoFdLock unlock];
+  NSLog(@"[SherpaOnnxFileIO] nofd unpin path=%@ count=%ld", key, (long)MAX(n, 0));
+  nofdEvict();
+}
+
+static void nofdTouch(NSString *path) {
+  NSDictionary *attrs = @{ NSFileModificationDate: [NSDate date] };
+  [[NSFileManager defaultManager] setAttributes:attrs ofItemAtPath:path error:nil];
+}
+
+static void nofdEvict(void) {
+  nofdEnsureLocks();
+  NSString *root = nofdCacheRoot();
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:root error:nil];
+  if (names.count == 0) return;
+  NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+  int64_t ageLimit = gNoFdMaxAgeMs;
+  uint64_t cap = gNoFdMaxBytes;
+
+  NSMutableArray<NSDictionary *> *ents = [NSMutableArray array];
+  [gNoFdLock lock];
+  for (NSString *name in names) {
+    if ([name hasSuffix:@".tmp"]) continue;
+    NSString *path = nofdCanonical([root stringByAppendingPathComponent:name]);
+    NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil];
+    if (![attrs.fileType isEqualToString:NSFileTypeRegular]) continue;
+    BOOL pinned = gNoFdPins[path].integerValue > 0;
+    NSDate *mtime = attrs.fileModificationDate ?: [NSDate distantPast];
+    [ents addObject:@{
+      @"path": path,
+      @"size": @(attrs.fileSize),
+      @"mtime": mtime,
+      @"pinned": @(pinned),
+    }];
+  }
+  [gNoFdLock unlock];
+
+  for (NSDictionary *e in ents) {
+    if ([e[@"pinned"] boolValue]) continue;
+    NSTimeInterval ageMs =
+        (now - [e[@"mtime"] timeIntervalSince1970]) * 1000.0;
+    BOOL expired = ageLimit == 0 ? YES : ageMs > (NSTimeInterval)ageLimit;
+    if (expired) {
+      NSLog(@"[SherpaOnnxFileIO] nofd evict age path=%@ ageMs=%.0f", e[@"path"], ageMs);
+      [fm removeItemAtPath:e[@"path"] error:nil];
+    }
+  }
+
+  names = [fm contentsOfDirectoryAtPath:root error:nil];
+  NSMutableArray<NSDictionary *> *live = [NSMutableArray array];
+  uint64_t total = 0;
+  [gNoFdLock lock];
+  for (NSString *name in names ?: @[]) {
+    if ([name hasSuffix:@".tmp"]) continue;
+    NSString *path = nofdCanonical([root stringByAppendingPathComponent:name]);
+    NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil];
+    if (![attrs.fileType isEqualToString:NSFileTypeRegular]) continue;
+    BOOL pinned = gNoFdPins[path].integerValue > 0;
+    NSDate *mtime = attrs.fileModificationDate ?: [NSDate distantPast];
+    [live addObject:@{
+      @"path": path,
+      @"size": @(attrs.fileSize),
+      @"mtime": mtime,
+      @"pinned": @(pinned),
+    }];
+    total += attrs.fileSize;
+  }
+  [gNoFdLock unlock];
+  if (total <= cap) return;
+  NSArray *unpinned = [[live filteredArrayUsingPredicate:
+      [NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, NSDictionary *bindings) {
+        (void)bindings;
+        return ![e[@"pinned"] boolValue];
+      }]]
+      sortedArrayUsingDescriptors:@[
+        [NSSortDescriptor sortDescriptorWithKey:@"mtime" ascending:YES]
+      ]];
+  for (NSDictionary *e in unpinned) {
+    if (total <= cap) break;
+    unsigned long long size = [e[@"size"] unsignedLongLongValue];
+    NSLog(@"[SherpaOnnxFileIO] nofd evict lru path=%@ size=%llu total=%llu cap=%llu",
+          e[@"path"], size, total, cap);
+    if ([fm removeItemAtPath:e[@"path"] error:nil]) {
+      if (total >= size) total -= size;
+      else total = 0;
+    }
+  }
+}
+
+static void nofdAdopt(NSString *path) {
+  nofdPin(path);
+  nofdTouch(path);
+  nofdEvict();
+}
 
 // ---- Handle implementations ----
 
@@ -138,6 +297,14 @@ static NSString *resolveAppBundleRelativePath(
 // ---- Resolver ----
 
 @implementation FileIOResolver
+
++ (void)initialize {
+  if (self != [FileIOResolver class]) return;
+  nofdEnsureLocks();
+  gNoFdMaxBytes = kNoFdDefaultMaxBytes;
+  gNoFdMaxAgeMs = kNoFdDefaultMaxAgeMs;
+  nofdEvict();
+}
 
 + (nullable FileIOReadHandle *)resolveSource:(NSDictionary *)source
                                        error:(NSString * _Nullable * _Nullable)errorCode
@@ -374,6 +541,195 @@ static NSString *resolveAppBundleRelativePath(
         @"%@: source is not seekable (requires a filesystem path)", code];
   }
   return nil;
+}
+
+static NSString *sha256Hex(NSString *value) {
+  const char *c = value.UTF8String ?: "";
+  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+  CC_SHA256(c, (CC_LONG)strlen(c), digest);
+  NSMutableString *out = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
+  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+    [out appendFormat:@"%02x", digest[i]];
+  }
+  return out;
+}
+
+static NSString *demuxCacheIdentity(NSDictionary *source) {
+  NSString *kind = source[@"kind"] ?: @"unknown";
+  NSString *ident = @"";
+  if ([kind isEqualToString:@"contentUri"] || [kind isEqualToString:@"securityScoped"]) {
+    ident = source[@"uri"] ?: @"";
+  } else if ([kind isEqualToString:@"app"]) {
+    ident = [NSString stringWithFormat:@"%@:%@", source[@"base"] ?: @"", source[@"path"] ?: @""];
+  } else if ([kind isEqualToString:@"pad"]) {
+    ident = [NSString stringWithFormat:@"%@:%@", source[@"packName"] ?: @"", source[@"path"] ?: @""];
+  } else {
+    ident = source[@"path"] ?: (source[@"uri"] ?: @"");
+  }
+  return [NSString stringWithFormat:@"%@|%@", kind, ident];
+}
+
+static NSString *extensionHint(NSDictionary *source) {
+  NSString *name = source[@"displayName"];
+  if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+    name = source[@"path"];
+  }
+  if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+    name = source[@"uri"];
+  }
+  if (![name isKindOfClass:[NSString class]] || name.length == 0) {
+    return @"";
+  }
+  NSString *leaf = name.lastPathComponent ?: name;
+  NSString *ext = leaf.pathExtension.lowercaseString;
+  if (ext.length == 0 || ext.length > 8) {
+    return @"";
+  }
+  for (NSUInteger i = 0; i < ext.length; i++) {
+    unichar c = [ext characterAtIndex:i];
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) {
+      return @"";
+    }
+  }
+  return [@"." stringByAppendingString:ext];
+}
+
++ (nullable NSString *)demuxableFilePathFromHandle:(FileIOReadHandle *)handle
+                                            source:(NSDictionary *)source
+                                             error:(NSString * _Nullable * _Nullable)errorCode
+                                           message:(NSString * _Nullable * _Nullable)errorMessage
+{
+  if (handle && handle.isFilePath && handle.filePath.length > 0) {
+    NSLog(@"[SherpaOnnxFileIO] demux FilePath path=%@", handle.filePath);
+    if (nofdIsCachePath(handle.filePath)) {
+      nofdAdopt(handle.filePath);
+    }
+    return handle.filePath;
+  }
+  if (!handle || handle.stream == nil) {
+    if (errorCode) *errorCode = kFIOErrInvalidArgument;
+    if (errorMessage) *errorMessage = @"FileSource is not a readable file";
+    return nil;
+  }
+
+  NSString *cacheRoot = nofdCacheRoot();
+  NSFileManager *fm = [NSFileManager defaultManager];
+  NSError *mkErr = nil;
+  [fm createDirectoryAtPath:cacheRoot withIntermediateDirectories:YES attributes:nil error:&mkErr];
+  if (mkErr) {
+    if (errorCode) *errorCode = kFIOErrWriteError;
+    if (errorMessage) *errorMessage = [NSString stringWithFormat:
+        @"Failed to create nofd cache: %@", mkErr.localizedDescription];
+    return nil;
+  }
+
+  NSString *key = sha256Hex(demuxCacheIdentity(source ?: @{}));
+  NSString *outPath = [cacheRoot stringByAppendingPathComponent:
+                       [key stringByAppendingString:extensionHint(source ?: @{})]];
+  if ([fm fileExistsAtPath:outPath]) {
+    NSDictionary *attrs = [fm attributesOfItemAtPath:outPath error:nil];
+    unsigned long long size = [attrs fileSize];
+    int64_t known = handle.length;
+    if (size > 0 && (known <= 0 || (unsigned long long)known == size)) {
+      NSLog(@"[SherpaOnnxFileIO] nofd cache hit path=%@", outPath);
+      nofdAdopt(outPath);
+      return outPath;
+    }
+    NSLog(@"[SherpaOnnxFileIO] nofd cache stale path=%@ size=%llu expected=%lld — recopy",
+          outPath, size, (long long)known);
+  }
+
+  NSString *tmpPath = [outPath stringByAppendingString:@".tmp"];
+  NSLog(@"[SherpaOnnxFileIO] nofd copy -> %@", outPath);
+  NSOutputStream *out = [NSOutputStream outputStreamToFileAtPath:tmpPath append:NO];
+  [out open];
+  [handle.stream open];
+  uint8_t buf[65536];
+  NSInteger bytesRead;
+  while ((bytesRead = [handle.stream read:buf maxLength:sizeof(buf)]) > 0) {
+    [out write:buf maxLength:(NSUInteger)bytesRead];
+  }
+  NSInteger streamErr = handle.stream.streamError ? 1 : 0;
+  [out close];
+  if (bytesRead < 0 || streamErr) {
+    [fm removeItemAtPath:tmpPath error:nil];
+    if (errorCode) *errorCode = kFIOErrReadError;
+    if (errorMessage) *errorMessage = @"Failed to materialize stream source for demux";
+    return nil;
+  }
+  [fm removeItemAtPath:outPath error:nil];
+  NSError *mvErr = nil;
+  if (![fm moveItemAtPath:tmpPath toPath:outPath error:&mvErr]) {
+    [fm removeItemAtPath:tmpPath error:nil];
+    if (errorCode) *errorCode = kFIOErrWriteError;
+    if (errorMessage) {
+      *errorMessage = [NSString stringWithFormat:
+          @"Failed to commit nofd cache file: %@", mvErr.localizedDescription];
+    }
+    return nil;
+  }
+  nofdAdopt(outPath);
+  return outPath;
+}
+
++ (BOOL)isNofdCachePath:(NSString *)path {
+  return nofdIsCachePath(path);
+}
+
++ (void)unpinNofdPath:(NSString *)path {
+  nofdUnpin(path);
+}
+
++ (void)retainNofdPinForBuffer:(NSString *)bufferId path:(NSString *)path {
+  if (bufferId.length == 0 || path.length == 0) return;
+  nofdEnsureLocks();
+  [gNoFdLock lock];
+  NSString *old = gNoFdBufferPins[bufferId];
+  gNoFdBufferPins[bufferId] = path;
+  [gNoFdLock unlock];
+  if (old.length > 0 && ![nofdCanonical(old) isEqualToString:nofdCanonical(path)]) {
+    nofdUnpin(old);
+  }
+}
+
++ (void)releaseNofdPinForBuffer:(NSString *)bufferId {
+  if (bufferId.length == 0) return;
+  nofdEnsureLocks();
+  [gNoFdLock lock];
+  NSString *path = gNoFdBufferPins[bufferId];
+  [gNoFdBufferPins removeObjectForKey:bufferId];
+  [gNoFdLock unlock];
+  if (path.length > 0) {
+    nofdUnpin(path);
+  }
+}
+
++ (void)configureNoFdCacheMaxBytes:(NSNumber *)maxBytes
+                          maxAgeMs:(NSNumber *)maxAgeMs
+                             error:(NSString * _Nullable * _Nullable)errorCode
+                           message:(NSString * _Nullable * _Nullable)errorMessage
+{
+  if (maxBytes != nil) {
+    double v = maxBytes.doubleValue;
+    if (v <= 0 || v != floor(v)) {
+      if (errorCode) *errorCode = kFIOErrInvalidArgument;
+      if (errorMessage) *errorMessage = @"noFdCache.maxBytes must be an integer > 0";
+      return;
+    }
+    gNoFdMaxBytes = (uint64_t)v;
+  }
+  if (maxAgeMs != nil) {
+    double v = maxAgeMs.doubleValue;
+    if (v < 0 || v != floor(v)) {
+      if (errorCode) *errorCode = kFIOErrInvalidArgument;
+      if (errorMessage) *errorMessage = @"noFdCache.maxAgeMs must be an integer >= 0";
+      return;
+    }
+    gNoFdMaxAgeMs = (int64_t)v;
+  }
+  NSLog(@"[SherpaOnnxFileIO] nofd policy maxBytes=%llu maxAgeMs=%lld",
+        gNoFdMaxBytes, (long long)gNoFdMaxAgeMs);
+  nofdEvict();
 }
 
 + (nullable NSString *)resolveSourceToFilePath:(NSDictionary *)source

@@ -152,7 +152,14 @@ const decoded = await createOfflineAudioBufferFromFile(
 );
 ```
 
-The decode path uses FFmpeg plus a WAV fast path internally. `FileSource` resolution is shared with `react-native-sherpa-onnx/fileio`, so `fs`, `app`, `contentUri`, `securityScoped`, and `pad` sources follow the same native resolver rules.
+The decode path uses FFmpeg plus a WAV fast path internally. `source` is a `FileSource` (see [fileio.md](fileio.md)).
+
+| Kind | How the file is opened |
+| --- | --- |
+| `fs` / `app` (`cache`, `files`, …) / `pad` / iOS `appBundle` / iOS `securityScoped` | Direct path. |
+| Android `app` + `apkAsset` | APK zip entry has no fd. Copied to `<cache>/fileio_apkasset/…` on first open; later opens are a cache hit. |
+| Android `contentUri` with ParcelFileDescriptor | Opened via `/proc/self/fd/N` (seekable). |
+| Android `contentUri` stream (no PFD) | Copied to a decode temp and deleted after decode (not `fileio_nofd`). |
 
 When you only need **duration** and not PCM, use [`probeAudioFileDuration`](./audio-conversion.md#probeaudiofiledurationsource) from `react-native-sherpa-onnx/audio` instead of creating an offline buffer. To read **container format and codec** from file content before decode, use [`probeAudioFileContainer`](./audio-conversion.md#probeaudiofilecontainersource).
 
@@ -318,6 +325,24 @@ Android unit tests cover the buffer rate matrix with committed mono WAV fixtures
 | offline → live (`appendOfflineToLive`) | yes | yes | yes |
 
 Assertions check output sample rate, sample count (exact `Resampler` length formula), and duration. **Not** covered here: FFmpeg file decode / ingest, or real microphone capture (those need instrumented / device tests).
+
+## Formats
+
+`createOfflineAudioBufferFromFile` sniffs by container, not extension. Output is **float32 PCM**. Default `targetSampleRateHz = 16000`, `forceMono = true`. `0` keeps the source rate. Encode/save is [audio-conversion.md](audio-conversion.md#formats).
+
+| Path | When | Encodings |
+| --- | --- | --- |
+| WAV fast path (no FFmpeg) | RIFF/WAVE, **mono**, PCM **s16le** or IEEE **f32le**, and target rate is 0 or equals source | Direct float32 |
+| FFmpeg | everything else | See table below |
+| No FFmpeg + not fast-path | stereo / 24-bit / MP3 / resample needed | `DECODE_INTERNAL_ERROR` |
+
+| FFmpeg demuxers | FFmpeg decoders |
+| --- | --- |
+| `wav`, `mp3`, `ogg`, `flac`, `mov` (m4a/mp4/mov/3gp), `matroska` (mkv/webm/mka), `aac` (ADTS) | `aac`, `mp3`, `vorbis`, `flac`, `opus`, `pcm_s16le`, `pcm_f32le`, `pcm_s32le`, `pcm_u8` |
+
+Android stream-only `contentUri` is copied to a decode temp and deleted after decode (not `fileio_nofd`).
+
+Out of scope: video pixels (use [`videobuffer`](videobuffer-offline.md)), AC-3 / E-AC-3 / DTS, WMA, AMR, AVI / MPEG-TS as audio containers.
 
 ## JS Events
 

@@ -203,6 +203,9 @@ void ImageRegistry::FillFrameInfoLocked(const Frame& f, int frameIndex,
   out.dpi = f.dpi;
   out.sectionIndex = f.sectionIndex;
   out.href = f.href;
+  out.sourceVideoBufferId = f.sourceVideoBufferId;
+  out.sourcePtsUs = f.sourcePtsUs;
+  out.sourceFrameIndex = f.sourceFrameIndex;
 }
 
 bool ImageRegistry::WriteFrameToMmap(Frame& frame, const std::string& bufferId,
@@ -337,6 +340,9 @@ bool ImageRegistry::AppendRgbFrame(const std::string& bufferId, RgbFrame frame,
   f.dpi = frame.dpi;
   f.sectionIndex = frame.sectionIndex;
   f.href = frame.href;
+  f.sourceVideoBufferId = frame.sourceVideoBufferId;
+  f.sourcePtsUs = frame.sourcePtsUs;
+  f.sourceFrameIndex = frame.sourceFrameIndex;
   it->second.pathType = pathType;
   it->second.frames.push_back(std::move(f));
   UpgradeEntryLocked(it->second);

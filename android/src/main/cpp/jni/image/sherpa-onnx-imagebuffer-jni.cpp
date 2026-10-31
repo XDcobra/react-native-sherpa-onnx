@@ -288,6 +288,11 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeGetFrameInfo(
   if (!info.href.empty()) {
     PutString(env, map, put, "href", info.href);
   }
+  if (!info.sourceVideoBufferId.empty()) {
+    PutString(env, map, put, "sourceVideoBufferId", info.sourceVideoBufferId);
+    PutLong(env, map, put, "sourcePtsUs", info.sourcePtsUs);
+    PutLong(env, map, put, "sourceFrameIndex", info.sourceFrameIndex);
+  }
   return map;
 }
 
@@ -379,6 +384,12 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeEnsureFrame(
   }
   if (!ensured.info.href.empty()) {
     PutString(env, map, put, "href", ensured.info.href);
+  }
+  if (!ensured.info.sourceVideoBufferId.empty()) {
+    PutString(env, map, put, "sourceVideoBufferId",
+              ensured.info.sourceVideoBufferId);
+    PutLong(env, map, put, "sourcePtsUs", ensured.info.sourcePtsUs);
+    PutLong(env, map, put, "sourceFrameIndex", ensured.info.sourceFrameIndex);
   }
   return map;
 }

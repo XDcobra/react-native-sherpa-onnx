@@ -1,0 +1,1 @@
+{"ringCapacity":16,"loggedAt":"2026-10-29T10:00:47.392Z","section":10,"suite":"live","rows":[{"residentEncodedBytes":0,"ms":64.872980117797852,"name":"ring.encodedPackets","packetsIngested":90},{"ms":0,"name":"ring.rgbAccounted","residentRgbBytes":11059200,"frames":16}]}

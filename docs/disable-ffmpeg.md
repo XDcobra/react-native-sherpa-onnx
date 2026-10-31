@@ -47,8 +47,16 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 |-----|-------------|
 | **`saveAudioAsWav16k(input, output)`** | Saves a buffer or `FileSource` as 16 kHz mono WAV. Builds without FFmpeg may reject when a backend path requires FFmpeg. |
 | **`saveAudioAsFile(input, output, format, options?)`** | Saves a buffer or `FileSource` to the requested output format. Non-WAV formats require FFmpeg. |
+| **`probeVideoFileDuration(source)`** | Reads clip duration from container metadata. Rejects with `VIDEO_FFMPEG_DISABLED` (JS wrapper returns `null`). |
+| **`probeVideoFileContainer(source)`** | Sniffs container + video codec from file content. Rejects with `VIDEO_FFMPEG_DISABLED` (JS wrapper returns `null`). |
+| **`createOfflineVideoBufferFromFile(source)`** | Opens a `FileSource` container (`mov` / `matroska`) via libavformat. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`ingestFileToLiveVideoBuffer(source, live)`** | Remuxes a `FileSource` into a live video buffer. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`createOfflineAudioBufferFromVideo(video)`** | Decodes the container audio track through FFmpeg. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`createLiveAudioBufferFromLiveVideo(live)`** | Live audio tap decode. Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`exportVideo(video, output, format, options?)`** | HW-encodes the clip, then muxes with FFmpeg (`mp4`/`mov`/`mkv`/`webm`). Rejects with `VIDEO_FFMPEG_DISABLED`. |
+| **`createVideoPreviewPlayer` audio track** | Preview audio uses FFmpeg SW decode. Video still plays; `audioUnavailable` / status `unavailable`. |
 
-The helpers above are exposed from **`react-native-sherpa-onnx/audio`**. STT, archive extraction, model detection, and general pipeline buffer operations continue to work when FFmpeg is disabled.
+The audio helpers above are exposed from **`react-native-sherpa-onnx/audio`**. Video file APIs are from **`react-native-sherpa-onnx/videobuffer`**. Live video buffers fed by native producers (no file demux) keep working. STT, archive extraction, model detection, and general pipeline buffer operations continue to work when FFmpeg is disabled.
 
 ## Risks and limitations of disabling FFmpeg
 

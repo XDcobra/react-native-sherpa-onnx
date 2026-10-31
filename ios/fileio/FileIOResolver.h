@@ -70,6 +70,26 @@ extern NSString * const kFIOErrPathTraversalBlocked;
                                             error:(NSString * _Nullable * _Nullable)errorCode
                                           message:(NSString * _Nullable * _Nullable)errorMessage;
 
+/**
+ * Path FFmpeg / libavformat can open. File-path handles are returned as-is
+ * (iOS `appBundle` is a real file). Stream handles are copied into
+ * `Caches/fileio_nofd/<sha256>` with a cache hit on reuse.
+ * Does not cleanup [handle]; caller still owns it.
+ */
++ (nullable NSString *)demuxableFilePathFromHandle:(FileIOReadHandle *)handle
+                                            source:(NSDictionary *)source
+                                            error:(NSString * _Nullable * _Nullable)errorCode
+                                          message:(NSString * _Nullable * _Nullable)errorMessage;
+
++ (BOOL)isNofdCachePath:(NSString *)path;
++ (void)unpinNofdPath:(NSString *)path;
++ (void)retainNofdPinForBuffer:(NSString *)bufferId path:(NSString *)path;
++ (void)releaseNofdPinForBuffer:(NSString *)bufferId;
++ (void)configureNoFdCacheMaxBytes:(NSNumber *)maxBytes
+                          maxAgeMs:(NSNumber *)maxAgeMs
+                             error:(NSString * _Nullable * _Nullable)errorCode
+                           message:(NSString * _Nullable * _Nullable)errorMessage;
+
 @end
 
 #endif /* FileIOResolver_h */

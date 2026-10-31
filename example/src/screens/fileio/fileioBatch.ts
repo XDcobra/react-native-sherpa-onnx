@@ -1,17 +1,21 @@
 import type { AudioOutputFormat } from 'react-native-sherpa-onnx/audio';
 import type { FileDestination } from 'react-native-sherpa-onnx/fileio';
+import type { VideoExportContainer } from 'react-native-sherpa-onnx/videobuffer';
 
 import {
   type AudioSourceChoice,
   type FileioInputChannelId,
   type FileioOperation,
   type FileioSampleSelection,
+  fileioSampleMedia,
   runFileioCopy,
   runFileioDecode,
   runFileioProbe,
+  runFileioVideoEncode,
 } from './fileioActions';
 import {
-  listAllSampleSelections,
+  listAllAudioSampleSelections,
+  listAllVideoSampleSelections,
   listAutomaticInputChannelIds,
   listFileioInputChannels,
   resolveFileioInputSource,
@@ -39,6 +43,7 @@ export type FileioBatchParams = {
   destinationKind: FileDestination['kind'];
   audioSource: AudioSourceChoice;
   outputFormat: AudioOutputFormat;
+  videoOutputFormat: VideoExportContainer;
 };
 
 function channelTitle(channelId: FileioInputChannelId): string {
@@ -52,6 +57,9 @@ function sampleTitle(selection: FileioSampleSelection): string {
   if (selection.kind === 'legacy') {
     return 'Legacy';
   }
+  if (selection.kind === 'video') {
+    return `Video ${selection.format.toUpperCase()}`;
+  }
   return selection.format.toUpperCase();
 }
 
@@ -62,6 +70,8 @@ async function runOne(
     destinationKind: FileDestination['kind'];
     audioSource: AudioSourceChoice;
     outputFormat: AudioOutputFormat;
+    videoOutputFormat: VideoExportContainer;
+    sample: FileioSampleSelection;
   }
 ): Promise<{ status: FileioBatchLineStatus; summary: string }> {
   if (operation === 'probe') {
@@ -69,9 +79,7 @@ async function runOne(
     if (result.status === 'success') {
       return {
         status: 'success',
-        summary: `${result.durationMs.toFixed(0)} ms, exact=${
-          result.isExact ? 'yes' : 'no'
-        }`,
+        summary: result.summary,
       };
     }
     return { status: 'error', summary: result.message };
@@ -82,12 +90,30 @@ async function runOne(
     if (result.status === 'success') {
       return {
         status: 'success',
-        summary: `bufferId=${result.bufferId}, ${result.durationMs.toFixed(
-          0
-        )} ms`,
+        summary: result.summary,
       };
     }
     return { status: 'error', summary: result.message };
+  }
+
+  if (fileioSampleMedia(encode.sample) === 'video') {
+    const copyResult = await runFileioVideoEncode({
+      destinationKind: encode.destinationKind,
+      inputSource: input.fileSource,
+      inputLabel: input.label,
+      outputFormat: encode.videoOutputFormat,
+    });
+    if (copyResult.status === 'canceled') {
+      return {
+        status: 'canceled',
+        summary: 'Encode canceled (picker/dialog).',
+      };
+    }
+    if (copyResult.status === 'success') {
+      const firstLine = copyResult.detail.split('\n')[0] ?? copyResult.detail;
+      return { status: 'success', summary: firstLine };
+    }
+    return { status: 'error', summary: copyResult.message };
   }
 
   const copyResult = await runFileioCopy({
@@ -109,7 +135,8 @@ async function runOne(
 }
 
 export function buildFileioBatchMatrix(params: {
-  batchAllSamples: boolean;
+  batchAllAudioSamples: boolean;
+  batchAllVideoSamples: boolean;
   batchAllChannels: boolean;
   currentSample: FileioSampleSelection;
   currentChannelId: FileioInputChannelId;
@@ -117,9 +144,16 @@ export function buildFileioBatchMatrix(params: {
   samples: FileioSampleSelection[];
   channelIds: FileioInputChannelId[];
 } {
-  const samples = params.batchAllSamples
-    ? listAllSampleSelections()
-    : [params.currentSample];
+  const samples: FileioSampleSelection[] = [];
+  if (params.batchAllAudioSamples) {
+    samples.push(...listAllAudioSampleSelections());
+  }
+  if (params.batchAllVideoSamples) {
+    samples.push(...listAllVideoSampleSelections());
+  }
+  if (!params.batchAllAudioSamples && !params.batchAllVideoSamples) {
+    samples.push(params.currentSample);
+  }
   const channelIds = params.batchAllChannels
     ? listAutomaticInputChannelIds()
     : [params.currentChannelId];
@@ -128,7 +162,8 @@ export function buildFileioBatchMatrix(params: {
 
 /** Summary for the Active FileSource card when a batch toggle is on. */
 export function describeFileioActiveInputSummary(params: {
-  batchAllSamples: boolean;
+  batchAllAudioSamples: boolean;
+  batchAllVideoSamples: boolean;
   batchAllChannels: boolean;
   currentSample: FileioSampleSelection;
   currentChannelId: FileioInputChannelId;
@@ -139,12 +174,13 @@ export function describeFileioActiveInputSummary(params: {
 
   const sampleNames = samples.map((s) => sampleTitle(s)).join(', ');
   const channelNames = channelIds.map((id) => channelTitle(id)).join(', ');
+  const allSamples = params.batchAllAudioSamples || params.batchAllVideoSamples;
 
   let label: string;
-  if (params.batchAllSamples && params.batchAllChannels) {
+  if (allSamples && params.batchAllChannels) {
     label = `Batch: ${samples.length} samples × ${channelIds.length} channels (${runCount} runs)`;
-  } else if (params.batchAllSamples) {
-    label = `Batch: all samples via ${channelTitle(
+  } else if (allSamples) {
+    label = `Batch: selected sample families via ${channelTitle(
       params.currentChannelId
     )} (${runCount} runs)`;
   } else {
@@ -153,10 +189,15 @@ export function describeFileioActiveInputSummary(params: {
     )} via all automatic channels (${runCount} runs)`;
   }
 
+  const familyBits = [
+    params.batchAllAudioSamples ? 'all audio' : null,
+    params.batchAllVideoSamples ? 'all video' : null,
+  ].filter(Boolean);
+
   const detailLines = [
     `Operation: ${params.operation}`,
-    params.batchAllSamples
-      ? `Samples: ${sampleNames}`
+    allSamples
+      ? `Samples (${familyBits.join(' + ')}): ${sampleNames}`
       : `Sample: ${sampleTitle(params.currentSample)}`,
     params.batchAllChannels
       ? `Channels: ${channelNames}`
@@ -169,7 +210,7 @@ export function describeFileioActiveInputSummary(params: {
     );
   }
 
-  if (params.batchAllSamples && !params.batchAllChannels) {
+  if (allSamples && !params.batchAllChannels) {
     const current = listFileioInputChannels().find(
       (c) => c.id === params.currentChannelId
     );
@@ -216,6 +257,8 @@ export async function runFileioBatch(
           destinationKind: params.destinationKind,
           audioSource: params.audioSource,
           outputFormat: params.outputFormat,
+          videoOutputFormat: params.videoOutputFormat,
+          sample: selection,
         });
         lines.push({
           sampleLabel: sLabel,

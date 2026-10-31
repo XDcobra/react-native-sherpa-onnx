@@ -2,10 +2,21 @@
 # Fetch PDFium Android binaries (pdfium-binaries) and rearrange into our prebuilt layout.
 # Usage: ./fetch_pdfium_android.sh [version]
 # Version is the pdfium-binaries chromium/ tag suffix (e.g. 8100 for chromium/8100).
-# Default matches ANDROID_RELEASE_TAG suffix (pdfium-android-v8100 → 8100).
+# Default reads ANDROID_RELEASE_TAG (pdfium-android-v8100-1 → chromium/8100).
+# Trailing -N is our rebuild counter and is stripped for the upstream fetch.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-VERSION="${1:-8100}"
+strip_rebuild() { echo "$1" | sed 's/-[0-9][0-9]*$//'; }
+if [[ -n "${1:-}" ]]; then
+  VERSION="$(strip_rebuild "$1")"
+else
+  TAG_FILE="$ROOT/ANDROID_RELEASE_TAG"
+  if [[ -f "$TAG_FILE" ]]; then
+    RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+    VERSION="$(strip_rebuild "${RELEASE_TAG#pdfium-android-v}")"
+  fi
+fi
+VERSION="${VERSION:-8100}"
 OUT="$ROOT/android"
 TMP="$ROOT/.fetch-tmp"
 BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${VERSION}"

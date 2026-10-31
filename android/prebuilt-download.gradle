@@ -1,6 +1,6 @@
 // Prebuilt download and check logic. Applied after android {} and configurations.
-// Depends on: sherpaOnnxVersion, ffmpegVersion, libarchiveVersion, lexborVersion, libwebpVersion, ortVersion (from prebuilt-versions.gradle)
-// and configurations.sherpaOnnxAar, ffmpegAar, libarchiveAar, lexborAar, libwebpAar, onnxruntimeAar (from build.gradle).
+// Depends on: sherpaOnnxVersion, ffmpegVersion, libarchiveVersion, lexborVersion, libyuvVersion, libwebpVersion, ortVersion (from prebuilt-versions.gradle)
+// and configurations.sherpaOnnxAar, ffmpegAar, libarchiveAar, lexborAar, libyuvAar, libwebpAar, onnxruntimeAar (from build.gradle).
 //
 // Resolution order per artifact (see docs/PREBUILT_RESOLUTION.md):
 //   (1) THIRD_PARTY    — prebuilt files under third_party/<bundle>/android/ (no network)
@@ -28,6 +28,7 @@ def requiredSherpaOnnxSoFiles = [
 ]
 def requiredLibarchiveSoFiles = ['libarchive.so', 'libzstd.so']
 def requiredLexborSoFiles = ['liblexbor.so']
+def requiredLibyuvSoFiles = ['libyuv.so']
 def requiredLibwebpSoFiles = ['libwebp.so', 'libsharpyuv.so']
 def requiredPdfiumSoFiles = ['libpdfium.so']
 def requiredOnnxruntimeJniSoFiles = ['libonnxruntime4j_jni.so']
@@ -44,6 +45,7 @@ def thirdPartyFfmpegDir = new File(thirdPartyDir, "ffmpeg_prebuilt/android")
 def thirdPartyShineDir = new File(thirdPartyDir, "shine_prebuilt/android")
 def thirdPartyLibarchiveDir = new File(thirdPartyDir, "libarchive_prebuilt/android")
 def thirdPartyLexborDir = new File(thirdPartyDir, "lexbor_prebuilt/android")
+def thirdPartyLibyuvDir = new File(thirdPartyDir, "libyuv_prebuilt/android")
 def thirdPartyLibwebpDir = new File(thirdPartyDir, "libwebp_prebuilt/android")
 def thirdPartyPdfiumDir = new File(thirdPartyDir, "pdfium_prebuilt/android")
 def thirdPartyOrtDir = new File(thirdPartyDir, "onnxruntime_prebuilt/android")
@@ -106,6 +108,21 @@ def hasAllLexborLibs = {
 
 def hasLexborHeaders = {
   return new File(project.projectDir, "src/main/cpp/include/lexbor/html/parser.h").exists()
+}
+
+def hasAllLibyuvLibs = {
+  for (abi in requiredAbis) {
+    def dir = new File(jniLibsDir, abi)
+    if (!dir.exists()) return false
+    for (soName in requiredLibyuvSoFiles) {
+      if (!new File(dir, soName).exists()) return false
+    }
+  }
+  return true
+}
+
+def hasLibyuvHeaders = {
+  return new File(project.projectDir, "src/main/cpp/include/libyuv/convert.h").exists()
 }
 
 def hasAllLibwebpLibs = {
@@ -322,6 +339,13 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def lexborHdrsOk = hasLexborHeaders()
     def lexborNeedsUpdate = !lexborLibsOk || !lexborHdrsOk || storedLexborVersion == null || storedLexborVersion != currentLexborVersion
 
+    def currentLibyuvVersion = project.ext.libyuvVersion
+    def libyuvVersionFile = new File(downloadDir, "libyuv-version.txt")
+    def storedLibyuvVersion = (libyuvVersionFile.exists() ? libyuvVersionFile.text.trim() : null)
+    def libyuvLibsOk = hasAllLibyuvLibs()
+    def libyuvHdrsOk = hasLibyuvHeaders()
+    def libyuvNeedsUpdate = !libyuvLibsOk || !libyuvHdrsOk || storedLibyuvVersion == null || storedLibyuvVersion != currentLibyuvVersion
+
     def currentLibwebpVersion = project.ext.libwebpVersion
     def libwebpVersionFile = new File(downloadDir, "libwebp-version.txt")
     def storedLibwebpVersion = (libwebpVersionFile.exists() ? libwebpVersionFile.text.trim() : null)
@@ -335,6 +359,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def ffmpegResolved = false
     def libarchiveResolved = false
     def lexborResolved = false
+    def libyuvResolved = false
     def libwebpResolved = false
 
     // =====================================================================
@@ -602,6 +627,83 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     } else {
       lexborResolved = true
       logPrebuilt("lexbor", "native", "LOCAL_SDK", currentLexborVersion)
+    }
+
+    // =====================================================================
+    // libyuv: JNI (.so) + C headers (VideoBuffer convert / scale / rotate)
+    // =====================================================================
+    if (libyuvNeedsUpdate) {
+      def tpJni = hasAllLibsUnder(thirdPartyLibyuvDir, requiredLibyuvSoFiles)
+      def tpHdr = new File(thirdPartyLibyuvDir, "include/libyuv/convert.h").exists()
+      if (tpJni && tpHdr) {
+        requiredAbis.each { abi ->
+          def jniSrc = new File(thirdPartyLibyuvDir, "jni/${abi}")
+          if (!jniSrc.exists()) {
+            jniSrc = new File(thirdPartyLibyuvDir, "${abi}/lib")
+          }
+          if (jniSrc.exists()) {
+            copy { from jniSrc; into new File(jniLibsDir, abi) }
+          }
+        }
+        def libyuvIncludeDir = file("${project.projectDir}/src/main/cpp/include/libyuv")
+        libyuvIncludeDir.mkdirs()
+        copy { from new File(thirdPartyLibyuvDir, "include/libyuv"); into libyuvIncludeDir }
+        def libyuvH = new File(thirdPartyLibyuvDir, "include/libyuv.h")
+        if (libyuvH.exists()) {
+          copy { from libyuvH; into file("${project.projectDir}/src/main/cpp/include") }
+        }
+        downloadDir.mkdirs()
+        libyuvVersionFile.text = currentLibyuvVersion
+        libyuvResolved = true
+        logPrebuilt("libyuv", "native", "THIRD_PARTY", currentLibyuvVersion)
+      }
+
+      if (!libyuvResolved) {
+        try {
+          def aarFiles = project.configurations.libyuvAar.files
+          if (!aarFiles.isEmpty()) {
+            downloadDir.mkdirs()
+            def aar = aarFiles.iterator().next()
+            def aarExtractDir = new File(downloadDir, "libyuv-aar-extract")
+            if (aarExtractDir.exists()) aarExtractDir.deleteDir()
+            aarExtractDir.mkdirs()
+            copy { from zipTree(aar); into aarExtractDir }
+            requiredAbis.each { abi ->
+              def aarJniDir = new File(aarExtractDir, "jni/${abi}")
+              if (aarJniDir.exists()) {
+                copy { from aarJniDir; into new File(jniLibsDir, abi) }
+              }
+            }
+            def libyuvIncludeDir = file("${project.projectDir}/src/main/cpp/include/libyuv")
+            def aarIncludeDir = new File(aarExtractDir, "include/libyuv")
+            def copiedHdr = false
+            if (aarIncludeDir.exists()) {
+              libyuvIncludeDir.mkdirs()
+              copy { from aarIncludeDir; into libyuvIncludeDir }
+              copiedHdr = true
+            }
+            def aarYuvH = new File(aarExtractDir, "include/libyuv.h")
+            if (aarYuvH.exists()) {
+              copy { from aarYuvH; into file("${project.projectDir}/src/main/cpp/include") }
+              copiedHdr = true
+            }
+            downloadDir.mkdirs()
+            libyuvVersionFile.text = currentLibyuvVersion
+            libyuvResolved = true
+            logPrebuilt("libyuv", "native", "MAVEN_AAR", aar.name)
+            if (!copiedHdr) {
+              logPrebuilt("libyuv", "headers", "unchanged", "no include/ in AAR")
+            }
+          } else {
+            println "[libyuv] MAVEN_AAR: libyuvAar empty --> trying GITHUB_RELEASE"
+          }
+        } catch (Exception e) {
+          println "[libyuv] MAVEN_AAR failed: ${e.message} --> trying GITHUB_RELEASE"
+        }
+      }
+    } else {
+      libyuvResolved = true
+      logPrebuilt("libyuv", "native", "LOCAL_SDK", currentLibyuvVersion)
     }
 
     // =====================================================================
@@ -889,19 +991,20 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
 
     // =====================================================================
-    // Stage 4: GITHUB_RELEASE fallback for sherpa / FFmpeg / libarchive / lexbor / libwebp
+    // Stage 4: GITHUB_RELEASE fallback for sherpa / FFmpeg / libarchive / lexbor / libyuv / libwebp
     // =====================================================================
     def repo = project.findProperty('prebuiltGitHubRepo') ?: getGitHubRepo()
     if (!repo) {
       def needFfmpeg = !sherpaOnnxDisableFfmpeg && !ffmpegResolved
       def needLibarchive = !sherpaOnnxDisableLibarchive && !libarchiveResolved
       def needLexbor = !lexborResolved
+      def needLibyuv = !libyuvResolved
       def needLibwebp = sherpaOnnxEnableLibwebp && !libwebpResolved
       def needPdfium = sherpaOnnxEnablePdfium && !pdfiumResolved
       def needSherpa = !sherpaResolved
-      if (needFfmpeg || needLibarchive || needLexbor || needLibwebp || needPdfium || needSherpa) {
+      if (needFfmpeg || needLibarchive || needLexbor || needLibyuv || needLibwebp || needPdfium || needSherpa) {
         println "[prebuilt] GITHUB_RELEASE: skipped (no repo). Set -PprebuiltGitHubRepo=owner/repo or git remote origin --> github.com"
-        println "[prebuilt]   still need: sherpa=${needSherpa}, ffmpeg=${needFfmpeg}, libarchive=${needLibarchive}, lexbor=${needLexbor}, libwebp=${needLibwebp}, pdfium=${needPdfium}"
+        println "[prebuilt]   still need: sherpa=${needSherpa}, ffmpeg=${needFfmpeg}, libarchive=${needLibarchive}, lexbor=${needLexbor}, libyuv=${needLibyuv}, libwebp=${needLibwebp}, pdfium=${needPdfium}"
         def diag = [
           "prebuiltGitHubRepo=${project.findProperty('prebuiltGitHubRepo') ?: '(not set)'}",
           "git remote origin=${getGitHubRepo() ?: '(not a GitHub URL or git unavailable)'}",
@@ -913,13 +1016,14 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           "ffmpegResolved=${ffmpegResolved}",
           "libarchiveResolved=${libarchiveResolved}",
           "lexborResolved=${lexborResolved}",
+          "libyuvResolved=${libyuvResolved}",
           "libwebpResolved=${libwebpResolved}",
           "pdfiumResolved=${pdfiumResolved}",
         ].join(", ")
         throw new RuntimeException(
           "Native libs/headers still missing and GitHub repo unknown. " +
           "Set -PprebuiltGitHubRepo=owner/repo or ensure git remote origin is a GitHub URL. " +
-          "Use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive / lexbor / libwebp / pdfium), run a Gradle Android build so prebuilts download, or ensure ANDROID_RELEASE_TAG GitHub releases exist. " +
+          "Use Maven (com.xdcobra.sherpa:ffmpeg / sherpa-onnx / libarchive / lexbor / libyuv / libwebp / pdfium), run a Gradle Android build so prebuilts download, or ensure ANDROID_RELEASE_TAG GitHub releases exist. " +
           (sherpaOnnxDisableFfmpeg ? "(FFmpeg disabled via sherpaOnnxDisableFfmpeg=true.) " : "") +
           (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.) " : "") +
           (!sherpaOnnxEnableLibwebp ? "(libwebp disabled via sherpaOnnxEnableLibwebp=false.) " : "") +
@@ -933,6 +1037,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         (!sherpaOnnxDisableFfmpeg && !ffmpegResolved) ||
         (!sherpaOnnxDisableLibarchive && !libarchiveResolved) ||
         (!lexborResolved) ||
+        (!libyuvResolved) ||
         (sherpaOnnxEnableLibwebp && !libwebpResolved) ||
         (sherpaOnnxEnablePdfium && !pdfiumResolved)
     if (willUseGithub) {
@@ -1039,6 +1144,44 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       downloadDir.mkdirs()
       lexborVersionFile.text = currentLexborVersion
       logPrebuilt("lexbor", "native", "GITHUB_RELEASE", tag)
+    }
+
+    if (!libyuvResolved) {
+      def tagFile = file("${project.projectDir.parent}/third_party/libyuv_prebuilt/ANDROID_RELEASE_TAG")
+      def tag = readReleaseTag(tagFile)
+      if (!tag) throw new RuntimeException("Missing or empty third_party/libyuv_prebuilt/ANDROID_RELEASE_TAG")
+      def zipFile = new File(downloadDir, "libyuv-android.zip")
+      def url = "${baseUrl}/${tag}/libyuv-android.zip"
+      project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
+      if (!zipFile.exists() || zipFile.length() == 0) throw new RuntimeException("Download failed or empty: ${url}")
+      def zipMagicYuv = new byte[2]
+      zipFile.withInputStream { it.read(zipMagicYuv) }
+      if (zipMagicYuv[0] != (byte) 0x50 || zipMagicYuv[1] != (byte) 0x4B) {
+        zipFile.delete()
+        throw new RuntimeException(
+            "Download is not a ZIP (got ${zipFile.length()} bytes). Release asset missing? ${url} — publish via build-libyuv-android-release workflow or use THIRD_PARTY under third_party/libyuv_prebuilt/android.")
+      }
+      def libyuvExtractDir = new File(downloadDir, "libyuv-extract")
+      if (libyuvExtractDir.exists()) libyuvExtractDir.deleteDir()
+      libyuvExtractDir.mkdirs()
+      copy { from zipTree(zipFile); into libyuvExtractDir }
+      copy {
+        from fileTree(libyuvExtractDir) { include 'arm64-v8a/**', 'armeabi-v7a/**', 'x86/**', 'x86_64/**' }
+        into jniLibsDir
+      }
+      def libyuvIncludeDir = file("${project.projectDir}/src/main/cpp/include/libyuv")
+      def libyuvIncludeInZip = new File(libyuvExtractDir, "include/libyuv")
+      if (libyuvIncludeInZip.exists()) {
+        libyuvIncludeDir.mkdirs()
+        copy { from libyuvIncludeInZip; into libyuvIncludeDir }
+      }
+      def yuvH = new File(libyuvExtractDir, "include/libyuv.h")
+      if (yuvH.exists()) {
+        copy { from yuvH; into file("${project.projectDir}/src/main/cpp/include") }
+      }
+      downloadDir.mkdirs()
+      libyuvVersionFile.text = currentLibyuvVersion
+      logPrebuilt("libyuv", "native", "GITHUB_RELEASE", tag)
     }
 
     if (sherpaOnnxEnableLibwebp && !libwebpResolved) {
@@ -1185,6 +1328,12 @@ project.tasks.register("checkJniLibs") {
         def soFile = new File(dir, soName)
         if (!soFile.exists()) {
           throw new RuntimeException("Missing required lexbor library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:lexbor resolves (see third_party/lexbor_prebuilt/README.md).")
+        }
+      }
+      requiredLibyuvSoFiles.each { soName ->
+        def soFile = new File(dir, soName)
+        if (!soFile.exists()) {
+          throw new RuntimeException("Missing required libyuv library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:libyuv resolves (see third_party/libyuv_prebuilt/README.md).")
         }
       }
       if (sherpaOnnxEnableLibwebp) {

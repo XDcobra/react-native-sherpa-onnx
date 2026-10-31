@@ -1107,6 +1107,9 @@ export interface Spec extends TurboModule {
     dpi?: number;
     sectionIndex?: number;
     href?: string;
+    sourceVideoBufferId?: string;
+    sourcePtsUs?: number;
+    sourceFrameIndex?: number;
   }>;
 
   /**
@@ -1126,6 +1129,9 @@ export interface Spec extends TurboModule {
     dpi?: number;
     sectionIndex?: number;
     href?: string;
+    sourceVideoBufferId?: string;
+    sourcePtsUs?: number;
+    sourceFrameIndex?: number;
   }>;
 
   releaseOfflineImageBuffer(bufferId: string): Promise<void>;
@@ -2845,6 +2851,12 @@ export interface Spec extends TurboModule {
    */
   cancelFileIO(operationId: string): Promise<void>;
 
+  /**
+   * Configure FileIO stream-materialize cache (`fileio_nofd`).
+   * `noFdCache.maxBytes` integer > 0; `noFdCache.maxAgeMs` integer >= 0.
+   */
+  configureFileIO(options?: Object): Promise<void>;
+
   // ==================== Helper - Assets ====================
 
   /**
@@ -3161,6 +3173,188 @@ export interface Spec extends TurboModule {
 
   /** Cancel network activity; does not delete the partial file. */
   cancelForegroundDownload(id: string): Promise<boolean>;
+
+  // ── VideoBuffer ────────────────────────────────────────────────────────
+
+  /**
+   * Probe video file duration from container metadata (no index, no HW decode).
+   * JS wrapper: `probeVideoFileDuration` from `react-native-sherpa-onnx/videobuffer`.
+   */
+  probeVideoFileDuration(source: Object): Promise<{
+    durationUs: number;
+    isExact: boolean;
+  }>;
+
+  /**
+   * Probe container format and video codec from file content (no VideoBuffer).
+   * JS wrapper: `probeVideoFileContainer` from `react-native-sherpa-onnx/videobuffer`.
+   */
+  probeVideoFileContainer(source: Object): Promise<{
+    inputFormatName: string;
+    codecName: string;
+    codedWidth: number;
+    codedHeight: number;
+    audioCodecName?: string;
+  }>;
+
+  createOfflineVideoBufferFromFile(
+    source: Object,
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    liveEdgeUs?: number;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: string;
+    seekableStartUs?: number;
+    seekableEndUs?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  createEmptyLiveVideoBuffer(options?: Object): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    liveEdgeUs?: number;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: string;
+    seekableStartUs?: number;
+    seekableEndUs?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  ingestFileToLiveVideoBuffer(
+    liveBufferId: string,
+    source: Object,
+    options?: Object
+  ): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  finalizeLiveVideoBuffer(liveBufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  getVideoBufferInfo(bufferId: string): Promise<{
+    bufferId: string;
+    kind: string;
+    state: string;
+    frameCount: number;
+    liveEdgeUs?: number;
+    totalFramesWritten?: number;
+    ringEvictedFrames?: number;
+    hasActiveSpool?: string;
+    seekableStartUs?: number;
+    seekableEndUs?: number;
+    audioCodec?: string;
+    audioDecodable?: string;
+    audioSampleRate?: number;
+    audioChannels?: number;
+    audioStartUs?: number;
+    audioDurationUs?: number;
+  }>;
+
+  getVideoKeyframeTimes(
+    bufferId: string,
+    fromUs: number,
+    toUs: number,
+    maxCount: number
+  ): Promise<number[]>;
+
+  releaseVideoBuffer(bufferId: string): Promise<void>;
+
+  createOfflineImageBufferFromVideo(
+    bufferId: string,
+    options?: Object
+  ): Promise<{
+    imageBufferId?: string;
+    frameCount?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  /**
+   * HW-transcode a VideoBuffer clip to a FileDestination (mp4/mov/mkv/webm).
+   * `destination` is a serialized FileDestination. `options`: codec, bitrate,
+   * fromUs, toUs, maxSide, operationId. Returns `{ outputKind, outputPath }`.
+   */
+  exportVideo(
+    bufferId: string,
+    destination: Object,
+    format: string,
+    options?: Object
+  ): Promise<{ outputKind: string; outputPath: string }>;
+
+  createOfflineAudioBufferFromVideo(
+    bufferId: string,
+    options?: Object
+  ): Promise<{
+    bufferId?: string;
+    kind?: string;
+    state?: string;
+    sampleRate?: number;
+    channelCount?: number;
+    numSamples?: number;
+    durationMs?: number;
+    storageKind?: string;
+    mediaStartMs?: number;
+    sourceCodec?: string;
+    sourceSampleRate?: number;
+    sourceChannels?: number;
+    errorCode?: string;
+    errorMessage?: string;
+  }>;
+
+  configureVideoBuffer(options?: Object): Promise<void>;
+
+  startLiveVideoAudioTap(
+    videoBufferId: string,
+    liveAudioBufferId: string,
+    targetSampleRateHz: number
+  ): Promise<void>;
+  stopLiveVideoAudioTap(videoBufferId: string): Promise<void>;
+
+  createVideoPreviewPlayer(bufferId: string, options?: Object): Promise<Object>;
+  videoPreviewPlay(playerId: string, requestId: string): Promise<void>;
+  videoPreviewPause(playerId: string, requestId: string): Promise<void>;
+  videoPreviewSeek(
+    playerId: string,
+    positionMs: number,
+    mode: string,
+    relative: boolean,
+    requestId: string
+  ): Promise<Object>;
+  videoPreviewSeekToLiveEdge(
+    playerId: string,
+    requestId: string
+  ): Promise<Object>;
+  videoPreviewStepFrame(
+    playerId: string,
+    direction: number,
+    requestId: string
+  ): Promise<Object>;
+  videoPreviewSetVolume(playerId: string, volume: number): Promise<void>;
+  videoPreviewSetMuted(playerId: string, muted: boolean): Promise<void>;
+  videoPreviewSetLoop(playerId: string, loop: boolean): Promise<void>;
+  videoPreviewSnapshot(playerId: string): Promise<Object>;
+  releaseVideoPreviewPlayer(playerId: string): Promise<void>;
 
   /** Required by NativeEventEmitter on RN iOS/Android. */
   addListener(eventName: string): void;

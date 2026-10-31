@@ -1,6 +1,7 @@
 // Resolve prebuilt versions from env, ANDROID_RELEASE_TAG files, or defaults.
 // Used by dependencies (AAR coordinates) and by prebuilt-download.gradle.
-// Returns version string from tag file (e.g. ffmpeg-android-v8.0.1 -> 8.0.1) or null if not found.
+// Returns version string from tag file (e.g. ffmpeg-android-v8.0.1-2 -> 8.0.1-2) or null if not found.
+// Trailing -N is our rebuild counter; there is no unsuffixed-tag fallback.
 def readVersionFromTagFile(File tagFile, String prefix) {
   if (!tagFile.exists()) return null
   def tag = tagFile.text.split(/\r?\n/).findResult { line ->
@@ -36,7 +37,7 @@ println "[react-native-sherpa-onnx] sherpa-onnx version (extracted/used): ${sher
 def ffmpegVersion = System.getenv('FFMPEG_VERSION')
 if (!ffmpegVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG'), 'ffmpeg-android-v')
-  ffmpegVersion = v ?: (project.hasProperty('ffmpegVersion') ? project.ffmpegVersion : '8.0.1')
+  ffmpegVersion = v ?: (project.hasProperty('ffmpegVersion') ? project.ffmpegVersion : '8.1.3-1')
 }
 project.ext.ffmpegVersion = ffmpegVersion
 println "[react-native-sherpa-onnx] ffmpeg version (extracted/used): ${ffmpegVersion}"
@@ -54,7 +55,7 @@ println "[react-native-sherpa-onnx] libarchive version (extracted/used): ${libar
 def libwebpVersion = System.getenv('LIBWEBP_VERSION')
 if (!libwebpVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/libwebp_prebuilt/ANDROID_RELEASE_TAG'), 'libwebp-android-v')
-  libwebpVersion = v ?: (project.hasProperty('libwebpVersion') ? project.libwebpVersion : '1.6.0')
+  libwebpVersion = v ?: (project.hasProperty('libwebpVersion') ? project.libwebpVersion : '1.6.0-1')
 }
 project.ext.libwebpVersion = libwebpVersion
 println "[react-native-sherpa-onnx] libwebp version (extracted/used): ${libwebpVersion}"
@@ -63,16 +64,25 @@ println "[react-native-sherpa-onnx] libwebp version (extracted/used): ${libwebpV
 def lexborVersion = System.getenv('LEXBOR_VERSION')
 if (!lexborVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG'), 'lexbor-android-v')
-  lexborVersion = v ?: (project.hasProperty('lexborVersion') ? project.lexborVersion : '3.0.0')
+  lexborVersion = v ?: (project.hasProperty('lexborVersion') ? project.lexborVersion : '3.0.0-1')
 }
 project.ext.lexborVersion = lexborVersion
 println "[react-native-sherpa-onnx] lexbor version (extracted/used): ${lexborVersion}"
+
+// libyuv: 1. LIBYUV_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
+def libyuvVersion = System.getenv('LIBYUV_VERSION')
+if (!libyuvVersion) {
+  def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/libyuv_prebuilt/ANDROID_RELEASE_TAG'), 'libyuv-android-v')
+  libyuvVersion = v ?: (project.hasProperty('libyuvVersion') ? project.libyuvVersion : '1976-1')
+}
+project.ext.libyuvVersion = libyuvVersion
+println "[react-native-sherpa-onnx] libyuv version (extracted/used): ${libyuvVersion}"
 
 // pdfium: 1. PDFIUM_VERSION env 2. ANDROID_RELEASE_TAG 3. property 4. default
 def pdfiumVersion = System.getenv('PDFIUM_VERSION')
 if (!pdfiumVersion) {
   def v = readVersionFromTagFile(new File(moduleRoot, 'third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG'), 'pdfium-android-v')
-  pdfiumVersion = v ?: (project.hasProperty('pdfiumVersion') ? project.pdfiumVersion : '8100')
+  pdfiumVersion = v ?: (project.hasProperty('pdfiumVersion') ? project.pdfiumVersion : '8100-1')
 }
 project.ext.pdfiumVersion = pdfiumVersion
 println "[react-native-sherpa-onnx] pdfium version (extracted/used): ${pdfiumVersion}"

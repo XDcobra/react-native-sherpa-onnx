@@ -73,4 +73,4 @@ Optional later: a **soft** “info” in detect (e.g. *“this directory is also
 ## 6. Related documents
 
 - Punctuation and offline/online detect — see internal buffer / detect docs and `src/licenses.ts` / model streams as updated with the product.  
-- [OfflineTextBuffer internal](../internal/offlinetextbuffer-internal.md) (offline text pipeline assumptions).
+- [OfflineTextBuffer internal](../internal/textbuffer/offlinetextbuffer-internal.md) (offline text pipeline assumptions).

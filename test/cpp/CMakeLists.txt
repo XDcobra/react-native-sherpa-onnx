@@ -4,6 +4,7 @@ cmake_minimum_required(VERSION 3.16)
 project(sherpa-onnx-host-cpp-tests LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_OBJCXX_STANDARD 17)
 
 set(MODEL_DETECT_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/model_detect")
 set(AUDIO_CONVERSION_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/audio_conversion")
@@ -827,4 +828,221 @@ add_test(NAME document_host_test COMMAND $<TARGET_FILE:document_host_test>)
 set_tests_properties(document_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
+
+# --- VideoBuffer host tests (C++ SOT; FakeDecoder, no device) ---
+# Compile libyuv from the submodule via third_party/libyuv_prebuilt wrapper CMake.
+# Other host-test jobs that do not init this submodule skip these targets.
+set(VIDEO_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/video")
+set(VIDEOBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/videobuffer")
+set(LIBYUV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libyuv")
+set(LIBYUV_PREBUILT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libyuv_prebuilt")
+if(EXISTS "${LIBYUV_ROOT}/include/libyuv.h")
+if(GTest_FOUND)
+  set(VIDEOBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+else()
+  set(VIDEOBUFFER_GTEST_LIBS gtest gtest_main)
+endif()
+
+if(NOT TARGET yuv)
+  add_subdirectory("${LIBYUV_PREBUILT}" "${CMAKE_CURRENT_BINARY_DIR}/libyuv")
+endif()
+
+set(VIDEOBUFFER_CORE_SOURCES
+  "${VIDEO_CPP_ROOT}/core/AlignedBuffer.cpp"
+  "${VIDEO_CPP_ROOT}/core/FileIo.cpp"
+  "${VIDEO_CPP_ROOT}/core/ColorConvert.cpp"
+  "${VIDEO_CPP_ROOT}/core/Timeline.cpp"
+  "${VIDEO_CPP_ROOT}/core/MemoryBudget.cpp"
+  "${VIDEO_CPP_ROOT}/core/FrameSlab.cpp"
+  "${VIDEO_CPP_ROOT}/core/DecodedFrameCache.cpp"
+  "${VIDEO_CPP_ROOT}/audio/AudioTimeline.cpp"
+  "${VIDEO_CPP_ROOT}/audio/AudioPacketReader.cpp"
+  "${VIDEO_CPP_ROOT}/audio/FfmpegAudioDecoder.cpp"
+  "${VIDEO_CPP_ROOT}/audio/VideoAudioExtractor.cpp"
+  "${VIDEO_CPP_ROOT}/audio/LiveAudioTap.cpp"
+  "${VIDEO_CPP_ROOT}/live/AudioPacketRing.cpp"
+  "${VIDEO_CPP_ROOT}/demux/BitstreamUtil.cpp"
+  "${VIDEO_CPP_ROOT}/demux/FfmpegDemuxer.cpp"
+  "${VIDEO_CPP_ROOT}/demux/FfmpegProbe.cpp"
+  "${VIDEO_CPP_ROOT}/decode/FakeDecoder.cpp"
+  "${VIDEO_CPP_ROOT}/decode/DecoderFactory.cpp"
+  "${VIDEO_CPP_ROOT}/decode/DecoderPool.cpp"
+  "${VIDEO_CPP_ROOT}/decode/DecodeSession.cpp"
+  "${VIDEO_CPP_ROOT}/decode/ThinningPlanner.cpp"
+  "${VIDEO_CPP_ROOT}/encode/EncoderFactory.cpp"
+  "${VIDEO_CPP_ROOT}/encode/FakeEncoder.cpp"
+  "${VIDEO_CPP_ROOT}/encode/VideoExportSession.cpp"
+  "${VIDEO_CPP_ROOT}/VideoEntry.cpp"
+  "${VIDEO_CPP_ROOT}/OfflineVideoEntry.cpp"
+  "${VIDEO_CPP_ROOT}/VideoRegistry.cpp"
+  "${VIDEO_CPP_ROOT}/VideoFrameAccess.cpp"
+  "${VIDEO_CPP_ROOT}/VideoPacketReader.cpp"
+  "${VIDEO_CPP_ROOT}/VideoImageBridge.cpp"
+  "${VIDEO_CPP_ROOT}/live/EncodedPacketRing.cpp"
+  "${VIDEO_CPP_ROOT}/live/PacketSpool.cpp"
+  "${VIDEO_CPP_ROOT}/live/LiveVideoEntry.cpp"
+  "${VIDEO_CPP_ROOT}/live/LiveIngest.cpp"
+  "${VIDEO_CPP_ROOT}/preview/PlaybackController.cpp"
+  "${VIDEO_CPP_ROOT}/preview/PlaybackClock.cpp"
+  "${VIDEO_CPP_ROOT}/preview/FrameScheduler.cpp"
+  "${VIDEO_CPP_ROOT}/preview/PreviewPlayer.cpp"
+)
+
+add_executable(videobuffer_core_host_test
+  "${VIDEOBUFFER_TEST_DIR}/aligned_buffer_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/fileio_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/colorconvert_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/timeline_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/bitstream_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/memory_budget_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/frame_slab_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/decoded_cache_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/decode_session_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/thinning_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/registry_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/live_ring_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/live_spool_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/iterator_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/decoder_pool_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/encoder_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/export_session_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/probe_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/audio_timeline_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/preview_controller_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/preview_live_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/preview_sync_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/clock_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/frame_scheduler_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/pcm_ring_test.cpp"
+  "${VIDEOBUFFER_TEST_DIR}/live_audio_test.cpp"
+  ${VIDEOBUFFER_CORE_SOURCES}
+)
+set(IMAGE_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image")
+set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
+target_sources(videobuffer_core_host_test PRIVATE
+  "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
+  "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
+  "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
+  "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+  "${PDF_CPP_ROOT}/PdfDocument.cpp"
+  "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
+  "${PDF_CPP_ROOT}/PdfLazySession.cpp"
+)
+target_include_directories(videobuffer_core_host_test PRIVATE
+  "${VIDEO_CPP_ROOT}"
+  "${VIDEOBUFFER_TEST_DIR}"
+  "${LIBYUV_ROOT}/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+  "${IMAGE_CPP_ROOT}"
+  "${IMAGE_CPP_ROOT}/decode"
+  "${PDF_CPP_ROOT}"
+)
+target_link_libraries(videobuffer_core_host_test PRIVATE
+  ${VIDEOBUFFER_GTEST_LIBS} yuv
+)
+find_package(Threads REQUIRED)
+target_link_libraries(videobuffer_core_host_test PRIVATE Threads::Threads)
+
+set(VIDEOBUFFER_SANITIZE "" CACHE STRING "asan|thread for videobuffer_core_host_test")
+if(VIDEOBUFFER_SANITIZE STREQUAL "address")
+  target_compile_options(videobuffer_core_host_test PRIVATE
+    -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(videobuffer_core_host_test PRIVATE
+    -fsanitize=address,undefined)
+elseif(VIDEOBUFFER_SANITIZE STREQUAL "thread")
+  target_compile_options(videobuffer_core_host_test PRIVATE
+    -fsanitize=thread -fno-omit-frame-pointer)
+  target_link_options(videobuffer_core_host_test PRIVATE -fsanitize=thread)
+endif()
+
+add_test(NAME videobuffer_core_host_test COMMAND $<TARGET_FILE:videobuffer_core_host_test>)
+set_tests_properties(videobuffer_core_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+if(TARGET PkgConfig::LIBAV)
+  add_executable(videobuffer_demux_host_test
+    "${VIDEOBUFFER_TEST_DIR}/demux_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/audio_demux_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/audio_decode_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/audio_extract_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/export_session_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/probe_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/live_audio_test.cpp"
+    ${VIDEOBUFFER_CORE_SOURCES}
+    "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
+    "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
+    "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
+    "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+    "${PDF_CPP_ROOT}/PdfDocument.cpp"
+    "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
+    "${PDF_CPP_ROOT}/PdfLazySession.cpp"
+  )
+  target_include_directories(videobuffer_demux_host_test PRIVATE
+    "${VIDEO_CPP_ROOT}"
+    "${VIDEOBUFFER_TEST_DIR}"
+    "${LIBYUV_ROOT}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
+    "${IMAGE_CPP_ROOT}"
+    "${IMAGE_CPP_ROOT}/decode"
+    "${PDF_CPP_ROOT}"
+  )
+  target_compile_definitions(videobuffer_demux_host_test PRIVATE HAVE_FFMPEG=1)
+  target_link_libraries(videobuffer_demux_host_test PRIVATE
+    PkgConfig::LIBAV ${VIDEOBUFFER_GTEST_LIBS} yuv Threads::Threads
+  )
+  if(VIDEOBUFFER_SANITIZE STREQUAL "address")
+    target_compile_options(videobuffer_demux_host_test PRIVATE
+      -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(videobuffer_demux_host_test PRIVATE
+      -fsanitize=address,undefined)
+  endif()
+  add_test(NAME videobuffer_demux_host_test COMMAND $<TARGET_FILE:videobuffer_demux_host_test>)
+  set_tests_properties(videobuffer_demux_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "videobuffer_demux_host_test enabled")
+endif()
+
+if(APPLE)
+  enable_language(OBJCXX)
+  add_executable(videobuffer_vt_host_test
+    "${VIDEOBUFFER_TEST_DIR}/vt_host_test.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../ios/videobuffer/VideoToolboxDecoder.mm"
+    "${VIDEO_CPP_ROOT}/core/AlignedBuffer.cpp"
+    "${VIDEO_CPP_ROOT}/core/FileIo.cpp"
+    "${VIDEO_CPP_ROOT}/demux/BitstreamUtil.cpp"
+    "${VIDEO_CPP_ROOT}/decode/DecoderFactory.cpp"
+    "${VIDEO_CPP_ROOT}/decode/FakeDecoder.cpp"
+  )
+  target_include_directories(videobuffer_vt_host_test PRIVATE
+    "${VIDEO_CPP_ROOT}"
+    "${VIDEOBUFFER_TEST_DIR}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../ios/videobuffer"
+    "${LIBYUV_ROOT}/include"
+  )
+  target_link_libraries(videobuffer_vt_host_test PRIVATE
+    ${VIDEOBUFFER_GTEST_LIBS}
+    "-framework VideoToolbox" "-framework CoreMedia" "-framework CoreVideo"
+    "-framework Foundation"
+  )
+  add_test(NAME videobuffer_vt_host_test COMMAND $<TARGET_FILE:videobuffer_vt_host_test>)
+  set_tests_properties(videobuffer_vt_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+
+  add_executable(videobuffer_sb_host_test
+    "${VIDEOBUFFER_TEST_DIR}/sb_host_test.mm"
+  )
+  target_link_libraries(videobuffer_sb_host_test PRIVATE
+    ${VIDEOBUFFER_GTEST_LIBS}
+    "-framework AVFoundation" "-framework CoreMedia" "-framework Foundation"
+    "-framework QuartzCore"
+  )
+  add_test(NAME videobuffer_sb_host_test COMMAND $<TARGET_FILE:videobuffer_sb_host_test>)
+endif()
+
+else()
+  message(STATUS "videobuffer host tests skipped (git submodule update --init third_party/libyuv)")
+endif()
 

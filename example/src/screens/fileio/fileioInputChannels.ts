@@ -16,6 +16,11 @@ import {
   TEST_CODEC_FILES,
 } from '../../audioConfig';
 import {
+  TEST_VIDEO_CODEC_FILES,
+  VIDEO_CODEC_ASSET_ENTRIES,
+  type VideoCodecSampleFormat,
+} from '../../videoConfig';
+import {
   fileSourceFromBundledPath,
   resolveAudioFileDisplayName,
   toFileSource,
@@ -38,7 +43,14 @@ export type FileioInputChannelId =
 
 export type FileioSampleSelection =
   | { kind: 'codec'; format: CodecAssetFormat }
-  | { kind: 'legacy' };
+  | { kind: 'legacy' }
+  | { kind: 'video'; format: VideoCodecSampleFormat };
+
+export function fileioSampleMedia(
+  selection: FileioSampleSelection
+): 'audio' | 'video' {
+  return selection.kind === 'video' ? 'video' : 'audio';
+}
 
 export type FileioInputSource = {
   fileSource: FileSource;
@@ -76,6 +88,12 @@ function sampleLabel(selection: FileioSampleSelection): string {
   if (selection.kind === 'legacy') {
     return 'Legacy WAV';
   }
+  if (selection.kind === 'video') {
+    return (
+      VIDEO_CODEC_ASSET_ENTRIES.find((e) => e.format === selection.format)
+        ?.label ?? selection.format.toUpperCase()
+    );
+  }
   return (
     CODEC_ASSET_ENTRIES.find((e) => e.format === selection.format)?.label ??
     selection.format.toUpperCase()
@@ -83,9 +101,13 @@ function sampleLabel(selection: FileioSampleSelection): string {
 }
 
 function sampleBundledPath(selection: FileioSampleSelection): string {
-  return selection.kind === 'legacy'
-    ? TEST_AUDIO_FILES.EN_1
-    : TEST_CODEC_FILES[selection.format];
+  if (selection.kind === 'legacy') {
+    return TEST_AUDIO_FILES.EN_1;
+  }
+  if (selection.kind === 'video') {
+    return TEST_VIDEO_CODEC_FILES[selection.format];
+  }
+  return TEST_CODEC_FILES[selection.format];
 }
 
 /** Canonical bundled read path (`app` + `files`), used as copy source. */
@@ -96,7 +118,7 @@ export function canonicalBundledFileSource(
   return fileSourceFromBundledPath(path);
 }
 
-export function listAllSampleSelections(): FileioSampleSelection[] {
+export function listAllAudioSampleSelections(): FileioSampleSelection[] {
   return [
     ...CODEC_ASSET_ENTRIES.map(
       (entry): FileioSampleSelection => ({
@@ -106,6 +128,19 @@ export function listAllSampleSelections(): FileioSampleSelection[] {
     ),
     { kind: 'legacy' },
   ];
+}
+
+export function listAllVideoSampleSelections(): FileioSampleSelection[] {
+  return VIDEO_CODEC_ASSET_ENTRIES.map(
+    (entry): FileioSampleSelection => ({
+      kind: 'video',
+      format: entry.format,
+    })
+  );
+}
+
+export function listAllSampleSelections(): FileioSampleSelection[] {
+  return [...listAllAudioSampleSelections(), ...listAllVideoSampleSelections()];
 }
 
 /** Automatic FileSource channels included in batch runs (excludes Pick channels). */
@@ -125,7 +160,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       title: 'app / apkAsset',
       platform: 'android',
       hint: isAndroid
-        ? 'APK assets/ (test_codec/sample.*) — default on Android'
+        ? 'APK assets/ (test_codec / test_videos sample.*) — default on Android'
         : 'Android-only',
       automatic: true,
       supported: isAndroid,
@@ -136,7 +171,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       title: 'app / appBundle',
       platform: 'ios',
       hint: isIos
-        ? 'Main bundle Resources (test_codec/sample.*) — default on iOS'
+        ? 'Main bundle Resources (test_codec / test_videos sample.*) — default on iOS'
         : 'iOS-only',
       automatic: true,
       supported: isIos,
@@ -197,7 +232,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       id: 'contentUri',
       title: 'contentUri',
       platform: 'android',
-      hint: 'SAF document URI — pick any audio file (Android)',
+      hint: 'SAF document URI — pick any audio or video file (Android)',
       automatic: false,
       supported: isAndroid,
       unsupportedReason: 'contentUri input is Android-only',
@@ -206,7 +241,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       id: 'securityScoped',
       title: 'securityScoped',
       platform: 'ios',
-      hint: 'Security-scoped URL — pick any audio file (iOS)',
+      hint: 'Security-scoped URL — pick any audio or video file (iOS)',
       automatic: false,
       supported: isIos,
       unsupportedReason: 'securityScoped input is iOS-only',
@@ -271,7 +306,7 @@ export async function resolveFileioInputSource(params: {
 
   if (channelId === 'contentUri' || channelId === 'securityScoped') {
     if (!manualPick) {
-      throw new Error('Choose an audio file for this FileSource channel.');
+      throw new Error('Choose a file for this FileSource channel.');
     }
     return {
       ...manualPick,
@@ -354,7 +389,7 @@ export async function pickFileioInputForChannel(
       resolveAudioFileDisplayName(uri, file.name) ??
       file.name?.trim() ??
       uri.split('/').pop()?.split('?')[0] ??
-      'Picked audio';
+      'Picked file';
 
     const fileSource: FileSource =
       channelId === 'securityScoped'

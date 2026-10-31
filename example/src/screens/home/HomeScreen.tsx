@@ -90,6 +90,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'video_preview',
+    sectionTitle: 'Vision',
+    title: 'Video Preview',
+    description:
+      'Play a bundled H.264 + AAC clip through OfflineVideoBuffer and VideoPreviewView',
+    icon: 'play-circle-outline',
+    screen: 'VideoPreview',
+    implemented: true,
+  },
+  {
     id: 'documents',
     sectionTitle: 'Documents (EPUB, MOBI, PDF, …)',
     title: 'Read aloud',
@@ -117,6 +127,16 @@ const FEATURES: HomeFeature[] = [
       'Real-time Mic/File → Streaming STT → Streaming TTS → Playback with event-driven segment forwarding',
     icon: 'git-compare',
     screen: 'LivePipelineShowcase',
+    implemented: true,
+  },
+  {
+    id: 'video_ocr_pipeline',
+    sectionTitle: 'Pipelines & Demos',
+    title: 'Video → OCR',
+    description:
+      'Preview a subtitled clip, sample frames into an ImageBuffer, then run OCR on every frame',
+    icon: 'film-outline',
+    screen: 'VideoOcrPipeline',
     implemented: true,
   },
   {

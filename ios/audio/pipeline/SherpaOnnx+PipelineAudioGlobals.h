@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -89,3 +90,15 @@ void pa_cleanupOrphanedOrchestrationFiles(int maxAgeSec = 3600);
 
 // Upgrade an in-memory entry to mmap if it exceeds the threshold.
 void pa_upgradeToMmapIfNeeded(const std::string &bufferId);
+
+void pa_register_decode_cancel(const std::string &opId,
+                               std::shared_ptr<std::atomic<bool>> flag);
+void pa_unregister_decode_cancel(const std::string &opId);
+
+bool pa_create_offline_from_f32_file(
+	const std::string &f32Path,
+	int sampleRate,
+	int channelCount,
+	std::string *bufferIdOut,
+	std::string *errorCode,
+	std::string *errorMessage);

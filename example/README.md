@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse / paddleocr_vl), e-document read-aloud (EPUB / FB2 / CBZ / PDF), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse / paddleocr_vl), video preview, Video → OCR, e-document read-aloud (EPUB / FB2 / CBZ / PDF), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -42,6 +42,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Test images (OCR)**      | `android/app/src/main/assets/test_images/`       | `ios/sherpa_models/test_images/`       |
 | **Test PDFs (text layer)** | `android/app/src/main/assets/test_pdfs/`         | `ios/sherpa_models/test_pdfs/`         |
 | **Test e-docs (Read aloud)** | `android/app/src/main/assets/test_edocs/`      | `ios/sherpa_models/test_edocs/`        |
+| **Test videos (Preview / OCR / File I/O)** | `android/app/src/main/assets/test_videos/`   | `ios/sherpa_models/test_videos/`       |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
 >
@@ -105,6 +106,14 @@ This screen demonstrates an end-to-end offline chain from file input to offline 
 |                                                                          |                                                                          |                                                                          |
 
 This screen demonstrates an end-to-end live pipeline: source input (mic/file) to streaming STT, then incremental TTS, then PCM playback with runtime metrics and finalize/save output flow. It is the main integration example for live buffer chaining and low-latency pipeline orchestration.
+
+## Video → OCR
+
+| ![Video OCR 1](../docs/images/example/video_ocr_1.png) | ![Video OCR 2](../docs/images/example/video_ocr_2.png) | ![Video OCR 3](../docs/images/example/video_ocr_3.png) |
+| ------------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------------ |
+|                                                        |                                                        |                                                        |
+
+Home section **Pipelines & Demos** → **Video → OCR**. End-to-end compose demo: play bundled `test_videos/ocr_subtitles_h264_aac.mp4` (H.264 Baseline + AAC, 8 s, burned-in captions) in `<VideoPreviewView>`, sample frames with `createOfflineImageBufferFromVideo` (default `sampling: 'fps', fps: 1`), preview the `OfflineImageBuffer`, then `createOCR().recognize` on every frame into an `OfflineTextBuffer`. OCR init reuses the same detect/init panel as Vision → OCR (bundled `ppocrv6-tiny`). See [docs/videobuffer-offline.md](../docs/videobuffer-offline.md) and [docs/ocr-offline.md](../docs/ocr-offline.md).
 
 ## Alignment (subtitles/timestamps)
 
@@ -182,9 +191,11 @@ This screen runs online punctuation over live text buffers. It shows incremental
 | -------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
 |                                                    |                                                    |                                                    |
 
-This screen validates file and conversion workflows, including loading local assets/files and exporting generated or transformed audio outputs. It is the UI reference for [docs/fileio.md](../docs/fileio.md) and [docs/audio-conversion.md](../docs/audio-conversion.md).
+This screen validates file and conversion workflows: **Probe**, **Decode**, and **Encode** over `FileSource` / `FileDestination`. **Run all audio samples** and **Run all video samples** can both be on (audio matrix first, then video). It is the UI reference for [docs/fileio.md](../docs/fileio.md), [docs/audio-conversion.md](../docs/audio-conversion.md), and [docs/videobuffer-offline.md](../docs/videobuffer-offline.md) (`probeVideoFileDuration` / `probeVideoFileContainer` / `exportVideo`).
 
-**Codec sandbox (`test_codec/`):** bundled samples for probe/decode/encode round-trips. Add files listed in `example/android/app/src/main/assets/test_codec/README.md` (Android) and `example/ios/sherpa_models/test_codec/README.md` (iOS), then rebuild. Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }` (APK `assets/`, not sandbox `files/`).
+**Audio sandbox (`test_codec/`):** probe (`probeAudioFileDuration` + `probeAudioFileContainer`), decode (`createOfflineAudioBufferFromFile`), encode (`saveAudioAsFile`). Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }`.
+
+**Video sandbox (`test_videos/sample.*`):** 1 s, 256×144 H.264 (AAC in MP4/MOV, Opus in MKV/WebM). Probe (duration + container sniff), decode (open + one JPEG frame), encode (`exportVideo` to mp4/mov/mkv/webm). WebM sample is H.264 in a Matroska shell (same as SDK export).
 
 ## Audio visualization showcase
 
@@ -271,7 +282,7 @@ This screen demonstrates true real-time streaming speaker diarization powered by
 | ![OCR offline 1](../docs/images/example/ocr_offline_1.png) | ![OCR offline 2](../docs/images/example/ocr_offline_2.png) | ![OCR offline 3](../docs/images/example/ocr_offline_3.png) |
 | ---------------------------------------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
 
-Offline image-to-text for the `ppocr`, `doctr`, `doc_vlm`, `nemotron_parse`, and `paddleocr_vl` families (`createOCR` / `recognize`). Images go through an `OfflineImageBuffer`; results land in an offline text buffer with optional spatial spans. Models can come from bundled assets, PAD packs, or the download manager (`ModelCategory.Ocr`). The example bundles the smallest published pack per family via [`scripts/model-download-config.json`](scripts/model-download-config.json): `ppocrv6-tiny`, `doctr-mobile`, `docvlm-granite-258m-q4f16`, `nemotron-3.5-parse-int8`, `paddleocr-vl-1.6-fp16`. See [docs/ocr-offline.md](../docs/ocr-offline.md).
+Offline image-to-text for the `ppocr`, `doctr`, `doc_vlm`, `nemotron_parse`, and `paddleocr_vl` families (`createOCR` / `recognize`). Images go through an `OfflineImageBuffer`; results land in an offline text buffer with optional spatial spans. Models can come from bundled assets, PAD packs, or the download manager (`ModelCategory.Ocr`). The example bundles `ppocrv6-tiny` via [`scripts/model-download-config.json`](scripts/model-download-config.json). Other OCR families are available through the download manager. See [docs/ocr-offline.md](../docs/ocr-offline.md).
 
 The same screen also picks bundled PDFs from `test_pdfs/` (`digital_hello.pdf` / `digital_multipage.pdf` / `scan_only_page.pdf` / `scan_only_multipage.pdf`) or a custom PDF. The example **shows the app-dev switch** (no SDK auto):
 
@@ -279,6 +290,13 @@ The same screen also picks bundled PDFs from `test_pdfs/` (`digital_hello.pdf` /
 2. On `ERR_PDF_NO_TEXT_LAYER` — unlock `rasterizePdfPages` → `OfflineImageBuffer` → `recognize` like an image.
 
 PDF pick still rasterizes for `OfflineImageBufferFrameView` preview (`lazy-lru`). Results keep the text buffer and draw boxes with [`OfflineImageBufferAnnotatedView`](../docs/imagebuffer-offline.md#offlineimagebufferannotatedview) for both `origin: ocr` (frame pixels) and `origin: textLayer` (PDF user-space mapped onto the frame). A path legend on the screen lists coords and overlay rules. The example opts in PDFium (`sherpaOnnxEnablePdfium=true` / `SHERPA_ONNX_ENABLE_PDFIUM=1`) and libwebp (`sherpaOnnxEnableLibwebp=true` / `SHERPA_ONNX_ENABLE_LIBWEBP=1`); consumer apps keep both SDK defaults off. See [docs/pdf-offline.md](../docs/pdf-offline.md) and [docs/imagebuffer-offline.md](../docs/imagebuffer-offline.md).
+
+## Video Preview
+
+| | ![Video Preview 1](../docs/images/example/video_preview_1.png) | |
+| --- | -------------------------------------------------------------- | --- |
+
+Home section **Vision** → **Video Preview**. Plays the bundled clip `test_videos/preview_h264_aac.mp4` (H.264 Baseline + AAC, 8 s, 640×360 test pattern) through `createOfflineVideoBufferFromFile` and `<VideoPreviewView>`. Controls: play/pause, seek, frame step, loop, mute. See [docs/videopreview.md](../docs/videopreview.md).
 
 ## Documents (read aloud)
 

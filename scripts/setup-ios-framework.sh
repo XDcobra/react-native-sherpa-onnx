@@ -104,6 +104,7 @@ else
 fi
 
 FRAMEWORK_SLUGS+=(lexbor)
+FRAMEWORK_SLUGS+=(libyuv)
 
 # libwebp is opt-in (default off) — only download when explicitly enabled.
 if [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-false}" = "true" ]; then
@@ -172,6 +173,17 @@ get_framework_config() {
       LIB_SIMULATOR="liblexbor.a"
       HEADER_CHECK="Headers/lexbor/html/parser.h"
       DISPLAY_NAME="lexbor"
+      ;;
+    libyuv)
+      TAG_FILE="$PROJECT_ROOT/third_party/libyuv_prebuilt/IOS_RELEASE_TAG"
+      TAG_PREFIX="libyuv-ios-v"
+      XCFRAMEWORK_NAME="libyuv.xcframework"
+      ZIP_ASSET_NAME="libyuv-ios.zip"
+      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-libyuv"
+      LIB_DEVICE="libyuv.a"
+      LIB_SIMULATOR="libyuv.a"
+      HEADER_CHECK="Headers/libyuv/convert.h"
+      DISPLAY_NAME="libyuv"
       ;;
     libwebp)
       TAG_FILE="$PROJECT_ROOT/third_party/libwebp_prebuilt/IOS_RELEASE_TAG"
@@ -245,7 +257,7 @@ get_installed_version() {
 
 # Get desired version from a framework's IOS_RELEASE_TAG file.
 # Usage: get_desired_version_from_tag <slug>
-# Output: version (e.g. 1.12.28 or 8.0.1) or empty if file/tag missing.
+# Output: version (e.g. 1.13.8-1 or 8.0.1-2) or empty if file/tag missing.
 get_desired_version_from_tag() {
   local slug="$1"
   get_framework_config "$slug" || return 1
@@ -296,7 +308,7 @@ fi
 
 # Explicit version on command line overrides sherpa-onnx only (backward compat)
 SHERPA_DESIRED_OVERRIDE=""
-if [ -n "$1" ] && [[ "$1" =~ ^[0-9]+\.([0-9]+\.)*[0-9]+$ ]]; then
+if [ -n "$1" ] && [[ "$1" =~ ^[0-9]+\.([0-9]+\.)*[0-9]+(-[0-9]+)?$ ]]; then
   SHERPA_DESIRED_OVERRIDE="$1"
 fi
 
@@ -356,7 +368,7 @@ fi
 # Require desired version for sherpa-onnx (main dependency)
 if [ -z "$(get_desired_version sherpa-onnx)" ]; then
   get_framework_config "sherpa-onnx" || true
-  echo -e "${RED}Error: IOS_RELEASE_TAG not found at $TAG_FILE or invalid format (expected ${TAG_PREFIX}X.Y.Z). Reinstall the package or run from repo.${NC}" >&2
+  echo -e "${RED}Error: IOS_RELEASE_TAG not found at $TAG_FILE or invalid format (expected ${TAG_PREFIX}X.Y.Z-N). Reinstall the package or run from repo.${NC}" >&2
   exit 1
 fi
 

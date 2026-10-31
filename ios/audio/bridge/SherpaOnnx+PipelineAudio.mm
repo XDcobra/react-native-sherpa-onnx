@@ -906,6 +906,80 @@ void pa_upgradeToMmapIfNeeded(const std::string &bufferId) {
   );
 }
 
+void pa_register_decode_cancel(const std::string &opId,
+                               std::shared_ptr<std::atomic<bool>> flag) {
+  std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+  g_pa_decodeCancelFlags[opId] = std::move(flag);
+}
+
+void pa_unregister_decode_cancel(const std::string &opId) {
+  std::lock_guard<std::mutex> lock(g_pa_decodeCancelMutex);
+  g_pa_decodeCancelFlags.erase(opId);
+}
+
+bool pa_create_offline_from_f32_file(
+  const std::string &f32Path,
+  int sampleRate,
+  int channelCount,
+  std::string *bufferIdOut,
+  std::string *errorCode,
+  std::string *errorMessage
+) {
+  if (!bufferIdOut || !errorCode || !errorMessage) return false;
+  struct stat st;
+  if (stat(f32Path.c_str(), &st) != 0 || st.st_size <= 0) {
+    *errorCode = "VIDEO_SPOOL_IO";
+    *errorMessage = "extract f32 missing";
+    return false;
+  }
+  int numSamples = (int)(st.st_size / (off_t)sizeof(float));
+  if (numSamples <= 0) {
+    *errorCode = "VIDEO_AUDIO_DECODE_FAILED";
+    *errorMessage = "no samples in range";
+    return false;
+  }
+  std::string bufferId = pa_generateId("off");
+  auto entry = std::make_shared<PaOfflineEntry>();
+  entry->bufferId = bufferId;
+  entry->sampleRate = sampleRate;
+  entry->channelCount = channelCount;
+  long threshold = pa_computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
+  if ((long)st.st_size >= threshold) {
+    auto region = PaMmapRegion::mapFile(f32Path, 0, true);
+    if (!region) {
+      unlink(f32Path.c_str());
+      *errorCode = "VIDEO_SPOOL_IO";
+      *errorMessage = "mmap extract f32";
+      return false;
+    }
+    entry->mmapRegion = std::move(region);
+  } else {
+    std::vector<float> samples((size_t)numSamples);
+    FILE *rf = fopen(f32Path.c_str(), "rb");
+    if (!rf) {
+      unlink(f32Path.c_str());
+      *errorCode = "VIDEO_SPOOL_IO";
+      *errorMessage = "read extract f32";
+      return false;
+    }
+    size_t nread = fread(samples.data(), sizeof(float), (size_t)numSamples, rf);
+    fclose(rf);
+    unlink(f32Path.c_str());
+    if (nread != (size_t)numSamples) {
+      *errorCode = "VIDEO_SPOOL_IO";
+      *errorMessage = "short extract f32";
+      return false;
+    }
+    entry->samples = std::move(samples);
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    g_pa_offline[bufferId] = entry;
+  }
+  *bufferIdOut = bufferId;
+  return true;
+}
+
 /**
  * Read Float32 PCM from a F32 WAV spool (skip 44-byte header).
  * Returns empty vector on failure.

@@ -59,6 +59,10 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/speaker-embedding/*.h",
     # Shared ImageBuffer core (decode + registry; JNI excluded below).
     "android/src/main/cpp/image/**/*.{h,cpp}",
+    # Shared VideoBuffer core (platform/android excluded below).
+    "android/src/main/cpp/video/**/*.{h,cpp}",
+    # libyuv common (ISA-flagged neon64 is a subspec).
+    "third_party/libyuv/source/*.cc",
     # Shared OCR core (factory + PpocrBackend + OcrEngine; JNI excluded below).
     "android/src/main/cpp/ocr/**/*.{h,cpp}",
     # Shared ORT provider attach (sherpa-style CPU fallback).
@@ -90,6 +94,18 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/diarization/sherpa-onnx-diarization-jni.cpp",
     "android/src/main/cpp/jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp",
     "android/src/main/cpp/jni/image/**/*",
+    "android/src/main/cpp/jni/video/**/*",
+    "android/src/main/cpp/video/platform/android/**/*",
+    "third_party/libyuv/source/*jpeg*",
+    "third_party/libyuv/source/*mjpeg*",
+    "third_party/libyuv/source/*_wasm.cc",
+    "third_party/libyuv/source/*_lsx.cc",
+    "third_party/libyuv/source/*_lasx.cc",
+    "third_party/libyuv/source/*_hvx.cc",
+    "third_party/libyuv/source/*_rvv.cc",
+    "third_party/libyuv/source/*_sme.cc",
+    "third_party/libyuv/source/*_sve.cc",
+    "third_party/libyuv/source/*_neon64.cc",
     "android/src/main/cpp/jni/ocr/**/*",
     "android/src/main/cpp/jni/pdf/**/*",
     "android/src/main/cpp/jni/document/**/*",
@@ -106,9 +122,10 @@ Pod::Spec.new do |s|
   private_headers += Dir.glob(File.join(pod_root, "android", "src", "main", "cpp", "**", "*.{h,hpp}"))
   private_headers += Dir.glob(File.join(pod_root, "ios", "**", "*.hpp"))
   private_headers += Dir.glob(File.join(pod_root, "third_party", "pugixml", "src", "**", "*.{h,hpp}"))
+  private_headers += Dir.glob(File.join(pod_root, "third_party", "libyuv", "include", "**", "*.h"))
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
 
-  s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox", "ImageIO", "CoreGraphics", "UIKit"
+  s.frameworks = "Foundation", "Accelerate", "CoreML", "AVFoundation", "AudioToolbox", "ImageIO", "CoreGraphics", "UIKit", "CoreMedia", "CoreVideo", "VideoToolbox"
 
   ffmpeg_xcframework = File.join(pod_root, "ios", "Frameworks", "FFmpeg.xcframework")
   libarchive_xcframework = File.join(pod_root, "ios", "Frameworks", "libarchive.xcframework")
@@ -204,6 +221,7 @@ Pod::Spec.new do |s|
   gcc_defs += ' HAVE_LIBARCHIVE=1' if has_libarchive
   gcc_defs += ' HAVE_LIBWEBP=1' if has_libwebp
   gcc_defs += ' HAVE_PDFIUM=1' if has_pdfium
+  gcc_defs += ' LIBYUV_DISABLE_JPEG=1 LIBYUV_DISABLE_SME=1 LIBYUV_DISABLE_SVE=1 LIBYUV_DISABLE_LSX=1 LIBYUV_DISABLE_LASX=1 LIBYUV_DISABLE_HVX=1 LIBYUV_DISABLE_RVV=1'
 
   ld_flags_base = '$(inherited)'
   if has_ffmpeg
@@ -249,6 +267,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/jni/audio\"",
     "\"#{pod_root}/android/src/main/cpp/image\"",
     "\"#{pod_root}/android/src/main/cpp/image/decode\"",
+    "\"#{pod_root}/android/src/main/cpp/video\"",
+    "\"#{pod_root}/third_party/libyuv/include\"",
     "\"#{pod_root}/android/src/main/cpp/ocr\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/markup\"",
     "\"#{pod_root}/android/src/main/cpp/ocr/ppocr\"",
@@ -266,6 +286,8 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/pdf\"",
     "\"#{pod_root}/ios/pdf/bridge\"",
     "\"#{pod_root}/ios\"",
+    "\"#{pod_root}/ios/videobuffer\"",
+    "\"#{pod_root}/ios/videobuffer/preview\"",
     "\"#{pod_root}/ios/archive\"",
     "\"#{pod_root}/ios/stt\"",
     "\"#{pod_root}/ios/tts\"",
@@ -362,6 +384,16 @@ Pod::Spec.new do |s|
   }
 
   s.libraries = "c++", "z", "iconv", "bz2"
+
+  # neon64 files only — ISA flags must not leak onto SDK translation units.
+  s.subspec "libyuv_neon64" do |n|
+    n.source_files = "third_party/libyuv/source/{compare,rotate,row,scale}_neon64.cc"
+    n.compiler_flags = "-march=armv8.2-a+dotprod+i8mm"
+    n.pod_target_xcconfig = {
+      "OTHER_CPLUSPLUSFLAGS[arch=arm64]" => "$(inherited) -march=armv8.2-a+dotprod+i8mm",
+      "GCC_PREPROCESSOR_DEFINITIONS" => gcc_defs
+    }
+  end
 
   # Per-release-model license metadata (synced from CI; same CSV as android/src/main/assets/model_licenses/).
   # Use resource_bundles so assets are packaged reliably across CocoaPods integration modes.

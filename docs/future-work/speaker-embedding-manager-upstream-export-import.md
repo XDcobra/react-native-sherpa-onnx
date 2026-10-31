@@ -7,7 +7,7 @@
 **Related (today):**
 
 - [speaker-identification-offline.md](../speaker-identification-offline.md) — `exportEnrollments` / `importEnrollments` (JS mirror)
-- [speaker-embedding-foundation.md](../internal/speaker-embedding-foundation.md) — persistence outside the extractor
+- [speaker-embedding-foundation.md](../internal/speaker-embedding/speaker-embedding-foundation.md) — persistence outside the extractor
 - Upstream C++: `third_party/sherpa-onnx/sherpa-onnx/csrc/speaker-embedding-manager.{h,cc}`
 - Upstream cxx-API: `SpeakerEmbeddingManager` in `c-api/cxx-api.h` — **GetEmbedding** pending upstream merge
 

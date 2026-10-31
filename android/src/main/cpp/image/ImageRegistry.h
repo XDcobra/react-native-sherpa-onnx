@@ -142,6 +142,9 @@ class ImageRegistry {
     int dpi = 0;
     int sectionIndex = -1;
     std::string href;
+    std::string sourceVideoBufferId;
+    int64_t sourcePtsUs = -1;
+    int64_t sourceFrameIndex = -1;
     uint64_t lruTick = 0;
   };
 
