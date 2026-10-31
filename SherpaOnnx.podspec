@@ -61,6 +61,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared VideoBuffer core (platform/android excluded below).
     "android/src/main/cpp/video/**/*.{h,cpp}",
+    "android/src/main/cpp/codec/**/*.{h,cpp}",
     # libyuv common (ISA-flagged neon64 is a subspec).
     "third_party/libyuv/source/*.cc",
     # Shared OCR core (factory + PpocrBackend + OcrEngine; JNI excluded below).
@@ -137,6 +138,13 @@ Pod::Spec.new do |s|
   disable_ffmpeg = ENV['SHERPA_ONNX_DISABLE_FFMPEG']
   if (!disable_ffmpeg || disable_ffmpeg == '0' || disable_ffmpeg == 'false') && File.exist?(ffmpeg_xcframework)
     has_ffmpeg = true
+  end
+  # Opt-in bundled H.264/HEVC SW decode: SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS=1
+  # selects the ffmpeg-vsw iOS asset in setup-ios-framework.sh. Runtime still
+  # uses avcodec_find_decoder; a default audio-only FFmpeg registers them disabled.
+  enable_video_sw = ENV['SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS']
+  if has_ffmpeg && (enable_video_sw == '1' || enable_video_sw == 'true')
+    Pod::UI.puts('[SherpaOnnx] VIDEO_SW_DECODERS requested; using installed FFmpeg.xcframework (avcodec_find_decoder at runtime).')
   end
 
   has_libarchive = false
@@ -288,6 +296,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios\"",
     "\"#{pod_root}/ios/videobuffer\"",
     "\"#{pod_root}/ios/videobuffer/preview\"",
+    "\"#{pod_root}/ios/imagebuffer\"",
     "\"#{pod_root}/ios/archive\"",
     "\"#{pod_root}/ios/stt\"",
     "\"#{pod_root}/ios/tts\"",

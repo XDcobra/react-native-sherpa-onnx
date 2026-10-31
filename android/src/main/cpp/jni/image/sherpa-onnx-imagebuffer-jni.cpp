@@ -242,7 +242,8 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeInit(
 
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromFiles(
-    JNIEnv* env, jclass, jobjectArray jPaths, jint maxSide, jint hotFrames) {
+    JNIEnv* env, jclass, jobjectArray jPaths, jint maxSide, jint hotFrames,
+    jstring jDecodePolicy) {
   jmethodID put = nullptr;
   jobject errMap = NewHashMap(env, &put);
   if (!jPaths) {
@@ -264,6 +265,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromFiles(
   sherpa_onnx::image::DecodeOptions opts;
   opts.maxSide = maxSide;
   opts.hotFrames = hotFrames;
+  opts.decodePolicy = JstringToStd(env, jDecodePolicy);
   auto result =
       sherpa_onnx::image::ImageRegistry::Instance().CreateFromFiles(paths, opts);
   if (!result.ok) {
@@ -281,7 +283,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromFiles(
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromBytesList(
     JNIEnv* env, jclass, jobjectArray jBlobs, jint maxSide, jint hotFrames,
-    jboolean fileOrigin) {
+    jboolean fileOrigin, jstring jDecodePolicy) {
   jmethodID put = nullptr;
   jobject errMap = NewHashMap(env, &put);
   if (!jBlobs) {
@@ -314,6 +316,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromBytesList(
   sherpa_onnx::image::DecodeOptions opts;
   opts.maxSide = maxSide;
   opts.hotFrames = hotFrames;
+  opts.decodePolicy = JstringToStd(env, jDecodePolicy);
   const auto pathType =
       fileOrigin ? sherpa_onnx::image::ImageThresholdPathType::FileOrigin
                  : sherpa_onnx::image::ImageThresholdPathType::HeapOrigin;
@@ -509,6 +512,11 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeGetFrameInfo(
     PutLong(env, map, put, "sourcePtsUs", info.sourcePtsUs);
     PutLong(env, map, put, "sourceFrameIndex", info.sourceFrameIndex);
   }
+  if (!info.decoderProvider.empty()) {
+    PutString(env, map, put, "decoderProvider", info.decoderProvider);
+    PutString(env, map, put, "decoderTier", info.decoderTier);
+    PutString(env, map, put, "decoderOrigin", info.decoderOrigin);
+  }
   return map;
 }
 
@@ -606,6 +614,11 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeEnsureFrame(
               ensured.info.sourceVideoBufferId);
     PutLong(env, map, put, "sourcePtsUs", ensured.info.sourcePtsUs);
     PutLong(env, map, put, "sourceFrameIndex", ensured.info.sourceFrameIndex);
+  }
+  if (!ensured.info.decoderProvider.empty()) {
+    PutString(env, map, put, "decoderProvider", ensured.info.decoderProvider);
+    PutString(env, map, put, "decoderTier", ensured.info.decoderTier);
+    PutString(env, map, put, "decoderOrigin", ensured.info.decoderOrigin);
   }
   return map;
 }

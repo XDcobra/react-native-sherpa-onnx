@@ -10,8 +10,13 @@ namespace video {
 
 class VideoToolboxDecoder : public DecoderBackend {
  public:
+  enum class Mode { Hardware, Software };
+
   VideoToolboxDecoder();
+  explicit VideoToolboxDecoder(Mode mode);
   ~VideoToolboxDecoder() override;
+  Mode mode() const { return mode_; }
+  bool usedHardware() const { return usedHardware_; }
   Status Configure(const VideoTrackInfo& track) override;
   Status Submit(const EncodedPacket& packet) override;
   Status Flush() override;
@@ -31,6 +36,8 @@ class VideoToolboxDecoder : public DecoderBackend {
   int submitCount_ = 0;
   int flushCount_ = 0;
   bool configured_ = false;
+  Mode mode_ = Mode::Hardware;
+  bool usedHardware_ = false;
 };
 
 }  // namespace video

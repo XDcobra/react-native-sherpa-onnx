@@ -84,6 +84,8 @@ struct DecodeOptions {
   int maxSide = 4096;
   /** Lazy file create only. 0 = default 8, clamped 1..32. Ignored by ImageDecoder. */
   int hotFrames = 0;
+  /** Empty = cascade default. "hardware" | "software" | "preferHardware". */
+  std::string decodePolicy;
 };
 
 struct LiveImageOptions {
@@ -113,6 +115,9 @@ struct ImageFrameInfo {
   std::string sourceVideoBufferId;
   int64_t sourcePtsUs = -1;
   int64_t sourceFrameIndex = -1;
+  std::string decoderProvider;
+  std::string decoderTier;
+  std::string decoderOrigin;
 };
 
 struct ImageBufferInfo {
@@ -157,6 +162,9 @@ struct DecodeResult {
   int orientationApplied = 1;  // EXIF 1..8; 1 = identity
   float scaleApplied = 1.f;
   RgbFrame frame;
+  std::string codecProvider;
+  std::string codecTier;
+  std::string codecOrigin;
 };
 
 }  // namespace image

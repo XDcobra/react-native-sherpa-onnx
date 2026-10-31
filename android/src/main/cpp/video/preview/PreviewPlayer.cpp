@@ -1,6 +1,9 @@
 #include "preview/PreviewPlayer.h"
 
 #include "VideoLog.h"
+#include "codec/CodecCatalog.h"
+#include "codec/CodecPolicy.h"
+#include "codec/CodecRuntime.h"
 #include "core/Timeline.h"
 #include "core/Uuid.h"
 
@@ -505,7 +508,33 @@ Status PreviewPlayer::AttachSurface(ANativeWindow* window, double refreshHz) {
   r->SetWindow(window);
   r->SetRefreshHz(refreshHz_);
   if (entry_ && entry_->packets()) {
-    auto st = r->Configure(entry_->packets()->track());
+    const VideoTrackInfo& track = entry_->packets()->track();
+    sherpa_onnx::codec::Request req;
+    req.media = sherpa_onnx::codec::Media::Video;
+    req.dir = sherpa_onnx::codec::Direction::Decode;
+    req.use = sherpa_onnx::codec::Use::Display;
+    req.stream.codec = VideoCodecName(track.codec);
+    req.stream.width = track.codedWidth;
+    req.stream.height = track.codedHeight;
+    req.policy = sherpa_onnx::codec::CodecRuntime::Instance().ResolveVideo(
+        sherpa_onnx::codec::Use::Display, opts_.decodePolicy,
+        entry_->decodePolicy());
+    req.ownerKey = id_;
+    const auto plan =
+        sherpa_onnx::codec::MakePlan(req, sherpa_onnx::codec::CodecCatalog::Instance());
+    for (const auto& step : plan.steps) {
+      if (!step.provider) continue;
+      auto lease = sherpa_onnx::codec::CodecArbiter::Instance().TryAcquire(
+          step.resource, id_);
+      if (!lease.ok()) continue;
+      displayLease_ = std::move(lease.value);
+      displayDecision_.tier = step.provider->tier;
+      displayDecision_.origin = step.provider->origin;
+      displayDecision_.provider = step.provider->name;
+      r->SetAllowedCodecName(step.provider->name);
+      break;
+    }
+    auto st = r->Configure(track);
     if (!st.ok) return st;
   }
   ownedVideo_ = std::move(r);

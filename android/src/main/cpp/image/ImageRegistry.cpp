@@ -1,5 +1,6 @@
 #include "ImageRegistry.h"
 
+#include "decode/ImageDecodeBackend.h"
 #include "ImageFileLazyBackend.h"
 #include "PdfLazyBackend.h"
 #include "live/LiveImageEntry.h"
@@ -169,6 +170,8 @@ void ImageRegistry::ConfigureThreshold(ImageThresholdPlatform platform,
 void ImageRegistry::SetCacheDir(const std::string& cacheDir) {
   std::lock_guard<std::mutex> lock(mu_);
   cacheDir_ = cacheDir;
+  RegisterPortableImageProviders();
+  RegisterPlatformImageProviders();
 }
 
 std::string ImageRegistry::NewBufferId() {
@@ -212,6 +215,9 @@ void ImageRegistry::FillFrameInfoLocked(const Frame& f, int frameIndex,
   out.sourceVideoBufferId = f.sourceVideoBufferId;
   out.sourcePtsUs = f.sourcePtsUs;
   out.sourceFrameIndex = f.sourceFrameIndex;
+  out.decoderProvider = f.decoderProvider;
+  out.decoderTier = f.decoderTier;
+  out.decoderOrigin = f.decoderOrigin;
 }
 
 bool ImageRegistry::WriteFrameToMmap(Frame& frame, const std::string& bufferId,
@@ -651,6 +657,11 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
       f.ram = std::move(rgb.rgb);
       f.pageNumber = rgb.pageNumber;
       f.dpi = rgb.dpi;
+      if (fileLazy) {
+        f.decoderProvider = fileLazy->lastProvider();
+        f.decoderTier = fileLazy->lastTier();
+        f.decoderOrigin = fileLazy->lastOrigin();
+      }
       TouchLruLocked(entry, frameIndex);
       UpgradeEntryLocked(entry);
       EvictUntilUnderLimitLocked(entry);

@@ -3893,7 +3893,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         "SherpaOnnx:video",
         "createOfflineFromFile kind=${source.getString("kind")} path=${demux.path}",
       )
-      val info = com.sherpaonnx.video.VideoBufferService.createOfflineFromFile(demux.path)
+      val decodePolicy =
+        if (options != null && options.hasKey("decodePolicy") && !options.isNull("decodePolicy")) {
+          options.getString("decodePolicy")
+        } else {
+          null
+        }
+      val info = com.sherpaonnx.video.VideoBufferService.createOfflineFromFile(
+        demux.path,
+        decodePolicy,
+      )
       val bufferId = info?.get("bufferId") as? String
       val err = info?.get("errorCode") as? String
       if (err.isNullOrEmpty() &&
@@ -3923,7 +3932,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val ring = if (options != null && options.hasKey("ringSeconds")) options.getInt("ringSeconds") else 10
       val retention = if (options != null && options.hasKey("retentionMode")) options.getInt("retentionMode") else 0
       val retPath = if (options != null && options.hasKey("retentionPath")) options.getString("retentionPath") else null
-      promise.resolve(videoInfoToWritableMap(com.sherpaonnx.video.VideoBufferService.createLive(ring, retention, retPath)))
+      val decodePolicy =
+        if (options != null && options.hasKey("decodePolicy") && !options.isNull("decodePolicy")) {
+          options.getString("decodePolicy")
+        } else {
+          null
+        }
+      promise.resolve(
+        videoInfoToWritableMap(
+          com.sherpaonnx.video.VideoBufferService.createLive(ring, retention, retPath, decodePolicy)
+        )
+      )
     } catch (e: Exception) {
       promise.reject("VIDEO_INTERNAL", e.message, e)
     }
@@ -4001,19 +4020,59 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun configureVideoBuffer(options: ReadableMap?, promise: Promise) {
     try {
       com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
-      var cpu = -1
-      var display = -1
-      if (options != null && options.hasKey("decoderBudget") && !options.isNull("decoderBudget")) {
-        val budget = options.getMap("decoderBudget")
-        if (budget != null) {
-          if (budget.hasKey("cpu") && !budget.isNull("cpu")) cpu = budget.getInt("cpu")
-          if (budget.hasKey("display") && !budget.isNull("display")) display = budget.getInt("display")
-        }
-      }
-      com.sherpaonnx.video.VideoBufferService.configureDecoderBudget(cpu, display)
       promise.resolve(null)
     } catch (e: Exception) {
       promise.reject("VIDEO_INVALID_ARGUMENT", e.message, e)
+    }
+  }
+
+  override fun configureCodecs(options: ReadableMap?, promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      fun str(map: ReadableMap?, key: String): String? =
+        if (map != null && map.hasKey(key) && !map.isNull(key)) map.getString(key) else null
+      fun budget(map: ReadableMap?, key: String): Int {
+        if (map == null || !map.hasKey(key) || map.isNull(key)) return 0
+        return map.getInt(key)
+      }
+      val video = if (options != null && options.hasKey("video") && !options.isNull("video")) {
+        options.getMap("video")
+      } else null
+      val image = if (options != null && options.hasKey("image") && !options.isNull("image")) {
+        options.getMap("image")
+      } else null
+      val budgets = if (options != null && options.hasKey("budgets") && !options.isNull("budgets")) {
+        options.getMap("budgets")
+      } else null
+      val err = com.sherpaonnx.video.VideoBufferService.configureCodecs(
+        str(video, "decode"),
+        str(video, "display"),
+        str(video, "encode"),
+        str(image, "decode"),
+        budget(budgets, "hwVideoDecode"),
+        budget(budgets, "hwVideoDisplay"),
+        budget(budgets, "hwVideoEncode"),
+        budget(budgets, "swVideoDecode"),
+        budget(budgets, "swVideoEncode"),
+        budget(budgets, "platformImageDecode"),
+      )
+      if (err != null) {
+        promise.reject(err, "configureCodecs failed")
+      } else {
+        promise.resolve(null)
+      }
+    } catch (e: Exception) {
+      promise.reject("CODEC_INVALID_ARGUMENT", e.message, e)
+    }
+  }
+
+  override fun getCodecInfo(promise: Promise) {
+    try {
+      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+      val json = com.sherpaonnx.video.VideoBufferService.codecInfoJson() ?: "{}"
+      promise.resolve(json)
+    } catch (e: Exception) {
+      promise.reject("CODEC_INVALID_ARGUMENT", e.message, e)
     }
   }
 
@@ -4246,6 +4305,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
         }
         @Suppress("UNCHECKED_CAST")
+        val decodePolicy =
+          if (options != null && options.hasKey("decodePolicy") && !options.isNull("decodePolicy")) {
+            options.getString("decodePolicy")
+          } else {
+            null
+          }
+        val encodePolicy =
+          if (options != null && options.hasKey("encodePolicy") && !options.isNull("encodePolicy")) {
+            options.getString("encodePolicy")
+          } else {
+            null
+          }
         val raw = com.sherpaonnx.video.VideoBufferService.exportVideo(
           bufferId,
           resolved.outputPath,
@@ -4257,6 +4328,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           maxSide,
           cancelFlagAddr,
           progressCallback,
+          decodePolicy,
+          encodePolicy,
         ) as? HashMap<String, Any>
         if (raw == null) {
           cleanupOutputFile(resolved.outputPath)
@@ -4497,6 +4570,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 4096
       val hotFrames = if (options != null && options.hasKey("hotFrames")) options.getInt("hotFrames") else 0
       val operationId = if (options != null && options.hasKey("operationId")) options.getString("operationId") else null
+      val decodePolicy =
+        if (options != null && options.hasKey("decodePolicy") && !options.isNull("decodePolicy")) {
+          options.getString("decodePolicy")
+        } else {
+          null
+        }
       val info = if (allFiles && paths.size == sources.size()) {
         com.sherpaonnx.image.ImageBufferService.createFromFiles(
           reactApplicationContext,
@@ -4504,6 +4583,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           maxSide,
           hotFrames,
           operationId,
+          decodePolicy,
         ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
       } else {
         blobs.clear()
@@ -4527,6 +4607,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           operationId,
           fileOrigin = true,
           hotFrames = hotFrames,
+          decodePolicy = decodePolicy,
         ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
       }
       promise.resolve(imageInfoToWritableMap(info))
@@ -4564,6 +4645,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 4096
       val hotFrames = if (options != null && options.hasKey("hotFrames")) options.getInt("hotFrames") else 0
       val operationId = if (options != null && options.hasKey("operationId")) options.getString("operationId") else null
+      val decodePolicy =
+        if (options != null && options.hasKey("decodePolicy") && !options.isNull("decodePolicy")) {
+          options.getString("decodePolicy")
+        } else {
+          null
+        }
       val info = com.sherpaonnx.image.ImageBufferService.createFromBytesList(
         reactApplicationContext,
         blobs,
@@ -4571,6 +4658,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         operationId,
         fileOrigin = false,
         hotFrames = hotFrames,
+        decodePolicy = decodePolicy,
       ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
       promise.resolve(imageInfoToWritableMap(info))
     } catch (e: Exception) {

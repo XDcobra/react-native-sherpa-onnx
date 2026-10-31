@@ -11,6 +11,10 @@
 #include "audio/VideoAudioExtractor.h"
 #include "core/Uuid.h"
 #include "../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "codec/CodecCatalog.h"
+#include "codec/CodecEvents.h"
+#include "codec/CodecRuntime.h"
+#include "codec/CodecTypes.h"
 #include "decode/DecoderBackend.h"
 #include "decode/DecoderPool.h"
 #include "live/LiveIngest.h"
@@ -24,6 +28,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unistd.h>
 #include <unordered_map>
@@ -75,6 +80,56 @@ void EnsureVideoInit() {
       return std::unique_ptr<sherpa_onnx::video::EncoderBackend>(
           new VideoToolboxEncoder());
     });
+    sherpa_onnx::video::SetNamedDecoderOpener([](const std::string& name) {
+      const auto mode = name.find(".sw") != std::string::npos
+                            ? VideoToolboxDecoder::Mode::Software
+                            : VideoToolboxDecoder::Mode::Hardware;
+      return std::unique_ptr<sherpa_onnx::video::DecoderBackend>(
+          new VideoToolboxDecoder(mode));
+    });
+    sherpa_onnx::video::SetNamedEncoderOpener([](const std::string& name) {
+      const auto mode = name.find(".sw") != std::string::npos
+                            ? VideoToolboxEncoder::Mode::Software
+                            : VideoToolboxEncoder::Mode::Hardware;
+      return std::unique_ptr<sherpa_onnx::video::EncoderBackend>(
+          new VideoToolboxEncoder(mode));
+    });
+    {
+      using sherpa_onnx::codec::CodecCatalog;
+      using sherpa_onnx::codec::Direction;
+      using sherpa_onnx::codec::Media;
+      using sherpa_onnx::codec::Origin;
+      using sherpa_onnx::codec::Provider;
+      using sherpa_onnx::codec::Reason;
+      using sherpa_onnx::codec::Tier;
+      const bool ios17 = @available(iOS 17.0, *);
+      const bool ios174 = @available(iOS 17.4, *);
+      auto add = [&](const char* name, const char* codec, Direction dir,
+                     Tier tier, bool avail, Reason reason) {
+        Provider p;
+        p.media = Media::Video;
+        p.dir = dir;
+        p.codec = codec;
+        p.tier = tier;
+        p.origin = Origin::Platform;
+        p.name = name;
+        p.caps.maxW = 8192;
+        p.caps.maxH = 8192;
+        p.available = avail;
+        p.unavailableReason = reason;
+        CodecCatalog::Instance().Register(std::move(p));
+      };
+      for (const char* codec : {"h264", "hevc"}) {
+        add("vt.hw", codec, Direction::Decode,
+            ios17 ? Tier::Hardware : Tier::Unknown, true, Reason::None);
+        add("vt.sw", codec, Direction::Decode, Tier::Software, ios17,
+            ios17 ? Reason::None : Reason::OsTooOld);
+        add("vt.hw", codec, Direction::Encode,
+            ios174 ? Tier::Hardware : Tier::Unknown, true, Reason::None);
+        add("vt.sw", codec, Direction::Encode, Tier::Software, ios174,
+            ios174 ? Reason::None : Reason::OsTooOld);
+      }
+    }
     SherpaVideoInstallMemoryPressureObserver();
     (void)reg.SweepOrphans();
     reg.SetEventSink([](const std::string &type, const std::string &bufferId,
@@ -87,6 +142,16 @@ void EnsureVideoInit() {
                         body:@{
                           @"type" : t ?: @"",
                           @"liveBufferId" : bid ?: @"",
+                          @"payload" : [NSString stringWithUTF8String:json.c_str()]
+                              ?: @"",
+                        }];
+    });
+    sherpa_onnx::codec::SetEventSink([](const std::string &json) {
+      SherpaOnnx *mod = gVideoModule;
+      if (mod == nil) return;
+      [mod sendEventWithName:@"SherpaOnnxCodecEvent"
+                        body:@{
+                          @"type" : @"codec",
                           @"payload" : [NSString stringWithUTF8String:json.c_str()]
                               ?: @"",
                         }];
@@ -129,7 +194,18 @@ NSDictionary *VideoInfoDict(const VideoBufferInfo &info) {
               ? info.audioRange.endUs - info.audioRange.startUs
               : 0);
   }
+  if (!info.decoderJson.empty()) {
+    dict[@"decoder"] = [NSString stringWithUTF8String:info.decoderJson.c_str()];
+  }
   return dict;
+}
+
+std::optional<sherpa_onnx::codec::Policy> PolicyFromDict(NSDictionary *options,
+                                                         NSString *key) {
+  if (![options isKindOfClass:[NSDictionary class]]) return std::nullopt;
+  id raw = options[key];
+  if (![raw isKindOfClass:[NSString class]]) return std::nullopt;
+  return sherpa_onnx::codec::ParsePolicy([(NSString *)raw UTF8String]);
 }
 
 NSDictionary *VideoError(const char *code, const std::string &msg) {
@@ -226,7 +302,6 @@ void BindVideoModule(SherpaOnnx *mod) {
                                  options:(NSDictionary *)options
                                  resolve:(RCTPromiseResolveBlock)resolve
                                   reject:(RCTPromiseRejectBlock)reject {
-  (void)options;
   BindVideoModule(self);
   if (![source isKindOfClass:[NSDictionary class]]) {
     reject(@"VIDEO_INVALID_ARGUMENT", @"source must be a FileSource", nil);
@@ -268,6 +343,7 @@ void BindVideoModule(SherpaOnnx *mod) {
     NSString *bid = [NSString stringWithUTF8String:r.value->id().c_str()];
     [FileIOResolver retainNofdPinForBuffer:bid path:path];
   }
+  r.value->SetDecodePolicy(PolicyFromDict(options, @"decodePolicy"));
   resolve(VideoInfoDict(r.value->Info()));
 }
 
@@ -298,6 +374,9 @@ void BindVideoModule(SherpaOnnx *mod) {
       break;
   }
   auto r = VideoRegistry::Instance().CreateLive(opts);
+  if (r.ok() && r.value) {
+    r.value->SetDecodePolicy(PolicyFromDict(options, @"decodePolicy"));
+  }
   resolve(VideoInfoDict(r.value->Info()));
 }
 
@@ -413,21 +492,64 @@ void BindVideoModule(SherpaOnnx *mod) {
 - (void)configureVideoBuffer:(NSDictionary *)options
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject {
+  (void)options;
   BindVideoModule(self);
-  id budget = options[@"decoderBudget"];
-  if ([budget isKindOfClass:[NSDictionary class]]) {
-    id cpu = budget[@"cpu"];
-    if ([cpu respondsToSelector:@selector(intValue)]) {
-      sherpa_onnx::video::DecoderPool::Instance().SetMaxSessions(
-          sherpa_onnx::video::DecoderClass::Cpu, [cpu intValue]);
-    }
-    id display = budget[@"display"];
-    if ([display respondsToSelector:@selector(intValue)]) {
-      sherpa_onnx::video::DecoderPool::Instance().SetMaxSessions(
-          sherpa_onnx::video::DecoderClass::Display, [display intValue]);
-    }
+  resolve(nil);
+}
+
+- (void)configureCodecs:(NSDictionary *)options
+                resolve:(RCTPromiseResolveBlock)resolve
+                 reject:(RCTPromiseRejectBlock)reject {
+  BindVideoModule(self);
+  EnsureVideoInit();
+  NSDictionary *video = [options isKindOfClass:[NSDictionary class]]
+                            ? options[@"video"]
+                            : nil;
+  NSDictionary *image = [options isKindOfClass:[NSDictionary class]]
+                            ? options[@"image"]
+                            : nil;
+  NSDictionary *budgets = [options isKindOfClass:[NSDictionary class]]
+                              ? options[@"budgets"]
+                              : nil;
+  auto cstr = [](id v) -> const char * {
+    if (![v isKindOfClass:[NSString class]]) return nullptr;
+    return [v UTF8String];
+  };
+  auto nint = [](id v) -> int {
+    if ([v respondsToSelector:@selector(intValue)]) return [v intValue];
+    return 0;
+  };
+  int b[6] = {
+      nint(budgets[@"hwVideoDecode"]), nint(budgets[@"hwVideoDisplay"]),
+      nint(budgets[@"hwVideoEncode"]),  nint(budgets[@"swVideoDecode"]),
+      nint(budgets[@"swVideoEncode"]),  nint(budgets[@"platformImageDecode"]),
+  };
+  auto st = sherpa_onnx::codec::CodecRuntime::Instance().ConfigureFromNative(
+      cstr(video[@"decode"]), cstr(video[@"display"]), cstr(video[@"encode"]),
+      cstr(image[@"decode"]), b);
+  if (b[0] > 0) {
+    sherpa_onnx::video::DecoderPool::Instance().SetMaxSessions(
+        sherpa_onnx::video::DecoderClass::Cpu, b[0]);
+  }
+  if (b[1] > 0) {
+    sherpa_onnx::video::DecoderPool::Instance().SetMaxSessions(
+        sherpa_onnx::video::DecoderClass::Display, b[1]);
+  }
+  if (!st.ok) {
+    reject([NSString stringWithUTF8String:st.errorCode.c_str()],
+           [NSString stringWithUTF8String:st.errorMessage.c_str()], nil);
+    return;
   }
   resolve(nil);
+}
+
+- (void)getCodecInfo:(RCTPromiseResolveBlock)resolve
+              reject:(RCTPromiseRejectBlock)reject {
+  BindVideoModule(self);
+  EnsureVideoInit();
+  const std::string json =
+      sherpa_onnx::codec::CodecRuntime::Instance().InfoJson();
+  resolve([NSString stringWithUTF8String:json.c_str()]);
 }
 
 - (void)startLiveVideoAudioTap:(NSString *)videoBufferId
@@ -695,6 +817,8 @@ void BindVideoModule(SherpaOnnx *mod) {
   opts.fromUs = fromUs;
   opts.toUs = toUs;
   opts.maxSide = maxSide;
+  opts.decodePolicy = PolicyFromDict(options, @"decodePolicy");
+  opts.encodePolicy = PolicyFromDict(options, @"encodePolicy");
   __weak SherpaOnnx *weakSelf = self;
   NSString *opIdNs = operationId;
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -729,11 +853,20 @@ void BindVideoModule(SherpaOnnx *mod) {
     }
     NSString *resultPath = wh.resultPath.length > 0 ? wh.resultPath : wh.filePath;
     [wh cleanup];
+    NSMutableDictionary *out = [@{
+      @"outputKind" : @"fs",
+      @"outputPath" : resultPath ?: wh.filePath,
+    } mutableCopy];
+    if (!opts.decoderDecision.provider.empty()) {
+      out[@"decoder"] = [NSString stringWithUTF8String:
+          sherpa_onnx::codec::DecisionToJson(opts.decoderDecision).c_str()];
+    }
+    if (!opts.encoderDecision.provider.empty()) {
+      out[@"encoder"] = [NSString stringWithUTF8String:
+          sherpa_onnx::codec::DecisionToJson(opts.encoderDecision).c_str()];
+    }
     dispatch_async(dispatch_get_main_queue(), ^{
-      resolve(@{
-        @"outputKind" : @"fs",
-        @"outputPath" : resultPath ?: wh.filePath,
-      });
+      resolve(out);
     });
   });
 }

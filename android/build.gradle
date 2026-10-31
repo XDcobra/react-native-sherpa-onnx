@@ -63,6 +63,8 @@ android {
   def sherpaOnnxEnableLibwebp = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
   // When true, PDFium is linked for PDF text-layer extract. Default false (opt-in; binary size).
   def sherpaOnnxEnablePdfium = (project.findProperty("sherpaOnnxEnablePdfium") ?: "false").toString().toLowerCase() in ["true", "1"]
+  // Opt-in FFmpeg variant with H.264/HEVC software video decoders (ffmpeg-vsw). Default off.
+  def sherpaOnnxEnableVideoSwDecoders = (project.findProperty("sherpaOnnxEnableVideoSwDecoders") ?: "false").toString().toLowerCase() in ["true", "1"]
 
   defaultConfig {
     minSdkVersion = getExtOrDefault("minSdkVersion")
@@ -76,7 +78,12 @@ android {
     externalNativeBuild {
       cmake {
         cppFlags "-std=c++17", "-Wall", "-Wextra", "-fvisibility=hidden"
-        def cmakeArgList = ["-DANDROID_STL=c++_shared"]
+        // Official NDK: APIs newer than minSdk via weak refs + __builtin_available.
+        // https://developer.android.com/ndk/guides/using-newer-apis
+        def cmakeArgList = [
+            "-DANDROID_STL=c++_shared",
+            "-DANDROID_WEAK_API_DEFS=ON",
+        ]
         if (sherpaOnnxDisableFfmpeg) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_FFMPEG=ON")
         if (sherpaOnnxDisableLibarchive) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_LIBARCHIVE=ON")
         if (sherpaOnnxEnableLibwebp) cmakeArgList.add("-DSHERPA_ONNX_ENABLE_LIBWEBP=ON")
@@ -192,7 +199,8 @@ dependencies {
 
   // Versions from prebuilt-versions.gradle; AARs used by prebuilt-download.gradle tasks.
   sherpaOnnxAar "com.xdcobra.sherpa:sherpa-onnx:${sherpaOnnxVersion}@aar"
-  ffmpegAar "com.xdcobra.sherpa:ffmpeg:${ffmpegVersion}@aar"
+  def enableVideoSwDecoders = (project.findProperty("sherpaOnnxEnableVideoSwDecoders") ?: "false").toString().toLowerCase() in ["true", "1"]
+  ffmpegAar "com.xdcobra.sherpa:ffmpeg${enableVideoSwDecoders ? '-vsw' : ''}:${ffmpegVersion}@aar"
   libarchiveAar "com.xdcobra.sherpa:libarchive:${libarchiveVersion}@aar"
   lexborAar "com.xdcobra.sherpa:lexbor:${lexborVersion}@aar"
   libyuvAar "com.xdcobra.sherpa:libyuv:${libyuvVersion}@aar"

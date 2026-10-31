@@ -124,7 +124,13 @@ Result<VideoFrameLease> VideoFrameIterator::Next() {
   fr.packed = req_.packed;
   const int flushesBefore = session_->flushCount();
   auto lease = session_->SeekAndAcquire(fr);
-  if (session_->flushCount() > flushesBefore) {
+  if (!lease.ok() && entry_->TryMidstreamSoftwareFallback()) {
+    session_ = entry_->StickySession();
+    if (session_) {
+      lease = session_->SeekAndAcquire(fr);
+    }
+  }
+  if (session_ && session_->flushCount() > flushesBefore) {
     ++seekCount_;
   } else if (index_ == 1) {
     ++seekCount_;
@@ -148,10 +154,19 @@ Result<VideoFrameLease> VideoFrameAccess::Acquire(const std::string& bufferId,
   }
   auto sess = e->StickySession();
   if (!sess) {
-    r.status = Status::Fail(kErrDecoderUnavailable, "session");
+    r.status = e->lastStickyError().ok
+                   ? Status::Fail(kErrDecoderUnavailable, "session")
+                   : e->lastStickyError();
     return r;
   }
-  return sess->SeekAndAcquire(req);
+  auto lease = sess->SeekAndAcquire(req);
+  if (!lease.ok() && e->TryMidstreamSoftwareFallback()) {
+    sess = e->StickySession();
+    if (sess) {
+      lease = sess->SeekAndAcquire(req);
+    }
+  }
+  return lease;
 }
 
 Result<VideoFrameIterator> VideoFrameAccess::Iterate(

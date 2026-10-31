@@ -26,6 +26,7 @@ class MediaCodecSurfaceRenderer : public IVideoRenderer {
 
   void SetWindow(ANativeWindow* window);
   void SetRefreshHz(double hz);
+  void SetAllowedCodecName(std::string name) { allowedName_ = std::move(name); }
   int64_t vsyncNs() const { return vsyncNs_.load(); }
 
   Status Configure(const VideoTrackInfo& track) override;

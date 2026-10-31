@@ -1,7 +1,10 @@
 #include "VideoRegistry.h"
 
 #include "VideoLog.h"
+#include "codec/CodecLog.h"
+#include "codec/CodecRuntime.h"
 #include "core/MemoryBudget.h"
+#include "decode/DecoderBackend.h"
 
 #include <chrono>
 #include <filesystem>
@@ -23,6 +26,9 @@ void VideoRegistry::SetCacheDir(std::string dir) {
 
 void VideoRegistry::ConfigureRam(uint64_t totalRamBytes) {
   MemoryBudget::Instance().Configure(MemoryBudget::ClassifyRam(totalRamBytes));
+  sherpa_onnx::video::RegisterBundledVideoSwDecoders();
+  sherpa_onnx::codec::CodecRuntime::Instance().Init(
+      static_cast<int64_t>(totalRamBytes));
 }
 
 void VideoRegistry::SetEventSink(EventFn fn) {

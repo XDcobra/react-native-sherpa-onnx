@@ -4,6 +4,7 @@
 
 #include "SampleBufferAudioRenderer.h"
 #include "VideoRegistry.h"
+#include "codec/CodecTypes.h"
 #include "preview/PreviewPlayer.h"
 
 #include <string>
@@ -85,6 +86,10 @@ void InstallPreviewSink(SherpaOnnx *mod) {
   popts.controller.pauseOnBackground = options[@"pauseOnBackground"] == nil ||
                                        [options[@"pauseOnBackground"] boolValue];
   popts.muted = [options[@"muted"] boolValue];
+  if ([options[@"decodePolicy"] isKindOfClass:[NSString class]]) {
+    popts.decodePolicy =
+        sherpa_onnx::codec::ParsePolicy([options[@"decodePolicy"] UTF8String]);
+  }
   if (options[@"progressIntervalMs"] != nil) {
     int interval = [options[@"progressIntervalMs"] intValue];
     if (interval < 50) interval = 50;

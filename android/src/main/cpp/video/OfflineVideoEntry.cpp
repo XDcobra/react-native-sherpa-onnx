@@ -61,6 +61,7 @@ VideoBufferInfo OfflineVideoEntry::Info() const {
       i.audioRange.endUs = tl->endUs();
     }
   }
+  FillCodecInfo(&i);
   return i;
 }
 

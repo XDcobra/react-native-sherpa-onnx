@@ -149,7 +149,9 @@ struct VideoToolboxEncoder::Impl {
   }
 };
 
-VideoToolboxEncoder::VideoToolboxEncoder() = default;
+VideoToolboxEncoder::VideoToolboxEncoder()
+    : VideoToolboxEncoder(Mode::Hardware) {}
+VideoToolboxEncoder::VideoToolboxEncoder(Mode mode) : mode_(mode) {}
 VideoToolboxEncoder::~VideoToolboxEncoder() { Close(); }
 
 Status VideoToolboxEncoder::Configure(const VideoTrackInfo& track, int bitrate) {
@@ -166,10 +168,29 @@ Status VideoToolboxEncoder::Configure(const VideoTrackInfo& track, int bitrate) 
   CMVideoCodecType codecType = track.codec == VideoCodec::Hevc
                                    ? kCMVideoCodecType_HEVC
                                    : kCMVideoCodecType_H264;
+  CFMutableDictionaryRef spec = CFDictionaryCreateMutable(
+      kCFAllocatorDefault, 1, &kCFTypeDictionaryKeyCallBacks,
+      &kCFTypeDictionaryValueCallBacks);
+#if defined(__IPHONE_17_4)
+  if (@available(iOS 17.4, *)) {
+    if (mode_ == Mode::Hardware) {
+      CFDictionarySetValue(
+          spec,
+          kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder,
+          kCFBooleanTrue);
+    } else {
+      CFDictionarySetValue(
+          spec,
+          kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder,
+          kCFBooleanFalse);
+    }
+  }
+#endif
   VTCompressionSessionRef session = nullptr;
   OSStatus st = VTCompressionSessionCreate(
       kCFAllocatorDefault, track.codedWidth, track.codedHeight, codecType,
-      nullptr, nullptr, nullptr, &Impl::Callback, impl_.get(), &session);
+      spec, nullptr, nullptr, &Impl::Callback, impl_.get(), &session);
+  CFRelease(spec);
   if (st != noErr || session == nullptr) {
     impl_.reset();
     return Status::Fail(kErrEncoderUnavailable, "VTCompressionSessionCreate");
@@ -209,6 +230,20 @@ Status VideoToolboxEncoder::Configure(const VideoTrackInfo& track, int bitrate) 
   VTCompressionSessionPrepareToEncodeFrames(session);
   VIDEO_LOGI("video.encode vt %dx%d fps=%d bitrate=%d", track.codedWidth,
              track.codedHeight, fps, br);
+#if defined(__IPHONE_17_4)
+  if (@available(iOS 17.4, *)) {
+    CFTypeRef used = nullptr;
+    const OSStatus pst = VTSessionCopyProperty(
+        session, kVTCompressionPropertyKey_UsingHardwareAcceleratedVideoEncoder,
+        kCFAllocatorDefault, &used);
+    int hw = -1;
+    if (pst == noErr && used != nullptr) {
+      hw = (used == kCFBooleanTrue) ? 1 : 0;
+      CFRelease(used);
+    }
+    VIDEO_LOGI("codec.vt encode hw=%d", hw);
+  }
+#endif
   return Status::Ok();
 }
 

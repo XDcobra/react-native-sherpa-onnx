@@ -12,6 +12,8 @@ import {
   exportOfflineImageBufferFrame,
   releaseOfflineImageBuffer,
 } from '../imagebuffer';
+import { configureCodecs } from '../codec';
+import type { CodecDecision } from '../codec/types';
 import { assertFileDestinationSupportedOnPlatform } from '../fileio/platformValidation';
 import type {
   FileDestination,
@@ -31,6 +33,7 @@ import type {
   CreateEmptyLiveVideoBufferOptions,
   CreateOfflineAudioFromVideoOptions,
   CreateOfflineImageFromVideoOptions,
+  CreateOfflineVideoBufferFromFileOptions,
   ExportVideoFrameOptions,
   ExportVideoOptions,
   IngestFileToLiveOptions,
@@ -134,6 +137,17 @@ export function resolvePipelineVideoBufferId(
   return id;
 }
 
+function parseCodecDecision(raw?: string): CodecDecision | undefined {
+  if (typeof raw !== 'string' || raw.length === 0) return undefined;
+  try {
+    const d = JSON.parse(raw) as CodecDecision;
+    if (!d || typeof d.provider !== 'string') return undefined;
+    return d;
+  } catch {
+    return undefined;
+  }
+}
+
 function mapAudio(raw: {
   audioCodec?: string;
   audioDecodable?: string;
@@ -172,6 +186,7 @@ function mapInfo(raw: {
   audioDurationUs?: number;
   errorCode?: string;
   errorMessage?: string;
+  decoder?: string;
 }): PipelineVideoBufferInfo {
   if (raw.errorCode) {
     throw new Error(`${raw.errorCode}: ${raw.errorMessage ?? ''}`);
@@ -190,6 +205,7 @@ function mapInfo(raw: {
       seekableStartUs: raw.seekableStartUs,
       seekableEndUs: raw.seekableEndUs,
       audio,
+      decoder: parseCodecDecision(raw.decoder),
     };
     return info;
   }
@@ -201,6 +217,7 @@ function mapInfo(raw: {
     seekableStartUs: raw.seekableStartUs,
     seekableEndUs: raw.seekableEndUs,
     audio,
+    decoder: parseCodecDecision(raw.decoder),
   };
   return info;
 }
@@ -278,12 +295,13 @@ export async function probeVideoFileContainer(
 }
 
 export async function createOfflineVideoBufferFromFile(
-  source: FileSource
+  source: FileSource,
+  options?: CreateOfflineVideoBufferFromFileOptions
 ): Promise<OfflineVideoBufferRef> {
   assertFileSource(source);
   const raw = await getNative().createOfflineVideoBufferFromFile(
     source as Object,
-    {}
+    options?.decodePolicy ? { decodePolicy: options.decodePolicy } : {}
   );
   const info = mapInfo(raw) as OfflineVideoBufferInfo;
   if (__DEV__) {
@@ -318,6 +336,7 @@ export async function createEmptyLiveVideoBuffer(
     ringSeconds: options?.ringSeconds ?? 10,
     retentionMode,
     retentionPath: path,
+    decodePolicy: options?.decodePolicy,
   });
   const info = mapInfo(raw) as LiveVideoBufferInfo;
   return {
@@ -425,6 +444,7 @@ export async function createOfflineImageBufferFromVideo(
     fps: options?.fps ?? 0,
     maxSide: options?.maxSide ?? 0,
     timesUs: options?.timesUs,
+    decodePolicy: options?.decodePolicy,
   });
   if (raw.errorCode) {
     if (__DEV__) {
@@ -468,15 +488,6 @@ export function subscribeLiveVideoBufferEvents(
     }
   );
   return () => sub.remove();
-}
-
-function assertBudgetLimit(value: number | undefined, field: string): void {
-  if (value === undefined) return;
-  if (!Number.isInteger(value) || value < 1 || value > 4) {
-    throw new Error(
-      `VIDEO_INVALID_ARGUMENT: decoderBudget.${field} must be an integer in [1, 4]`
-    );
-  }
 }
 
 export async function createOfflineAudioBufferFromVideo(
@@ -580,21 +591,9 @@ export async function createOfflineAudioBufferFromVideo(
 }
 
 export async function configureVideoBuffer(
-  options?: ConfigureVideoBufferOptions
+  _options?: ConfigureVideoBufferOptions
 ): Promise<void> {
-  const cpu = options?.decoderBudget?.cpu;
-  const display = options?.decoderBudget?.display;
-  assertBudgetLimit(cpu, 'cpu');
-  assertBudgetLimit(display, 'display');
-  await getNative().configureVideoBuffer({
-    decoderBudget:
-      cpu !== undefined || display !== undefined
-        ? {
-            ...(cpu !== undefined ? { cpu } : {}),
-            ...(display !== undefined ? { display } : {}),
-          }
-        : undefined,
-  });
+  await configureCodecs();
 }
 
 export async function createLiveAudioBufferFromLiveVideo(
@@ -716,6 +715,8 @@ export async function exportVideo(
         toUs: toUs !== undefined ? Math.trunc(toUs) : undefined,
         maxSide: Math.trunc(maxSide),
         operationId,
+        decodePolicy: options?.decodePolicy,
+        encodePolicy: options?.encodePolicy,
       }
     );
     if (__DEV__) {
@@ -762,6 +763,7 @@ export type {
   CreateEmptyLiveVideoBufferOptions,
   CreateOfflineAudioFromVideoOptions,
   CreateOfflineImageFromVideoOptions,
+  CreateOfflineVideoBufferFromFileOptions,
   ExportVideoFrameOptions,
   ExportVideoOptions,
   IngestFileToLiveOptions,
@@ -783,7 +785,6 @@ export type {
   PipelineVideoBufferKind,
   VideoAudioExtractResult,
   VideoAudioTrackInfo,
-  VideoDecoderBudget,
   VideoExportCodec,
   VideoExportContainer,
   VideoFileContainerProbe,

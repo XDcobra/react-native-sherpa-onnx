@@ -2,6 +2,9 @@
 #include "VideoImageBridge.h"
 #include "VideoLog.h"
 #include "VideoRegistry.h"
+#include "codec/CodecEvents.h"
+#include "codec/CodecRuntime.h"
+#include "codec/CodecTypes.h"
 #include "audio/LiveAudioTap.h"
 #include "audio/VideoAudioExtractor.h"
 #include "core/Uuid.h"
@@ -193,6 +196,9 @@ jobject InfoToMap(JNIEnv* env, const sherpa_onnx::video::VideoBufferInfo& info) 
                 ? info.audioRange.endUs - info.audioRange.startUs
                 : 0);
   }
+  if (!info.decoderJson.empty()) {
+    PutString(env, map, put, "decoder", info.decoderJson);
+  }
   return map;
 }
 
@@ -218,6 +224,9 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeInit(JNIEnv* env, jclass,
         new sherpa_onnx::video::AMediaCodecEncoder());
   });
   InstallAndroidEventSink(env);
+  sherpa_onnx::codec::SetEventSink([](const std::string& json) {
+    EmitVideoEvent("SherpaOnnxCodecEvent", "codec", "", json);
+  });
   const int n = reg.SweepOrphans();
   LOGI("VideoBuffer init orphanSweep=%d", n);
 }
@@ -236,6 +245,61 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeConfigureDecoderBudget(
   LOGI("VideoBuffer decoderBudget cpu=%d display=%d",
        DecoderPool::Instance().maxSessions(DecoderClass::Cpu),
        DecoderPool::Instance().maxSessions(DecoderClass::Display));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_video_VideoBufferNative_nativeConfigureCodecs(
+    JNIEnv* env, jclass, jstring videoDecode, jstring videoDisplay,
+    jstring videoEncode, jstring imageDecode, jint hwDec, jint hwDisp,
+    jint hwEnc, jint swDec, jint swEnc, jint img) {
+  const int budgets[6] = {hwDec, hwDisp, hwEnc, swDec, swEnc, img};
+  auto toUtf = [&](jstring s) -> std::string {
+    if (!s) return {};
+    const char* c = env->GetStringUTFChars(s, nullptr);
+    std::string out = c ? c : "";
+    if (c) env->ReleaseStringUTFChars(s, c);
+    return out;
+  };
+  const std::string vd = toUtf(videoDecode);
+  const std::string vdi = toUtf(videoDisplay);
+  const std::string ve = toUtf(videoEncode);
+  const std::string imgP = toUtf(imageDecode);
+  auto st = sherpa_onnx::codec::CodecRuntime::Instance().ConfigureFromNative(
+      vd.empty() ? nullptr : vd.c_str(), vdi.empty() ? nullptr : vdi.c_str(),
+      ve.empty() ? nullptr : ve.c_str(), imgP.empty() ? nullptr : imgP.c_str(),
+      budgets);
+  if (hwDec > 0) {
+    DecoderPool::Instance().SetMaxSessions(DecoderClass::Cpu, hwDec);
+  }
+  if (hwDisp > 0) {
+    DecoderPool::Instance().SetMaxSessions(DecoderClass::Display, hwDisp);
+  }
+  if (!st.ok) {
+    return env->NewStringUTF(st.errorCode.c_str());
+  }
+  return nullptr;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_video_VideoBufferNative_nativeGetCodecInfo(JNIEnv* env,
+                                                               jclass) {
+  const std::string json =
+      sherpa_onnx::codec::CodecRuntime::Instance().InfoJson();
+  return env->NewStringUTF(json.c_str());
+}
+
+JNIEXPORT void JNICALL
+Java_com_sherpaonnx_video_VideoBufferNative_nativeRegisterVideoCodec(
+    JNIEnv* env, jclass, jstring name, jstring codec, jboolean encoder,
+    jboolean hardware, jint minW, jint minH, jint maxW, jint maxH, jint alignW,
+    jint alignH, jlong maxBlocks, jint blockW, jint blockH, jint maxInstances,
+    jdouble fps1080) {
+  const std::string n = JstringToStd(env, name);
+  const std::string c = JstringToStd(env, codec);
+  sherpa_onnx::video::RegisterNamedVideoCodec(
+      n.c_str(), c.c_str(), encoder == JNI_TRUE, hardware == JNI_TRUE, minW,
+      minH, maxW, maxH, alignW, alignH, static_cast<int64_t>(maxBlocks), blockW,
+      blockH, maxInstances, fps1080);
 }
 
 JNIEXPORT void JNICALL
@@ -567,11 +631,21 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeStopLiveAudioTap(
   return JNI_TRUE;
 }
 
+JNIEXPORT void JNICALL
+Java_com_sherpaonnx_video_VideoBufferNative_nativeSetDecodePolicy(
+    JNIEnv* env, jclass, jstring jId, jstring jPolicy) {
+  auto e = VideoRegistry::Instance().Get(JstringToStd(env, jId));
+  if (!e) return;
+  const std::string p = JstringToStd(env, jPolicy);
+  e->SetDecodePolicy(sherpa_onnx::codec::ParsePolicy(p));
+}
+
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
     JNIEnv* env, jclass, jstring jId, jstring jOutPath, jstring jFormat,
     jstring jCodec, jint bitrate, jlong fromUs, jlong toUs, jint maxSide,
-    jlong cancelAddr, jobject progress) {
+    jlong cancelAddr, jobject progress, jstring jDecodePolicy,
+    jstring jEncodePolicy) {
   using sherpa_onnx::video::VideoCodec;
   using sherpa_onnx::video::VideoExportOptions;
   using sherpa_onnx::video::VideoExportSession;
@@ -584,6 +658,10 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
   opts.fromUs = fromUs;
   opts.toUs = toUs;
   opts.maxSide = maxSide;
+  opts.decodePolicy =
+      sherpa_onnx::codec::ParsePolicy(JstringToStd(env, jDecodePolicy));
+  opts.encodePolicy =
+      sherpa_onnx::codec::ParsePolicy(JstringToStd(env, jEncodePolicy));
   std::atomic<bool>* cancel =
       cancelAddr != 0 ? reinterpret_cast<std::atomic<bool>*>(cancelAddr)
                       : nullptr;
@@ -611,9 +689,20 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
   if (!st.ok) {
     PutString(env, map, put, "errorCode", st.errorCode);
     PutString(env, map, put, "errorMessage", st.errorMessage);
+    if (!st.codecReason.empty()) {
+      PutString(env, map, put, "codecReason", st.codecReason);
+    }
     return map;
   }
   PutString(env, map, put, "ok", "true");
+  if (!opts.decoderDecision.provider.empty()) {
+    PutString(env, map, put, "decoder",
+              sherpa_onnx::codec::DecisionToJson(opts.decoderDecision));
+  }
+  if (!opts.encoderDecision.provider.empty()) {
+    PutString(env, map, put, "encoder",
+              sherpa_onnx::codec::DecisionToJson(opts.encoderDecision));
+  }
   return map;
 }
 

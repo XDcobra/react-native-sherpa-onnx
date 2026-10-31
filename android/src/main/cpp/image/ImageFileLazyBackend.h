@@ -38,10 +38,17 @@ class ImageFileLazyBackend {
   bool DecodeFrame(int index, RgbFrame* out, std::string* err_code,
                    std::string* err_message);
 
+  const std::string& lastProvider() const { return lastProvider_; }
+  const std::string& lastTier() const { return lastTier_; }
+  const std::string& lastOrigin() const { return lastOrigin_; }
+
  private:
   DecodeOptions opts_;
   std::vector<Slot> slots_;
   std::atomic<int> decode_count_{0};
+  std::string lastProvider_;
+  std::string lastTier_;
+  std::string lastOrigin_;
 };
 
 }  // namespace image

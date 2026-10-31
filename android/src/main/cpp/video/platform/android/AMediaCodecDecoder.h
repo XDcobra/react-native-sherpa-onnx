@@ -31,6 +31,7 @@ class AMediaCodecDecoder : public DecoderBackend {
   void Close() override;
   int submitCount() const override { return submitCount_; }
   int flushCount() const override { return flushCount_; }
+  bool IsReclaimed() const override { return reclaimed_; }
   void SetAllowedCodecName(std::string name) { allowedName_ = std::move(name); }
 
   static void SetGlobalHwDecoderName(VideoCodec codec, std::string name);
@@ -56,6 +57,7 @@ class AMediaCodecDecoder : public DecoderBackend {
   int flushCount_ = 0;
   bool configured_ = false;
   bool queuedSinceStart_ = false;
+  bool reclaimed_ = false;
   std::atomic<uint64_t> imageGen_{0};
   std::mutex outMu_;
   std::condition_variable outCv_;

@@ -6,6 +6,9 @@
 #include <string>
 
 #include "VideoTypes.h"
+#include "codec/CodecTypes.h"
+
+#include <optional>
 
 namespace sherpa_onnx {
 namespace video {
@@ -16,6 +19,10 @@ struct VideoExportOptions {
   int64_t fromUs = 0;
   int64_t toUs = -1;
   int maxSide = 0;
+  std::optional<sherpa_onnx::codec::Policy> decodePolicy;
+  std::optional<sherpa_onnx::codec::Policy> encodePolicy;
+  sherpa_onnx::codec::Decision decoderDecision;
+  sherpa_onnx::codec::Decision encoderDecision;
 };
 
 class VideoExportSession {
@@ -23,7 +30,7 @@ class VideoExportSession {
   using ProgressFn = std::function<void(int percent, int64_t encodedUs)>;
 
   static Status Run(const std::string& bufferId, const std::string& outPath,
-                    const std::string& format, const VideoExportOptions& opts,
+                    const std::string& format, VideoExportOptions& opts,
                     std::atomic<bool>* cancel, ProgressFn progress);
 };
 

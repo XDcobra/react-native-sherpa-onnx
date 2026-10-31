@@ -4,6 +4,8 @@
 #include "VideoLog.h"
 #include "VideoRegistry.h"
 #include "audio/VideoAudioExtractor.h"
+#include "codec/CodecRuntime.h"
+#include "codec/CodecSelector.h"
 #include "core/Uuid.h"
 #include "demux/BitstreamUtil.h"
 #include "encode/EncoderBackend.h"
@@ -11,6 +13,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 #include <fcntl.h>
 #include <memory>
 #include <unistd.h>
@@ -366,7 +369,7 @@ Status MuxAudioFromPcm(AVFormatContext* fmt, AVStream* as, AVCodecContext* enc,
 Status VideoExportSession::Run(const std::string& bufferId,
                                const std::string& outPath,
                                const std::string& format,
-                               const VideoExportOptions& opts,
+                               VideoExportOptions& opts,
                                std::atomic<bool>* cancel, ProgressFn progress) {
   if (bufferId.empty() || outPath.empty()) {
     return Status::Fail(kErrInvalidArgument, "export path");
@@ -417,11 +420,6 @@ Status VideoExportSession::Run(const std::string& bufferId,
   }
   const int64_t rangeUs = toUs - fromUs;
 
-  auto factory = GetEncoderFactory();
-  auto encoder = factory ? factory() : nullptr;
-  if (!encoder) {
-    return Status::Fail(kErrEncoderUnavailable, "no encoder factory");
-  }
   VideoTrackInfo encTrack = srcTrack;
   encTrack.codec = opts.codec;
   encTrack.codedWidth = outW;
@@ -430,16 +428,57 @@ Status VideoExportSession::Run(const std::string& bufferId,
   encTrack.displayHeight = outH;
   encTrack.nominalFps = {fps, 1};
   encTrack.transform = {};
-  auto cfg = encoder->Configure(encTrack, opts.bitrate);
-  if (!cfg.ok) {
-    encoder->Close();
-    return cfg;
-  }
 
-  if (!entry->StickySession()) {
+  sherpa_onnx::codec::Request creq;
+  creq.media = sherpa_onnx::codec::Media::Video;
+  creq.dir = sherpa_onnx::codec::Direction::Encode;
+  creq.use = sherpa_onnx::codec::Use::Export;
+  creq.stream.codec = VideoCodecName(opts.codec);
+  creq.stream.width = outW;
+  creq.stream.height = outH;
+  creq.stream.fps = static_cast<double>(fps);
+  creq.policy = sherpa_onnx::codec::CodecRuntime::Instance().ResolveVideo(
+      sherpa_onnx::codec::Use::Export, opts.encodePolicy, std::nullopt);
+  creq.ownerKey = std::string("export:") + bufferId;
+  auto selected = sherpa_onnx::codec::Select<EncoderBackend>(
+      creq, sherpa_onnx::codec::CodecArbiter::Instance(),
+      [&](const sherpa_onnx::codec::Provider& p) {
+        sherpa_onnx::codec::Result<std::unique_ptr<EncoderBackend>> opened;
+        auto enc = OpenEncoderForProvider(p.name);
+        if (!enc) {
+          opened.status = sherpa_onnx::codec::Status::Fail(
+              kErrEncoderUnavailable, "no encoder factory");
+          return opened;
+        }
+        auto cfg = enc->Configure(encTrack, opts.bitrate);
+        if (!cfg.ok) {
+          enc->Close();
+          opened.status = sherpa_onnx::codec::Status::Fail(
+              cfg.errorCode.c_str(), cfg.errorMessage);
+          return opened;
+        }
+        opened.value = std::move(enc);
+        return opened;
+      });
+  opts.encoderDecision = selected.decision;
+  if (!selected.ok()) {
+    Status fail = Status::Fail(selected.status.errorCode.c_str(),
+                               selected.status.errorMessage);
+    fail.codecReason =
+        sherpa_onnx::codec::ReasonName(selected.decision.fallbackReason);
+    fail.codecTier = sherpa_onnx::codec::TierName(selected.decision.tier);
+    return fail;
+  }
+  auto encoder = std::move(selected.backend);
+
+  if (opts.decodePolicy) {
+    entry->SetDecodePolicy(opts.decodePolicy);
+  }
+  if (!entry->StickySession(opts.decodePolicy)) {
     encoder->Close();
     return Status::Fail(kErrDecoderUnavailable, "cpu decoder busy");
   }
+  opts.decoderDecision = entry->lastDecoderDecision();
 
   IterateRequest ireq;
   ireq.startUs = fromUs;

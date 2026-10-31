@@ -685,6 +685,14 @@ add_executable(imagebuffer_host_test
   "${IMAGE_CPP_ROOT}/live/LiveImageEntry.cpp"
   "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
   "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+  "${IMAGE_CPP_ROOT}/decode/ImageDecodeSelect.cpp"
+  "${IMAGE_CPP_ROOT}/../codec/CodecTypes.cpp"
+  "${IMAGE_CPP_ROOT}/../codec/CodecCatalog.cpp"
+  "${IMAGE_CPP_ROOT}/../codec/CodecCaps.cpp"
+  "${IMAGE_CPP_ROOT}/../codec/CodecArbiter.cpp"
+  "${IMAGE_CPP_ROOT}/../codec/CodecPolicy.cpp"
+  "${IMAGE_CPP_ROOT}/../codec/CodecEvents.cpp"
+  "${IMAGE_CPP_ROOT}/../codec/CodecRuntime.cpp"
   "${PDF_CPP_ROOT}/PdfDocument.cpp"
   "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
   "${PDF_CPP_ROOT}/PdfLazySession.cpp"
@@ -692,6 +700,7 @@ add_executable(imagebuffer_host_test
 target_include_directories(imagebuffer_host_test PRIVATE
   "${IMAGE_CPP_ROOT}"
   "${IMAGE_CPP_ROOT}/decode"
+  "${IMAGE_CPP_ROOT}/.."
   "${PDF_CPP_ROOT}"
   "${IMAGEBUFFER_TEST_DIR}"
 )
@@ -833,6 +842,41 @@ set_tests_properties(document_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+# --- Shared codec layer (no video/image includes) ---
+set(CODEC_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp")
+set(CODEC_SOURCES
+  "${CODEC_CPP_ROOT}/codec/CodecTypes.cpp"
+  "${CODEC_CPP_ROOT}/codec/CodecCatalog.cpp"
+  "${CODEC_CPP_ROOT}/codec/CodecCaps.cpp"
+  "${CODEC_CPP_ROOT}/codec/CodecArbiter.cpp"
+  "${CODEC_CPP_ROOT}/codec/CodecPolicy.cpp"
+  "${CODEC_CPP_ROOT}/codec/CodecEvents.cpp"
+  "${CODEC_CPP_ROOT}/codec/CodecRuntime.cpp"
+)
+if(GTest_FOUND)
+  set(CODEC_GTEST_LIBS GTest::gtest GTest::gtest_main)
+else()
+  set(CODEC_GTEST_LIBS gtest gtest_main)
+endif()
+add_executable(codec_host_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/codec/codec_plan_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/codec/codec_caps_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/codec/codec_arbiter_test.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/codec/codec_selector_test.cpp"
+  ${CODEC_SOURCES}
+)
+target_include_directories(codec_host_test PRIVATE
+  "${CODEC_CPP_ROOT}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/codec"
+)
+target_link_libraries(codec_host_test PRIVATE ${CODEC_GTEST_LIBS})
+find_package(Threads REQUIRED)
+target_link_libraries(codec_host_test PRIVATE Threads::Threads)
+add_test(NAME codec_host_test COMMAND $<TARGET_FILE:codec_host_test>)
+set_tests_properties(codec_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
 # --- VideoBuffer host tests (C++ SOT; FakeDecoder, no device) ---
 # Compile libyuv from the submodule via third_party/libyuv_prebuilt wrapper CMake.
 # Other host-test jobs that do not init this submodule skip these targets.
@@ -852,6 +896,7 @@ if(NOT TARGET yuv)
 endif()
 
 set(VIDEOBUFFER_CORE_SOURCES
+  ${CODEC_SOURCES}
   "${VIDEO_CPP_ROOT}/core/AlignedBuffer.cpp"
   "${VIDEO_CPP_ROOT}/core/FileIo.cpp"
   "${VIDEO_CPP_ROOT}/core/ColorConvert.cpp"
@@ -869,6 +914,7 @@ set(VIDEOBUFFER_CORE_SOURCES
   "${VIDEO_CPP_ROOT}/demux/FfmpegDemuxer.cpp"
   "${VIDEO_CPP_ROOT}/demux/FfmpegProbe.cpp"
   "${VIDEO_CPP_ROOT}/decode/FakeDecoder.cpp"
+  "${VIDEO_CPP_ROOT}/decode/FfmpegVideoDecoder.cpp"
   "${VIDEO_CPP_ROOT}/decode/DecoderFactory.cpp"
   "${VIDEO_CPP_ROOT}/decode/DecoderPool.cpp"
   "${VIDEO_CPP_ROOT}/decode/DecodeSession.cpp"
@@ -926,8 +972,11 @@ set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
 target_sources(videobuffer_core_host_test PRIVATE
   "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
   "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
-  "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
+  "${IMAGE_CPP_ROOT}/ImageFileLazyBackend.cpp"
+  "${IMAGE_CPP_ROOT}/live/LiveImageEntry.cpp"
   "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+  "${IMAGE_CPP_ROOT}/decode/ImageDecodeSelect.cpp"
+  "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
   "${PDF_CPP_ROOT}/PdfDocument.cpp"
   "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
   "${PDF_CPP_ROOT}/PdfLazySession.cpp"
@@ -972,12 +1021,16 @@ if(TARGET PkgConfig::LIBAV)
     "${VIDEOBUFFER_TEST_DIR}/audio_extract_test.cpp"
     "${VIDEOBUFFER_TEST_DIR}/export_session_test.cpp"
     "${VIDEOBUFFER_TEST_DIR}/probe_test.cpp"
+    "${VIDEOBUFFER_TEST_DIR}/ffmpeg_video_decode_test.cpp"
     "${VIDEOBUFFER_TEST_DIR}/live_audio_test.cpp"
     ${VIDEOBUFFER_CORE_SOURCES}
     "${IMAGE_CPP_ROOT}/ImageMmapThreshold.cpp"
     "${IMAGE_CPP_ROOT}/ImageRegistry.cpp"
+    "${IMAGE_CPP_ROOT}/ImageFileLazyBackend.cpp"
+    "${IMAGE_CPP_ROOT}/live/LiveImageEntry.cpp"
     "${IMAGE_CPP_ROOT}/ImageFrameEncoder.cpp"
     "${IMAGE_CPP_ROOT}/decode/ImageDecoder.cpp"
+    "${IMAGE_CPP_ROOT}/decode/ImageDecodeSelect.cpp"
     "${PDF_CPP_ROOT}/PdfDocument.cpp"
     "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
     "${PDF_CPP_ROOT}/PdfLazySession.cpp"
@@ -1018,11 +1071,13 @@ if(APPLE)
     "${VIDEO_CPP_ROOT}/demux/BitstreamUtil.cpp"
     "${VIDEO_CPP_ROOT}/decode/DecoderFactory.cpp"
     "${VIDEO_CPP_ROOT}/decode/FakeDecoder.cpp"
+    ${CODEC_SOURCES}
   )
   target_include_directories(videobuffer_vt_host_test PRIVATE
     "${VIDEO_CPP_ROOT}"
     "${VIDEOBUFFER_TEST_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../../ios/videobuffer"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp"
     "${LIBYUV_ROOT}/include"
   )
   target_link_libraries(videobuffer_vt_host_test PRIVATE

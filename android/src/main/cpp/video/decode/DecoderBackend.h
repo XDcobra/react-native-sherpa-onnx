@@ -37,6 +37,7 @@ class DecoderBackend {
   virtual void Close() = 0;
   virtual int submitCount() const = 0;
   virtual int flushCount() const = 0;
+  virtual bool IsReclaimed() const { return false; }
 };
 
 using DecoderFactory = std::function<std::unique_ptr<DecoderBackend>()>;
@@ -44,6 +45,24 @@ using DecoderFactory = std::function<std::unique_ptr<DecoderBackend>()>;
 void RegisterDecoderFactory(DecoderFactory factory);
 DecoderFactory GetDecoderFactory();
 void ResetDecoderFactoryForTest();
+
+/** Register a platform MediaCodec / VT / fake provider into the codec catalog. */
+void RegisterNamedVideoCodec(const char* name, const char* codec, bool encoder,
+                             bool hardware, int minW, int minH, int maxW,
+                             int maxH, int alignW, int alignH,
+                             int64_t maxBlocks, int blockW, int blockH,
+                             int maxInstances, double fps1080Low);
+
+/** Open a decoder for a catalog provider (fake / ffmpeg / MediaCodec / VT). */
+std::unique_ptr<DecoderBackend> OpenDecoderForProvider(
+    const std::string& providerName);
+
+using NamedDecoderOpener =
+    std::function<std::unique_ptr<DecoderBackend>(const std::string&)>;
+void SetNamedDecoderOpener(NamedDecoderOpener opener);
+
+/** Runtime-detect FFmpeg h264/hevc SW decoders and register them. */
+void RegisterBundledVideoSwDecoders();
 
 }  // namespace video
 }  // namespace sherpa_onnx

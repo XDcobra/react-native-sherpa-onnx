@@ -3383,6 +3383,8 @@ export interface Spec extends TurboModule {
   }>;
 
   configureVideoBuffer(options?: Object): Promise<void>;
+  configureCodecs(options?: Object): Promise<void>;
+  getCodecInfo(): Promise<string>;
 
   startLiveVideoAudioTap(
     videoBufferId: string,

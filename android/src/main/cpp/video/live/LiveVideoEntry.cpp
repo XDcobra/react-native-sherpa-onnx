@@ -2,6 +2,7 @@
 
 #include "VideoLog.h"
 #include "VideoRegistry.h"
+#include "codec/CodecTypes.h"
 #include "core/MemoryBudget.h"
 #include "core/Uuid.h"
 
@@ -141,6 +142,9 @@ VideoBufferInfo LiveVideoEntry::Info() const {
     i.audioRange.startUs = audioTimeline_.startUs();
     i.audioRange.endUs = audioTimeline_.endUs();
     i.audioPacketsWritten = audioTimeline_.size();
+  }
+  if (!lastDecision_.provider.empty()) {
+    i.decoderJson = sherpa_onnx::codec::DecisionToJson(lastDecision_);
   }
   return i;
 }

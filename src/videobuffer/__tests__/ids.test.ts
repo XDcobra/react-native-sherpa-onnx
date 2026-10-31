@@ -16,6 +16,7 @@ jest.mock('react-native', () => {
     createOfflineImageBufferFromVideo: jest.fn(),
     createOfflineAudioBufferFromVideo: jest.fn(),
     configureVideoBuffer: jest.fn(),
+    configureCodecs: jest.fn(),
     cancelDecode: jest.fn(),
     exportVideo: jest.fn(),
     probeVideoFileDuration: jest.fn(),
@@ -130,6 +131,7 @@ describe('videobuffer public API mapping', () => {
       finalizeLiveVideoBuffer: jest.Mock;
       createOfflineAudioBufferFromVideo: jest.Mock;
       configureVideoBuffer: jest.Mock;
+      configureCodecs: jest.Mock;
       exportVideo: jest.Mock;
       probeVideoFileDuration: jest.Mock;
       probeVideoFileContainer: jest.Mock;
@@ -238,13 +240,10 @@ describe('videobuffer public API mapping', () => {
     expect(rn.__listenerCount()).toBe(0);
   });
 
-  it('rejects decoderBudget outside [1, 4]', async () => {
-    await expect(
-      configureVideoBuffer({ decoderBudget: { cpu: 0 } })
-    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT/);
-    await expect(
-      configureVideoBuffer({ decoderBudget: { display: 5 } })
-    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT/);
+  it('configureVideoBuffer delegates to configureCodecs', async () => {
+    rn.__mockNative.configureCodecs.mockResolvedValue(undefined);
+    await configureVideoBuffer();
+    expect(rn.__mockNative.configureCodecs).toHaveBeenCalled();
   });
 
   it('maps createOfflineAudioBufferFromVideo and defaults 16 kHz', async () => {
@@ -375,11 +374,22 @@ describe('videobuffer public API mapping', () => {
     );
   });
 
-  it('forwards a valid decoderBudget to native', async () => {
-    rn.__mockNative.configureVideoBuffer.mockResolvedValue(undefined);
-    await configureVideoBuffer({ decoderBudget: { cpu: 1, display: 1 } });
-    expect(rn.__mockNative.configureVideoBuffer).toHaveBeenCalledWith({
-      decoderBudget: { cpu: 1, display: 1 },
+  it('forwards decodePolicy on createOfflineVideoBufferFromFile', async () => {
+    rn.__mockNative.createOfflineVideoBufferFromFile.mockResolvedValue({
+      bufferId: 'vid_off_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      kind: 'offlineVideoBuffer',
+      state: 'immutable',
+      frameCount: 1,
     });
+    await createOfflineVideoBufferFromFile(
+      { kind: 'fs', path: '/tmp/a.mp4' },
+      { decodePolicy: 'software' }
+    );
+    expect(
+      rn.__mockNative.createOfflineVideoBufferFromFile
+    ).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/a.mp4' },
+      { decodePolicy: 'software' }
+    );
   });
 });

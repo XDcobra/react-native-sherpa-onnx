@@ -23,6 +23,10 @@ class DecodeSession {
 
   void SetGenerationSource(std::function<uint64_t()> fn);
   void SetTrack(const VideoTrackInfo& track) { track_ = track; }
+  void MarkConfigured() { configured_ = true; }
+  bool IsReclaimed() const {
+    return decoder_ && decoder_->IsReclaimed();
+  }
 
   Result<VideoFrameLease> SeekAndAcquire(const FrameRequest& req);
 

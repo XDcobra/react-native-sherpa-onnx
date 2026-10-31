@@ -48,11 +48,16 @@ inline const char* kErrAudioCodecUnsupported = "VIDEO_AUDIO_CODEC_UNSUPPORTED";
 inline const char* kErrAudioDecodeFailed = "VIDEO_AUDIO_DECODE_FAILED";
 inline const char* kErrEncoderUnavailable = "VIDEO_ENCODER_UNAVAILABLE";
 inline const char* kErrEncodeFailed = "VIDEO_ENCODE_FAILED";
+inline const char* kErrSwDecoderDisabled = "VIDEO_SW_DECODER_DISABLED";
+inline const char* kErrSwEncoderDisabled = "VIDEO_SW_ENCODER_DISABLED";
 
 struct Status {
   bool ok = true;
   std::string errorCode;
   std::string errorMessage;
+  std::string codecReason;
+  std::string codecAttempts;
+  std::string codecTier;
 
   static Status Ok() { return {}; }
   static Status Fail(const char* code, std::string message) {
@@ -276,6 +281,8 @@ struct VideoBufferInfo {
   std::optional<AudioTrackInfo> audio;
   TimeRange audioRange;
   int64_t audioPacketsWritten = 0;
+  /** Sticky decoder decision JSON, empty if no session is open. */
+  std::string decoderJson;
 };
 
 inline const char* AudioCodecName(AudioCodec c) {

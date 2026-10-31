@@ -22,6 +22,7 @@ internal object ImageBufferNative {
     paths: Array<String>,
     maxSide: Int,
     hotFrames: Int,
+    decodePolicy: String?,
   ): HashMap<String, Any>?
 
   @JvmStatic
@@ -30,6 +31,7 @@ internal object ImageBufferNative {
     maxSide: Int,
     hotFrames: Int,
     fileOrigin: Boolean,
+    decodePolicy: String?,
   ): HashMap<String, Any>?
   @JvmStatic
   external fun nativeDecodeAndAppend(

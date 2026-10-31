@@ -1,4 +1,6 @@
 #include "VideoRegistry.h"
+#include "codec/CodecArbiter.h"
+#include "codec/CodecRuntime.h"
 #include "core/MemoryBudget.h"
 #include "decode/DecoderBackend.h"
 #include "decode/DecoderPool.h"
@@ -40,6 +42,7 @@ class ExportSessionTest : public ::testing::Test {
     DecoderPool::Instance().SetMaxSessions(DecoderClass::Cpu, 1);
     DecoderPool::Instance().SetMaxSessions(DecoderClass::Display, 1);
     VideoRegistry::Instance().SetCacheDir("/tmp");
+    sherpa_onnx::codec::CodecRuntime::Instance().Init(2LL * 1024 * 1024 * 1024);
   }
   void TearDown() override {
     DecoderPool::Instance().CloseAll();
@@ -47,6 +50,7 @@ class ExportSessionTest : public ::testing::Test {
     ResetEncoderFactoryForTest();
     MemoryBudget::Instance().ResetUsedForTest();
     MemoryBudget::Instance().Configure(VideoRamClass::Mid);
+    sherpa_onnx::codec::CodecArbiter::Instance().ResetForTest();
   }
 
   std::shared_ptr<OfflineVideoEntry> MakeClip(int frames = 6) {
@@ -86,6 +90,21 @@ TEST_F(ExportSessionTest, BadFormatRejected) {
   EXPECT_EQ(st.errorCode, kErrInvalidArgument);
   VideoRegistry::Instance().Release(e->id());
 }
+
+#ifdef HAVE_FFMPEG
+TEST_F(ExportSessionTest, SecondExportPoolFull) {
+  auto hold = sherpa_onnx::codec::CodecArbiter::Instance().TryAcquire(
+      sherpa_onnx::codec::ResourceClass::HwVideoEncode, "held-export");
+  ASSERT_TRUE(hold.ok()) << hold.status.errorMessage;
+  auto e = MakeClip();
+  VideoExportOptions opts;
+  auto st = VideoExportSession::Run(e->id(), "/tmp/out.mp4", "mp4", opts,
+                                    nullptr, nullptr);
+  EXPECT_FALSE(st.ok);
+  EXPECT_EQ(st.errorCode, kErrEncoderUnavailable);
+  VideoRegistry::Instance().Release(e->id());
+}
+#endif
 
 #ifndef HAVE_FFMPEG
 TEST_F(ExportSessionTest, FfmpegDisabled) {

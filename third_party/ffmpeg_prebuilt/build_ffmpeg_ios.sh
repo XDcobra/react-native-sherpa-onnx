@@ -34,6 +34,14 @@ if ! command -v "$HOST_PKG_CONFIG" >/dev/null 2>&1; then
   exit 1
 fi
 
+# VIDEO_SW_DECODERS=1 adds bundled H.264/HEVC software video decoders (ffmpeg-vsw).
+DECODERS="aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus"
+PARSERS="aac,mpegaudio,vorbis,flac"
+if [ "${VIDEO_SW_DECODERS:-0}" = "1" ]; then
+  DECODERS="${DECODERS},h264,hevc"
+  PARSERS="${PARSERS},h264,hevc"
+fi
+
 COMMON_CONFIGURE=(
 --disable-programs
 --disable-doc
@@ -51,10 +59,10 @@ COMMON_CONFIGURE=(
 --enable-avutil
 --enable-swresample
 
---enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus
+--enable-decoder=${DECODERS}
 --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
 --enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska
---enable-parser=aac,mpegaudio,vorbis,flac
+--enable-parser=${PARSERS}
 --enable-encoder=pcm_s16le,flac,aac,alac,libshine,libopus
 
 --enable-protocol=file

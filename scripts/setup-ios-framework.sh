@@ -143,14 +143,22 @@ get_framework_config() {
       ;;
     ffmpeg)
       TAG_FILE="$PROJECT_ROOT/third_party/ffmpeg_prebuilt/IOS_RELEASE_TAG"
-      TAG_PREFIX="ffmpeg-ios-v"
+      if [ "${SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS:-0}" = "1" ] || \
+         [ "${SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS:-false}" = "true" ]; then
+        TAG_PREFIX="ffmpeg-vsw-ios-v"
+        ZIP_ASSET_NAME="ffmpeg-vsw-ios-framework.zip"
+        VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-ffmpeg-vsw"
+        DISPLAY_NAME="FFmpeg (video-SW)"
+      else
+        TAG_PREFIX="ffmpeg-ios-v"
+        ZIP_ASSET_NAME="ffmpeg-ios-framework.zip"
+        VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-ffmpeg"
+        DISPLAY_NAME="FFmpeg"
+      fi
       XCFRAMEWORK_NAME="FFmpeg.xcframework"
-      ZIP_ASSET_NAME="ffmpeg-ios-framework.zip"
-      VERSION_FILE="$FRAMEWORKS_DIR/.framework-version-ffmpeg"
       LIB_DEVICE="libffmpeg.a"
       LIB_SIMULATOR="libffmpeg.a"
       HEADER_CHECK="Headers/libavcodec/avcodec.h"
-      DISPLAY_NAME="FFmpeg"
       ;;
     libarchive)
       TAG_FILE="$PROJECT_ROOT/third_party/libarchive_prebuilt/IOS_RELEASE_TAG"

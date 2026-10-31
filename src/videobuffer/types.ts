@@ -27,6 +27,7 @@ export interface OfflineVideoBufferInfo {
   seekableStartUs?: number;
   seekableEndUs?: number;
   audio: VideoAudioTrackInfo | null;
+  decoder?: import('../codec/types').CodecDecision;
 }
 
 export interface LiveVideoBufferInfo {
@@ -41,6 +42,7 @@ export interface LiveVideoBufferInfo {
   seekableStartUs?: number;
   seekableEndUs?: number;
   audio: VideoAudioTrackInfo | null;
+  decoder?: import('../codec/types').CodecDecision;
 }
 
 export type PipelineVideoBufferInfo =
@@ -109,11 +111,16 @@ export type VideoRetention =
 export interface CreateEmptyLiveVideoBufferOptions {
   ringSeconds?: number;
   retention?: VideoRetention;
+  decodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export interface IngestFileToLiveOptions {
   pacing?: 'realtime' | 'asFast';
   includeAudio?: boolean;
+}
+
+export interface CreateOfflineVideoBufferFromFileOptions {
+  decodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export interface CreateOfflineImageFromVideoOptions {
@@ -122,6 +129,7 @@ export interface CreateOfflineImageFromVideoOptions {
   uniformCount?: number;
   timesUs?: number[];
   maxSide?: number;
+  decodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export type LiveVideoBufferEventType =
@@ -154,17 +162,14 @@ export interface ExportVideoOptions {
   fromUs?: number;
   toUs?: number;
   maxSide?: number;
+  decodePolicy?: import('../codec/types').CodecPolicy;
+  encodePolicy?: import('../codec/types').CodecPolicy;
   onProgress?: (e: { percent: number; encodedUs: number }) => void;
   signal?: AbortSignal;
 }
 
-export interface VideoDecoderBudget {
-  cpu?: number;
-  display?: number;
-}
-
 export interface ConfigureVideoBufferOptions {
-  decoderBudget?: VideoDecoderBudget;
+  /** @deprecated Use configureCodecs({ budgets }) from react-native-sherpa-onnx/codec. */
 }
 
 export type VideoFileDurationProbe = {

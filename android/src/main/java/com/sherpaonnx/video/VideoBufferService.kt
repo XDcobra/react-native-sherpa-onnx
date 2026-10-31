@@ -32,20 +32,45 @@ internal object VideoBufferService : ComponentCallbacks2 {
       val totalRam = memInfo.totalMem.takeIf { it > 0 } ?: (6L * 1024 * 1024 * 1024)
       val debug = 0 != (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)
       VideoBufferNative.nativeInit(cacheDir.absolutePath, totalRam, debug)
-      val avc = VideoCodecCatalog.find("video/avc")
-      val hevc = VideoCodecCatalog.find("video/hevc")
-      VideoBufferNative.nativeSetHwCodecs(avc.decoder, hevc.decoder, avc.encoder, hevc.encoder)
+      for (e in VideoCodecCatalog.listAvcHevc()) {
+        val codec = if (e.mime.equals("video/hevc", ignoreCase = true)) "hevc" else "h264"
+        VideoBufferNative.nativeRegisterVideoCodec(
+          e.name, codec, e.encoder, e.hardware,
+          e.minW, e.minH, e.maxW, e.maxH, e.alignW, e.alignH,
+          e.maxBlocks, e.blockW, e.blockH, e.maxInstances, e.fps1080,
+        )
+      }
+      if (debug) {
+        VideoCodecCatalog.dumpAll()
+      }
       context.applicationContext.registerComponentCallbacks(this)
       initialized = true
       Log.i(TAG, "VideoBufferService initialized cacheDir=${cacheDir.absolutePath}")
     }
   }
 
-  fun createOfflineFromFile(path: String): Map<String, Any>? =
-    VideoBufferNative.nativeCreateOfflineFromFile(path)
+  fun createOfflineFromFile(path: String, decodePolicy: String? = null): Map<String, Any>? {
+    val map = VideoBufferNative.nativeCreateOfflineFromFile(path)
+    val id = map?.get("bufferId") as? String
+    if (!decodePolicy.isNullOrEmpty() && !id.isNullOrEmpty()) {
+      VideoBufferNative.nativeSetDecodePolicy(id, decodePolicy)
+    }
+    return map
+  }
 
-  fun createLive(ringSeconds: Int, retentionMode: Int, path: String?): Map<String, Any>? =
-    VideoBufferNative.nativeCreateLive(ringSeconds, retentionMode, path)
+  fun createLive(
+    ringSeconds: Int,
+    retentionMode: Int,
+    path: String?,
+    decodePolicy: String? = null,
+  ): Map<String, Any>? {
+    val map = VideoBufferNative.nativeCreateLive(ringSeconds, retentionMode, path)
+    val id = map?.get("bufferId") as? String
+    if (!decodePolicy.isNullOrEmpty() && !id.isNullOrEmpty()) {
+      VideoBufferNative.nativeSetDecodePolicy(id, decodePolicy)
+    }
+    return map
+  }
 
   fun getInfo(bufferId: String): Map<String, Any>? =
     VideoBufferNative.nativeGetInfo(bufferId)
@@ -86,6 +111,25 @@ internal object VideoBufferService : ComponentCallbacks2 {
     VideoBufferNative.nativeConfigureDecoderBudget(cpu, display)
   }
 
+  fun configureCodecs(
+    videoDecode: String?,
+    videoDisplay: String?,
+    videoEncode: String?,
+    imageDecode: String?,
+    hwDec: Int,
+    hwDisp: Int,
+    hwEnc: Int,
+    swDec: Int,
+    swEnc: Int,
+    img: Int,
+  ): String? =
+    VideoBufferNative.nativeConfigureCodecs(
+      videoDecode, videoDisplay, videoEncode, imageDecode,
+      hwDec, hwDisp, hwEnc, swDec, swEnc, img,
+    )
+
+  fun codecInfoJson(): String? = VideoBufferNative.nativeGetCodecInfo()
+
   fun extractAudioFromVideo(
     bufferId: String,
     startUs: Long,
@@ -110,10 +154,12 @@ internal object VideoBufferService : ComponentCallbacks2 {
     maxSide: Int,
     cancelFlagAddr: Long,
     progress: Any?,
+    decodePolicy: String? = null,
+    encodePolicy: String? = null,
   ): Map<String, Any>? =
     VideoBufferNative.nativeExportVideo(
       bufferId, outPath, format, codec, bitrate, fromUs, toUs, maxSide,
-      cancelFlagAddr, progress,
+      cancelFlagAddr, progress, decodePolicy, encodePolicy,
     )
 
   fun probeVideoFile(path: String): Map<String, Any>? =

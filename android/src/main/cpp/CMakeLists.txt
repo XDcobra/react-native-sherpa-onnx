@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.22.1)
 
+# Official NDK: weak refs for APIs newer than minSdk. Must be set before
+# project() so the toolchain adds
+# -D__ANDROID_UNAVAILABLE_SYMBOLS_ARE_WEAK__ -Werror=unguarded-availability.
+# https://developer.android.com/ndk/guides/using-newer-apis
+set(ANDROID_WEAK_API_DEFS ON CACHE BOOL
+    "NDK weak API refs; guard newer APIs with __builtin_available")
+
 project("sherpaonnx")
 
 # Set C++ standard
@@ -204,6 +211,8 @@ set(SOURCES
     image/live/LiveImageEntry.cpp
     image/ImageFrameEncoder.cpp
     image/decode/ImageDecoder.cpp
+    image/decode/ImageDecodeSelect.cpp
+    image/platform/android/AImageDecoderBackend.cpp
     jni/image/sherpa-onnx-imagebuffer-jni.cpp
     jni/video/sherpa-onnx-videobuffer-jni.cpp
     ocr/OcrFactory.cpp
@@ -265,6 +274,13 @@ set(SOURCES
     document/DocMobi.cpp
     ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
     jni/document/sherpa-onnx-document-jni.cpp
+    codec/CodecTypes.cpp
+    codec/CodecCatalog.cpp
+    codec/CodecCaps.cpp
+    codec/CodecArbiter.cpp
+    codec/CodecPolicy.cpp
+    codec/CodecEvents.cpp
+    codec/CodecRuntime.cpp
     video/core/AlignedBuffer.cpp
     video/core/FileIo.cpp
     video/core/ColorConvert.cpp
@@ -280,6 +296,7 @@ set(SOURCES
     video/live/AudioPacketRing.cpp
     video/demux/BitstreamUtil.cpp
     video/decode/FakeDecoder.cpp
+    video/decode/FfmpegVideoDecoder.cpp
     video/decode/DecoderFactory.cpp
     video/encode/EncoderFactory.cpp
     video/encode/FakeEncoder.cpp

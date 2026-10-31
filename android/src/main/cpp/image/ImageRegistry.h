@@ -158,6 +158,9 @@ class ImageRegistry {
     std::string sourceVideoBufferId;
     int64_t sourcePtsUs = -1;
     int64_t sourceFrameIndex = -1;
+    std::string decoderProvider;
+    std::string decoderTier;
+    std::string decoderOrigin;
     uint64_t lruTick = 0;
   };
 

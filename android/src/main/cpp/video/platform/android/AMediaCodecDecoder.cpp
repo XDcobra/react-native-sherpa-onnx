@@ -181,6 +181,11 @@ void AMediaCodecDecoder::PumpCodec(int64_t timeoutUs) {
       waitUs = 0;
       continue;
     }
+    if (ix == -1101 || ix == -1100) {
+      reclaimed_ = true;
+      VIDEO_LOGI("video.decode amc reclaim ix=%zd", static_cast<ssize_t>(ix));
+      return;
+    }
     if (ix < 0) {
       return;
     }

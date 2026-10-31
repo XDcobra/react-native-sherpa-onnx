@@ -47,6 +47,11 @@ export interface OfflineImageFrameInfo {
     ptsUs: number;
     frameIndex: number;
   };
+  decoder?: {
+    provider: string;
+    tier: import('../codec/types').CodecTier;
+    origin: import('../codec/types').CodecOrigin;
+  };
 }
 
 /** Branded handle for an offline image buffer. */
@@ -86,6 +91,7 @@ export interface CreateOfflineImageBufferOptions {
    * `done`/`total` count sources; `phase` is e.g. `decode` or `done`.
    */
   onProgress?: (event: ImageProgressEvent) => void;
+  decodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 /** Progress event for offline image create (public; no operationId). */

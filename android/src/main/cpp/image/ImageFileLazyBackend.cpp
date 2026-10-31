@@ -1,5 +1,6 @@
 #include "ImageFileLazyBackend.h"
 
+#include "decode/ImageDecodeBackend.h"
 #include "decode/ImageDecoder.h"
 
 #include <fstream>
@@ -70,18 +71,15 @@ bool ImageFileLazyBackend::DecodeFrame(int index, RgbFrame* out,
   }
 
   decode_count_.fetch_add(1);
-  const DecodeFormat format = ImageDecoder::DetectFormat(data, size);
-  DecodeResult decoded;
-  if (format == DecodeFormat::Heic) {
-    decoded = ImageDecoder::DecodeHeicBytes(data, size, opts_);
-  } else {
-    decoded = ImageDecoder::DecodeBytes(data, size, opts_);
-  }
+  DecodeResult decoded = DecodeWithPolicy(data, size, opts_, "img");
   if (!decoded.ok) {
     return fail(decoded.errorCode.empty() ? "ERR_IMAGE_DECODE_FAILED"
                                           : decoded.errorCode.c_str(),
                 decoded.errorMessage);
   }
+  lastProvider_ = decoded.codecProvider;
+  lastTier_ = decoded.codecTier;
+  lastOrigin_ = decoded.codecOrigin;
   *out = std::move(decoded.frame);
   return true;
 }

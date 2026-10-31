@@ -68,7 +68,7 @@ class DecoderPool {
 
   /** Cpu class, waits up to timeoutMs. Existing OCR/image path. */
   Result<std::shared_ptr<DecoderBackend>> Acquire(const std::string& bufferId,
-                                                  int timeoutMs = 5000);
+                                                  int timeoutMs = 0);
   void Release(const std::string& bufferId);
   void ReleaseSlot(DecoderClass cls, const std::string& ownerId);
   /** Close and erase a slot whose refcount is already 0 (buffer gone). */

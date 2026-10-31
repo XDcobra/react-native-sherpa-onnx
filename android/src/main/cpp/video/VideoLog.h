@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "codec/CodecLog.h"
+
 #if defined(__ANDROID__)
 #include <android/log.h>
 #elif defined(__APPLE__)
@@ -23,7 +25,10 @@ inline bool& VideoLogEnabled() {
   return enabled;
 }
 
-inline void SetVideoLogEnabled(bool on) { VideoLogEnabled() = on; }
+inline void SetVideoLogEnabled(bool on) {
+  VideoLogEnabled() = on;
+  ::sherpa_onnx::codec::SetCodecLogEnabled(on);
+}
 
 inline void VideoLogPrint(const char* tag, const char* level, const char* fmt,
                           va_list ap) {
