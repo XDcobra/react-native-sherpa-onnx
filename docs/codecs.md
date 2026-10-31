@@ -51,7 +51,7 @@ Existing `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_ENCODER_UNAVAILABLE` / `VIDEO_PREV
 
 ## Bundled SW video (`ffmpeg-vsw`)
 
-Default FFmpeg prebuilts stay audio-only. The example app sets the flags **off** so smoke S4.2 hits `VIDEO_SW_DECODER_DISABLED`.
+Default FFmpeg prebuilts stay audio-only. The example app opts in (`sherpaOnnxEnableVideoSwDecoders` / `SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS`). VoiceLab and other consumer apps keep the SDK default **off**.
 
 Publish the variant with the **FFmpeg video-SW** GitHub Actions (tag files `ANDROID_VSW_RELEASE_TAG` / `IOS_VSW_RELEASE_TAG`), then opt in:
 
@@ -61,7 +61,3 @@ Publish the variant with the **FFmpeg video-SW** GitHub Actions (tag files `ANDR
 Availability is detected at runtime with `avcodec_find_decoder`. Missing decoders map to `VIDEO_SW_DECODER_DISABLED`.
 
 H.264/HEVC **patents** are separate from the LGPL-2.1 license. The variant is off by default so the default install size and patent surface stay unchanged.
-
-## Device smoke
-
-The example app **Codec smoke** screen (`__DEV__`) lists S0–S5. Run on a device; host tests do not replace them. Filter Android with `adb logcat -s SherpaOnnxCodec SherpaOnnx`.

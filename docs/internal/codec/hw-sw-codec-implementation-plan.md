@@ -1,6 +1,6 @@
 # Shared HW/SW codec layer — implementation plan
 
-**Status:** Phases 0–5 implemented in tree (2026-10-31). Shared C++ core, Android/iOS providers, opt-in `ffmpeg-vsw`, image backends, public docs. Device smokes S0–S5 and benches B1–B9 remain user-run and do not block. Phase 6 optional (not done). Phase 7 skipped (audio still Kotlin).  
+**Status:** Phases 0–5 implemented in tree (2026-10-31). Shared C++ core, Android/iOS providers, opt-in `ffmpeg-vsw`, image backends, public docs. Smoke S0–S5 green on A142P + iOS Simulator: [hw-sw-codec-smoke-a142p-2026-10-31.md](./hw-sw-codec-smoke-a142p-2026-10-31.md). Benches B1–B9 and a real iPhone remain user-run and do not block. Phase 6 optional (not done). Phase 7 skipped (audio still Kotlin).  
 **Branch:** `feat/videobuffer-hw-slot-caps` (from `refactor/refactor-before-release-1-0` @ `d679d5c7`).  
 **Findings:** [hw-sw-codec-findings.md](./hw-sw-codec-findings.md). Read §1, §7 and §8 there first.  
 **Supersedes:** the Cursor plan *HW slot public API* (`hw_slot_public_api_b461b36f`). Its four todos (auto caps, encoder pool, fail-fast + slot events, tests/docs) become Phase 1 here. Its non-goal "no silent SW fallback" still holds: fallback exists only under an explicit `preferHardware` policy and is always reported.
@@ -9,7 +9,7 @@ Phases are implementation order inside **one** epic and one release, not separat
 
 Rules that apply to every phase: debug-first (instrument → logcat on Android first → minimal fix), no SDK API change outside what this plan lists, no GPL, no commits without review, and the user builds the example app.
 
-**Device tests never block the plan (decided 2026-10-31).** Everything that needs a real Android or iOS device (gates, benches B1–B4 / B6–B9, conformance suite) is collected in the smoke checklist (§5.1). The user runs it later. Implementation moves to the next phase once the agent-side checks pass (§3). A failing smoke item becomes a normal debug-first bug: user sends logcat / Xcode log, then one targeted fix. Where a phase needs a number that only a device can give, the plan names the default used until it is measured.
+**Device tests never block the plan (decided 2026-10-31).** S0–S5 are recorded (A142P + iOS Simulator, 2026-10-31). Remaining user-run items: benches B1–B9, real iPhone (VT HW decode / reclaim), S4.2 with vsw off, S5.2/S5.3 on API 26/28. Implementation moves to the next phase once the agent-side checks pass (§3). A failing remaining smoke item becomes a normal debug-first bug. Where a phase needs a number that only a device can give, the plan names the default used until it is measured.
 
 ---
 
@@ -295,7 +295,7 @@ Platform-only code (JNI, Kotlin, `.mm`) cannot run on the host. It is kept thin,
 
 1. `VideoCodecCatalog.kt`: when debug is on, log every video codec per MIME (name, `isHardwareAccelerated` / `isSoftwareOnly` / `isVendor`, size ranges, alignment, block-count, max instances, `getSupportedPerformancePoints`, measured 1080p fps, color formats). Tag `SherpaOnnxCodec`, prefix `codec.catalog.raw`.
 2. iOS `VideoToolboxDecoder` / `Encoder`: after session create on iOS 17+/17.4+, read `Using…HardwareAccelerated…` and log `codec.vt decode hw=<0|1>`. No other change. This answers whether today's iOS path is already silently SW (findings #4). Phase 3 implements the tiers either way, so the answer is information, not a dependency.
-3. Example app: new **Codec smoke** screen (`example/src/screens/codec-smoke/`, same layout as the other screen folders, reachable from home in `__DEV__`). It grows per phase: catalog dump, conformance suite (§5), benches (§4). Each run prints a copyable report and logs under `SherpaOnnxCodec`. Written by the agent, run by the user.
+3. Temporary example **Codec smoke** screen (`example/src/screens/codec-smoke/`, `__DEV__`) for S0–S5. Removed after the 2026-10-31 A142P + iOS Simulator run. Results stay in [hw-sw-codec-smoke-a142p-2026-10-31.md](./hw-sw-codec-smoke-a142p-2026-10-31.md).
 
 Done: logging code + smoke screen skeleton; smoke items S0.1–S0.2 in §5.1.
 
@@ -342,9 +342,9 @@ Smoke (user, non-blocking): S2.1–S2.7 in §5.1, benches B1, B2, B3, B6.
 
 ### Phase 3 — iOS VideoToolbox tiers
 
-1. `VideoToolboxDecoder(Mode)`: `Hardware` → `RequireHardwareAcceleratedVideoDecoder` on iOS 17+; `Software` → `EnableHardwareAcceleratedVideoDecoder = false`; read `UsingHardwareAcceleratedVideoDecoder` into the decision. iOS < 17: `Hardware` = legacy create, tier `unknown`; `Software` provider unavailable (`os-too-old`). `VTIsHardwareDecodeSupported` stays only as a catalog hint.
+1. `VideoToolboxDecoder(Mode)`: `Hardware` → `RequireHardwareAcceleratedVideoDecoder` on iOS 17+; `Software` → `EnableHardwareAcceleratedVideoDecoder = false`; read `UsingHardwareAcceleratedVideoDecoder` into the decision. iOS < 17: `Hardware` = legacy create, tier `unknown`; `Software` provider unavailable (`os-too-old`). `VTIsHardwareDecodeSupported` is the catalog hint: `vt.hw` decode `available` is false / `not-present` when the OS reports no HW.
 2. `VideoToolboxEncoder(Mode)`: same with the 17.4 keys.
-3. iOS init registers providers `vt.hw` / `vt.sw` per codec and direction with availability by OS version.
+3. iOS init registers providers `vt.hw` / `vt.sw` per codec and direction. Decode `vt.hw` availability = OS version **and** `VTIsHardwareDecodeSupported`. Encode `vt.hw` stays advertised when the OS version allows it.
 4. Preview: `hardware` keeps `SampleBufferVideoRenderer` (system decode; tier reported `hardware` only when `VTIsHardwareDecodeSupported`, else `unknown`). The SW tier uses the new `DecodedSampleBufferRenderer`: selected `DecoderBackend` → `CVPixelBufferPool` NV12 → `CMSampleBuffer` with PTS → the same layer.
 5. `kVTInvalidSessionErr` (background) maps to `invalid-session` and goes through the Phase 2 mid-stream rule.
 
@@ -356,7 +356,7 @@ Smoke (user, non-blocking): S3.1–S3.3 in §5.1, bench B4.
 
 1. FFmpeg variant: `build_ffmpeg.sh` / `build_ffmpeg_ios.sh` get `VIDEO_SW_DECODERS=1` → `--enable-decoder=…,h264,hevc --enable-parser=…,h264,hevc`. Same pin (8.1.3-x), same LGPL flags. Artifacts: Maven `com.xdcobra.sherpa:ffmpeg-vsw:<ver>@aar`, iOS release asset `ffmpeg-vsw-ios-<ver>`. Extend [PREBUILT_RESOLUTION.md](../PREBUILT_RESOLUTION.md) with the variant.
 2. Switches: Gradle `sherpaOnnxEnableVideoSwDecoders=true` (selects the variant AAR), Podspec `SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS=1`. No new C define. The provider asks `avcodec_find_decoder` at init and registers `ffmpeg.h264` / `ffmpeg.hevc` as available or `disabled`.
-3. `video/decode/FfmpegVideoDecoder.{h,cpp}` (`#if HAVE_FFMPEG`): extradata from `track.codecConfig` (avcC / hvcC, length-prefixed packets as the demuxer emits them), frame threads, `yuv420p` / `yuvj420p` → libyuv `I420ToNV12` into the existing aligned NV12 layout. 10-bit and 4:2:2 / 4:4:4 → `unsupported-stream` in v1.
+3. `video/decode/FfmpegVideoDecoder.{h,cpp}` (`#if HAVE_FFMPEG`): extradata from `track.codecConfig` (avcC / hvcC, length-prefixed packets as the demuxer emits them), frame threads, `yuv420p` / `yuvj420p` → libyuv `I420ToNV12` into the existing aligned NV12 layout. 10-bit and 4:2:2 / 4:4:4 → `unsupported-stream` in v1. `DecodeSession` lookahead (up to 8 following packets, plus EOS at clip end) covers `FF_THREAD_FRAME` delay and late first AMediaCodec output. No ByteBuffer SW fallback.
 4. Register on both platforms with tier software, origin bundled.
 
 Tests (host, real decode with system libav, inside `videobuffer_demux_host_test`): H.264 and HEVC fixtures (MP4 + MKV) → frame count equals the index, PTS monotonic, NV12 checksum stable, `Flush` + seek to keyframe works.
@@ -390,7 +390,7 @@ OfflineAudioBuffer registers its FFmpeg audio decoders/encoders as software/bund
 
 ## 4. Benches and gates
 
-Harness in the example app's Codec smoke screen (Phase 0, step 3). The agent writes it; the **user runs it**; nothing here blocks a phase. Report p50 / p95, CPU %, and thermal state; Android first, then iOS. Until a bench is run, the defaults named in the phases apply. B5 is the only build-side measurement.
+Benches B1–B9 were planned against the temporary Codec smoke screen (removed after S0–S5). They remain user-run and do not block. Report p50 / p95, CPU %, and thermal state; Android first, then iOS. Until a bench is run, the defaults named in the phases apply. B5 is the only build-side measurement.
 
 | # | Bench | Platforms | Gate / use |
 | --- | --- | --- | --- |
@@ -418,35 +418,35 @@ Harness in the example app's Codec smoke screen (Phase 0, step 3). The agent wri
 | Image portable | ✅ unchanged | ✅ |
 | Image platform | — (libyuv conversion only) | ✅ conformance |
 
-Device conformance suite (Codec smoke screen, run by the user before every release): for each tier available on the device, decode the fixture set (H.264 / HEVC 360p / 1080p / 4K; JPEG EXIF 1 / 6, PNG, WebP, HEIC), compare against the portable or FFmpeg reference (PSNR for video, OCR for images), and dump the catalog. This replaces the host coverage lost on HW and platform paths.
+Device conformance (S0–S5 recorded 2026-10-31; example screen removed): for each tier available on the device, decode the fixture set (H.264 / HEVC 360p / 1080p / 4K; JPEG EXIF 1 / 6, PNG, WebP, HEIC), compare against the portable or FFmpeg reference (PSNR for video, OCR for images), and dump the catalog. This replaces the host coverage lost on HW and platform paths. Re-runs before a release need a new harness or host/device scripts.
 
-### 5.1 Smoke checklist (user, later, non-blocking)
+### 5.1 Smoke checklist
 
-Run in the example app on a device. Filter Android with `adb logcat -s SherpaOnnxCodec SherpaOnnx`. Paste failures with logs; each becomes one debug-first fix. "A142P" = the low-end reference device; any other device is extra evidence, not required.
+Recorded 2026-10-31 in the temporary example screen (now removed). Filter leftover logs with `adb logcat -s SherpaOnnxCodec SherpaOnnx`. "A142P" = the low-end reference device. Example builds keep `ffmpeg-vsw` **on**; S4.2 is the off-flag case. Result column: [hw-sw-codec-smoke-a142p-2026-10-31.md](./hw-sw-codec-smoke-a142p-2026-10-31.md) (A142P 15/0/5, iOS Simulator 11/0/9).
 
-| ID | Device | Steps | Expected |
-| --- | --- | --- | --- |
-| S0.1 | Android (A142P; plus any Qualcomm / Exynos if available) | Codec smoke → "Dump catalog" | `codec.catalog.raw` lines for every AVC / HEVC codec; report saved to `evidence/` |
-| S0.2 | iPhone iOS 17+ | decode + export once | `codec.vt decode hw=…` / `encode hw=…` lines; answers findings #4 |
-| S1.1 | A142P | start two exports in parallel | second rejects `VIDEO_ENCODER_UNAVAILABLE`, `codecReason: 'pool-full'`; `slotFreed` after the first finishes; retry succeeds |
-| S1.2 | A142P | any decode + export | logcat shows `codec.plan` / `codec.try` / `codec.select` / `codec.slot release` per open |
-| S2.1 | A142P | 1080p H.264, `decodePolicy: 'software'` | `c2.android.avc.decoder`; 10 sampled frames vs HW PSNR ≥ 40 dB |
-| S2.2 | A142P | 4K HEVC, `software`, no variant | `VIDEO_SW_DECODER_DISABLED`, attempts list `c2.android.hevc.decoder: unsupported-stream` |
-| S2.3 | A142P | display budget 1, two previews, default policy | second preview plays on SW; one `fallback` event; snapshot decision `software` |
-| S2.4 | A142P | export 720p, `encodePolicy: 'software'` | `c2.android.avc.encoder`; file plays |
-| S2.5 | A142P | export 1080p, `encodePolicy: 'software'` | `VIDEO_ENCODER_UNAVAILABLE` / `unsupported-stream` (D7) |
-| S2.6 | A142P | export, then open the camera app | decode reopens on SW once (`codec.midstream`) and export finishes, or fails cleanly if the encoder was reclaimed |
-| S2.7 | AVD emulator | decode default vs `hardware` | default decodes via SW with `fallback` event; `hardware` rejects `VIDEO_DECODER_UNAVAILABLE` |
-| S3.1 | iPhone iOS 17+ | decode `software` | `hw=0`, decision `software` |
-| S3.2 | iPhone iOS 17+ | `hardware` while HW is busy (two exports + preview) | clean `…_UNAVAILABLE`, no silent SW |
-| S3.3 | iPhone | app to background during decode | `invalid-session` → one mid-stream reopen (D6) or clean error |
-| S4.1 | Android + iPhone, `ffmpeg-vsw` build | 4K HEVC `software`, OCR at 1 fps | provider `ffmpeg.hevc`; OCR results arrive (slow is fine) |
-| S4.2 | same device, default build | same call | `VIDEO_SW_DECODER_DISABLED` |
-| S5.1 | Android API 30+ | JPEG create, default policy | decision `hardware` / `platform` / `AImageDecoder` |
-| S5.2 | Android API 28 or 29 (emulator is fine) | JPEG create + HEIC create, default policy | JPEG: `stb` with one `fallback` event (`os-too-old`); HEIC: `ImageDecoder.java` |
-| S5.3 | Android API 26 (emulator is fine) | HEIC create, default policy | `ERR_IMAGE_SW_DECODER_UNAVAILABLE`, attempts show both reasons |
-| S5.4 | iPhone | HEIC + JPEG create with `maxSide` | ImageIO thumbnail path, EXIF-6 fixture upright |
-| Release | A142P + iPhone | conformance suite + B1–B4, B6–B9 | numbers recorded in §4; B9 must pass before publishing |
+| ID | Device | Steps | Expected | Result |
+| --- | --- | --- | --- | --- |
+| S0.1 | Android (A142P; plus any Qualcomm / Exynos if available) | Codec smoke → "Dump catalog" | `ffmpeg.*` available when vsw on; platform SW + HW rows; report in `evidence/` | **pass** A142P |
+| S0.2 | iOS 17+ | catalog + decode / export | `vt.hw` decode `available` = `VTIsHardwareDecodeSupported` (Simulator: `not-present`); `vt.sw` + encode `vt.hw` present | **pass** Simulator |
+| S1.1 | A142P + iOS | two parallel **encodes**, `hwVideoEncode=1`, `encodePolicy: hardware`, `decodePolicy: preferHardware` | one file, one `VIDEO_ENCODER_UNAVAILABLE` / `pool-full`; `slotFreed` after the first finishes | **pass** both |
+| S1.2 | A142P + iOS | any decode + export, `preferHardware` | `codec.plan` / `codec.try` / `codec.select` / `codec.slot release`; iOS Simulator lands on `vt.sw` | **pass** both |
+| S2.1 | A142P | 1080p H.264, `decodePolicy: 'software'` | platform SW (`OMX.google.h264.decoder` or `c2.android.avc.decoder`) | **pass** `OMX.google.h264.decoder` |
+| S2.2 | A142P | 4K HEVC, `software` | vsw on: `ffmpeg.hevc` (same cascade as S4.1). vsw off: `VIDEO_SW_DECODER_DISABLED`, platform SW `unsupported-stream` | **pass** vsw on (`ffmpeg.hevc`) |
+| S2.3 | A142P | display budget 1, two previews, default policy | second preview occupies the remaining path; both players stay up | **pass** |
+| S2.4 | A142P | export 720p, `encodePolicy: 'software'`, decode `preferHardware` | platform SW encoder; file plays | **pass** |
+| S2.5 | A142P | export 1080p, `encodePolicy: 'software'` | `VIDEO_ENCODER_UNAVAILABLE` / `unsupported-stream` (D7) | **pass** |
+| S2.6 | A142P | abort mid-export, then recreate | `VIDEO_CANCELLED`; recreate succeeds. Camera reclaim is bench B6 | **pass** abort/recreate |
+| S2.7 | A142P (HW present) | decode default vs `hardware` | both HW, same provider. AVD (no HW): default SW + `fallback`; `hardware` → `VIDEO_DECODER_UNAVAILABLE` | **pass** A142P both `OMX.MTK.VIDEO.DECODER.AVC`. AVD unrun |
+| S3.1 | iOS 17+ | decode `software` | `vt.sw`, decision `software` | **pass** Simulator |
+| S3.2 | iOS 17+ | two HW exports + preview | clean `…_UNAVAILABLE` on the contended HW path, no silent SW. Simulator has no VT HW decode — preview after the exports is enough | **pass** Simulator (preview). Real iPhone unrun |
+| S3.3 | iOS | export under `preferHardware`; background if possible | export finishes; background → `invalid-session` + one mid-stream reopen (D6) or clean error | **pass** Simulator (no background in 45s; export ok) |
+| S4.1 | Android + iOS, `ffmpeg-vsw` | 4K HEVC `software` | Android: `ffmpeg.hevc` (platform SW HEVC 1080p-capped). iOS: `vt.sw` when platform SW covers 4K; `ffmpeg.hevc` only when it does not | **pass** both |
+| S4.2 | same device, **vsw off** | same call | `VIDEO_SW_DECODER_DISABLED`. Example flag on → skip | **skip** (example vsw on) |
+| S5.1 | Android API 30+ | JPEG create, default policy | native `AImageDecoder`. Frame JSON `decoder` may be unset (ensure hot-path) | **pass** pixels/size |
+| S5.2 | Android API 28 or 29 (emulator is fine) | JPEG + HEIC, default policy | JPEG: `stb` + `fallback` (`os-too-old`); HEIC: `ImageDecoder.java` | unrun (A142P is API 36) |
+| S5.3 | Android API 26 (emulator is fine) | HEIC create, default policy | `ERR_IMAGE_SW_DECODER_UNAVAILABLE` | unrun (A142P is API 36) |
+| S5.4 | iOS | HEIC + JPEG with `maxSide` | ImageIO; EXIF-6 upright | **pass** Simulator (`heic=256x192`, `jpegExif6=192x256`) |
+| Release | A142P + real iPhone | conformance suite + B1–B4, B6–B9 | numbers in §4; B9 must pass before publishing | unrun |
 
 ---
 
