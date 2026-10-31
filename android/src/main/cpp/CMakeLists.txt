@@ -200,6 +200,8 @@ set(SOURCES
     crypto/sha256.cpp
     image/ImageMmapThreshold.cpp
     image/ImageRegistry.cpp
+    image/ImageFileLazyBackend.cpp
+    image/live/LiveImageEntry.cpp
     image/ImageFrameEncoder.cpp
     image/decode/ImageDecoder.cpp
     jni/image/sherpa-onnx-imagebuffer-jni.cpp

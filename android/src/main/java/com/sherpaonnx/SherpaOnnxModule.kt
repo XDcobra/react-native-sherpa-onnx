@@ -3566,6 +3566,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       else -> m.putDouble("totalBytes", 0.0)
     }
     m.putString("storageKind", info["storageKind"] as? String ?: "ram")
+    when (val tw = info["totalFramesWritten"]) {
+      is Number -> m.putDouble("totalFramesWritten", tw.toDouble())
+    }
+    when (val ev = info["ringEvictedFrames"]) {
+      is Number -> m.putDouble("ringEvictedFrames", ev.toDouble())
+    }
+    when (val spool = info["hasActiveSpool"]) {
+      is Boolean -> m.putBoolean("hasActiveSpool", spool)
+    }
     return m
   }
 
@@ -3692,6 +3701,113 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise,
   ) {
     documentHelper.extractDocumentImages(source, options, promise)
+  }
+
+  override fun createEmptyLiveImageBuffer(options: ReadableMap?, promise: Promise) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+      val ring = if (options != null && options.hasKey("ringFrames")) options.getInt("ringFrames") else 16
+      val retention = options?.getString("retention") ?: "session"
+      val session = retention != "none"
+      val info = com.sherpaonnx.image.ImageBufferService.createLive(ring, session)
+      promise.resolve(imageInfoToWritableMap(info))
+    } catch (e: Exception) {
+      val msg = e.message ?: "createEmptyLiveImageBuffer failed"
+      val code = if (msg.startsWith("ERR_")) msg.substringBefore(':').trim() else "ERR_IMAGE_INTERNAL"
+      promise.reject(code, msg, e)
+    }
+  }
+
+  override fun appendLiveImageFrame(bufferId: String, base64Bytes: String, promise: Promise) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+      val bytes = android.util.Base64.decode(base64Bytes, android.util.Base64.DEFAULT)
+      val before = com.sherpaonnx.image.ImageBufferService.getInfo(bufferId)
+      com.sherpaonnx.image.ImageBufferService.appendLive(bufferId, bytes)
+      val info = com.sherpaonnx.image.ImageBufferService.getInfo(bufferId)
+        ?: throw RuntimeException("ERR_IMAGE_BUFFER_NOT_FOUND: $bufferId")
+      emitLiveImageAppendEvents(bufferId, before, info)
+      promise.resolve(imageInfoToWritableMap(info))
+    } catch (e: Exception) {
+      val msg = e.message ?: "appendLiveImageFrame failed"
+      val code = if (msg.startsWith("ERR_")) msg.substringBefore(':').trim() else "ERR_IMAGE_INTERNAL"
+      promise.reject(code, msg, e)
+    }
+  }
+
+  override fun ingestFileToLiveImageBuffer(
+    source: ReadableMap,
+    bufferId: String,
+    promise: Promise,
+  ) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+      val handle = fileIOHelper.resolveSource(source)
+      val bytes = try {
+        readImageSourceBytes(handle)
+      } finally {
+        try {
+          handle.close()
+        } catch (_: Exception) {
+        }
+      }
+      val before = com.sherpaonnx.image.ImageBufferService.getInfo(bufferId)
+      com.sherpaonnx.image.ImageBufferService.appendLive(bufferId, bytes)
+      val info = com.sherpaonnx.image.ImageBufferService.getInfo(bufferId)
+        ?: throw RuntimeException("ERR_IMAGE_BUFFER_NOT_FOUND: $bufferId")
+      emitLiveImageAppendEvents(bufferId, before, info)
+      promise.resolve(imageInfoToWritableMap(info))
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      val msg = e.message ?: "ingestFileToLiveImageBuffer failed"
+      val code = if (msg.startsWith("ERR_")) msg.substringBefore(':').trim() else "ERR_IMAGE_INTERNAL"
+      promise.reject(code, msg, e)
+    }
+  }
+
+  override fun finalizeLiveImageBuffer(bufferId: String, promise: Promise) {
+    try {
+      com.sherpaonnx.image.ImageBufferService.ensureInitialized(reactApplicationContext)
+      val info = com.sherpaonnx.image.ImageBufferService.finishLive(bufferId)
+      emitImageLiveEvent("finished", bufferId, info)
+      promise.resolve(imageInfoToWritableMap(info))
+    } catch (e: Exception) {
+      val msg = e.message ?: "finalizeLiveImageBuffer failed"
+      val code = if (msg.startsWith("ERR_")) msg.substringBefore(':').trim() else "ERR_IMAGE_INVALID_STATE"
+      promise.reject(code, msg, e)
+    }
+  }
+
+  private fun emitLiveImageAppendEvents(
+    bufferId: String,
+    before: Map<String, Any>?,
+    after: Map<String, Any>,
+  ) {
+    val evictedBefore = (before?.get("ringEvictedFrames") as? Number)?.toLong() ?: 0L
+    val evictedAfter = (after["ringEvictedFrames"] as? Number)?.toLong() ?: 0L
+    if (evictedAfter > evictedBefore) {
+      emitImageLiveEvent("overflow", bufferId, after)
+    }
+    emitImageLiveEvent("framesAppended", bufferId, after)
+  }
+
+  private fun emitImageLiveEvent(type: String, bufferId: String, info: Map<String, Any>) {
+    val body = Arguments.createMap()
+    body.putString("type", type)
+    body.putString("liveBufferId", bufferId)
+    when (val fc = info["frameCount"]) {
+      is Number -> body.putInt("frameCount", fc.toInt())
+    }
+    when (val tw = info["totalFramesWritten"]) {
+      is Number -> body.putDouble("totalFramesWritten", tw.toDouble())
+    }
+    try {
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("SherpaOnnxImageLiveEvent", body)
+    } catch (_: Exception) {
+    }
   }
 
   override fun createEmptyOfflineImageBuffer(promise: Promise) {
@@ -4355,13 +4471,22 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject("ERR_IMAGE_INVALID_ARGUMENT", "sources required")
         return
       }
+      val paths = ArrayList<String>()
       val blobs = ArrayList<ByteArray>()
+      var allFiles = true
       for (i in 0 until sources.size()) {
         val source = sources.getMap(i)
           ?: throw RuntimeException("ERR_IMAGE_INVALID_ARGUMENT: source[$i] must be a FileSource map")
         val handle = fileIOHelper.resolveSource(source)
         try {
-          blobs.add(readImageSourceBytes(handle))
+          when (handle) {
+            is com.sherpaonnx.fileio.FileIOResolver.ReadHandle.FilePath ->
+              paths.add(handle.file.absolutePath)
+            else -> {
+              allFiles = false
+              blobs.add(readImageSourceBytes(handle))
+            }
+          }
         } finally {
           try {
             handle.close()
@@ -4370,14 +4495,40 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         }
       }
       val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 4096
+      val hotFrames = if (options != null && options.hasKey("hotFrames")) options.getInt("hotFrames") else 0
       val operationId = if (options != null && options.hasKey("operationId")) options.getString("operationId") else null
-      val info = com.sherpaonnx.image.ImageBufferService.createFromBytesList(
-        reactApplicationContext,
-        blobs,
-        maxSide,
-        operationId,
-        fileOrigin = true,
-      ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
+      val info = if (allFiles && paths.size == sources.size()) {
+        com.sherpaonnx.image.ImageBufferService.createFromFiles(
+          reactApplicationContext,
+          paths,
+          maxSide,
+          hotFrames,
+          operationId,
+        ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
+      } else {
+        blobs.clear()
+        for (i in 0 until sources.size()) {
+          val source = sources.getMap(i)
+            ?: throw RuntimeException("ERR_IMAGE_INVALID_ARGUMENT: source[$i] must be a FileSource map")
+          val handle = fileIOHelper.resolveSource(source)
+          try {
+            blobs.add(readImageSourceBytes(handle))
+          } finally {
+            try {
+              handle.close()
+            } catch (_: Exception) {
+            }
+          }
+        }
+        com.sherpaonnx.image.ImageBufferService.createFromBytesList(
+          reactApplicationContext,
+          blobs,
+          maxSide,
+          operationId,
+          fileOrigin = true,
+          hotFrames = hotFrames,
+        ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
+      }
       promise.resolve(imageInfoToWritableMap(info))
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       promise.reject(e.code, e.message, e)
@@ -4411,6 +4562,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         blobs.add(Base64.decode(b64, Base64.DEFAULT))
       }
       val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 4096
+      val hotFrames = if (options != null && options.hasKey("hotFrames")) options.getInt("hotFrames") else 0
       val operationId = if (options != null && options.hasKey("operationId")) options.getString("operationId") else null
       val info = com.sherpaonnx.image.ImageBufferService.createFromBytesList(
         reactApplicationContext,
@@ -4418,6 +4570,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         maxSide,
         operationId,
         fileOrigin = false,
+        hotFrames = hotFrames,
       ) { done, total, phase -> emitImageProgress(operationId, done, total, phase) }
       promise.resolve(imageInfoToWritableMap(info))
     } catch (e: Exception) {

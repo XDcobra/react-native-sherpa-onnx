@@ -1,6 +1,8 @@
 #include "ImageRegistry.h"
 
+#include "ImageFileLazyBackend.h"
 #include "PdfLazyBackend.h"
+#include "live/LiveImageEntry.h"
 
 #include <chrono>
 #include <climits>
@@ -171,6 +173,10 @@ void ImageRegistry::SetCacheDir(const std::string& cacheDir) {
 
 std::string ImageRegistry::NewBufferId() {
   return "img_off_" + FormatUuidV4();
+}
+
+std::string ImageRegistry::NewLiveBufferId() {
+  return "img_live_" + FormatUuidV4();
 }
 
 int64_t ImageRegistry::ThresholdFor(ImageThresholdPathType pathType) const {
@@ -503,8 +509,30 @@ void ImageRegistry::ScheduleNeighborPrefetch(const std::string& bufferId,
 ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& bufferId,
                                                        int frameIndex) {
   EnsureResult r;
+  if (bufferId.rfind("img_live_", 0) == 0) {
+    std::shared_ptr<LiveImageEntry> live;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      auto it = liveEntries_.find(bufferId);
+      if (it == liveEntries_.end()) {
+        r.errorCode = "ERR_IMAGE_INVALID_ARGUMENT";
+        r.errorMessage = "unknown bufferId";
+        return r;
+      }
+      live = it->second;
+    }
+    ImageFrameInfo info;
+    auto st = live->EnsureFrame(frameIndex, &info);
+    r.ok = st.ok;
+    r.errorCode = st.errorCode;
+    r.errorMessage = st.errorMessage;
+    r.info = info;
+    return r;
+  }
+
 
   pdf::PdfLazyBackend* session = nullptr;
+  ImageFileLazyBackend* fileLazy = nullptr;
   int pageNumber = 0;
   uint64_t generation = 0;
   int frameCount = 0;
@@ -541,12 +569,13 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
       generation = entry.generation;
       frameCount = static_cast<int>(entry.frames.size());
     } else {
-      if (!entry.pdfLazy) {
+      if (!entry.pdfLazy && !entry.fileLazy) {
         r.errorCode = "ERR_PDF_INTERNAL";
         r.errorMessage = "lazy session missing";
         return r;
       }
       session = entry.pdfLazy.get();
+      fileLazy = entry.fileLazy.get();
       pageNumber = entry.frames[static_cast<size_t>(frameIndex)].pageNumber;
       generation = entry.generation;
       frameCount = static_cast<int>(entry.frames.size());
@@ -573,9 +602,24 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
   RgbFrame rgb;
   std::string errCode;
   std::string errMsg;
-  if (!session->RasterizePage(pageNumber, &rgb, &errCode, &errMsg)) {
-    r.errorCode = errCode.empty() ? "ERR_PDF_RENDER_FAILED" : errCode;
-    r.errorMessage = errMsg.empty() ? "lazy rasterize failed" : errMsg;
+  bool decoded = false;
+  if (session) {
+    decoded = session->RasterizePage(pageNumber, &rgb, &errCode, &errMsg);
+    if (!decoded) {
+      r.errorCode = errCode.empty() ? "ERR_PDF_RENDER_FAILED" : errCode;
+      r.errorMessage = errMsg.empty() ? "lazy rasterize failed" : errMsg;
+      return r;
+    }
+  } else if (fileLazy) {
+    decoded = fileLazy->DecodeFrame(frameIndex, &rgb, &errCode, &errMsg);
+    if (!decoded) {
+      r.errorCode = errCode.empty() ? "ERR_IMAGE_DECODE_FAILED" : errCode;
+      r.errorMessage = errMsg.empty() ? "lazy file decode failed" : errMsg;
+      return r;
+    }
+  } else {
+    r.errorCode = "ERR_PDF_INTERNAL";
+    r.errorMessage = "lazy session missing";
     return r;
   }
 
@@ -613,8 +657,8 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
       FillFrameInfoLocked(entry.frames[static_cast<size_t>(frameIndex)], frameIndex,
                           r.info);
       r.ok = true;
-      PDF_LAZY_LOGI(
-          "ensure bufferId=%s frame=%d page=%d %dx%d hot=%d/%d",
+      IMG_LOGI(
+          "[SherpaOnnx:image] ensure bufferId=%s frame=%d page=%d %dx%d hot=%d/%d",
           bufferId.c_str(), frameIndex, r.info.pageNumber, r.info.width,
           r.info.height, entry.hotCount(), entry.hotFramesLimit);
     }
@@ -655,41 +699,51 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromFiles(
     return r;
   }
 
-  Entry e;
-  e.bufferId = NewBufferId();
-  e.pathType = ImageThresholdPathType::FileOrigin;
+  auto backend = std::make_unique<ImageFileLazyBackend>(opts);
   const int total = static_cast<int>(paths.size());
-
   for (int i = 0; i < total; ++i) {
     if (cancel && cancel()) {
       r.errorCode = "ERR_IMAGE_CANCELLED";
       r.errorMessage = "cancelled";
       return r;
     }
-    if (progress) progress(i, total, "decode");
-
-    auto decoded = ImageDecoder::DecodeFile(paths[static_cast<size_t>(i)], opts);
-    if (!decoded.ok) {
-      r.errorCode = decoded.errorCode.empty() ? "ERR_IMAGE_DECODE_FAILED" : decoded.errorCode;
-      r.errorMessage = decoded.errorMessage + " (" + paths[static_cast<size_t>(i)] + ")";
+    if (progress) progress(i, total, "index");
+    const std::string& path = paths[static_cast<size_t>(i)];
+    if (path.empty()) {
+      r.errorCode = "ERR_IMAGE_INVALID_ARGUMENT";
+      r.errorMessage = "empty path";
       return r;
     }
-    IMG_LOGI("[SherpaOnnx:image] decode file=%s format=%s %dx%d orient=%d scale=%.3f",
-             paths[static_cast<size_t>(i)].c_str(), DecodeFormatName(decoded.format),
-             decoded.frame.width, decoded.frame.height, decoded.orientationApplied,
-             decoded.scaleApplied);
-
-    Frame f;
-    f.width = decoded.frame.width;
-    f.height = decoded.frame.height;
-    f.kind = ImageStorageKind::Ram;
-    f.ram = std::move(decoded.frame.rgb);
-    e.frames.push_back(std::move(f));
+    std::error_code ec;
+    if (!fs::exists(path, ec) || !fs::is_regular_file(path, ec)) {
+      r.errorCode = "ERR_IMAGE_DECODE_FAILED";
+      r.errorMessage = "cannot open file: " + path;
+      return r;
+    }
+    backend->AddPath(path);
   }
   if (progress) progress(total, total, "done");
 
+  const int limit = ClampHotFrames(opts.hotFrames);
   std::lock_guard<std::mutex> lock(mu_);
-  return FinishCreateLocked(std::move(e));
+  Entry e;
+  e.bufferId = NewBufferId();
+  e.pathType = ImageThresholdPathType::FileOrigin;
+  e.state = ImageBufferState::Lazy;
+  e.hotFramesLimit = limit;
+  e.fileLazy = std::move(backend);
+  e.frames.resize(static_cast<size_t>(total));
+  IMG_LOGI("[SherpaOnnx:image] createFromFiles lazy bufferId=%s frames=%d hotFrames=%d",
+           e.bufferId.c_str(), total, limit);
+  r.info.bufferId = e.bufferId;
+  r.info.frameCount = total;
+  r.info.totalBytes = 0;
+  r.info.storageKind = ImageStorageKind::Ram;
+  r.info.state = ImageBufferState::Lazy;
+  r.bufferId = e.bufferId;
+  r.ok = true;
+  entries_[e.bufferId] = std::move(e);
+  return r;
 }
 
 ImageRegistry::CreateResult ImageRegistry::CreateFromBytesList(
@@ -702,45 +756,58 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromBytesList(
     return r;
   }
 
-  Entry e;
-  e.bufferId = NewBufferId();
-  e.pathType = pathType;
+  auto backend = std::make_unique<ImageFileLazyBackend>(opts);
   const int total = static_cast<int>(blobs.size());
-
   for (int i = 0; i < total; ++i) {
     if (cancel && cancel()) {
       r.errorCode = "ERR_IMAGE_CANCELLED";
       r.errorMessage = "cancelled";
       return r;
     }
-    if (progress) progress(i, total, "decode");
-
+    if (progress) progress(i, total, "index");
     const auto& blob = blobs[static_cast<size_t>(i)];
-    auto decoded = ImageDecoder::DecodeBytes(blob.data(), blob.size(), opts);
-    if (!decoded.ok) {
-      r.errorCode = decoded.errorCode.empty() ? "ERR_IMAGE_DECODE_FAILED" : decoded.errorCode;
-      r.errorMessage = decoded.errorMessage;
+    if (blob.empty()) {
+      r.errorCode = "ERR_IMAGE_DECODE_FAILED";
+      r.errorMessage = "empty image bytes";
       return r;
     }
-
-    Frame f;
-    f.width = decoded.frame.width;
-    f.height = decoded.frame.height;
-    f.kind = ImageStorageKind::Ram;
-    f.ram = std::move(decoded.frame.rgb);
-    e.frames.push_back(std::move(f));
+    backend->AddBytes(blob);
   }
   if (progress) progress(total, total, "done");
 
+  const int limit = ClampHotFrames(opts.hotFrames);
   std::lock_guard<std::mutex> lock(mu_);
-  return FinishCreateLocked(std::move(e));
+  Entry e;
+  e.bufferId = NewBufferId();
+  e.pathType = pathType;
+  e.state = ImageBufferState::Lazy;
+  e.hotFramesLimit = limit;
+  e.fileLazy = std::move(backend);
+  e.frames.resize(static_cast<size_t>(total));
+  IMG_LOGI("[SherpaOnnx:image] createFromBytes lazy bufferId=%s frames=%d hotFrames=%d",
+           e.bufferId.c_str(), total, limit);
+  r.info.bufferId = e.bufferId;
+  r.info.frameCount = total;
+  r.info.totalBytes = 0;
+  r.info.storageKind = ImageStorageKind::Ram;
+  r.info.state = ImageBufferState::Lazy;
+  r.bufferId = e.bufferId;
+  r.ok = true;
+  entries_[e.bufferId] = std::move(e);
+  return r;
 }
 
 bool ImageRegistry::GetInfo(const std::string& bufferId, ImageBufferInfo& out) const {
   std::lock_guard<std::mutex> lock(mu_);
+  auto liveIt = liveEntries_.find(bufferId);
+  if (liveIt != liveEntries_.end()) {
+    out = liveIt->second->Info();
+    return true;
+  }
   auto it = entries_.find(bufferId);
   if (it == entries_.end()) return false;
   out.bufferId = it->second.bufferId;
+  out.kind = ImageBufferKind::Offline;
   out.frameCount = static_cast<int>(it->second.frames.size());
   out.totalBytes = it->second.totalBytes();
   out.storageKind = it->second.storageKind();
@@ -751,6 +818,10 @@ bool ImageRegistry::GetInfo(const std::string& bufferId, ImageBufferInfo& out) c
 bool ImageRegistry::GetFrameInfo(const std::string& bufferId, int frameIndex,
                                  ImageFrameInfo& out) const {
   std::lock_guard<std::mutex> lock(mu_);
+  auto liveIt = liveEntries_.find(bufferId);
+  if (liveIt != liveEntries_.end()) {
+    return liveIt->second->GetFrameInfo(frameIndex, &out);
+  }
   auto it = entries_.find(bufferId);
   if (it == entries_.end()) return false;
   if (frameIndex < 0 || frameIndex >= static_cast<int>(it->second.frames.size())) {
@@ -762,6 +833,16 @@ bool ImageRegistry::GetFrameInfo(const std::string& bufferId, int frameIndex,
 
 const uint8_t* ImageRegistry::GetFrameRgbPtr(const std::string& bufferId, int frameIndex,
                                              int* outWidth, int* outHeight) {
+  if (bufferId.rfind("img_live_", 0) == 0) {
+    std::shared_ptr<LiveImageEntry> live;
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      auto it = liveEntries_.find(bufferId);
+      if (it == liveEntries_.end()) return nullptr;
+      live = it->second;
+    }
+    return live->GetFrameRgbPtr(frameIndex, outWidth, outHeight);
+  }
   {
     std::lock_guard<std::mutex> lock(mu_);
     auto it = entries_.find(bufferId);
@@ -811,6 +892,12 @@ const uint8_t* ImageRegistry::GetFrameRgbPtr(const std::string& bufferId, int fr
 
 bool ImageRegistry::Release(const std::string& bufferId) {
   std::lock_guard<std::mutex> lock(mu_);
+  auto liveIt = liveEntries_.find(bufferId);
+  if (liveIt != liveEntries_.end()) {
+    liveEntries_.erase(liveIt);
+    IMG_LOGI("[SherpaOnnx:image] release live bufferId=%s", bufferId.c_str());
+    return true;
+  }
   auto it = entries_.find(bufferId);
   if (it == entries_.end()) return false;
   it->second.generation += 1;  // invalidate in-flight prefetch / ensure
@@ -818,9 +905,87 @@ bool ImageRegistry::Release(const std::string& bufferId) {
     ClearFrameRgbLocked(f);
   }
   it->second.pdfLazy.reset();
+  it->second.fileLazy.reset();
   entries_.erase(it);
   IMG_LOGI("[SherpaOnnx:image] release bufferId=%s", bufferId.c_str());
   return true;
+}
+
+ImageRegistry::CreateResult ImageRegistry::CreateLive(const LiveImageOptions& opts) {
+  std::lock_guard<std::mutex> lock(mu_);
+  CreateResult r;
+  const std::string id = NewLiveBufferId();
+  auto live = LiveImageEntry::Create(opts, id);
+  liveEntries_[id] = live;
+  r.ok = true;
+  r.bufferId = id;
+  r.info = live->Info();
+  IMG_LOGI("[SherpaOnnx:image] createLive bufferId=%s ringFrames=%d retention=%s",
+           id.c_str(), opts.ringFrames,
+           opts.retention == ImageRetention::Session ? "session" : "none");
+  return r;
+}
+
+LiveImageEntry::Status ImageRegistry::AppendLiveCompressed(
+    const std::string& bufferId, std::vector<uint8_t> bytes) {
+  std::shared_ptr<LiveImageEntry> live;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = liveEntries_.find(bufferId);
+    if (it == liveEntries_.end()) {
+      LiveImageEntry::Status s;
+      s.errorCode = "ERR_IMAGE_BUFFER_NOT_FOUND";
+      s.errorMessage = "unknown live bufferId";
+      return s;
+    }
+    live = it->second;
+  }
+  auto st = live->AppendCompressed(std::move(bytes));
+  if (st.ok) {
+    const auto info = live->Info();
+    IMG_LOGI(
+        "[SherpaOnnx:image] live append bufferId=%s frames=%d written=%lld "
+        "evicted=%lld spool=%d",
+        bufferId.c_str(), info.frameCount,
+        static_cast<long long>(info.totalFramesWritten),
+        static_cast<long long>(info.ringEvictedFrames),
+        info.hasActiveSpool ? 1 : 0);
+  }
+  return st;
+}
+
+LiveImageEntry::Status ImageRegistry::FinishLive(const std::string& bufferId) {
+  std::shared_ptr<LiveImageEntry> live;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = liveEntries_.find(bufferId);
+    if (it == liveEntries_.end()) {
+      LiveImageEntry::Status s;
+      s.errorCode = "ERR_IMAGE_BUFFER_NOT_FOUND";
+      s.errorMessage = "unknown live bufferId";
+      return s;
+    }
+    live = it->second;
+  }
+  auto st = live->Finish();
+  if (st.ok) {
+    IMG_LOGI("[SherpaOnnx:image] live finish bufferId=%s", bufferId.c_str());
+  }
+  return st;
+}
+
+int ImageRegistry::FileLazyDecodeCount(const std::string& bufferId) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = entries_.find(bufferId);
+  if (it == entries_.end() || !it->second.fileLazy) return -1;
+  return it->second.fileLazy->decode_count();
+}
+
+int ImageRegistry::LiveDecodeCount(const std::string& bufferId) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = liveEntries_.find(bufferId);
+  if (it == liveEntries_.end()) return -1;
+  return it->second->DecodeCount();
 }
 
 void ImageRegistry::MaybeUpgradeToMmap(const std::string& bufferId,

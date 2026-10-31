@@ -7,6 +7,30 @@ package com.sherpaonnx.image
 internal object ImageBufferNative {
   @JvmStatic external fun nativeInit(cacheDir: String, totalRamBytes: Long)
   @JvmStatic external fun nativeCreateEmpty(): String
+
+  @JvmStatic
+  external fun nativeCreateLive(ringFrames: Int, sessionRetention: Boolean): HashMap<String, Any>?
+
+  @JvmStatic
+  external fun nativeAppendLive(bufferId: String, bytes: ByteArray): HashMap<String, Any>?
+
+  @JvmStatic
+  external fun nativeFinishLive(bufferId: String): HashMap<String, Any>?
+
+  @JvmStatic
+  external fun nativeCreateFromFiles(
+    paths: Array<String>,
+    maxSide: Int,
+    hotFrames: Int,
+  ): HashMap<String, Any>?
+
+  @JvmStatic
+  external fun nativeCreateFromBytesList(
+    blobs: Array<ByteArray>,
+    maxSide: Int,
+    hotFrames: Int,
+    fileOrigin: Boolean,
+  ): HashMap<String, Any>?
   @JvmStatic
   external fun nativeDecodeAndAppend(
     bufferId: String,

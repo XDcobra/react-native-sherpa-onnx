@@ -1,8 +1,9 @@
 /**
- * Offline ImageBuffer — public API for react-native-sherpa-onnx/imagebuffer.
+ * Pipeline ImageBuffer — public API for react-native-sherpa-onnx/imagebuffer.
  *
- * Multi-frame RGB8 buffers with RAM|mmap storage.
- * LiveImageBuffer is reserved (types only).
+ * Offline: multi-frame RGB8 with RAM|mmap. File/base64 create is lazy-lru
+ * (`state: 'lazy'`); RGB on ensure / OCR / FrameView.
+ * Live: compressed JPEG/WebP/HEIC ring (`img_live_*`), recording → finished.
  *
  * WebP is opt-in: rebuild with `sherpaOnnxEnableLibwebp=true` (Android) or
  * `SHERPA_ONNX_ENABLE_LIBWEBP=1` (iOS). Default builds reject WebP decode/export
@@ -23,19 +24,33 @@ import type {
 } from '../fileio/types';
 import { ImageErrorCode } from './types';
 import type {
+  CreateEmptyLiveImageBufferOptions,
   CreateOfflineImageBufferOptions,
   ExportOfflineImageBufferFrameOptions,
   ImageExportFormat,
   ImageFrameResizeMode,
   ImageProgressEvent,
+  ImageRetention,
   ImageStorageKind,
+  LiveImageBufferEvent,
+  LiveImageBufferEventType,
+  LiveImageBufferFinishedRef,
+  LiveImageBufferHandle,
+  LiveImageBufferHandleFinished,
+  LiveImageBufferHandleRecording,
+  LiveImageBufferIdSource,
   LiveImageBufferInfo,
+  LiveImageBufferRef,
+  LiveImageBufferState,
   OfflineImageBufferHandle,
   OfflineImageBufferIdSource,
   OfflineImageBufferInfo,
   OfflineImageBufferRef,
   OfflineImageBufferState,
   OfflineImageFrameInfo,
+  PipelineImageBufferIdSource,
+  PipelineImageBufferInfo,
+  PipelineImageBufferKind,
 } from './types';
 import {
   OfflineImageBufferFrameView,
@@ -49,8 +64,13 @@ type NativeSubscription = { remove: () => void };
 
 let opIdCounter = 0;
 
-const IMAGE_BUFFER_ID_PATTERN =
+const OFFLINE_ID =
   /^img_off_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const LIVE_ID =
+  /^img_live_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const IMAGE_BUFFER_ID_PATTERN = new RegExp(
+  `${OFFLINE_ID.source}|${LIVE_ID.source}`
+);
 
 function asHandle(id: string): OfflineImageBufferHandle {
   return id as OfflineImageBufferHandle;
@@ -76,7 +96,37 @@ function resolveImageBufferId(source: OfflineImageBufferIdSource): string {
 export function resolveOfflineImageBufferId(
   source: OfflineImageBufferIdSource
 ): string {
-  return resolveImageBufferId(source);
+  const id = resolveImageBufferId(source);
+  if (!OFFLINE_ID.test(id) && !LIVE_ID.test(id)) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: malformed image buffer id: ${id}`
+    );
+  }
+  return id;
+}
+
+export function resolveLiveImageBufferId(
+  source: LiveImageBufferIdSource
+): string {
+  const id = resolveImageBufferId(source as OfflineImageBufferIdSource);
+  if (!LIVE_ID.test(id)) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: malformed live image buffer id: ${id}`
+    );
+  }
+  return id;
+}
+
+export function resolvePipelineImageBufferId(
+  source: PipelineImageBufferIdSource
+): string {
+  const id = resolveImageBufferId(source as OfflineImageBufferIdSource);
+  if (!OFFLINE_ID.test(id) && !LIVE_ID.test(id)) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: malformed image buffer id: ${id}`
+    );
+  }
+  return id;
 }
 
 function assertImageBufferId(id: string): void {
@@ -87,9 +137,9 @@ function assertImageBufferId(id: string): void {
   }
 }
 
-function mapInfo(raw: {
+function mapOfflineInfo(raw: {
   bufferId: string;
-  kind: string;
+  kind?: string;
   state: string;
   frameCount: number;
   totalBytes: number;
@@ -103,6 +153,46 @@ function mapInfo(raw: {
     totalBytes: raw.totalBytes,
     storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
   };
+}
+
+function mapLiveInfo(raw: {
+  bufferId: string;
+  state: string;
+  frameCount: number;
+  totalFramesWritten?: number;
+  ringEvictedFrames?: number;
+  hasActiveSpool?: boolean | string;
+  totalBytes?: number;
+  storageKind?: string;
+}): LiveImageBufferInfo {
+  return {
+    bufferId: raw.bufferId,
+    kind: 'liveImageBuffer',
+    state: raw.state === 'finished' ? 'finished' : 'recording',
+    frameCount: raw.frameCount,
+    totalFramesWritten: raw.totalFramesWritten ?? 0,
+    ringEvictedFrames: raw.ringEvictedFrames ?? 0,
+    hasActiveSpool:
+      raw.hasActiveSpool === true || raw.hasActiveSpool === 'true',
+    totalBytes: raw.totalBytes,
+    storageKind:
+      raw.storageKind === 'mmap'
+        ? 'mmap'
+        : raw.storageKind === 'ram'
+        ? 'ram'
+        : undefined,
+  };
+}
+
+function mapInfo(raw: {
+  bufferId: string;
+  kind: string;
+  state: string;
+  frameCount: number;
+  totalBytes: number;
+  storageKind: string;
+}): OfflineImageBufferInfo {
+  return mapOfflineInfo(raw);
 }
 
 function mapFrameInfo(raw: {
@@ -176,17 +266,24 @@ function cancelledError(): Error {
   });
 }
 
-/** Wire onProgress / AbortSignal; returns native `{ maxSide?, operationId }` plus cleanup. */
+/** Wire onProgress / AbortSignal; returns native `{ maxSide?, hotFrames?, operationId }` plus cleanup. */
 function beginCreateProgressCancel(options?: CreateOfflineImageBufferOptions): {
-  nativeOptions: { maxSide?: number; operationId: string };
+  nativeOptions: { maxSide?: number; hotFrames?: number; operationId: string };
   cleanup: () => void;
 } {
   const operationId = `img_create_${Date.now()}_${++opIdCounter}`;
-  const nativeOptions: { maxSide?: number; operationId: string } = {
+  const nativeOptions: {
+    maxSide?: number;
+    hotFrames?: number;
+    operationId: string;
+  } = {
     operationId,
   };
   if (options?.maxSide !== undefined) {
     nativeOptions.maxSide = options.maxSide;
+  }
+  if (options?.hotFrames !== undefined) {
+    nativeOptions.hotFrames = options.hotFrames;
   }
 
   let progressSubscription: NativeSubscription | null = null;
@@ -272,7 +369,8 @@ export async function createEmptyOfflineImageBuffer(): Promise<OfflineImageBuffe
 }
 
 /**
- * Decode one or more images from {@link FileSource}(s) into an offline ImageBuffer.
+ * Index one or more images from {@link FileSource}(s) into a lazy offline ImageBuffer.
+ * RGB is decoded on {@link ensureOfflineImageBufferFrame}, FrameView, or OCR.
  * Pass `onProgress` and/or `signal` in options for create progress and cancellation.
  */
 export async function createOfflineImageBufferFromFiles(
@@ -351,15 +449,194 @@ export async function getOfflineImageBufferInfo(
   buffer: OfflineImageBufferIdSource
 ): Promise<OfflineImageBufferInfo> {
   const id = resolveImageBufferId(buffer);
-  assertImageBufferId(id);
+  if (!OFFLINE_ID.test(id)) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: malformed offline image buffer id: ${id}`
+    );
+  }
   return mapInfo(await getNative().getOfflineImageBufferInfo(id));
+}
+
+function mapPipelineInfo(raw: {
+  bufferId: string;
+  kind?: string;
+  state: string;
+  frameCount: number;
+  totalBytes?: number;
+  storageKind?: string;
+  totalFramesWritten?: number;
+  ringEvictedFrames?: number;
+  hasActiveSpool?: boolean | string;
+}): PipelineImageBufferInfo {
+  if (raw.kind === 'liveImageBuffer' || LIVE_ID.test(raw.bufferId)) {
+    return mapLiveInfo(raw);
+  }
+  return mapOfflineInfo({
+    bufferId: raw.bufferId,
+    kind: raw.kind,
+    state: raw.state,
+    frameCount: raw.frameCount,
+    totalBytes: raw.totalBytes ?? 0,
+    storageKind: raw.storageKind ?? 'ram',
+  });
+}
+
+export async function getPipelineImageBufferInfo(
+  buffer: PipelineImageBufferIdSource
+): Promise<PipelineImageBufferInfo> {
+  const id = resolvePipelineImageBufferId(buffer);
+  return mapPipelineInfo(await getNative().getOfflineImageBufferInfo(id));
+}
+
+export async function releasePipelineImageBuffer(
+  buffer: PipelineImageBufferIdSource
+): Promise<void> {
+  const id = resolvePipelineImageBufferId(buffer);
+  await getNative().releaseOfflineImageBuffer(id);
+  if (__DEV__) {
+    console.log('[SherpaOnnx:image] release', id);
+  }
+}
+
+function assertFileSource(source: FileSource): void {
+  if (
+    !source ||
+    typeof source !== 'object' ||
+    typeof (source as FileSource).kind !== 'string'
+  ) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: source must be a FileSource`
+    );
+  }
+}
+
+export async function createEmptyLiveImageBuffer(
+  options?: CreateEmptyLiveImageBufferOptions
+): Promise<LiveImageBufferRef> {
+  const raw = await getNative().createEmptyLiveImageBuffer({
+    ringFrames: options?.ringFrames ?? 16,
+    retention: options?.retention ?? 'session',
+  });
+  const info = mapLiveInfo(raw);
+  if (!LIVE_ID.test(info.bufferId)) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: malformed live image buffer id: ${info.bufferId}`
+    );
+  }
+  if (__DEV__) {
+    console.log(
+      '[SherpaOnnx:image] createEmptyLive',
+      info.bufferId,
+      'ringFrames=',
+      options?.ringFrames ?? 16,
+      'retention=',
+      options?.retention ?? 'session'
+    );
+  }
+  return {
+    info,
+    bufferId: info.bufferId as LiveImageBufferHandleRecording,
+    unsubscribeEvents: () => {},
+  };
+}
+
+export async function appendLiveImageFrame(
+  live: LiveImageBufferIdSource,
+  compressedBase64: string
+): Promise<LiveImageBufferInfo> {
+  const id = resolveLiveImageBufferId(live);
+  if (typeof compressedBase64 !== 'string' || compressedBase64.length === 0) {
+    throw new Error(
+      `${ImageErrorCode.INVALID_ARGUMENT}: compressedBase64 required`
+    );
+  }
+  const info = mapLiveInfo(
+    await getNative().appendLiveImageFrame(id, compressedBase64)
+  );
+  if (__DEV__) {
+    console.log(
+      '[SherpaOnnx:image] appendLive',
+      id,
+      'frames=',
+      info.frameCount,
+      'written=',
+      info.totalFramesWritten,
+      'evicted=',
+      info.ringEvictedFrames
+    );
+  }
+  return info;
+}
+
+export async function ingestFileToLiveImageBuffer(
+  source: FileSource,
+  live: LiveImageBufferIdSource
+): Promise<LiveImageBufferInfo> {
+  assertFileSource(source);
+  const id = resolveLiveImageBufferId(live);
+  const info = mapLiveInfo(
+    await getNative().ingestFileToLiveImageBuffer(source as Object, id)
+  );
+  if (__DEV__) {
+    console.log(
+      '[SherpaOnnx:image] ingestFileToLive',
+      id,
+      'kind=',
+      source.kind,
+      'frames=',
+      info.frameCount
+    );
+  }
+  return info;
+}
+
+export async function finalizeLiveImageBuffer(
+  live: LiveImageBufferIdSource
+): Promise<LiveImageBufferFinishedRef> {
+  const id = resolveLiveImageBufferId(live);
+  const info = mapLiveInfo(await getNative().finalizeLiveImageBuffer(id));
+  if (__DEV__) {
+    console.log('[SherpaOnnx:image] finalizeLive', id, 'state=', info.state);
+  }
+  return {
+    bufferId: info.bufferId as LiveImageBufferHandleFinished,
+    info,
+  };
+}
+
+export function subscribeLiveImageBufferEvents(
+  live: LiveImageBufferIdSource,
+  onEvent: (event: LiveImageBufferEvent) => void
+): () => void {
+  const id = resolveLiveImageBufferId(live);
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+  const sub = emitter.addListener(
+    'SherpaOnnxImageLiveEvent',
+    (raw: {
+      type?: string;
+      liveBufferId?: string;
+      frameCount?: number;
+      totalFramesWritten?: number;
+    }) => {
+      if (!raw || raw.liveBufferId !== id) return;
+      onEvent({
+        type: (raw.type as LiveImageBufferEvent['type']) ?? 'framesAppended',
+        liveBufferId: raw.liveBufferId,
+        frameCount: raw.frameCount,
+        totalFramesWritten: raw.totalFramesWritten,
+      });
+    }
+  );
+  return () => sub.remove();
 }
 
 export { getOfflineImageBufferFrameInfo } from './getFrameInfo';
 
 /**
  * Ensure frame RGB is resident. No-op (returns frame info) for immutable buffers.
- * For lazy-lru PDF buffers: rasterize cold slots, update LRU, may prefetch ±1.
+ * For lazy file and PDF buffers: decode/rasterize cold slots, update LRU, may prefetch ±1.
+ * Finished live buffers decode a compressed ring/spool frame into the hot RGB cache.
+ * Recording live buffers reject with `ERR_IMAGE_INVALID_STATE`.
  */
 export async function ensureOfflineImageBufferFrame(
   buffer: OfflineImageBufferIdSource,
@@ -463,6 +740,7 @@ export async function exportOfflineImageBufferFrame(
 }
 
 export type {
+  CreateEmptyLiveImageBufferOptions,
   CreateOfflineImageBufferOptions,
   ExportOfflineImageBufferFrameOptions,
   FileDestination,
@@ -470,6 +748,18 @@ export type {
   ImageExportFormat,
   ImageFrameResizeMode,
   ImageProgressEvent,
+  ImageRetention,
+  ImageStorageKind,
+  LiveImageBufferEvent,
+  LiveImageBufferEventType,
+  LiveImageBufferFinishedRef,
+  LiveImageBufferHandle,
+  LiveImageBufferHandleFinished,
+  LiveImageBufferHandleRecording,
+  LiveImageBufferIdSource,
+  LiveImageBufferInfo,
+  LiveImageBufferRef,
+  LiveImageBufferState,
   OfflineImageBufferFrameViewProps,
   OfflineImageBufferHandle,
   OfflineImageBufferIdSource,
@@ -477,8 +767,9 @@ export type {
   OfflineImageBufferRef,
   OfflineImageBufferState,
   OfflineImageFrameInfo,
-  LiveImageBufferInfo,
-  ImageStorageKind,
+  PipelineImageBufferIdSource,
+  PipelineImageBufferInfo,
+  PipelineImageBufferKind,
   ResolvedFileRef,
 };
 

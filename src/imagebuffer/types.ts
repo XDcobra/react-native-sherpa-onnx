@@ -1,7 +1,8 @@
 /**
- * Offline ImageBuffer types for react-native-sherpa-onnx/imagebuffer.
+ * Pipeline image buffer types for react-native-sherpa-onnx/imagebuffer.
  *
- * LiveImageBuffer is reserved for a future epic (types only).
+ * OfflineImageBuffer: immutable RGB or lazy file/PDF slots.
+ * LiveImageBuffer: recording → finished (never back). Same C++ kernel.
  */
 
 import type {
@@ -12,7 +13,7 @@ import type {
 
 export type { FileDestination, FileSource, ResolvedFileRef };
 
-/** `lazy` = PDF lazy-lru slots (RGB may be cold until ensure). */
+/** `lazy` = PDF or file lazy-lru slots (RGB may be cold until ensure). */
 export type OfflineImageBufferState = 'immutable' | 'lazy';
 
 export type ImageStorageKind = 'ram' | 'mmap';
@@ -62,12 +63,19 @@ export type OfflineImageBufferIdSource =
   | OfflineImageBufferRef
   | OfflineImageBufferHandle
   | OfflineImageBufferInfo
+  | LiveImageBufferFinishedRef
+  | LiveImageBufferHandleFinished
   | string;
 
 /** Options for offline image create. */
 export interface CreateOfflineImageBufferOptions {
   /** Longest edge cap after decode (default 4096). <= 0 disables. */
   maxSide?: number;
+  /**
+   * Lazy file create: max decoded RGB frames kept hot (default 8, clamped 1..32).
+   * Same contract as PDF `hotFrames`.
+   */
+  hotFrames?: number;
   /**
    * Cancel the create operation. When aborted, the create promise rejects with
    * `ERR_IMAGE_CANCELLED` and any partial buffer is released.
@@ -87,11 +95,81 @@ export interface ImageProgressEvent {
   phase: string;
 }
 
-/** Reserved — not implemented in this epic. */
-export type LiveImageBufferInfo = {
+export type PipelineImageBufferKind = 'offlineImageBuffer' | 'liveImageBuffer';
+
+export type LiveImageBufferState = 'recording' | 'finished';
+
+export interface LiveImageBufferInfo {
   bufferId: string;
   kind: 'liveImageBuffer';
+  state: LiveImageBufferState;
+  frameCount: number;
+  totalFramesWritten: number;
+  ringEvictedFrames: number;
+  hasActiveSpool: boolean;
+  totalBytes?: number;
+  storageKind?: ImageStorageKind;
+}
+
+export type PipelineImageBufferInfo =
+  | OfflineImageBufferInfo
+  | LiveImageBufferInfo;
+
+export type LiveImageBufferHandleRecording = string & {
+  readonly __brand: 'LiveImageBufferHandleRecording';
 };
+
+export type LiveImageBufferHandleFinished = string & {
+  readonly __brand: 'LiveImageBufferHandleFinished';
+};
+
+export type LiveImageBufferHandle =
+  | LiveImageBufferHandleRecording
+  | LiveImageBufferHandleFinished;
+
+export interface LiveImageBufferRef {
+  info: LiveImageBufferInfo;
+  bufferId: LiveImageBufferHandleRecording;
+  unsubscribeEvents: () => void;
+}
+
+export type LiveImageBufferFinishedRef = {
+  bufferId: LiveImageBufferHandleFinished;
+  info: LiveImageBufferInfo;
+};
+
+export type LiveImageBufferIdSource =
+  | LiveImageBufferRef
+  | LiveImageBufferHandleRecording
+  | LiveImageBufferHandleFinished
+  | string;
+
+export type PipelineImageBufferIdSource =
+  | OfflineImageBufferRef
+  | LiveImageBufferRef
+  | PipelineImageBufferInfo
+  | OfflineImageBufferHandle
+  | LiveImageBufferHandle
+  | string;
+
+export type ImageRetention = 'session' | 'none';
+
+export interface CreateEmptyLiveImageBufferOptions {
+  ringFrames?: number;
+  retention?: ImageRetention;
+}
+
+export type LiveImageBufferEventType =
+  | 'framesAppended'
+  | 'overflow'
+  | 'finished';
+
+export interface LiveImageBufferEvent {
+  type: LiveImageBufferEventType;
+  liveBufferId: string;
+  frameCount?: number;
+  totalFramesWritten?: number;
+}
 
 export const ImageErrorCode = {
   INVALID_ARGUMENT: 'ERR_IMAGE_INVALID_ARGUMENT',
@@ -99,6 +177,8 @@ export const ImageErrorCode = {
   FORMAT_UNSUPPORTED: 'ERR_IMAGE_FORMAT_UNSUPPORTED',
   WEBP_DISABLED: 'ERR_IMAGE_WEBP_DISABLED',
   BUFFER_NOT_FOUND: 'ERR_IMAGE_BUFFER_NOT_FOUND',
+  INVALID_STATE: 'ERR_IMAGE_INVALID_STATE',
+  FRAME_EVICTED: 'ERR_IMAGE_FRAME_EVICTED',
   ENCODE_FAILED: 'ERR_IMAGE_ENCODE_FAILED',
   CANCELLED: 'ERR_IMAGE_CANCELLED',
   INTERNAL: 'ERR_IMAGE_INTERNAL',
