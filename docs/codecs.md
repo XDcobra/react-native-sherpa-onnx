@@ -51,10 +51,12 @@ Existing `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_ENCODER_UNAVAILABLE` / `VIDEO_PREV
 
 ## Bundled SW video (`ffmpeg-vsw`)
 
-Default FFmpeg prebuilts stay audio-only. Opt in with `VIDEO_SW_DECODERS=1` when building FFmpeg, then:
+Default FFmpeg prebuilts stay audio-only. The example app sets the flags **off** so smoke S4.2 hits `VIDEO_SW_DECODER_DISABLED`.
 
-- Android Gradle: `sherpaOnnxEnableVideoSwDecoders=true`
-- iOS Pod: `SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS=1`
+Publish the variant with the **FFmpeg video-SW** GitHub Actions (tag files `ANDROID_VSW_RELEASE_TAG` / `IOS_VSW_RELEASE_TAG`), then opt in:
+
+- Android Gradle: `sherpaOnnxEnableVideoSwDecoders=true` → Maven `com.xdcobra.sherpa:ffmpeg-vsw` or `ffmpeg-vsw-android.zip`
+- iOS Pod: `SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS=1` → `ffmpeg-vsw-ios-framework.zip`
 
 Availability is detected at runtime with `avcodec_find_decoder`. Missing decoders map to `VIDEO_SW_DECODER_DISABLED`.
 

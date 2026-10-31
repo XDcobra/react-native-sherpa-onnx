@@ -7,6 +7,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Caller env (e.g. ARTIFACT_ID=ffmpeg-vsw) wins over the example defaults.
+_SAVED_GROUP_ID="${GROUP_ID:-}"
+_SAVED_ARTIFACT_ID="${ARTIFACT_ID:-}"
 if [ -f "${SCRIPT_DIR}/publish.env" ]; then
   set -a
   # shellcheck source=publish.env
@@ -18,6 +21,8 @@ elif [ -f "${SCRIPT_DIR}/publish.env.example" ]; then
   . "${SCRIPT_DIR}/publish.env.example"
   set +a
 fi
+[ -n "${_SAVED_GROUP_ID}" ] && GROUP_ID="${_SAVED_GROUP_ID}"
+[ -n "${_SAVED_ARTIFACT_ID}" ] && ARTIFACT_ID="${_SAVED_ARTIFACT_ID}"
 
 for var in GROUP_ID ARTIFACT_ID MAVEN_VERSION AAR_SRC MAVEN_REPO_PAT; do
   eval "val=\${$var}"

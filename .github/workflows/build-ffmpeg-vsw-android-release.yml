@@ -1,0 +1,209 @@
+# Build FFmpeg (+ libshine + libopus) with bundled H.264/HEVC software
+# video decoders and publish as GitHub Release + Maven ffmpeg-vsw.
+# Tag: third_party/ffmpeg_prebuilt/ANDROID_VSW_RELEASE_TAG
+# Must not share cache keys or Maven coordinates with the audio-only ffmpeg job.
+#
+# Trigger: workflow_dispatch (gh workflow run --ref) and push of this workflow /
+# the vsw tag / the Android FFmpeg build script so the workflow is registered
+# on feature branches (GitHub only indexes workflows after a push).
+#
+name: Prebuilt - FFmpeg video-SW (Android) Release
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build-ffmpeg-vsw-android-release.yml'
+      - 'third_party/ffmpeg_prebuilt/ANDROID_VSW_RELEASE_TAG'
+      - 'third_party/ffmpeg_prebuilt/build_ffmpeg.sh'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ffmpeg-vsw-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/ffmpeg_prebuilt/ANDROID_VSW_RELEASE_TAG
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE (e.g. ffmpeg-vsw-android-v8.1.3-1)"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          MAVEN_VERSION=$(echo "$RELEASE_TAG" | sed 's/^ffmpeg-vsw-android-v//')
+          echo "maven_version=$MAVEN_VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (Maven version: $MAVEN_VERSION)"
+
+      - name: Set up Android NDK
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r29
+          add-to-path: true
+          local-cache: false
+
+      - name: Get submodule versions
+        id: submodules
+        run: |
+          echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "opus=$(git -C third_party/opus rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache FFmpeg vsw prebuilts
+        uses: actions/cache@v6
+        id: ffmpeg-cache
+        with:
+          path: |
+            third_party/ffmpeg_prebuilt/android
+            third_party/shine_prebuilt/android
+            third_party/opus_prebuilt/android
+          key: ffmpeg-vsw-android-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ steps.submodules.outputs.opus }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh', 'third_party/opus_prebuilt/build_opus.sh') }}
+
+      - name: Install FFmpeg build dependencies
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libunistring-dev libaom-dev libdav1d-dev
+
+      - name: Build libshine
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/shine_prebuilt
+          chmod +x build_shine.sh
+          ./build_shine.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Build libopus
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/opus_prebuilt
+          chmod +x build_opus.sh
+          ./build_opus.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Build FFmpeg (video-SW decoders + libshine + libopus)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/ffmpeg_prebuilt
+          chmod +x build_ffmpeg.sh
+          ./build_ffmpeg.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          VIDEO_SW_DECODERS: '1'
+
+      - name: Package jniLibs layout (FFmpeg + shine + opus only)
+        run: |
+          LAYOUT=ffmpeg-vsw-android-layout
+          rm -rf "$LAYOUT"
+          mkdir -p "$LAYOUT"
+          ABIS="arm64-v8a armeabi-v7a x86 x86_64"
+          FFMPEG_SO="libavcodec.so libavformat.so libavutil.so libswresample.so libavfilter.so"
+          SHINE_SO="libshine.so"
+          OPUS_SO="libopus.so"
+          for abi in $ABIS; do
+            mkdir -p "$LAYOUT/$abi"
+            for so in $FFMPEG_SO; do
+              SRC="third_party/ffmpeg_prebuilt/android/$abi/lib/$so"
+              if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; fi
+            done
+            for so in $SHINE_SO; do
+              for root in third_party/ffmpeg_prebuilt/android third_party/shine_prebuilt/android; do
+                SRC="$root/$abi/lib/$so"
+                if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; break; fi
+              done
+            done
+            for so in $OPUS_SO; do
+              for root in third_party/ffmpeg_prebuilt/android third_party/opus_prebuilt/android; do
+                SRC="$root/$abi/lib/$so"
+                if [ -f "$SRC" ]; then cp "$SRC" "$LAYOUT/$abi/"; break; fi
+              done
+            done
+          done
+          if [ -d "third_party/ffmpeg_prebuilt/android/include" ]; then
+            mkdir -p "$LAYOUT/include"
+            cp -R third_party/ffmpeg_prebuilt/android/include/* "$LAYOUT/include/"
+          fi
+          echo "Layout contents:"
+          find "$LAYOUT" -type f \( -name '*.so' -o -name '*.h' \) | head -50
+
+      - name: Create release zip
+        run: |
+          cd ffmpeg-vsw-android-layout
+          zip -r ../ffmpeg-vsw-android.zip .
+          cd ..
+          ls -la ffmpeg-vsw-android.zip
+
+      - name: Create FFmpeg vsw AAR
+        run: |
+          chmod +x third_party/ffmpeg_prebuilt/create_ffmpeg_aar.sh
+          VER="${{ steps.tag.outputs.maven_version }}"
+          third_party/ffmpeg_prebuilt/create_ffmpeg_aar.sh ffmpeg-vsw-android-layout "$VER" "ffmpeg-vsw-${VER}.aar"
+          ls -la "ffmpeg-vsw-${VER}.aar"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: FFmpeg video-SW Android ${{ steps.tag.outputs.release_tag }}
+          make_latest: false
+          body: |
+            Opt-in FFmpeg prebuilt with bundled H.264/HEVC **software** video decoders (`VIDEO_SW_DECODERS=1`).
+            Default `com.xdcobra.sherpa:ffmpeg` stays audio-only.
+            - **ffmpeg-vsw-android.zip** – `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so) and `include/`.
+            - **ffmpeg-vsw-${{ steps.tag.outputs.maven_version }}.aar** – Maven `com.xdcobra.sherpa:ffmpeg-vsw`.
+
+            H.264/HEVC patents are separate from the LGPL-2.1 license. Enable in apps with `sherpaOnnxEnableVideoSwDecoders=true`.
+          files: |
+            ffmpeg-vsw-android.zip
+            ffmpeg-vsw-${{ steps.tag.outputs.maven_version }}.aar
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish FFmpeg vsw AAR to GitHub Pages Maven
+        if: success()
+        env:
+          MAVEN_REPO_PAT: ${{ secrets.MAVEN_REPO_PAT }}
+          MAVEN_VERSION: ${{ steps.tag.outputs.maven_version }}
+          AAR_SRC: ffmpeg-vsw-${{ steps.tag.outputs.maven_version }}.aar
+          ARTIFACT_ID: ffmpeg-vsw
+        run: |
+          if [ -z "${MAVEN_REPO_PAT}" ]; then
+            echo "MAVEN_REPO_PAT not set, skipping Maven publish."
+            exit 0
+          fi
+          chmod +x third_party/ffmpeg_prebuilt/publish-maven/publish-to-github-pages.sh
+          third_party/ffmpeg_prebuilt/publish-maven/publish-to-github-pages.sh
+
+      - name: Summary
+        run: |
+          echo "## FFmpeg video-SW Android release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`ffmpeg-vsw-android.zip\` | JNI layout + headers. Gradle extracts when \`sherpaOnnxEnableVideoSwDecoders=true\`. |" >> $GITHUB_STEP_SUMMARY
+          echo "| \`ffmpeg-vsw-${{ steps.tag.outputs.maven_version }}.aar\` | Maven \`com.xdcobra.sherpa:ffmpeg-vsw\`. |" >> $GITHUB_STEP_SUMMARY

@@ -18,6 +18,8 @@ def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarc
 def sherpaOnnxEnableLibwebp = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
 // Opt-in (default false). When false, skip all PDFium download/link requirements.
 def sherpaOnnxEnablePdfium = (project.findProperty("sherpaOnnxEnablePdfium") ?: "false").toString().toLowerCase() in ["true", "1"]
+// Opt-in (default false). When true, resolve com.xdcobra.sherpa:ffmpeg-vsw and the vsw GitHub zip.
+def sherpaOnnxEnableVideoSwDecoders = (project.findProperty("sherpaOnnxEnableVideoSwDecoders") ?: "false").toString().toLowerCase() in ["true", "1"]
 
 def requiredAbis = ["arm64-v8a", "armeabi-v7a", "x86", "x86_64"]
 def requiredFfmpegSoFiles = [
@@ -319,11 +321,13 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def sherpaNeedsUpdate = !sherpaLibsOk || !sherpaHdrsOk || storedSherpaVersion == null || storedSherpaVersion != currentSherpaVersion
 
     def currentFfmpegVersion = project.ext.ffmpegVersion
+    // Stamp includes the variant so flipping sherpaOnnxEnableVideoSwDecoders re-resolves.
+    def currentFfmpegStamp = sherpaOnnxEnableVideoSwDecoders ? "${currentFfmpegVersion}-vsw" : currentFfmpegVersion
     def ffmpegVersionFile = new File(downloadDir, "ffmpeg-version.txt")
     def storedFfmpegVersion = (ffmpegVersionFile.exists() ? ffmpegVersionFile.text.trim() : null)
     def ffmpegLibsOk = hasAllFfmpegLibs()
     def ffmpegHdrsOk = hasFfmpegHeaders()
-    def ffmpegNeedsUpdate = !ffmpegLibsOk || !ffmpegHdrsOk || storedFfmpegVersion == null || storedFfmpegVersion != currentFfmpegVersion
+    def ffmpegNeedsUpdate = !ffmpegLibsOk || !ffmpegHdrsOk || storedFfmpegVersion == null || storedFfmpegVersion != currentFfmpegStamp
 
     def currentLibarchiveVersion = project.ext.libarchiveVersion
     def libarchiveVersionFile = new File(downloadDir, "libarchive-version.txt")
@@ -442,9 +446,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         ffmpegIncludeDir.mkdirs()
         copy { from new File(thirdPartyFfmpegDir, "include"); into ffmpegIncludeDir }
         downloadDir.mkdirs()
-        ffmpegVersionFile.text = currentFfmpegVersion
+        ffmpegVersionFile.text = currentFfmpegStamp
         ffmpegResolved = true
-        logPrebuilt("FFmpeg", "native", "THIRD_PARTY", currentFfmpegVersion)
+        logPrebuilt("FFmpeg", "native", "THIRD_PARTY", currentFfmpegStamp)
       }
 
       // Stage 3: MAVEN_AAR
@@ -473,7 +477,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
               copiedHdr = true
             }
             downloadDir.mkdirs()
-            ffmpegVersionFile.text = currentFfmpegVersion
+            ffmpegVersionFile.text = currentFfmpegStamp
             ffmpegResolved = true
             logPrebuilt("FFmpeg", "native", "MAVEN_AAR", aar.name)
             if (!copiedHdr) {
@@ -488,7 +492,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       }
     } else {
       ffmpegResolved = true
-      logPrebuilt("FFmpeg", "native", "LOCAL_SDK", currentFfmpegVersion)
+      logPrebuilt("FFmpeg", "native", "LOCAL_SDK", currentFfmpegStamp)
     }
 
     // =====================================================================
@@ -1047,11 +1051,18 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     downloadDir.mkdirs()
 
     if (!sherpaOnnxDisableFfmpeg && !ffmpegResolved) {
-      def tagFile = file("${project.projectDir.parent}/third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
+      def ffmpegTagRel = sherpaOnnxEnableVideoSwDecoders
+          ? "third_party/ffmpeg_prebuilt/ANDROID_VSW_RELEASE_TAG"
+          : "third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG"
+      def ffmpegZipName = sherpaOnnxEnableVideoSwDecoders ? "ffmpeg-vsw-android.zip" : "ffmpeg-android.zip"
+      def ffmpegWorkflow = sherpaOnnxEnableVideoSwDecoders
+          ? "build-ffmpeg-vsw-android-release"
+          : "build-ffmpeg-android-release"
+      def tagFile = file("${project.projectDir.parent}/${ffmpegTagRel}")
       def tag = readReleaseTag(tagFile)
-      if (!tag) throw new RuntimeException("Missing or empty third_party/ffmpeg_prebuilt/ANDROID_RELEASE_TAG")
-      def zipFile = new File(downloadDir, "ffmpeg-android.zip")
-      def url = "${baseUrl}/${tag}/ffmpeg-android.zip"
+      if (!tag) throw new RuntimeException("Missing or empty ${ffmpegTagRel}")
+      def zipFile = new File(downloadDir, ffmpegZipName)
+      def url = "${baseUrl}/${tag}/${ffmpegZipName}"
       project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
       if (!zipFile.exists() || zipFile.length() == 0) {
         throw new RuntimeException("Download failed or empty: ${url}")
@@ -1062,7 +1073,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       if (zipMagic[0] != (byte) 0x50 || zipMagic[1] != (byte) 0x4B) {
         zipFile.delete()
         throw new RuntimeException(
-            "Download is not a ZIP (got ${zipFile.length()} bytes). Release asset missing? ${url} — publish via build-ffmpeg-android-release workflow or use THIRD_PARTY under third_party/ffmpeg_prebuilt/android.")
+            "Download is not a ZIP (got ${zipFile.length()} bytes). Release asset missing? ${url} — publish via ${ffmpegWorkflow} workflow or use THIRD_PARTY under third_party/ffmpeg_prebuilt/android.")
       }
       def ffmpegExtractDir = new File(downloadDir, "ffmpeg-extract")
       if (ffmpegExtractDir.exists()) ffmpegExtractDir.deleteDir()
@@ -1078,7 +1089,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         copy { from fileTree(ffmpegIncludeInZip); into ffmpegIncludeDir }
       }
       downloadDir.mkdirs()
-      ffmpegVersionFile.text = currentFfmpegVersion
+      ffmpegVersionFile.text = currentFfmpegStamp
       logPrebuilt("FFmpeg", "native", "GITHUB_RELEASE", tag)
     }
 

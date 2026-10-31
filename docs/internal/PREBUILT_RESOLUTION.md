@@ -14,7 +14,7 @@ Every externally supplied Android artifact (native `.so`, C headers, `classes.ja
 
 **Optional skips:** FFmpeg and libarchive are skipped entirely when `sherpaOnnxDisableFfmpeg` or `sherpaOnnxDisableLibarchive` is set in `gradle.properties`; see [disable-ffmpeg.md](../disable-ffmpeg.md) and [disable-libarchive.md](../disable-libarchive.md).
 
-**FFmpeg video-SW variant:** Gradle `sherpaOnnxEnableVideoSwDecoders=true` selects Maven artifact `com.xdcobra.sherpa:ffmpeg-vsw:<ver>@aar` (H.264/HEVC software decoders). Default artifact stays audio-only. Build the variant with `VIDEO_SW_DECODERS=1` in `third_party/ffmpeg_prebuilt/build_ffmpeg.sh`. Runtime still uses `avcodec_find_decoder` — a default prebuilt without those decoders registers them as `disabled`. See [codecs.md](../codecs.md).
+**FFmpeg video-SW variant:** Gradle `sherpaOnnxEnableVideoSwDecoders=true` selects Maven `com.xdcobra.sherpa:ffmpeg-vsw:<ver>@aar` and GitHub `ffmpeg-vsw-android-v<ver>` / `ffmpeg-vsw-android.zip` (tag file `ANDROID_VSW_RELEASE_TAG`). iOS uses `IOS_VSW_RELEASE_TAG` → `ffmpeg-vsw-ios-framework.zip` when `SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS=1`. Publish via **Prebuilt - FFmpeg video-SW (Android) Release** and **Framework - FFmpeg video-SW (iOS) Release**. Default `ffmpeg` stays audio-only. The download stamp is `<ver>-vsw` so flipping the flag re-resolves. Runtime still uses `avcodec_find_decoder`. See [codecs.md](../codecs.md).
 
 **Opt-in (default off):**
 
@@ -33,6 +33,7 @@ For each row, resolution tries **1 --> 2 --> 3 --> 4** in order; **5** applies i
 | **sherpa-onnx** | Java/Kotlin API | `classes.jar` | `third_party/sherpa-onnx-prebuilt/android/java/classes.jar` | (build dir from previous run) | `sherpaOnnxAar` --> `classes.jar` | ZIP `java/classes.jar` or extract cache |
 | **FFmpeg** | JNI | `libavcodec.so`, `libavformat.so`, `libavutil.so`, `libswresample.so`, `libavfilter.so`, `libshine.so` | `third_party/ffmpeg_prebuilt/android/jni/<abi>/` | `src/main/jniLibs/<abi>/` | `ffmpegAar` | `ffmpeg-android.zip` |
 | **FFmpeg** | C headers | `libavcodec/avcodec.h` etc. | `third_party/ffmpeg_prebuilt/android/include/**` | `src/main/cpp/include/ffmpeg/` | AAR `include/**` | ZIP `include/**` |
+| **FFmpeg vsw** (opt-in) | JNI + headers | same `.so` set; H.264/HEVC SW decoders inside `libavcodec` | local `VIDEO_SW_DECODERS=1` under `third_party/ffmpeg_prebuilt/android/` | stamp `<ver>-vsw` in `ffmpeg-version.txt` | `ffmpeg-vsw` AAR | `ffmpeg-vsw-android-v<ver>` / `ffmpeg-vsw-android.zip` |
 | **libarchive** | JNI | `libarchive.so`, `libzstd.so` | `third_party/libarchive_prebuilt/android/jni/<abi>/` | `src/main/jniLibs/<abi>/` | `libarchiveAar` | `libarchive-android.zip` |
 | **libarchive** | C headers | `archive.h` | `third_party/libarchive_prebuilt/android/include/**` | `src/main/cpp/include/libarchive/` | AAR `include/**` | ZIP `include/**` |
 | **lexbor** | JNI | `liblexbor.so` | `third_party/lexbor_prebuilt/android/jni/<abi>/` (or `<abi>/lib/`) | `src/main/jniLibs/<abi>/` | `lexborAar` | `lexbor-android.zip` |

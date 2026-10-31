@@ -1,0 +1,161 @@
+# Build FFmpeg XCFramework with bundled H.264/HEVC software video decoders.
+# Tag: third_party/ffmpeg_prebuilt/IOS_VSW_RELEASE_TAG
+# Asset: ffmpeg-vsw-ios-framework.zip — must not collide with audio-only ffmpeg-ios.
+#
+name: Framework - FFmpeg video-SW (iOS) Release
+
+on:
+  push:
+    paths:
+      - '.github/workflows/framework-ffmpeg-vsw-ios-framework.yml'
+      - 'third_party/ffmpeg_prebuilt/IOS_VSW_RELEASE_TAG'
+      - 'third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-ffmpeg-vsw-ios:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Read release tag
+        id: tag
+        run: |
+          TAG_FILE=third_party/ffmpeg_prebuilt/IOS_VSW_RELEASE_TAG
+          if [ ! -f "$TAG_FILE" ]; then
+            echo "::error::Missing $TAG_FILE (e.g. ffmpeg-vsw-ios-v8.1.3-1)"
+            exit 1
+          fi
+          RELEASE_TAG=$(grep -v '^#' "$TAG_FILE" | grep -v '^[[:space:]]*$' | head -1 | tr -d '\r\n')
+          if [ -z "$RELEASE_TAG" ]; then
+            echo "::error::Empty release tag in $TAG_FILE"
+            exit 1
+          fi
+          echo "release_tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          VERSION=$(echo "$RELEASE_TAG" | sed 's/^ffmpeg-vsw-ios-v//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Using release tag: $RELEASE_TAG (version: $VERSION)"
+
+      - name: Get submodule versions
+        id: submodules
+        run: |
+          echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "opus=$(git -C third_party/opus rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache FFmpeg vsw iOS prebuilts
+        uses: actions/cache@v6
+        id: ffmpeg-cache
+        with:
+          path: |
+            third_party/ffmpeg_prebuilt/ios
+            third_party/ffmpeg_prebuilt/FFmpeg.xcframework
+            third_party/shine_prebuilt/ios
+            third_party/opus_prebuilt/ios
+          key: ffmpeg-vsw-ios-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ steps.submodules.outputs.opus }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh', 'third_party/shine_prebuilt/build_shine_ios.sh', 'third_party/opus_prebuilt/build_opus_ios.sh') }}
+
+      - name: Install FFmpeg build dependencies
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          brew update
+          brew install pkg-config nasm yasm autoconf automake libtool
+
+      - name: Build libshine (iOS)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/shine_prebuilt
+          chmod +x build_shine_ios.sh
+          ./build_shine_ios.sh
+
+      - name: Build libopus (iOS)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/opus_prebuilt
+          chmod +x build_opus_ios.sh
+          ./build_opus_ios.sh
+
+      - name: Build FFmpeg XCFramework (iOS video-SW)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/ffmpeg_prebuilt
+          chmod +x build_ffmpeg_ios.sh
+          ./build_ffmpeg_ios.sh
+        env:
+          VIDEO_SW_DECODERS: '1'
+
+      - name: Validate output
+        run: |
+          if [ ! -d "third_party/ffmpeg_prebuilt/FFmpeg.xcframework" ]; then
+            echo "::error::FFmpeg.xcframework was not generated"
+            exit 1
+          fi
+          echo "Generated framework:"
+          ls -la third_party/ffmpeg_prebuilt/FFmpeg.xcframework
+
+      - name: Create version info file
+        run: |
+          cat > third_party/ffmpeg_prebuilt/FFmpeg.xcframework/VERSION.txt << EOF
+          ffmpeg-vsw version: v${{ steps.tag.outputs.version }}
+          VIDEO_SW_DECODERS=1
+          Built on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          GitHub Actions Run: ${{ github.run_id }}
+          Commit: ${{ github.sha }}
+          EOF
+          cat third_party/ffmpeg_prebuilt/FFmpeg.xcframework/VERSION.txt
+
+      - name: Upload XCFramework as artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-vsw-xcframework-${{ steps.tag.outputs.version }}
+          path: third_party/ffmpeg_prebuilt/FFmpeg.xcframework
+          retention-days: 90
+          compression-level: 6
+
+      - name: Create release zip
+        run: |
+          LAYOUT=ffmpeg-vsw-ios-layout
+          rm -rf "$LAYOUT"
+          mkdir -p "$LAYOUT"
+          cp -R third_party/ffmpeg_prebuilt/FFmpeg.xcframework "$LAYOUT/"
+          cd "$LAYOUT"
+          zip -r ../ffmpeg-vsw-ios-framework.zip .
+          cd ..
+          ls -la ffmpeg-vsw-ios-framework.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.tag.outputs.release_tag }}
+          name: FFmpeg video-SW iOS ${{ steps.tag.outputs.release_tag }}
+          make_latest: false
+          body: |
+            Opt-in FFmpeg XCFramework with bundled H.264/HEVC software video decoders (`VIDEO_SW_DECODERS=1`).
+            Default `ffmpeg-ios-framework.zip` stays audio-only.
+            - **ffmpeg-vsw-ios-framework.zip** – `FFmpeg.xcframework` (device + simulator).
+            Enable with `SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS=1` before `pod install`.
+          files: ffmpeg-vsw-ios-framework.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          echo "## FFmpeg video-SW iOS release" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release:** [${{ steps.tag.outputs.release_tag }}](https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.release_tag }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Asset | Description |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------------|" >> $GITHUB_STEP_SUMMARY
+          echo "| \`ffmpeg-vsw-ios-framework.zip\` | \`FFmpeg.xcframework\` with H.264/HEVC SW decoders. |" >> $GITHUB_STEP_SUMMARY
