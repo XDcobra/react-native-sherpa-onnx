@@ -4,7 +4,7 @@
 
 This guide is a pipeline composition cookbook for real, reusable end-to-end flows in `react-native-sherpa-onnx`.
 
-It focuses on public buffer contracts (`OfflineAudioBuffer`, `LiveAudioBuffer`, `OfflineTextBuffer`, `LiveTextBuffer`, `OfflineSegmentBuffer`, `LiveSegmentBuffer`) and public feature APIs, rather than internal implementation details.
+It focuses on public buffer contracts (`OfflineAudioBuffer`, `LiveAudioBuffer`, `OfflineTextBuffer`, `LiveTextBuffer`, `OfflineSegmentBuffer`, `LiveSegmentBuffer`, `OfflineImageBuffer`, `LiveImageBuffer`) and public feature APIs, rather than internal implementation details.
 
 Use this file to pick a proven chain quickly. For full per-feature API details, follow the linked feature docs. For **shared streaming pipeline handle** semantics (`stop` / `flush` / `reset` / `getStatus` / `completed`) across STT, enhancement, separation live overload, VAD, TTS live overload, and punctuation, see **[streaming-pipelines-overview.md](streaming-pipelines-overview.md)**.
 
@@ -36,7 +36,8 @@ Use this file to pick a proven chain quickly. For full per-feature API details, 
 | `OfflineAudioBuffer` (`off_*`) | `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, offline feature outputs | `createSTT().transcribe`, `createEnhancement().enhance`, `createSeparation().separate`, `createAlignment().alignTextToAudio`, `saveAudioAsFile` | Batch input/output; deterministic completion |
 | `LiveAudioBuffer` (`live_*`) | `createEmptyLiveAudioBuffer`, mic capture, file ingest, streaming feature outputs | `createStreamingSTT().transcribe`, `createStreamingEnhancement().enhance`, `createSeparation().separate` (live overload), VAD `process`, `labelLiveSegments`, PCM player | Continuous stream; supports running pipelines |
 | `OfflineTextBuffer` (`txt_off_*`) | `createOfflineTextBufferFromText`, offline STT output, offline punctuation output, offline OCR output, `extractDocumentText`, `extractPdfTextLayer` | `createTTS().synthesize`, `createAlignment().alignTextToAudio`, offline punctuation input | Batch text handoff; OCR / PDF / markup also write spatial spans |
-| `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles`, `rasterizePdfPages`, `extractDocumentImages` | `createOCR().recognize` | Decoded frames for offline OCR |
+| `OfflineImageBuffer` (`img_off_*`) | `createOfflineImageBufferFromFiles` (lazy), `rasterizePdfPages`, `extractDocumentImages` | `createOCR().recognize`, FrameView, export | File create stays compressed until ensure / OCR |
+| `LiveImageBuffer` (`img_live_*`) | `createEmptyLiveImageBuffer`, `appendLiveImageFrame`, `ingestFileToLiveImageBuffer` | OCR / FrameView / export **after** `finalizeLiveImageBuffer` | Compressed JPEG/WebP/HEIC ring; recording → finished; same id |
 | `LiveTextBuffer` (`txt_live_*`) | app commits, streaming STT output, streaming punctuation output | `createTTS().synthesize` (live overload), streaming punctuation input | Partial + committed segments |
 | `OfflineSegmentBuffer` (`seg_off_*`) | offline alignment output, offline VAD/segmentation outputs, SID `labelOfflineSegments` | subtitle/timestamp export, anchor input for advanced alignment modes | Segment metadata for post-processing |
 | `LiveSegmentBuffer` (`seg_live_*`) | streaming VAD output, live segmentation attachments, SID `labelLiveSegments` | gating, timeline UI, downstream orchestration | Event-driven segment stream |
@@ -250,8 +251,19 @@ When to use:
 Related docs:
 - [ocr-offline.md](ocr-offline.md)
 - [imagebuffer-offline.md](imagebuffer-offline.md)
+- [imagebuffer-streaming.md](imagebuffer-streaming.md)
 - [textbuffer-offline.md](textbuffer-offline.md)
 - [document-offline.md](document-offline.md)
+
+Live stills follow the same OCR call after finalize (no live-OCR-while-recording):
+
+```mermaid
+flowchart LR
+  A[createEmptyLiveImageBuffer] --> B[append / ingest JPEG WebP HEIC]
+  B --> C[finalizeLiveImageBuffer]
+  C --> D["createOCR().recognize"]
+  D --> E[OfflineTextBuffer]
+```
 
 ## E-document offline patterns
 
