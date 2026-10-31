@@ -300,7 +300,11 @@ bool AMediaCodecDecoder::ReceiveWait(DecodedRawFrame* out, int64_t timeoutUs) {
     if (now >= deadline) {
       PumpCodec(0);
       DrainImages();
-      return PopDecoded(out);
+      if (PopDecoded(out)) {
+        return true;
+      }
+      VIDEO_LOGW("video.decode amc wait-empty codec=%s", allowedName_.c_str());
+      return false;
     }
     const auto remainUs = std::chrono::duration_cast<std::chrono::microseconds>(
                               deadline - now)

@@ -42,6 +42,7 @@ class DecodeSession {
   Status DecodeThrough(int64_t targetPres, bool cacheAlongWay);
   Status DrainToCache(bool cacheAlongWay, int64_t targetPres);
   Status DrainUntilCached(int64_t targetPres, bool cacheAlongWay);
+  Status TrySubmitLookahead();
   Status InsertDecoded(const DecodedRawFrame& raw, bool cacheAlongWay,
                        int64_t targetPres);
   int64_t PresentationOf(const DecodedRawFrame& raw) const;

@@ -23,6 +23,11 @@ class DecoderBackend {
   virtual Status Configure(const VideoTrackInfo& track) = 0;
   virtual Status Submit(const EncodedPacket& packet) = 0;
   virtual Status Flush() = 0;
+  /**
+   * Push EOS so delayed SW decoders (ffmpeg FF_THREAD_FRAME) emit held frames.
+   * Must not discard already-queued output. Default: no-op.
+   */
+  virtual Status SignalEnd() { return Status::Ok(); }
   /** Pop one decoded frame; returns false if the output queue is empty. */
   virtual bool Receive(DecodedRawFrame* out) = 0;
   /**

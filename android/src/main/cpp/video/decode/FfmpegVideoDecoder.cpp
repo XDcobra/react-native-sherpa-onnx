@@ -61,6 +61,9 @@ Status FfmpegVideoDecoder::Configure(const VideoTrackInfo& track) {
     Close();
     return Status::Fail(kErrDecoderUnavailable, "avcodec_open2");
   }
+  VIDEO_LOGI("video.decode ffmpeg open %s threads=%d type=%d %dx%d",
+             VideoCodecName(track.codec), impl_->ctx->thread_count,
+             impl_->ctx->thread_type, track.codedWidth, track.codedHeight);
   impl_->frame = av_frame_alloc();
   if (impl_->frame == nullptr) {
     Close();
@@ -88,17 +91,35 @@ Status FfmpegVideoDecoder::Submit(const EncodedPacket& packet) {
   }
   const int sent = avcodec_send_packet(impl_->ctx, &pkt);
   if (sent < 0) {
+    VIDEO_LOGW("video.decode ffmpeg send fail ptsUs=%lld rc=%d",
+               static_cast<long long>(packet.ptsUs), sent);
     return Status::Fail(kErrDecodeFailed, "avcodec_send_packet");
   }
   ++submitCount_;
+  int got = 0;
+  auto st = DrainReceived(&got);
+  if (!st.ok) {
+    return st;
+  }
+  VIDEO_LOGI("video.decode ffmpeg submit ptsUs=%lld sent=0 got=%d queued=%zu",
+             static_cast<long long>(packet.ptsUs), got, out_.size());
+  return Status::Ok();
+}
+
+Status FfmpegVideoDecoder::DrainReceived(int* gotOut) {
+  int got = 0;
   AVFrame* fr = impl_->frame;
-  while (avcodec_receive_frame(impl_->ctx, fr) == 0) {
+  while (fr && avcodec_receive_frame(impl_->ctx, fr) == 0) {
+    ++got;
     if (fr->format != AV_PIX_FMT_YUV420P && fr->format != AV_PIX_FMT_YUVJ420P) {
+      VIDEO_LOGW("video.decode ffmpeg pix_fmt=%d %dx%d", fr->format, fr->width,
+                 fr->height);
       av_frame_unref(fr);
       return Status::Fail(kErrCodecUnsupported, "ffmpeg pix_fmt");
     }
     const int w = fr->width;
     const int h = fr->height;
+    const int64_t pts = fr->pts;
     const int yStride = AlignUp(w);
     const int uvStride = AlignUp(w);
     DecodedRawFrame out;
@@ -125,11 +146,28 @@ Status FfmpegVideoDecoder::Submit(const EncodedPacket& packet) {
     out.view.uv.stride = uvStride;
     out.view.width = w;
     out.view.height = h;
-    out.ptsUs = fr->pts;
+    out.ptsUs = pts;
+    VIDEO_LOGI("video.decode ffmpeg frame pts=%lld %dx%d queued=%zu",
+               static_cast<long long>(pts), w, h, out_.size() + 1);
     std::lock_guard<std::mutex> lock(outMu_);
     out_.push_back(std::move(out));
   }
+  if (gotOut) {
+    *gotOut = got;
+  }
   return Status::Ok();
+}
+
+Status FfmpegVideoDecoder::SignalEnd() {
+  if (!configured_ || impl_->ctx == nullptr) {
+    return Status::Fail(kErrDecoderUnavailable, "ffmpeg not configured");
+  }
+  avcodec_send_packet(impl_->ctx, nullptr);
+  int got = 0;
+  auto st = DrainReceived(&got);
+  VIDEO_LOGI("video.decode ffmpeg signal-end got=%d queued=%zu", got,
+             out_.size());
+  return st;
 }
 
 Status FfmpegVideoDecoder::Flush() {

@@ -1,5 +1,6 @@
 #include "decode/DecoderBackend.h"
 
+#include "VideoLog.h"
 #include "codec/CodecCatalog.h"
 #include "codec/CodecTypes.h"
 #include "decode/FakeDecoder.h"
@@ -156,6 +157,8 @@ void RegisterBundledVideoSwDecoders() {
     p.caps.maxH = 4320;
     p.available = found != nullptr;
     p.unavailableReason = found ? Reason::None : Reason::Disabled;
+    VIDEO_LOGI("video.decode ffmpeg register %s found=%d", name,
+               found != nullptr ? 1 : 0);
     CodecCatalog::Instance().Register(std::move(p));
   };
   reg("ffmpeg.h264", "h264", AV_CODEC_ID_H264);

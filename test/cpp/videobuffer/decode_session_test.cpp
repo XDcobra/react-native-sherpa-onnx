@@ -90,6 +90,16 @@ TEST_F(DecodeSessionTest, KeyframeModeDecodesOneFrame) {
   EXPECT_EQ(b.decoder->submitCount(), 1);
 }
 
+TEST_F(DecodeSessionTest, DelayedDecoderLookaheadGetsFirstFrame) {
+  SessionBundle b;
+  b.decoder->setEmitDelay(3);
+  auto lease = b.session->SeekAndAcquire(Acc(0));
+  ASSERT_TRUE(lease.ok()) << lease.status.errorCode << " "
+                          << lease.status.errorMessage;
+  EXPECT_EQ(lease.value.view().frameIndex, 0);
+  EXPECT_GE(b.decoder->submitCount(), 4);
+}
+
 TEST_F(DecodeSessionTest, SameGopForwardDoesNotFlush) {
   SessionBundle b;
   ASSERT_TRUE(b.session->SeekAndAcquire(Acc(2 * 33333)).ok());
