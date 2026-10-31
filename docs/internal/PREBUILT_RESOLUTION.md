@@ -14,6 +14,8 @@ Every externally supplied Android artifact (native `.so`, C headers, `classes.ja
 
 **Optional skips:** FFmpeg and libarchive are skipped entirely when `sherpaOnnxDisableFfmpeg` or `sherpaOnnxDisableLibarchive` is set in `gradle.properties`; see [disable-ffmpeg.md](../disable-ffmpeg.md) and [disable-libarchive.md](../disable-libarchive.md).
 
+**FFmpeg video-SW variant:** Gradle `sherpaOnnxEnableVideoSwDecoders=true` selects Maven artifact `com.xdcobra.sherpa:ffmpeg-vsw:<ver>@aar` (H.264/HEVC software decoders). Default artifact stays audio-only. Build the variant with `VIDEO_SW_DECODERS=1` in `third_party/ffmpeg_prebuilt/build_ffmpeg.sh`. Runtime still uses `avcodec_find_decoder` — a default prebuilt without those decoders registers them as `disabled`. See [codecs.md](../codecs.md).
+
 **Opt-in (default off):**
 
 - **libwebp** resolves only when `sherpaOnnxEnableLibwebp=true`. Otherwise download/link is skipped and WebP decode/export rejects with `ERR_IMAGE_WEBP_DISABLED`. See [imagebuffer-offline.md](../imagebuffer-offline.md) and `third_party/libwebp_prebuilt/README.md`.

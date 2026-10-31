@@ -26,6 +26,7 @@ Maintainer notes, plans, and evidence. Public API guides live one level up (`doc
 
 | File | Notes |
 | --- | --- |
+| [codec/](./codec/) | Shared HW/SW de/encoding layer: [findings](./codec/hw-sw-codec-findings.md), [implementation plan](./codec/hw-sw-codec-implementation-plan.md) |
 | [live-overload.md](./live-overload.md) | Shared offline-weights-on-live-buffers contracts |
 | [sdk-feature-support-matrix.md](./sdk-feature-support-matrix.md) | Upstream vs SDK feature matrix |
 | [cancel-clean-cut.md](./cancel-clean-cut.md) | Cancel / abort semantics (done) |

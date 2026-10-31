@@ -20,6 +20,8 @@ As of: codebase in `react-native-sherpa-onnx` + `third_party/sherpa-onnx` (Kotli
 
 ## Short notes
 
+- **Pipeline VideoBuffer / ImageBuffer codecs** are not sherpa-onnx engine features. They share the C++ codec layer (`docs/codecs.md`): default `preferHardware`, opt-in bundled SW video via `ffmpeg-vsw`.
+
 - **TTS live in the SDK** is currently pipeline-based and used as streaming even though sherpa does not expose a separate online TTS config like it does for online ASR.
 - **VAD** is implemented in the SDK as a single engine entry point (`createStreamingVAD`) that can cover both the live pipeline and offline processing.
 - **Alignment** exists in the SDK but not as a true streaming engine; ongoing/segmented processing is only orchestrated as fake streaming.
