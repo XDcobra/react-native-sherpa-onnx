@@ -372,6 +372,7 @@ ios/Frameworks/sherpa_onnx.xcframework/
 ios/Frameworks/FFmpeg.xcframework/
 ios/Frameworks/libarchive.xcframework/
 ios/Frameworks/lexbor.xcframework/
+ios/Frameworks/libyuv.xcframework/
 ios/Frameworks/libwebp.xcframework/
 ios/Frameworks/pdfium.xcframework/
 ios/Frameworks/*.zip
