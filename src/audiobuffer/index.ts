@@ -57,6 +57,7 @@ import type {
   LiveAudioIngressSource,
   LiveAudioPipelineWriter,
   OfflineFromSamplesOptions,
+  DecodeProgressEvent,
 } from './types';
 
 const getNative = (): Spec =>
@@ -693,8 +694,9 @@ export async function createOfflineAudioBufferFromFile(
       const onProgress = options.onProgress;
       progressSubscription = emitter.addListener(
         'decodeProgress',
-        (event: any) => {
-          if (event?.operationId === operationId) {
+        (raw: unknown) => {
+          const event = raw as DecodeProgressEvent & { operationId?: string };
+          if (event.operationId === operationId) {
             onProgress({
               framesDecoded: event.framesDecoded,
               totalFramesEstimate: event.totalFramesEstimate,
@@ -1233,8 +1235,9 @@ export async function ingestFileToLiveAudioBuffer(
     const onProgress = options.onProgress;
     progressSubscription = emitter.addListener(
       'decodeProgress',
-      (event: any) => {
-        if (event?.operationId === operationId) {
+      (raw: unknown) => {
+        const event = raw as DecodeProgressEvent & { operationId?: string };
+        if (event.operationId === operationId) {
           onProgress({
             framesDecoded: event.framesDecoded,
             totalFramesEstimate: event.totalFramesEstimate,
@@ -1276,8 +1279,18 @@ export async function ingestFileToLiveAudioBuffer(
   const done = new Promise<import('./types').FileIngestResult>(
     (resolve, reject) => {
       const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
-      const sub = emitter.addListener('decodeComplete', (event: any) => {
-        if (event?.operationId !== operationId) return;
+      const sub = emitter.addListener('decodeComplete', (raw: unknown) => {
+        const event = raw as {
+          operationId?: string;
+          success?: boolean;
+          totalFramesIngested?: number;
+          sourceSampleRate?: number;
+          sourceChannels?: number;
+          autoFinalized?: boolean;
+          error?: string;
+          errorCode?: string;
+        };
+        if (event.operationId !== operationId) return;
         sub.remove();
         progressSubscription?.remove();
         if (abortHandler && options?.signal) {

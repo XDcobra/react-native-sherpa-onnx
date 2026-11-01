@@ -541,8 +541,13 @@ export async function createOfflineAudioBufferFromVideo(
       const onProgress = options.onProgress;
       progressSubscription = emitter.addListener(
         'decodeProgress',
-        (event: any) => {
-          if (event?.operationId === operationId) {
+        (raw: unknown) => {
+          const event = raw as {
+            operationId?: string;
+            percent?: number;
+            framesDecoded?: number;
+          };
+          if (event.operationId === operationId) {
             onProgress({
               percent: event.percent ?? 0,
               decodedMs: event.framesDecoded ?? 0,
@@ -693,8 +698,13 @@ export async function exportVideo(
       const onProgress = options.onProgress;
       progressSubscription = emitter.addListener(
         'decodeProgress',
-        (event: any) => {
-          if (event?.operationId === operationId) {
+        (raw: unknown) => {
+          const event = raw as {
+            operationId?: string;
+            percent?: number;
+            encodedUs?: number;
+          };
+          if (event.operationId === operationId) {
             onProgress({
               percent: event.percent ?? 0,
               encodedUs: event.encodedUs ?? 0,
