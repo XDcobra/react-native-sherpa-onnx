@@ -64,7 +64,7 @@ Default `codec: 'h264'` still writes H.264 inside `webm`/`mkv` (Matroska shell).
 
 ## Image decode
 
-Sniff is by magic bytes, not extension. GIF/WebP: first frame only. EXIF and format notes: [imagebuffer-offline.md](imagebuffer-offline.md#formats).
+Sniff is by magic bytes, not extension — that is [`probeImageFileContainer`](imagebuffer-offline.md#probeimagefilecontainersource) (no RGB). Pixels are decoded on `ensureOfflineImageBufferFrame`. GIF/WebP: first frame only. EXIF and format notes: [imagebuffer-offline.md](imagebuffer-offline.md#formats).
 
 | Format | Android | iOS | Bundled SW |
 | --- | --- | --- | --- |

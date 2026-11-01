@@ -2,6 +2,7 @@ jest.mock('react-native', () => {
   const listeners: Array<(event: unknown) => void> = [];
   const mockNative = {
     createEmptyOfflineImageBuffer: jest.fn(),
+    probeImageFileContainer: jest.fn(),
     createOfflineImageBufferFromFiles: jest.fn(),
     createOfflineImageBufferFromBase64: jest.fn(),
     getOfflineImageBufferInfo: jest.fn(),
@@ -60,6 +61,7 @@ import {
   getOfflineImageBufferFrameInfo,
   getOfflineImageBufferInfo,
   ImageErrorCode,
+  probeImageFileContainer,
   releaseOfflineImageBuffer,
 } from '../index';
 
@@ -68,6 +70,7 @@ describe('offline ImageBuffer public API', () => {
   const reactNativeMock = jest.requireMock('react-native') as {
     __mockNative: {
       createEmptyOfflineImageBuffer: jest.Mock;
+      probeImageFileContainer: jest.Mock;
       createOfflineImageBufferFromFiles: jest.Mock;
       createOfflineImageBufferFromBase64: jest.Mock;
       getOfflineImageBufferInfo: jest.Mock;
@@ -146,6 +149,34 @@ describe('offline ImageBuffer public API', () => {
         operationId: expect.stringMatching(/^img_create_/),
       })
     );
+  });
+
+  it('rejects a non-FileSource on probeImageFileContainer', async () => {
+    await expect(
+      probeImageFileContainer('/tmp/a.jpg' as never)
+    ).rejects.toThrow(/ERR_IMAGE_INVALID_ARGUMENT/);
+    expect(mockNative.probeImageFileContainer).not.toHaveBeenCalled();
+  });
+
+  it('maps probeImageFileContainer and returns null on native reject', async () => {
+    const source = { kind: 'fs' as const, path: '/tmp/a.jpg' };
+    mockNative.probeImageFileContainer.mockResolvedValue({
+      inputFormatName: 'jpeg',
+      codecName: 'jpeg',
+      codedWidth: 64,
+      codedHeight: 48,
+    });
+    await expect(probeImageFileContainer(source)).resolves.toEqual({
+      inputFormatName: 'jpeg',
+      codecName: 'jpeg',
+      codedWidth: 64,
+      codedHeight: 48,
+    });
+    expect(mockNative.probeImageFileContainer).toHaveBeenCalledWith(source);
+    mockNative.probeImageFileContainer.mockRejectedValue(
+      new Error('ERR_IMAGE_DECODE_FAILED')
+    );
+    await expect(probeImageFileContainer(source)).resolves.toBeNull();
   });
 
   it('rejects malformed buffer ids on getInfo', async () => {

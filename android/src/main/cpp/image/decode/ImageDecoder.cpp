@@ -129,6 +129,78 @@ const uint8_t* GetPixel(const std::vector<uint8_t>& rgb, int w, int x, int y) {
 
 }  // namespace
 
+ImageProbeResult ProbeFail(const char* code, const std::string& message,
+                           DecodeFormat format = DecodeFormat::Unknown) {
+  ImageProbeResult r;
+  r.ok = false;
+  r.errorCode = code;
+  r.errorMessage = message;
+  r.format = format;
+  return r;
+}
+
+ImageProbeResult ImageDecoder::ProbeBytes(const uint8_t* data, size_t size) {
+  if (!data || size == 0) {
+    return ProbeFail("ERR_IMAGE_DECODE_FAILED", "empty image bytes");
+  }
+  const DecodeFormat format = DetectFormat(data, size);
+  if (format == DecodeFormat::Unknown) {
+    return ProbeFail("ERR_IMAGE_FORMAT_UNSUPPORTED", "unknown image format");
+  }
+
+  ImageProbeResult out;
+  out.ok = true;
+  out.format = format;
+
+  if (format == DecodeFormat::Heic) {
+    return out;
+  }
+
+  if (format == DecodeFormat::Webp) {
+#if defined(HAVE_LIBWEBP)
+    int w = 0;
+    int h = 0;
+    if (WebPGetInfo(data, size, &w, &h) && w > 0 && h > 0) {
+      out.codedWidth = w;
+      out.codedHeight = h;
+    }
+#endif
+    return out;
+  }
+
+  int w = 0;
+  int h = 0;
+  int comp = 0;
+  if (stbi_info_from_memory(data, static_cast<int>(size), &w, &h, &comp) &&
+      w > 0 && h > 0) {
+    out.codedWidth = w;
+    out.codedHeight = h;
+    return out;
+  }
+  return ProbeFail("ERR_IMAGE_DECODE_FAILED",
+                   stbi_failure_reason() ? stbi_failure_reason()
+                                         : "stbi_info failed",
+                   format);
+}
+
+ImageProbeResult ImageDecoder::ProbeFile(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    return ProbeFail("ERR_IMAGE_DECODE_FAILED", "cannot open file: " + path);
+  }
+  in.seekg(0, std::ios::end);
+  const auto len = in.tellg();
+  if (len <= 0) {
+    return ProbeFail("ERR_IMAGE_DECODE_FAILED", "empty file: " + path);
+  }
+  in.seekg(0, std::ios::beg);
+  std::vector<uint8_t> buf(static_cast<size_t>(len));
+  if (!in.read(reinterpret_cast<char*>(buf.data()), len)) {
+    return ProbeFail("ERR_IMAGE_DECODE_FAILED", "read failed: " + path);
+  }
+  return ProbeBytes(buf.data(), buf.size());
+}
+
 DecodeFormat ImageDecoder::DetectFormat(const uint8_t* data, size_t size) {
   if (!data || size < 4) return DecodeFormat::Unknown;
   if (data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF) return DecodeFormat::Jpeg;

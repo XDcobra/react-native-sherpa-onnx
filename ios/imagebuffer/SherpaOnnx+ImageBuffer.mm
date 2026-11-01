@@ -317,6 +317,93 @@ std::string DecodePolicyFromOptions(NSDictionary *options) {
 
 @implementation SherpaOnnx (ImageBuffer)
 
+static NSData *ReadImageSourceData(NSDictionary *source, NSString **errCode,
+                                   NSString **errMsg) {
+  FileIOReadHandle *readHandle = [FileIOResolver resolveSource:source
+                                                         error:errCode
+                                                       message:errMsg];
+  if (!readHandle) {
+    return nil;
+  }
+  NSData *data = nil;
+  if (readHandle.isFilePath && readHandle.filePath.length > 0) {
+    data = [NSData dataWithContentsOfFile:readHandle.filePath];
+  } else if (readHandle.stream != nil) {
+    [readHandle.stream open];
+    NSMutableData *buf = [NSMutableData data];
+    uint8_t chunk[65536];
+    NSInteger n;
+    while ((n = [readHandle.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
+      [buf appendBytes:chunk length:(NSUInteger)n];
+    }
+    data = buf;
+  }
+  [readHandle cleanup];
+  return data;
+}
+
+static bool ProbeHeicHeader(NSData *data, int *width, int *height) {
+  if (width) *width = 0;
+  if (height) *height = 0;
+  if (data.length == 0) return false;
+  CGImageSourceRef src =
+      CGImageSourceCreateWithData((__bridge CFDataRef)data, nullptr);
+  if (!src) return false;
+  CFDictionaryRef props = CGImageSourceCopyPropertiesAtIndex(src, 0, nullptr);
+  CFRelease(src);
+  if (!props) return false;
+  NSDictionary *dict = (__bridge_transfer NSDictionary *)props;
+  const int w = [dict[(__bridge id)kCGImagePropertyPixelWidth] intValue];
+  const int h = [dict[(__bridge id)kCGImagePropertyPixelHeight] intValue];
+  if (width) *width = w;
+  if (height) *height = h;
+  return w > 0 && h > 0;
+}
+
+- (void)probeImageFileContainer:(NSDictionary *)source
+                        resolve:(RCTPromiseResolveBlock)resolve
+                         reject:(RCTPromiseRejectBlock)reject {
+  if (![source isKindOfClass:[NSDictionary class]]) {
+    reject(@"ERR_IMAGE_INVALID_ARGUMENT", @"source must be a FileSource", nil);
+    return;
+  }
+  NSString *errCode = nil;
+  NSString *errMsg = nil;
+  NSData *data = ReadImageSourceData(source, &errCode, &errMsg);
+  if (!data || data.length == 0) {
+    reject(errCode ?: @"ERR_IMAGE_DECODE_FAILED",
+           errMsg ?: @"empty or unreadable FileSource", nil);
+    return;
+  }
+  const auto *bytes = static_cast<const uint8_t *>(data.bytes);
+  auto probe = ImageDecoder::ProbeBytes(bytes, static_cast<size_t>(data.length));
+  if (probe.ok && probe.format == sherpa_onnx::image::DecodeFormat::Heic &&
+      (probe.codedWidth <= 0 || probe.codedHeight <= 0)) {
+    int w = 0;
+    int h = 0;
+    if (ProbeHeicHeader(data, &w, &h)) {
+      probe.codedWidth = w;
+      probe.codedHeight = h;
+    }
+  }
+  if (!probe.ok) {
+    reject(@(probe.errorCode.c_str()),
+           probe.errorMessage.empty() ? @(probe.errorCode.c_str())
+                                      : @(probe.errorMessage.c_str()),
+           nil);
+    return;
+  }
+  const char *name = sherpa_onnx::image::DecodeFormatName(probe.format);
+  NSMutableDictionary *dict = [NSMutableDictionary dictionary];
+  dict[@"inputFormatName"] = @(name);
+  dict[@"codecName"] = @(name);
+  dict[@"codedWidth"] = @(probe.codedWidth);
+  dict[@"codedHeight"] = @(probe.codedHeight);
+  NSLog(@"[SherpaOnnx:image] probeContainer %s %dx%d", name, probe.codedWidth,
+        probe.codedHeight);
+  resolve(dict);
+}
+
 - (void)createEmptyOfflineImageBuffer:(RCTPromiseResolveBlock)resolve
                                reject:(RCTPromiseRejectBlock)reject {
   EnsureImageRegistryInit();

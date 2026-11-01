@@ -10,6 +10,82 @@ using namespace sherpa_onnx::image;
 using sherpa_onnx::image::testutil::FixturePath;
 using sherpa_onnx::image::testutil::ReadFileBytes;
 
+TEST(ImageBufferDecode, Probe_JpegPngWebpReportsCodedSize) {
+  const auto jpeg = ReadFileBytes(FixturePath("solid_red_64x48.jpg"));
+  const auto png = ReadFileBytes(FixturePath("solid_blue_64x48.png"));
+  const auto webp = ReadFileBytes(FixturePath("solid_red_64x48.webp"));
+  ASSERT_FALSE(jpeg.empty());
+  ASSERT_FALSE(png.empty());
+  ASSERT_FALSE(webp.empty());
+
+  const auto jpegP = ImageDecoder::ProbeBytes(jpeg.data(), jpeg.size());
+  ASSERT_TRUE(jpegP.ok) << jpegP.errorMessage;
+  EXPECT_EQ(jpegP.format, DecodeFormat::Jpeg);
+  EXPECT_EQ(jpegP.codedWidth, 64);
+  EXPECT_EQ(jpegP.codedHeight, 48);
+
+  const auto pngP = ImageDecoder::ProbeBytes(png.data(), png.size());
+  ASSERT_TRUE(pngP.ok) << pngP.errorMessage;
+  EXPECT_EQ(pngP.format, DecodeFormat::Png);
+  EXPECT_EQ(pngP.codedWidth, 64);
+  EXPECT_EQ(pngP.codedHeight, 48);
+
+  const auto webpP = ImageDecoder::ProbeBytes(webp.data(), webp.size());
+  ASSERT_TRUE(webpP.ok) << webpP.errorMessage;
+  EXPECT_EQ(webpP.format, DecodeFormat::Webp);
+#if defined(HAVE_LIBWEBP)
+  EXPECT_EQ(webpP.codedWidth, 64);
+  EXPECT_EQ(webpP.codedHeight, 48);
+#endif
+
+  const auto fileP = ImageDecoder::ProbeFile(FixturePath("solid_red_64x48.jpg"));
+  ASSERT_TRUE(fileP.ok) << fileP.errorMessage;
+  EXPECT_EQ(fileP.codedWidth, 64);
+  EXPECT_EQ(fileP.codedHeight, 48);
+}
+
+TEST(ImageBufferDecode, Probe_UnknownAndEmptyFail) {
+  const uint8_t junk[] = {0x00, 0x01, 0x02, 0x03};
+  const auto unknown = ImageDecoder::ProbeBytes(junk, sizeof(junk));
+  EXPECT_FALSE(unknown.ok);
+  EXPECT_EQ(unknown.errorCode, "ERR_IMAGE_FORMAT_UNSUPPORTED");
+
+  const auto empty = ImageDecoder::ProbeBytes(nullptr, 0);
+  EXPECT_FALSE(empty.ok);
+  EXPECT_EQ(empty.errorCode, "ERR_IMAGE_DECODE_FAILED");
+}
+
+TEST(ImageBufferDecode, Probe_HeicReportsFormatWithoutSize) {
+  std::vector<uint8_t> heic(32, 0);
+  heic[0] = 0;
+  heic[1] = 0;
+  heic[2] = 0;
+  heic[3] = 0x18;
+  heic[4] = 'f';
+  heic[5] = 't';
+  heic[6] = 'y';
+  heic[7] = 'p';
+  heic[8] = 'h';
+  heic[9] = 'e';
+  heic[10] = 'i';
+  heic[11] = 'c';
+
+  const auto probe = ImageDecoder::ProbeBytes(heic.data(), heic.size());
+  ASSERT_TRUE(probe.ok) << probe.errorMessage;
+  EXPECT_EQ(probe.format, DecodeFormat::Heic);
+  EXPECT_EQ(probe.codedWidth, 0);
+  EXPECT_EQ(probe.codedHeight, 0);
+}
+
+TEST(ImageBufferDecode, Probe_JpegExifKeepsHeaderSize) {
+  const auto probe =
+      ImageDecoder::ProbeFile(FixturePath("exif_orient6_40x20.jpg"));
+  ASSERT_TRUE(probe.ok) << probe.errorMessage;
+  EXPECT_EQ(probe.format, DecodeFormat::Jpeg);
+  EXPECT_EQ(probe.codedWidth, 40);
+  EXPECT_EQ(probe.codedHeight, 20);
+}
+
 TEST(ImageBufferDecode, Decode_DetectsJpegPngWebp) {
   const auto jpeg = ReadFileBytes(FixturePath("solid_red_64x48.jpg"));
   const auto png = ReadFileBytes(FixturePath("solid_blue_64x48.png"));

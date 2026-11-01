@@ -192,6 +192,15 @@ export const ImageErrorCode = {
   INTERNAL: 'ERR_IMAGE_INTERNAL',
 } as const;
 
+/** Header-only sniff from {@link probeImageFileContainer}. No RGB. */
+export type ImageFileContainerProbe = {
+  inputFormatName: string;
+  codecName: string;
+  /** Header size, before maxSide / EXIF swap. 0 if unknown (typical for HEIC on host). */
+  codedWidth: number;
+  codedHeight: number;
+};
+
 /** Encode formats for {@link exportOfflineImageBufferFrame}. */
 export type ImageExportFormat = 'jpeg' | 'png' | 'webp' | 'heic';
 

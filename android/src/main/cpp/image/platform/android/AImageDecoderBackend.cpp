@@ -21,6 +21,41 @@
 namespace sherpa_onnx {
 namespace image {
 
+bool AImageDecoderBackend::ProbeHeader(const uint8_t* data, size_t size,
+                                       int* width, int* height) {
+  if (width != nullptr) {
+    *width = 0;
+  }
+  if (height != nullptr) {
+    *height = 0;
+  }
+  if (!data || size == 0) {
+    return false;
+  }
+  if (__builtin_available(android 30, *)) {
+    AImageDecoder* dec = nullptr;
+    const int rc = AImageDecoder_createFromBuffer(data, size, &dec);
+    if (rc != ANDROID_IMAGE_DECODER_SUCCESS || dec == nullptr) {
+      return false;
+    }
+    const AImageDecoderHeaderInfo* header = AImageDecoder_getHeaderInfo(dec);
+    const int w = AImageDecoderHeaderInfo_getWidth(header);
+    const int h = AImageDecoderHeaderInfo_getHeight(header);
+    AImageDecoder_delete(dec);
+    if (w <= 0 || h <= 0) {
+      return false;
+    }
+    if (width != nullptr) {
+      *width = w;
+    }
+    if (height != nullptr) {
+      *height = h;
+    }
+    return true;
+  }
+  return false;
+}
+
 bool AImageDecoderBackend::Supports(DecodeFormat format) const {
   return format != DecodeFormat::Unknown;
 }

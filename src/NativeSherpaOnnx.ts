@@ -1052,6 +1052,17 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Probe image format and coded size from magic bytes + headers (no RGB, no ImageBuffer).
+   * JS wrapper: `probeImageFileContainer` from `react-native-sherpa-onnx/imagebuffer`.
+   */
+  probeImageFileContainer(source: Object): Promise<{
+    inputFormatName: string;
+    codecName: string;
+    codedWidth: number;
+    codedHeight: number;
+  }>;
+
+  /**
    * Decode one or more images from serialized {@link FileSource} maps into an offline ImageBuffer.
    * Native options: `{ maxSide?: number, hotFrames?: number, operationId?: string }`.
    * Progress events: `SherpaOnnxImageProgress` with `{ operationId, done, total, phase }`.

@@ -29,6 +29,7 @@ import type {
   CreateOfflineImageBufferOptions,
   ExportOfflineImageBufferFrameOptions,
   ImageExportFormat,
+  ImageFileContainerProbe,
   ImageFrameResizeMode,
   ImageProgressEvent,
   ImageRetention,
@@ -408,6 +409,42 @@ export async function createEmptyOfflineImageBuffer(): Promise<OfflineImageBuffe
     console.log('[SherpaOnnx:image] createEmpty', info.bufferId);
   }
   return toRef(info);
+}
+
+/**
+ * Probe format and coded size without opening a buffer or decoding RGB.
+ * Native failures return `null`. WebP is reported even when libwebp is off.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — `source` is not a `FileSource`.
+ */
+export async function probeImageFileContainer(
+  source: FileSource
+): Promise<ImageFileContainerProbe | null> {
+  assertFileSource(source);
+  try {
+    const result = await getNative().probeImageFileContainer(source as Object);
+    const inputFormatName = result?.inputFormatName?.trim();
+    const codecName = result?.codecName?.trim();
+    if (!inputFormatName || !codecName) {
+      return null;
+    }
+    const probe: ImageFileContainerProbe = {
+      inputFormatName,
+      codecName,
+      codedWidth: typeof result.codedWidth === 'number' ? result.codedWidth : 0,
+      codedHeight:
+        typeof result.codedHeight === 'number' ? result.codedHeight : 0,
+    };
+    if (__DEV__) {
+      console.log(
+        '[SherpaOnnx:image] probeContainer',
+        probe.inputFormatName,
+        `${probe.codedWidth}x${probe.codedHeight}`
+      );
+    }
+    return probe;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -877,6 +914,7 @@ export type {
   FileDestination,
   FileSource,
   ImageExportFormat,
+  ImageFileContainerProbe,
   ImageFrameResizeMode,
   ImageProgressEvent,
   ImageRetention,
