@@ -536,6 +536,11 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeExtractAudioFromVideo(
         }
         env->CallVoidMethod(progressGlobal, progressMid, percent,
                             static_cast<jlong>(decodedMs));
+        if (env->ExceptionCheck()) {
+          VIDEO_LOGW("extract progress JNI exception percent=%d", percent);
+          env->ExceptionDescribe();
+          env->ExceptionClear();
+        }
       },
       &result);
   if (progressGlobal) {
@@ -683,6 +688,11 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
         }
         env->CallVoidMethod(progressGlobal, progressMid, percent,
                             static_cast<jlong>(encodedUs));
+        if (env->ExceptionCheck()) {
+          VIDEO_LOGW("export progress JNI exception percent=%d", percent);
+          env->ExceptionDescribe();
+          env->ExceptionClear();
+        }
       });
   if (progressGlobal) {
     env->DeleteGlobalRef(progressGlobal);

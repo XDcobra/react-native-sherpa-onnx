@@ -1157,6 +1157,49 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   // Map of operationId → cancel flag for active decode operations
   private val decodeCancelFlags = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicBoolean>()
+
+  /**
+   * Mirrors [cancelFlag] into the native std::atomic<bool> at [cancelFlagAddr].
+   * Writes the native flag only on a real cancel, never on interrupt, and must be
+   * stopped via [stopNativeCancelBridge] before nativeFreeCancelFlag.
+   */
+  private fun startNativeCancelBridge(
+    cancelFlag: java.util.concurrent.atomic.AtomicBoolean,
+    cancelFlagAddr: Long,
+    operationId: String,
+  ): Thread {
+    val checker = Thread {
+      var interrupted = false
+      while (!cancelFlag.get()) {
+        try {
+          Thread.sleep(50)
+        } catch (_: InterruptedException) {
+          interrupted = true
+          break
+        }
+      }
+      if (!interrupted && cancelFlag.get()) {
+        android.util.Log.i("SherpaOnnx:cancel", "bridge set op=$operationId")
+        nativeSetCancelFlag(cancelFlagAddr, true)
+      }
+    }
+    checker.isDaemon = true
+    checker.start()
+    return checker
+  }
+
+  private fun stopNativeCancelBridge(checker: Thread, operationId: String) {
+    checker.interrupt()
+    var callerInterrupted = false
+    while (checker.isAlive) {
+      try {
+        checker.join()
+      } catch (_: InterruptedException) {
+        callerInterrupted = true
+      }
+    }
+    if (callerInterrupted) Thread.currentThread().interrupt()
+  }
   // Map of ingestId → ingest status for active file ingest operations
   private val fileIngestStatuses = java.util.concurrent.ConcurrentHashMap<String, FileIngestStatus>()
   private val decodeExecutor = java.util.concurrent.Executors.newCachedThreadPool { runnable ->
@@ -1180,8 +1223,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     sourceChannels: Int,
   ) {
     try {
-      val eventEmitter = reactApplicationContext
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       val payload = Arguments.createMap()
       payload.putString("operationId", operationId)
       payload.putDouble("framesDecoded", framesDecoded.toDouble())
@@ -1189,9 +1230,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       payload.putInt("percent", percent)
       payload.putInt("sourceSampleRate", sourceSampleRate)
       payload.putInt("sourceChannels", sourceChannels)
-      eventEmitter.emit("decodeProgress", payload)
-    } catch (_: Exception) {
-      // Ignore event emission failures (e.g. bridge teardown)
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("decodeProgress", payload)
+    } catch (t: Throwable) {
+      Log.w("SherpaOnnxDecode", "emit decodeProgress failed: ${t.message}")
     }
   }
 
@@ -1201,8 +1244,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     encodedUs: Long,
   ) {
     try {
-      val eventEmitter = reactApplicationContext
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       val payload = Arguments.createMap()
       payload.putString("operationId", operationId)
       payload.putInt("percent", percent)
@@ -1211,9 +1252,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       payload.putDouble("totalFramesEstimate", 0.0)
       payload.putInt("sourceSampleRate", 0)
       payload.putInt("sourceChannels", 0)
-      eventEmitter.emit("decodeProgress", payload)
-    } catch (_: Exception) {
-      // Ignore event emission failures (e.g. bridge teardown)
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("decodeProgress", payload)
+    } catch (t: Throwable) {
+      Log.w("SherpaOnnx:video", "emit video.export progress failed: ${t.message}")
     }
   }
 
@@ -1228,20 +1271,24 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     autoFinalized: Boolean = false,
   ) {
     try {
-      val eventEmitter = reactApplicationContext
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
       val payload = Arguments.createMap()
       payload.putString("operationId", operationId)
       payload.putBoolean("success", success)
-      if (error != null) payload.putString("error", error)
-      if (errorCode != null) payload.putString("errorCode", errorCode)
       payload.putDouble("totalFramesIngested", totalFramesIngested.toDouble())
       payload.putInt("sourceSampleRate", sourceSampleRate)
       payload.putInt("sourceChannels", sourceChannels)
       payload.putBoolean("autoFinalized", autoFinalized)
-      eventEmitter.emit("decodeComplete", payload)
-    } catch (_: Exception) {
-      // Ignore event emission failures
+      if (error != null) payload.putString("error", error)
+      if (errorCode != null) payload.putString("errorCode", errorCode)
+      Log.i(
+        "SherpaOnnxDecode",
+        "emit decodeComplete op=$operationId success=$success thread=${Thread.currentThread().name}",
+      )
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("decodeComplete", payload)
+    } catch (t: Throwable) {
+      Log.w("SherpaOnnxDecode", "emit decodeComplete failed: ${t.message}")
     }
   }
 
@@ -1989,14 +2036,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           throw RuntimeException("DECODE_CANCELLED: Operation cancelled")
         }
         // Link our AtomicBoolean to the native flag
-        val cancelChecker = Thread {
-          while (!cancelFlag.get()) {
-            try { Thread.sleep(50) } catch (_: InterruptedException) { break }
-          }
-          nativeSetCancelFlag(cancelFlagAddr, true)
-        }
-        cancelChecker.isDaemon = true
-        cancelChecker.start()
+        val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
 
         try {
           // Streaming decode: write float32 chunks directly to a temp .f32 file,
@@ -2038,8 +2078,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             progressCallback,
           ) as? HashMap<String, Any> ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Null result from native decode")
 
-          cancelChecker.interrupt()
-
           val numSamples = (result["numSamples"] as? Long)?.toInt() ?: 0
           val srcSampleRate = (result["sourceSampleRate"] as? Int) ?: 0
           val outputRate = if (targetRate > 0) targetRate else srcSampleRate
@@ -2075,8 +2113,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
           promise.resolve(entry.toWritableMap())
         } finally {
+          stopNativeCancelBridge(cancelChecker, operationId)
           nativeFreeCancelFlag(cancelFlagAddr)
-          cancelChecker.interrupt()
         }
       } catch (e: com.sherpaonnx.fileio.FileIOException) {
         promise.reject(e.code, e.message, e)
@@ -2280,14 +2318,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     decodeExecutor.execute {
       val cancelFlagAddr = nativeAllocateCancelFlag()
-      val cancelChecker = Thread {
-        while (!cancelFlag.get()) {
-          try { Thread.sleep(50) } catch (_: InterruptedException) { break }
-        }
-        nativeSetCancelFlag(cancelFlagAddr, true)
-      }
-      cancelChecker.isDaemon = true
-      cancelChecker.start()
+      val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
 
       var srcSampleRate = 0
       var srcChannels = 0
@@ -2390,8 +2421,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           errorCode = "DECODE_INTERNAL_ERROR",
         )
       } finally {
+        stopNativeCancelBridge(cancelChecker, operationId)
         nativeFreeCancelFlag(cancelFlagAddr)
-        cancelChecker.interrupt()
         decodeCancelFlags.remove(operationId)
         try { readHandle.close() } catch (_: Exception) {}
         try { tempSourceFile?.delete() } catch (_: Exception) {}
@@ -3025,14 +3056,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           nativeFreeCancelFlag(cancelFlagAddr)
           throw RuntimeException("AUDIO_SAVE_CANCELLED: Operation cancelled")
         }
-        val cancelChecker = Thread {
-          while (!cancelFlag.get()) {
-            try { Thread.sleep(50) } catch (_: InterruptedException) { break }
-          }
-          nativeSetCancelFlag(cancelFlagAddr, true)
-        }
-        cancelChecker.isDaemon = true
-        cancelChecker.start()
+        val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
 
         try {
           if (bufferId.startsWith("off_")) {
@@ -3042,10 +3066,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           } else {
             throw IllegalArgumentException("Invalid buffer ID prefix: expected off_ or live_")
           }
-          cancelChecker.interrupt()
         } finally {
+          stopNativeCancelBridge(cancelChecker, operationId)
           nativeFreeCancelFlag(cancelFlagAddr)
-          cancelChecker.interrupt()
         }
 
         copyTmpToStreamIfNeeded(dest)
@@ -3182,21 +3205,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           nativeFreeCancelFlag(cancelFlagAddr)
           throw RuntimeException("AUDIO_SAVE_CANCELLED: Operation cancelled")
         }
-        val cancelChecker = Thread {
-          while (!cancelFlag.get()) {
-            try { Thread.sleep(50) } catch (_: InterruptedException) { break }
-          }
-          nativeSetCancelFlag(cancelFlagAddr, true)
-        }
-        cancelChecker.isDaemon = true
-        cancelChecker.start()
+        val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
 
         try {
           encodeViaDecodeFile(sourcePath, sourceFd, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(), operationId, cancelFlagAddr)
-          cancelChecker.interrupt()
         } finally {
+          stopNativeCancelBridge(cancelChecker, operationId)
           nativeFreeCancelFlag(cancelFlagAddr)
-          cancelChecker.interrupt()
         }
 
         copyTmpToStreamIfNeeded(dest)
@@ -3889,10 +3904,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     try {
       com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
       demux = fileIOHelper.resolveDemuxableSource(source)
-      android.util.Log.i(
-        "SherpaOnnx:video",
-        "createOfflineFromFile kind=${source.getString("kind")} path=${demux.path}",
-      )
       val decodePolicy =
         if (options != null && options.hasKey("decodePolicy") && !options.isNull("decodePolicy")) {
           options.getString("decodePolicy")
@@ -3912,11 +3923,17 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         videoNofdPins.put(bufferId, demux)?.close()
         demux = null
       }
-      promise.resolve(videoInfoToWritableMap(info))
+      if (info == null) {
+        android.util.Log.w("SherpaOnnx:video", "createOfflineFromFile null info")
+        promise.reject("VIDEO_INTERNAL", "native video call returned no info")
+      } else {
+        promise.resolve(videoInfoToWritableMap(info))
+      }
     } catch (e: com.sherpaonnx.fileio.FileIOException) {
       android.util.Log.w("SherpaOnnx:video", "createOfflineFromFile fileio: ${e.message}")
       promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
+      android.util.Log.w("SherpaOnnx:video", "createOfflineFromFile fail: ${e.message}")
       promise.reject("VIDEO_INTERNAL", e.message, e)
     } finally {
       try {
@@ -4119,6 +4136,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       }
       promise.resolve(null)
     } catch (e: Exception) {
+      android.util.Log.w(
+        "SherpaOnnx:video",
+        "releaseVideoBuffer fail bufferId=$bufferId: ${e.message}",
+      )
       promise.reject("VIDEO_INTERNAL", e.message, e)
     }
   }
@@ -4152,14 +4173,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     decodeCancelFlags[operationId] = cancelFlag
     decodeExecutor.execute {
       val cancelFlagAddr = nativeAllocateCancelFlag()
-      val cancelChecker = Thread {
-        while (!cancelFlag.get()) {
-          try { Thread.sleep(50) } catch (_: InterruptedException) { break }
-        }
-        nativeSetCancelFlag(cancelFlagAddr, true)
-      }
-      cancelChecker.isDaemon = true
-      cancelChecker.start()
+      val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
       try {
         com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
         val dir = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.cacheDir
@@ -4225,8 +4239,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val code = if (msg.startsWith("VIDEO_")) msg.substringBefore(":").trim() else "VIDEO_INTERNAL"
         promise.reject(code, msg, e)
       } finally {
+        stopNativeCancelBridge(cancelChecker, operationId)
         nativeFreeCancelFlag(cancelFlagAddr)
-        cancelChecker.interrupt()
         decodeCancelFlags.remove(operationId)
       }
     }
@@ -4282,23 +4296,37 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       "webm" -> "webm"
       else -> "mp4"
     }
+    val decodePolicy =
+      if (options != null && options.hasKey("decodePolicy") && !options.isNull("decodePolicy")) {
+        options.getString("decodePolicy")
+      } else {
+        null
+      }
+    val encodePolicy =
+      if (options != null && options.hasKey("encodePolicy") && !options.isNull("encodePolicy")) {
+        options.getString("encodePolicy")
+      } else {
+        null
+      }
+    val dest: ResolvedDestination
+    try {
+      dest = resolveDestinationForSave(destination, ext)
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      android.util.Log.w("SherpaOnnx:video", "exportVideo dest fileio: ${e.message}")
+      promise.reject(e.code, e.message, e)
+      return
+    } catch (e: Exception) {
+      android.util.Log.w("SherpaOnnx:video", "exportVideo dest fail: ${e.message}")
+      promise.reject("VIDEO_INTERNAL", e.message, e)
+      return
+    }
     val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
     decodeCancelFlags[operationId] = cancelFlag
     decodeExecutor.execute {
-      var dest: ResolvedDestination? = null
       val cancelFlagAddr = nativeAllocateCancelFlag()
-      val cancelChecker = Thread {
-        while (!cancelFlag.get()) {
-          try { Thread.sleep(50) } catch (_: InterruptedException) { break }
-        }
-        nativeSetCancelFlag(cancelFlagAddr, true)
-      }
-      cancelChecker.isDaemon = true
-      cancelChecker.start()
+      val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
       try {
         com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
-        val resolved = resolveDestinationForSave(destination, ext)
-        dest = resolved
         val progressCallback = object {
           @Suppress("unused")
           fun onProgress(percent: Int, encodedUs: Long) {
@@ -4306,21 +4334,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           }
         }
         @Suppress("UNCHECKED_CAST")
-        val decodePolicy =
-          if (options != null && options.hasKey("decodePolicy") && !options.isNull("decodePolicy")) {
-            options.getString("decodePolicy")
-          } else {
-            null
-          }
-        val encodePolicy =
-          if (options != null && options.hasKey("encodePolicy") && !options.isNull("encodePolicy")) {
-            options.getString("encodePolicy")
-          } else {
-            null
-          }
         val raw = com.sherpaonnx.video.VideoBufferService.exportVideo(
           bufferId,
-          resolved.outputPath,
+          dest.outputPath,
           fmt,
           codec,
           bitrate,
@@ -4333,34 +4349,48 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           encodePolicy,
         ) as? HashMap<String, Any>
         if (raw == null) {
-          cleanupOutputFile(resolved.outputPath)
+          cleanupOutputFile(dest.outputPath)
+          android.util.Log.w(
+            "SherpaOnnx:video",
+            "exportVideo null result op=$operationId",
+          )
           promise.reject("VIDEO_INTERNAL", "null export result")
           return@execute
         }
         val err = raw["errorCode"] as? String
         if (!err.isNullOrEmpty()) {
-          cleanupOutputFile(resolved.outputPath)
-          promise.reject(err, raw["errorMessage"] as? String ?: err)
+          cleanupOutputFile(dest.outputPath)
+          val errMsg = raw["errorMessage"] as? String ?: err
+          android.util.Log.w(
+            "SherpaOnnx:video",
+            "exportVideo err op=$operationId code=$err",
+          )
+          promise.reject(err, errMsg)
           return@execute
         }
-        copyTmpToStreamIfNeeded(resolved)
-        val result = com.facebook.react.bridge.Arguments.createMap().apply {
-          putString("outputKind", sanitizeOutputKind(resolved))
-          putString("outputPath", sanitizeResolvedOutputPath(resolved))
+        copyTmpToStreamIfNeeded(dest)
+        val outputKind = sanitizeOutputKind(dest)
+        val outputPath = sanitizeResolvedOutputPath(dest)
+        val result = Arguments.createMap().apply {
+          putString("outputKind", outputKind)
+          putString("outputPath", outputPath)
         }
         promise.resolve(result)
       } catch (e: com.sherpaonnx.fileio.FileIOException) {
-        cleanupOutputFile(dest?.outputPath)
+        cleanupOutputFile(dest.outputPath)
+        android.util.Log.w("SherpaOnnx:video", "exportVideo fileio op=$operationId: ${e.message}")
         promise.reject(e.code, e.message, e)
       } catch (e: Exception) {
-        cleanupOutputFile(dest?.outputPath)
+        cleanupOutputFile(dest.outputPath)
         val msg = e.message ?: "export failed"
         val code = if (msg.startsWith("VIDEO_")) msg.substringBefore(":").trim() else "VIDEO_INTERNAL"
+        android.util.Log.w("SherpaOnnx:video", "exportVideo fail op=$operationId: $msg")
         promise.reject(code, msg, e)
       } finally {
+        stopNativeCancelBridge(cancelChecker, operationId)
         nativeFreeCancelFlag(cancelFlagAddr)
-        cancelChecker.interrupt()
         decodeCancelFlags.remove(operationId)
+        cleanupSaveDestination(dest)
       }
     }
   }
