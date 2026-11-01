@@ -527,9 +527,9 @@ Thrown / rejected as `VIDEO_…`.
 | `VIDEO_FRAME_EVICTED` | Decode of a PTS that left the ring (and was not spooled). Raise `ringSeconds` or use `retention: 'session'` / `maxSeconds`. |
 | `VIDEO_SPOOL_IO` | Spool read/write failed (`retention` session/path/maxSeconds). |
 | `VIDEO_FILE_CORRUPT` | Ingest demux failed. |
-| `VIDEO_MEMORY_BUDGET_EXCEEDED` | Process decode/RGB budget exceeded. |
+| `VIDEO_MEMORY_BUDGET_EXCEEDED` | Process decode/RGB budget exceeded. See [offline — Budgets](videobuffer-offline.md#budgets). |
 
-Offline extract/export codes after finalize: [videobuffer-offline.md](videobuffer-offline.md#error-codes). Preview: [videopreview.md](videopreview.md).
+Offline extract/export codes after finalize: [videobuffer-offline.md](videobuffer-offline.md#error-codes). Preview: [videopreview.md](videopreview.md). Decoded-frame vs codec-slot caps: [offline — Budgets](videobuffer-offline.md#budgets).
 
 ---
 

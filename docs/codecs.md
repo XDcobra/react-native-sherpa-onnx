@@ -49,7 +49,7 @@ Image encode (`exportOfflineImageBufferFrame` / `exportVideoFrame`): JPEG/PNG us
 
 New codes: `VIDEO_SW_DECODER_DISABLED`, `VIDEO_SW_ENCODER_DISABLED`, `ERR_IMAGE_SW_DECODER_UNAVAILABLE`, `ERR_IMAGE_HW_DECODER_UNAVAILABLE`, `ERR_IMAGE_SW_ENCODER_UNAVAILABLE`, `ERR_IMAGE_HW_ENCODER_UNAVAILABLE`, `CODEC_INVALID_ARGUMENT`.
 
-Existing `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_ENCODER_UNAVAILABLE` / `VIDEO_PREVIEW_DECODER_BUSY` now include `codecReason` (`pool-full`, `not-present`, `os-too-old`, `unsupported-stream`, `configure-failed`, …).
+Slot full: `VIDEO_DECODER_BUSY` / `VIDEO_ENCODER_BUSY` / `VIDEO_PREVIEW_DECODER_BUSY`. No usable codec for the policy: `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_ENCODER_UNAVAILABLE` (with `codecReason` `not-present`, `os-too-old`, `unsupported-stream`, `configure-failed`, …). Slot vs decoded-frame RAM: [videobuffer-offline.md — Budgets](videobuffer-offline.md#budgets).
 
 ## Bundled SW video (`ffmpeg-vsw`)
 

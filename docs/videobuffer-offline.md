@@ -13,6 +13,7 @@ For rolling ingest (`recording` → `finished`), see [Pipeline video buffers —
 | **Decode / encode tiers** | Pixels use the shared codec layer ([codecs.md](codecs.md)). Default policy `preferHardware` (platform HW, then platform SW, then opt-in bundled FFmpeg). Strict `hardware` fails when no HW session is usable. Opening the file still succeeds without a decoder. |
 | **FFmpeg required to open a file** | `probeVideoFileDuration`, `probeVideoFileContainer`, `createOfflineVideoBufferFromFile`, and `exportVideo` (mux) reject with `VIDEO_FFMPEG_DISABLED` when FFmpeg is compiled out. JS probe wrappers return `null`. See [disable-ffmpeg.md](disable-ffmpeg.md). |
 | **Time axis** | Video times are **microseconds** (`ptsUs`, `fromUs` / `toUs`, `timesUs`, `seekableStartUs`). Audio extract uses **milliseconds** (`rangeMs`). OCR spans use **milliseconds** (`ptsMs`, derived from the frame’s `source.ptsUs`). |
+| **Resource budgets** | Two caps: **decoded-frame RAM** (auto from device RAM) and **codec slots** (`configureCodecs`, 1–4). See [Budgets](#budgets). |
 
 ---
 
@@ -345,7 +346,7 @@ const images = await createOfflineImageBufferFromVideo(video, { sampling: 'fps',
 // images ≈ { imageBufferId: 'img_off_1c2d…', frameCount: 20 }
 ```
 
-Copies sampled frames into an [offline ImageBuffer](imagebuffer-offline.md). Pass `images.imageBufferId` to OCR / `getOfflineImageBufferFrameInfo`. Each frame may include `source: { videoBufferId, ptsUs, frameIndex }` — OCR fills `TextSpatialSpan.ptsMs` from that PTS. Accepts **offline** and **finished live**. Recording live → `VIDEO_BUFFER_INVALID_STATE`.
+Copies sampled frames into an [offline ImageBuffer](imagebuffer-offline.md). Pass `images.imageBufferId` to OCR / `getOfflineImageBufferFrameInfo`. Each frame may include `source: { videoBufferId, ptsUs, frameIndex }` — OCR fills `TextSpatialSpan.ptsMs` from that PTS. Accepts **offline** and **finished live**. Recording live → `VIDEO_BUFFER_INVALID_STATE`. Slot full → `VIDEO_DECODER_BUSY`. No usable decoder → `VIDEO_DECODER_UNAVAILABLE`. RGB copy over budget → `VIDEO_MEMORY_BUDGET_EXCEEDED`.
 
 Release with `releaseOfflineImageBuffer` from `react-native-sherpa-onnx/imagebuffer`.
 
@@ -381,7 +382,7 @@ const file = await exportVideoFrame(video, 0, { kind: 'fs', path: '/tmp/frame.jp
 // file ≈ { kind: 'fs', path: '/tmp/frame.jpg' }
 ```
 
-Decodes the nearest frame at `ptsUs` and writes it via [fileio](fileio.md). Accepts **offline** and **finished live**. `ptsUs` outside the clip → `VIDEO_FRAME_OUT_OF_RANGE`.
+Decodes the nearest frame at `ptsUs` and writes it via [fileio](fileio.md). Accepts **offline** and **finished live**. `ptsUs` outside the clip → `VIDEO_FRAME_OUT_OF_RANGE`. Slot full → `VIDEO_DECODER_BUSY`. No usable decoder → `VIDEO_DECODER_UNAVAILABLE`. RGB copy over budget → `VIDEO_MEMORY_BUDGET_EXCEEDED`.
 
 **`options`** (`ExportVideoFrameOptions`)
 
@@ -422,7 +423,7 @@ HW-transcodes the clip (decode NV12 → MediaCodec / VideoToolbox → FFmpeg mux
 | `onProgress` | — | `{ percent, encodedUs }`. |
 | `signal` | — | Abort → `VIDEO_CANCELLED`. |
 
-Audio follows the container: **mp4/mov → AAC**, **mkv/webm → Opus**. No audio track → video-only file. Missing HW encoder → `VIDEO_ENCODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. CPU decoder busy → `VIDEO_DECODER_UNAVAILABLE`.
+Audio follows the container: **mp4/mov → AAC**, **mkv/webm → Opus**. No audio track → video-only file. Missing encoder → `VIDEO_ENCODER_UNAVAILABLE` / `VIDEO_CODEC_UNSUPPORTED`. Encode slot full → `VIDEO_ENCODER_BUSY`. CPU decoder busy → `VIDEO_DECODER_BUSY`. Decode cache over budget → `VIDEO_MEMORY_BUDGET_EXCEEDED`.
 
 #### `createOfflineAudioBufferFromVideo(video, options?)`
 
@@ -552,9 +553,103 @@ Canonical TypeScript types: [`src/videobuffer/types.ts`](../src/videobuffer/type
 
 ---
 
+## Budgets
+
+The SDK caps **decoded pixels** and **concurrent codec sessions** so a clip job fails with a `VIDEO_…` code instead of taking the process down. Both depend on the device **RAM class**. `getCodecInfo()` reports `ramClass` and slot `max` / `inUse`.
+
+| Cap | What it limits | How it is set | Exhausted code |
+| --- | --- | --- | --- |
+| **Decoded-frame memory** | Cached NV12 / Gray8 / RGB frames across **all** open video buffers | Auto from device RAM class. Not configurable from JS. | `VIDEO_MEMORY_BUDGET_EXCEEDED` |
+| **Codec slots** | Concurrent HW/SW decode, display, and encode sessions | Auto from the same RAM class (and OEM instance hints), overridable with [`configureCodecs({ budgets })`](codecs.md) **1–4** | `VIDEO_DECODER_BUSY` / `VIDEO_ENCODER_BUSY` / `VIDEO_PREVIEW_DECODER_BUSY` |
+
+These codes appear on pixel work: `createOfflineImageBufferFromVideo`, `exportVideoFrame`, `exportVideo`, preview. `createOfflineVideoBufferFromFile` only opens the file. Audio extract does not use either cap.
+
+How much you can do at once depends on **device RAM**, **how many video / image buffers you still hold**, **how large you decode** (`maxSide`, `'all'` vs `'fps'` / `'keyframes'`), and **how many jobs run in parallel**.
+
+### Decoded-frame memory
+
+Shared across every open video buffer. Classified from total device RAM:
+
+| RAM class | Device RAM | Decoded-frame cap |
+| --- | --- | --- |
+| `low` | ≤ 3 GiB | 24 MiB |
+| `mid` | ≤ 6 GiB | 48 MiB |
+| `high` | ≤ 12 GiB | 96 MiB |
+| `veryHigh` | > 12 GiB | 160 MiB |
+
+Over the cap → `VIDEO_MEMORY_BUDGET_EXCEEDED`. Typical triggers: several clips left open, full-resolution copies, or parallel image-from-video / `exportVideo`. `maxSide` and a sparser `sampling` keep a job smaller. An [ImageBuffer](imagebuffer-offline.md) from a clip is extra memory until `releaseOfflineImageBuffer`; the video side stays until `releaseVideoBuffer`.
+
+Live recording uses a separate per-buffer ring (`ringSeconds`) — see [videobuffer-streaming.md](videobuffer-streaming.md).
+
+### Codec slots
+
+How many decode / preview / encode sessions may run at once. Defaults follow the same RAM class:
+
+| RAM class | `hwVideoDecode` | `hwVideoDisplay` | `hwVideoEncode` | `swVideoDecode` |
+| --- | --- | --- | --- | --- |
+| `low` / `mid` | 1 | 1 | 1 | 1 |
+| `high` | 2 | 1 | 1 | 2 |
+| `veryHigh` | 2 | 1 | 2 | 2 |
+
+`configureCodecs({ budgets: { hwVideoDecode: 2 } })` changes a slot in **1–4**. That does not raise the decoded-frame MiB cap. Preview uses `hwVideoDisplay`; OCR, image-from-video, and export decode use `hwVideoDecode`. A full slot → `VIDEO_DECODER_BUSY` / `VIDEO_ENCODER_BUSY` / `VIDEO_PREVIEW_DECODER_BUSY`: wait or run one job at a time. No decoder for the policy → `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_ENCODER_UNAVAILABLE` — change policy, do not retry the same call.
+
+### If a budget code is thrown
+
+JS throws `Error` with message `VIDEO_…: …`. Read the prefix. `codecReason` (`not-present`, `configure-failed`, …) is extra detail on unavailable — see [codecs.md](codecs.md).
+
+| Code | Means | What to do |
+| --- | --- | --- |
+| `VIDEO_MEMORY_BUDGET_EXCEEDED` | A new decoded/RGB frame does not fit after evicting this buffer’s unpinned cache. Usually too many open clips, full-res copies, or parallel exports. | `releaseVideoBuffer` / `releaseOfflineImageBuffer` on work you are done with. Lower `maxSide`. Sample `'fps'` / `'keyframes'` instead of `'all'`. Run **one** image-from-video or `exportVideo` at a time. Retry **once** after release — not in a tight loop. |
+| `VIDEO_DECODER_BUSY` | Decoder exists; SDK slot cap is full (`inUse === max`). | Serialize decode / export. Wait for `subscribeCodecEvents` `slotFreed`. Optionally raise `budgets` (still 1–4). |
+| `VIDEO_DECODER_UNAVAILABLE` | No usable decoder for the resolved policy (`not-present`, `configure-failed`, `os-too-old`). | Do not retry the same policy. Default `preferHardware` already falls back to platform SW. Strict `hardware` on a SW-only device will keep failing. Bundled FFmpeg SW needs the `ffmpeg-vsw` variant. |
+| `VIDEO_ENCODER_BUSY` | Encoder exists; encode slot is full. | Serialize `exportVideo`. Wait for `slotFreed` on `hwVideoEncode`. |
+| `VIDEO_ENCODER_UNAVAILABLE` | No usable encoder for `codec` / policy. | Check `codec` (`h264` / `hevc`) and `encodePolicy`. Do not retry the same call. |
+| `VIDEO_PREVIEW_DECODER_BUSY` | Display slot taken. | Release the other preview, or raise `hwVideoDisplay` (1–4). Audio-only play is still allowed. |
+| `VIDEO_DECODE_FAILED` / `VIDEO_ENCODE_FAILED` | Session died mid-stream (bad frame, encoder `NO_MEMORY`, mux). | Not a budget miss. Releasing other work can help a one-shot retry; looping the same call will not. |
+
+```ts
+import { subscribeCodecEvents } from 'react-native-sherpa-onnx/codec';
+
+function videoCode(e: unknown): string {
+  const m = e instanceof Error ? e.message : String(e);
+  return m.split(':')[0] ?? '';
+}
+
+const video = await createOfflineVideoBufferFromFile(source);
+try {
+  const images = await createOfflineImageBufferFromVideo(video, {
+    sampling: 'fps',
+    fps: 2,
+    maxSide: 1280,
+  });
+  await releaseOfflineImageBuffer(images.imageBufferId);
+} catch (e) {
+  const code = videoCode(e);
+  if (code === 'VIDEO_MEMORY_BUDGET_EXCEEDED') {
+    // release other clips, lower maxSide, retry once
+  }
+  if (code === 'VIDEO_DECODER_BUSY') {
+    // slot full — wait for slotFreed, or run this job later
+  }
+  if (code === 'VIDEO_DECODER_UNAVAILABLE') {
+    // no usable decoder for this policy — do not retry the same call
+  }
+} finally {
+  await releaseVideoBuffer(video);
+}
+
+subscribeCodecEvents((e) => {
+  if (e.type === 'slotFreed') {
+    // retry a queued decode / export
+  }
+});
+```
+
+---
+
 ## Error codes
 
-Thrown / rejected as `VIDEO_…` (`Error` message `VIDEO_…: …`, native reject code the same).
+Thrown / rejected as `VIDEO_…` (`Error` message `VIDEO_…: …`, native reject code the same). Budget codes: [Budgets](#budgets).
 
 | Code | Typical cause |
 | --- | --- |
@@ -568,17 +663,19 @@ Thrown / rejected as `VIDEO_…` (`Error` message `VIDEO_…: …`, native rejec
 | `VIDEO_NO_VIDEO_TRACK` | Audio-only file. |
 | `VIDEO_NO_AUDIO_TRACK` | Extract audio but the clip has no audio. |
 | `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC, or no usable decoder/encoder for the resolved policy. |
-| `VIDEO_ENCODER_UNAVAILABLE` | No encoder session for the requested `codec` / policy (pool-full or caps). |
+| `VIDEO_ENCODER_BUSY` | Encode slot full. See [Budgets](#budgets). |
+| `VIDEO_ENCODER_UNAVAILABLE` | No usable encoder for the requested `codec` / policy. See [Budgets](#budgets). |
 | `VIDEO_ENCODE_FAILED` | Encode or mux error during `exportVideo`. |
 | `VIDEO_AUDIO_CODEC_UNSUPPORTED` | Audio codec not in the SDK FFmpeg build. |
-| `VIDEO_DECODER_UNAVAILABLE` | No decoder session for the resolved policy (pool-full, missing HW, or SW disabled). |
+| `VIDEO_DECODER_BUSY` | Decode slot full. See [Budgets](#budgets). |
+| `VIDEO_DECODER_UNAVAILABLE` | No usable decoder for the resolved policy. See [Budgets](#budgets). |
 | `VIDEO_SW_DECODER_DISABLED` | Bundled SW decode requested but `ffmpeg-vsw` is not present / `avcodec_find_decoder` failed. |
 | `VIDEO_DECODE_FAILED` | Decode error on a frame. |
 | `VIDEO_AUDIO_DECODE_FAILED` | Audio extract produced no PCM in range / decode error. |
 | `VIDEO_FRAME_OUT_OF_RANGE` | `ptsUs` / `timesUs` outside the clip. |
 | `VIDEO_FILE_CORRUPT` | Demux/index failed. |
 | `VIDEO_CANCELLED` | `signal` aborted audio extract or `exportVideo`. |
-| `VIDEO_MEMORY_BUDGET_EXCEEDED` | Decode/RGB copy exceeded the process budget. |
+| `VIDEO_MEMORY_BUDGET_EXCEEDED` | Decode/RGB copy exceeded the process decoded-frame cap. See [Budgets](#budgets). |
 
 Preview-only codes (`VIDEO_PREVIEW_…`) are documented in [videopreview.md](videopreview.md).
 
@@ -592,6 +689,7 @@ Preview-only codes (`VIDEO_PREVIEW_…`) are documented in [videopreview.md](vid
 - [Pipeline audio buffers — offline](audiobuffer-offline.md)
 - [OCR — offline](ocr-offline.md)
 - [fileio.md](fileio.md) (`FileSource` / `FileDestination` / `ResolvedFileRef`)
+- [Codec policies](codecs.md) (slot budgets, `codecReason`, `slotFreed`)
 - [Disabling FFmpeg](disable-ffmpeg.md)
 
 ---
