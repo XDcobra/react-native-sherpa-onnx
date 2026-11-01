@@ -63,7 +63,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   FileIO: {
     title: 'File I/O sandbox',
-    body: 'Codec and FileDestination sandbox. Switch Audio vs Video at the top — samples and encode output formats stay on that path. FileSource channel, batch-all, Probe / Decode / Encode are unchanged. Video has a preferHardware / hardware / software policy for decode, still export, and clip encode.',
+    body: 'Codec and FileDestination sandbox. Switch Audio, Video, or Image at the top — samples and encode output formats stay on that path. FileSource channel, batch-all, Probe / Decode / Encode are unchanged. Video and Image have a preferHardware / hardware / software policy for decode and encode.',
   },
   AudioVisualization: {
     title: 'Audio visualization API',

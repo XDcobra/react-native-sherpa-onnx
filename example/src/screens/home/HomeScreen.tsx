@@ -145,7 +145,7 @@ const FEATURES: HomeFeature[] = [
     sectionTitle: 'Pipelines & Demos',
     title: 'File I/O',
     description:
-      'Audio or video FileDestination sandbox: probe, decode, encode, codec policy',
+      'Audio, video, or image FileDestination sandbox: probe, decode, encode, codec policy',
     icon: 'folder-open-outline',
     screen: 'FileIO',
     implemented: true,

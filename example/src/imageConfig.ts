@@ -5,6 +5,26 @@
  * - iOS: example/ios/sherpa_models/test_images/ (copied into the app bundle at build time)
  */
 
+/** Tiny File I/O codec samples (not OCR goldens). */
+export const TEST_IMAGE_CODEC_FILES = {
+  jpeg: 'test_images/sample.jpg',
+  png: 'test_images/sample.png',
+  webp: 'test_images/sample.webp',
+  heic: 'test_images/sample.heic',
+} as const;
+
+export type ImageCodecSampleFormat = keyof typeof TEST_IMAGE_CODEC_FILES;
+
+export const IMAGE_CODEC_ASSET_ENTRIES: {
+  format: ImageCodecSampleFormat;
+  label: string;
+}[] = [
+  { format: 'jpeg', label: 'JPEG' },
+  { format: 'png', label: 'PNG' },
+  { format: 'webp', label: 'WebP' },
+  { format: 'heic', label: 'HEIC' },
+];
+
 export const TEST_IMAGE_FILES = {
   EN_HELLO: 'test_images/en_hello.png',
   DE_GUTEN_TAG: 'test_images/de_guten_tag.png',

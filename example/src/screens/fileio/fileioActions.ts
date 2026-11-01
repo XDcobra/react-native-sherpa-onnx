@@ -33,6 +33,14 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import type { CodecPolicy } from 'react-native-sherpa-onnx/codec';
 import {
+  createOfflineImageBufferFromFiles,
+  ensureOfflineImageBufferFrame,
+  exportOfflineImageBufferFrame,
+  probeImageFileContainer,
+  releaseOfflineImageBuffer,
+  type ImageExportFormat,
+} from 'react-native-sherpa-onnx/imagebuffer';
+import {
   createOfflineVideoBufferFromFile,
   exportVideo,
   exportVideoFrame,
@@ -95,6 +103,13 @@ export const FILEIO_VIDEO_EXPORT_CODECS: VideoExportCodec[] = [
   'vp9',
 ];
 
+export const FILEIO_IMAGE_OUTPUT_FORMATS: ImageExportFormat[] = [
+  'jpeg',
+  'png',
+  'webp',
+  'heic',
+];
+
 /** Payload when the user runs encode (Copy) on the File I/O screen. */
 export type FileioCopyInput = {
   destinationKind: FileDestination['kind'];
@@ -118,7 +133,7 @@ export type FileioCopyResult =
 export type FileioProbeResult =
   | {
       status: 'success';
-      media: 'audio' | 'video';
+      media: 'audio' | 'video' | 'image';
       durationMs?: number;
       durationUs?: number;
       isExact?: boolean;
@@ -132,7 +147,7 @@ export type FileioProbeResult =
 export type FileioDecodeResult =
   | {
       status: 'success';
-      media: 'audio' | 'video';
+      media: 'audio' | 'video' | 'image';
       bufferId: string;
       durationMs?: number;
       durationUs?: number;
@@ -152,10 +167,21 @@ export type FileioVideoEncodeInput = {
   encodePolicy?: CodecPolicy;
 };
 
+export type FileioImageEncodeInput = {
+  destinationKind: FileDestination['kind'];
+  inputSource: FileSource;
+  inputLabel: string;
+  outputFormat: ImageExportFormat;
+  decodePolicy?: CodecPolicy;
+  encodePolicy?: CodecPolicy;
+};
+
 export type FileioDecodeOptions = {
   decodePolicy?: CodecPolicy;
   encodePolicy?: CodecPolicy;
 };
+
+export type FileioMedia = 'audio' | 'video' | 'image';
 
 const FS_EXPORT_DIR = `${DocumentDirectoryPath}/SherpaOnnxFileIO/exports`;
 const APP_EXPORT_RELATIVE = 'SherpaOnnxFileIO/exports';
@@ -200,6 +226,19 @@ export function mimeTypeForFormat(format: AudioOutputFormat): string {
   }
 }
 
+export function mimeTypeForImageFormat(format: ImageExportFormat): string {
+  switch (format) {
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'webp':
+      return 'image/webp';
+    case 'heic':
+      return 'image/heic';
+  }
+}
+
 export function mimeTypeForVideoFormat(format: VideoExportContainer): string {
   switch (format) {
     case 'mp4':
@@ -222,7 +261,8 @@ function isBundledTestPath(rel: string | undefined): rel is string {
     !!rel &&
     (rel.startsWith('test_codec/') ||
       rel.startsWith('test_wavs/') ||
-      rel.startsWith('test_videos/'))
+      rel.startsWith('test_videos/') ||
+      rel.startsWith('test_images/'))
   );
 }
 
@@ -298,6 +338,10 @@ function isVideoBundledPath(path: string | undefined): boolean {
   return !!path && path.startsWith('test_videos/');
 }
 
+function isImageBundledPath(path: string | undefined): boolean {
+  return !!path && path.startsWith('test_images/');
+}
+
 function buildContentTreeDestination(
   treeOrFolderUri: string,
   filename: string,
@@ -346,7 +390,7 @@ async function pickSecurityScopedDestination(): Promise<FileDestination> {
   const picked = await pick({
     mode: 'open',
     requestLongTermAccess: true,
-    type: [types.audio],
+    type: [types.audio, types.video, types.images],
   });
   const file = picked[0];
   const uri = file?.uri?.trim();
@@ -569,15 +613,51 @@ async function runVideoProbe(
   };
 }
 
-export async function runFileioProbe(
+async function runImageProbe(
   input: FileioInputSource
 ): Promise<FileioProbeResult> {
+  const container = await probeImageFileContainer(input.fileSource);
+  if (!container) {
+    return {
+      status: 'error',
+      message: formatProbeNullError(input, input.bundledPath),
+    };
+  }
+  const lines = [
+    'Media: image',
+    `Format: ${container.inputFormatName}`,
+    `Codec: ${container.codecName}`,
+    `Coded size: ${container.codedWidth}×${container.codedHeight}`,
+    `Input: ${input.label}`,
+    describeFileSource(input.fileSource),
+  ];
+  return {
+    status: 'success',
+    media: 'image',
+    inputFormatName: container.inputFormatName,
+    codecName: container.codecName,
+    detail: lines.join('\n'),
+    summary: `${container.inputFormatName} ${container.codedWidth}×${container.codedHeight}`,
+  };
+}
+
+export async function runFileioProbe(
+  input: FileioInputSource,
+  media?: FileioMedia
+): Promise<FileioProbeResult> {
   try {
-    if (isVideoBundledPath(input.bundledPath)) {
+    if (media === 'image' || isImageBundledPath(input.bundledPath)) {
+      return await runImageProbe(input);
+    }
+    if (media === 'video' || isVideoBundledPath(input.bundledPath)) {
       return await runVideoProbe(input);
     }
-    if (input.bundledPath) {
+    if (media === 'audio' || input.bundledPath) {
       return await runAudioProbe(input);
+    }
+    const image = await runImageProbe(input);
+    if (image.status === 'success') {
+      return image;
     }
     const video = await runVideoProbe(input);
     if (video.status === 'success') {
@@ -687,21 +767,71 @@ async function runVideoDecode(
   }
 }
 
-export async function runFileioDecode(
+async function runImageDecode(
   input: FileioInputSource,
   options?: FileioDecodeOptions
 ): Promise<FileioDecodeResult> {
+  const startedAt = performance.now();
+  const image = await createOfflineImageBufferFromFiles(input.fileSource, {
+    decodePolicy: options?.decodePolicy,
+  });
   try {
-    if (isVideoBundledPath(input.bundledPath)) {
+    const frame = await ensureOfflineImageBufferFrame(image, 0);
+    const decodeElapsedMs = performance.now() - startedAt;
+    const decoder = frame.decoder
+      ? `${frame.decoder.provider} ${frame.decoder.tier}/${frame.decoder.origin}`
+      : 'n/a';
+    const detail = [
+      'Media: image',
+      `decode: ${formatElapsedMs(decodeElapsedMs)}`,
+      `bufferId: ${String(image.bufferId)}`,
+      `frames: ${image.info.frameCount}`,
+      `size: ${frame.width}×${frame.height}`,
+      `bytes: ${frame.byteSize}`,
+      `storage: ${frame.storageKind}`,
+      `decoder: ${decoder}`,
+      `decodePolicy: ${options?.decodePolicy ?? 'preferHardware'}`,
+      `Input: ${input.label}`,
+      describeFileSource(input.fileSource),
+    ].join('\n');
+    return {
+      status: 'success',
+      media: 'image',
+      bufferId: String(image.bufferId),
+      decodeElapsedMs,
+      detail,
+      summary: `decode ${formatElapsedMs(decodeElapsedMs)}, ${frame.width}×${
+        frame.height
+      }`,
+    };
+  } finally {
+    await releaseOfflineImageBuffer(image).catch(() => {});
+  }
+}
+
+export async function runFileioDecode(
+  input: FileioInputSource,
+  options?: FileioDecodeOptions,
+  media?: FileioMedia
+): Promise<FileioDecodeResult> {
+  try {
+    if (media === 'image' || isImageBundledPath(input.bundledPath)) {
+      return await runImageDecode(input, options);
+    }
+    if (media === 'video' || isVideoBundledPath(input.bundledPath)) {
       return await runVideoDecode(input, options);
     }
-    if (input.bundledPath) {
+    if (media === 'audio' || input.bundledPath) {
       return await runAudioDecode(input);
     }
     try {
-      return await runVideoDecode(input, options);
+      return await runImageDecode(input, options);
     } catch {
-      return await runAudioDecode(input);
+      try {
+        return await runVideoDecode(input, options);
+      } catch {
+        return await runAudioDecode(input);
+      }
     }
   } catch (e) {
     return {
@@ -941,6 +1071,136 @@ export async function runFileioVideoEncode(
   } finally {
     if (video) {
       await releaseVideoBuffer(video).catch(() => {});
+    }
+  }
+}
+
+export async function runFileioImageEncode(
+  input: FileioImageEncodeInput
+): Promise<FileioCopyResult> {
+  let image: Awaited<
+    ReturnType<typeof createOfflineImageBufferFromFiles>
+  > | null = null;
+  const ext = input.outputFormat === 'jpeg' ? 'jpg' : input.outputFormat;
+  const filename = exportFilename(ext, 'fileio-image');
+  const mime = mimeTypeForImageFormat(input.outputFormat);
+  try {
+    image = await createOfflineImageBufferFromFiles(input.inputSource, {
+      decodePolicy: input.decodePolicy,
+    });
+
+    let dest: FileDestination;
+    switch (input.destinationKind) {
+      case 'fs':
+      case 'app':
+        dest = await fixedDestinationForKind(input.destinationKind, filename);
+        break;
+      case 'contentTree':
+        dest = await pickContentTreeDestination(filename, mime);
+        break;
+      case 'contentUri': {
+        if (Platform.OS === 'ios') {
+          dest = { kind: 'contentUri', uri: 'content://unsupported-on-ios' };
+          break;
+        }
+        dest = {
+          kind: 'app',
+          base: 'cache',
+          path: `SherpaOnnxFileIO/staging/${filename}`,
+        };
+        const encodeStartedAt = performance.now();
+        const staged = await exportOfflineImageBufferFrame(image, 0, dest, {
+          format: input.outputFormat,
+          encodePolicy: input.encodePolicy,
+        });
+        const encodeElapsedMs = performance.now() - encodeStartedAt;
+        if (staged.kind !== 'fs') {
+          throw new Error(
+            'Expected a filesystem path from app cache staging; got content URI.'
+          );
+        }
+        const sourceUri = encodeURI(
+          staged.path.startsWith('file://')
+            ? staged.path
+            : `file://${staged.path}`
+        );
+        try {
+          const responses = await saveDocuments({
+            sourceUris: [sourceUri],
+            mimeType: mime,
+            fileName: filename,
+          });
+          const first = responses[0];
+          if (first?.error) {
+            throw new Error(first.error);
+          }
+          const uri = first?.uri?.trim();
+          if (!uri) {
+            throw new Error('Save dialog did not return a target URI.');
+          }
+          const resolved: ResolvedFileRef = uri.startsWith('content://')
+            ? { kind: 'contentUri', uri }
+            : { kind: 'fs', path: decodeURI(uri.replace(/^file:\/\//, '')) };
+          return {
+            status: 'success',
+            resolved,
+            encodeElapsedMs,
+            detail: [
+              `encode: ${formatElapsedMs(encodeElapsedMs)}`,
+              `Output: ${formatResolvedLocation(resolved)}`,
+              `Format: ${input.outputFormat}`,
+              `Image encode: exportOfflineImageBufferFrame`,
+              `decodePolicy: ${input.decodePolicy ?? 'preferHardware'}`,
+              `encodePolicy: ${input.encodePolicy ?? 'preferHardware'}`,
+              `File input: ${input.inputLabel}`,
+              describeFileSource(input.inputSource),
+            ].join('\n'),
+          };
+        } finally {
+          await unlink(staged.path).catch(() => {});
+        }
+      }
+      case 'securityScoped':
+        dest = await pickSecurityScopedDestination();
+        break;
+    }
+
+    const encodeStartedAt = performance.now();
+    const resolved = await exportOfflineImageBufferFrame(image, 0, dest, {
+      format: input.outputFormat,
+      encodePolicy: input.encodePolicy,
+    });
+    const encodeElapsedMs = performance.now() - encodeStartedAt;
+    return {
+      status: 'success',
+      resolved,
+      encodeElapsedMs,
+      detail: [
+        `encode: ${formatElapsedMs(encodeElapsedMs)}`,
+        `Output: ${formatResolvedLocation(resolved)}`,
+        `Format: ${input.outputFormat}`,
+        `Image encode: exportOfflineImageBufferFrame`,
+        `decodePolicy: ${input.decodePolicy ?? 'preferHardware'}`,
+        `encodePolicy: ${input.encodePolicy ?? 'preferHardware'}`,
+        `File input: ${input.inputLabel}`,
+        describeFileSource(input.inputSource),
+      ].join('\n'),
+    };
+  } catch (e) {
+    if (isPickCanceled(e)) {
+      return { status: 'canceled' };
+    }
+    return {
+      status: 'error',
+      message: formatFileioNativeError(
+        input.inputSource,
+        input.inputSource.kind === 'app' ? input.inputSource.path : undefined,
+        e
+      ),
+    };
+  } finally {
+    if (image) {
+      await releaseOfflineImageBuffer(image).catch(() => {});
     }
   }
 }

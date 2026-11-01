@@ -29,6 +29,9 @@ If the folder is empty, the example app’s sample-audio options will show “Pa
 - **`test_videos/` folder**  
   Bundled clips for Video Preview (`preview_h264_aac.mp4`), Video → OCR (`ocr_subtitles_h264_aac.mp4`), and File I/O (`sample.mp4` / `.mov` / `.mkv` / `.webm` H.264, `sample_vp9.webm` VP9, 1 s 144p). Copied to `App.app/test_videos/`.
 
+- **`test_images/` folder**  
+  OCR goldens plus File I/O stills (`sample.jpg` / `.png` / `.webp` / `.heic`). Copied to `App.app/test_images/`.
+
 ## Layout
 
 ```
