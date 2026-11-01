@@ -147,6 +147,14 @@ export async function isPdfiumEnabled(): Promise<boolean> {
  * on first open (see {@link FileSource} / `apkAsset`).
  * Encrypted PDFs: pass {@link ExtractPdfTextLayerOptions.password}; missing or
  * wrong stays `ERR_PDF_ENCRYPTED`.
+ *
+ * @throws {Error} `ERR_PDF_INVALID_ARGUMENT` — `source` is not a `FileSource`, or `pages` / `password` is invalid.
+ * @throws {Error} `ERR_PDF_CANCELLED` — `signal` aborted.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — missing or malformed `txt_off_*` / `txt_live_*` id.
+ * @throws {Error} `ERR_PDF_PDFIUM_DISABLED` — PDFium is not linked.
+ * @throws {Error} `ERR_PDF_NO_TEXT_LAYER` — selected pages have no extractable text layer.
+ * @throws {Error} `ERR_PDF_OPEN_FAILED` — PDF could not be opened.
+ * @throws {Error} `ERR_PDF_ENCRYPTED` — missing or wrong password.
  */
 export async function extractPdfTextLayer(
   source: FileSource,
@@ -209,6 +217,13 @@ export async function extractPdfTextLayer(
  * on first open (see {@link FileSource} / `apkAsset`).
  * Encrypted PDFs: pass {@link RasterizePdfPagesOptions.password}; missing or
  * wrong stays `ERR_PDF_ENCRYPTED`.
+ *
+ * @throws {Error} `ERR_PDF_INVALID_ARGUMENT` — `source` is not a `FileSource`, or `pages` / `dpi` / `strategy` is invalid.
+ * @throws {Error} `ERR_PDF_CANCELLED` — `signal` aborted.
+ * @throws {Error} `ERR_PDF_INTERNAL` — native returned no `bufferId`.
+ * @throws {Error} `ERR_PDF_PDFIUM_DISABLED` — PDFium is not linked.
+ * @throws {Error} `ERR_PDF_OPEN_FAILED` — PDF could not be opened.
+ * @throws {Error} `ERR_PDF_RENDER_FAILED` — page rasterization failed.
  */
 export async function rasterizePdfPages(
   source: FileSource,

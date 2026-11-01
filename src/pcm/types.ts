@@ -32,10 +32,20 @@ export interface PcmPlayer {
   /** Unique player session ID (generated at creation). */
   readonly playerId: string;
 
-  /** Pause playback. Buffered samples are retained — resume() continues from current position. */
+  /**
+   * Pause playback. Buffered samples are retained — resume() continues from current position.
+   * @throws {Error} `PCM_PLAYER_NOT_FOUND` — player id is unknown.
+   * @throws {Error} `PCM_PLAYER_DESTROYED` — player was already destroyed.
+   * @throws {Error} `PCM_PLAYER_ERROR` — native pause failed.
+   */
   pause(): Promise<void>;
 
-  /** Resume paused playback. No-op if not paused. */
+  /**
+   * Resume paused playback. No-op if not paused.
+   * @throws {Error} `PCM_PLAYER_NOT_FOUND` — player id is unknown.
+   * @throws {Error} `PCM_PLAYER_DESTROYED` — player was already destroyed.
+   * @throws {Error} `PCM_PLAYER_ERROR` — native resume failed.
+   */
   resume(): Promise<void>;
 
   /**
@@ -43,18 +53,33 @@ export interface PcmPlayer {
    * - Offline buffers: clamps to [0, durationMs].
    * - Live buffers (recording): rejects with PCM_PLAYER_SEEK_OUT_OF_RANGE if outside available ring window.
    * - Live buffers (finished): seeks within available data.
+   * @throws {Error} `PCM_PLAYER_SEEK_OUT_OF_RANGE` — live seek is outside the available ring window.
+   * @throws {Error} `PCM_PLAYER_NOT_FOUND` — player id is unknown.
+   * @throws {Error} `PCM_PLAYER_DESTROYED` — player was already destroyed.
+   * @throws {Error} `PCM_PLAYER_ERROR` — native seek failed.
    */
   seekToMs(positionMs: number): Promise<void>;
 
-  /** Restart playback from the beginning. Equivalent to seekToMs(0) + resume if ended. */
+  /**
+   * Restart playback from the beginning. Equivalent to seekToMs(0) + resume if ended.
+   * @throws {Error} `PCM_PLAYER_NOT_FOUND` — player id is unknown.
+   * @throws {Error} `PCM_PLAYER_DESTROYED` — player was already destroyed.
+   * @throws {Error} `PCM_PLAYER_ERROR` — native restart failed.
+   */
   restart(): Promise<void>;
 
-  /** Get the current playback position in milliseconds. */
+  /**
+   * Get the current playback position in milliseconds.
+   * @throws {Error} `PCM_PLAYER_NOT_FOUND` — player id is unknown.
+   * @throws {Error} `PCM_PLAYER_DESTROYED` — player was already destroyed.
+   * @throws {Error} `PCM_PLAYER_ERROR` — native position read failed.
+   */
   getPlaybackPositionMs(): Promise<number>;
 
   /**
    * Stop playback and release native resources.
    * After this call the player is invalid — do not call other methods.
+   * Idempotent in JS; typically does not throw.
    */
   destroy(): Promise<void>;
 }

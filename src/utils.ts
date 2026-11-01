@@ -54,6 +54,8 @@ export function autoModelFileSource(
  *   }
  * }
  * ```
+ *
+ * @throws {Error} `LIST_ASSETS_ERROR` — native asset scan failed.
  */
 export async function listAssetModels(): Promise<
   Array<{
@@ -67,6 +69,9 @@ export async function listAssetModels(): Promise<
 /**
  * List model folders under a specific filesystem path.
  * When recursive is true, returns relative folder paths under the base path.
+ *
+ * @throws {Error} `PATH_REQUIRED` — `path` is empty.
+ * @throws {Error} `LIST_MODELS_ERROR` — native listing at `path` failed.
  */
 export async function listModelsAtPath(
   path: string,

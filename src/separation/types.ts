@@ -99,6 +99,14 @@ export interface SeparationEngine {
   /**
    * Offline batch separation (Enhancement-shaped API).
    * Default `segmentation.mode: 'off'` → single native batch call; `'auto'` → segment orchestration.
+   * @throws {Error} `SEPARATION_INVALID_ARGUMENT` — stem count, sample rate, or buffers are invalid.
+   * @throws {Error} `SEPARATION_ERROR` — native separate failed.
+   * @throws {Error} `SEPARATION_BUFFER_NOT_FOUND` — input or output buffer is unknown.
+   * @throws {Error} `SEPARATION_BUFFER_KIND_MISMATCH` — buffer is not the required offline kind.
+   * @throws {Error} `SEPARATION_BUFFER_EMPTY` — input audio has no samples.
+   * @throws {Error} `SEPARATION_OUTPUT_NOT_EMPTY` — an output buffer already has samples.
+   * @throws {Error} `SEPARATION_STEM_COUNT_MISMATCH` — `audioOuts.length` does not match the model.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   separate(
     audioIn: OfflineAudioBufferIdSource,
@@ -108,6 +116,9 @@ export interface SeparationEngine {
 
   /**
    * Live overload on the offline separation engine — mandatory `continuous_frames` segmentation.
+   * @throws {Error} `SEPARATION_INVALID_ARGUMENT` — live/offline overload mismatch or bad stem count.
+   * @throws {Error} `SEPARATION_ERROR` — live segment buffer missing or native pipeline failed.
+   * @throws {Error} `LIVE_OFFLINE_SEGMENTATION_REQUIRED` — live path requires a segmentation policy.
    */
   separate(
     audioIn: LiveAudioBufferIdSource,
@@ -115,7 +126,15 @@ export interface SeparationEngine {
     options: SeparationLivePipelineOptions
   ): Promise<SeparationPipelineHandle>;
 
+  /**
+   * Native model sample rate.
+   * @throws {Error} `SEPARATION_ERROR` — native query failed.
+   */
   getSampleRate(): Promise<number>;
+  /**
+   * Number of stems this model writes.
+   * @throws {Error} `SEPARATION_ERROR` — native query failed.
+   */
   getNumStems(): Promise<number>;
   destroy(): Promise<void>;
 }

@@ -23,6 +23,10 @@ export interface UvrCustomConfig {
   model: FileSource;
 }
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `SEPARATION_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertSeparationCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

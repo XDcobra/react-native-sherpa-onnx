@@ -24,12 +24,20 @@ export interface StreamingPunctuationCustomConfig {
   bpe_vocab: FileSource;
 }
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertOfflinePunctuationCustomConfig(
   customConfig: Record<string, unknown>
 ): void {
   assertCustomModelConfig(customConfig, PunctuationErrorCode.INVALID_ARGUMENT);
 }
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertStreamingPunctuationCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

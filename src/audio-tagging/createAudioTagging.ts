@@ -24,6 +24,12 @@ import {
 
 let instanceCounter = 0;
 
+/**
+ * Create an audio-tagging engine. Call `destroy()` when finished.
+ * @throws {Error} `AUDIO_TAGGING_INVALID_ARGUMENT` — options, `modelSource`, or custom paths are invalid.
+ * @throws {Error} `AUDIO_TAGGING_INIT_FAILED` — JS wrap of a failed native init result.
+ * @throws {Error} Native reject `AUDIO_TAGGING_INIT_ERROR`.
+ */
 export async function createAudioTagging(
   options: AudioTaggingInitializeOptions
 ): Promise<AudioTaggingEngine> {

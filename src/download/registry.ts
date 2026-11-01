@@ -196,6 +196,15 @@ export async function listModels(
   return cache?.models ?? [];
 }
 
+/**
+ * Fetch and cache the model catalog for `category` from the selected source.
+ * @throws {DownloadError} `DOWNLOAD_UNKNOWN_SOURCE` — `source` is not registered.
+ * @throws {DownloadError} `DOWNLOAD_SOURCE_LIST_FAILED` — source does not support `category`.
+ * @throws {DownloadError} `DOWNLOAD_NETWORK_FAILED` — catalog fetch failed before an HTTP status (no cache).
+ * @throws {DownloadError} `DOWNLOAD_HTTP_STATUS` — catalog server returned a non-success status (no cache).
+ * @throws {DownloadError} `DOWNLOAD_CANCELLED` — `signal` aborted (no cache).
+ * @throws {DownloadError} `DOWNLOAD_SOURCE_AUTH_FAILED` — source rejected credentials (no cache).
+ */
 export async function refreshModels(
   category: ModelCategory,
   options?: RefreshModelsOptions

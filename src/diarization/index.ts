@@ -191,6 +191,11 @@ async function finishDiarizeResult(params: {
   };
 }
 
+/**
+ * Create an offline speaker-diarization engine. Call `destroy()` when finished.
+ * @throws {Error} `DIARIZATION_INVALID_ARGUMENT` — options, model sources, or custom paths are invalid.
+ * @throws {Error} Native init failed (`Diarization initialization failed` / `DIARIZATION_INIT_ERROR`).
+ */
 export async function createDiarization(
   options: DiarizationInitializeOptions
 ): Promise<DiarizationEngine> {

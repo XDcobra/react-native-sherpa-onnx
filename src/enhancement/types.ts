@@ -108,6 +108,12 @@ export interface EnhancementEngine {
    * Read-only input offline buffer; writes denoised PCM into empty `audioOut`.
    * Both arguments must resolve to offline audio buffer ids (`off_*`).
    * `audioIn` must be populated; `audioOut` must be empty (created via `createEmptyOfflineAudioBuffer`).
+   * @throws {Error} `ENHANCEMENT_ERROR` — native enhance failed.
+   * @throws {Error} `ENHANCEMENT_BUFFER_NOT_FOUND` — input or output buffer is unknown.
+   * @throws {Error} `ENHANCEMENT_BUFFER_KIND_MISMATCH` — buffer is not the required offline kind.
+   * @throws {Error} `ENHANCEMENT_BUFFER_EMPTY` — input audio has no samples.
+   * @throws {Error} `ENHANCEMENT_OUTPUT_NOT_EMPTY` — `audioOut` already has samples.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   enhance(
     audioIn: OfflineAudioBufferIdSource,
@@ -120,6 +126,10 @@ export interface EnhancementEngine {
    * Consumes committed speech chunks from a live input buffer and writes
    * denoised committed chunks to a live audio output buffer.
    * Restricted to `continuous_frames` segmentation policies.
+   * @throws {Error} `ENHANCE_INVALID_ARGUMENT` — live/offline overload mismatch.
+   * @throws {Error} `ENHANCEMENT_ERROR` — live segment buffer missing or native pipeline failed.
+   * @throws {Error} `LIVE_OFFLINE_SEGMENTATION_REQUIRED` — live path requires a segmentation policy.
+   * @throws {Error} `ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND` — live audio buffer is unknown.
    */
   enhance(
     audioIn: LiveAudioBufferIdSource,

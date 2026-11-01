@@ -74,6 +74,16 @@ export type PunctuationPipelineHandle = {
 
 export type StreamingPunctuationEngine = {
   readonly instanceId: string;
+  /**
+   * Start an online punctuation pipeline from a live text buffer into a live output buffer.
+   * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — `textIn` is not a `txt_live_*` buffer.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — segmentation policy fields are invalid.
+   * @throws {Error} `PUNCTUATION_INSTANCE_NOT_FOUND` — engine was destroyed.
+   * @throws {Error} `PUNCTUATION_ERROR` — native online punctuate failed.
+   * @throws {Error} `PUNCTUATION_PIPELINE_ERROR` — native pipeline worker failed.
+   * @throws {Error} `TEXT_BUFFER_KIND_MISMATCH` — buffer is not the required live text kind.
+   * @throws {Error} `TEXT_INVALID_STATE` — live text buffer is not recording.
+   */
   punctuate(
     textIn: LiveTextBufferIdSource,
     textOut: LiveTextBufferIdSource,

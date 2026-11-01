@@ -37,6 +37,10 @@ function getEventEmitter(): NativeEventEmitter {
  * @param audioBuffer - Live or offline audio buffer to play from
  * @param options - Player configuration (volume, onEnded, etc.)
  * @returns Promise resolving to a PcmPlayer handle
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — audio buffer id is malformed.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer is not in the native registry.
+ * @throws {Error} `PCM_PLAYER_INVALID_CONFIG` — player config or backend setup is invalid.
+ * @throws {Error} `PCM_PLAYER_ERROR` — native player create failed.
  */
 export async function createPcmPlayer(
   audioBuffer: PcmPlayerAudioBuffer,

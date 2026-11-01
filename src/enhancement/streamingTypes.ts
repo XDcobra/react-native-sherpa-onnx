@@ -20,6 +20,16 @@ export interface StreamingEnhancementEngine {
   getSampleRate(): Promise<number>;
   getFrameShiftInSamples(): Promise<number>;
   destroy(): Promise<void>;
+  /**
+   * Start an online denoise pipeline from a live input buffer into a live output buffer.
+   * @throws {Error} `ENHANCEMENT_INVALID_ARGUMENT` — `inputBufferId` is not a `live_*` audio buffer.
+   * @throws {Error} `ENHANCEMENT_INVALID_SEGMENTATION` — segmentation policy is invalid for online enhance.
+   * @throws {Error} `ONLINE_ENHANCEMENT_ERROR` — native online enhance failed.
+   * @throws {Error} `ENHANCEMENT_PIPELINE_BUFFER_NOT_FOUND` — live buffer is unknown.
+   * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — audio buffer is not in the native registry.
+   * @throws {Error} `BUFFER_INVALIDATED` — a live buffer was released while the pipeline ran.
+   * @throws {Error} `STREAMING_PIPELINE_ERROR` — native pipeline worker failed.
+   */
   enhance(
     inputBufferId: string,
     outputBufferId: string,

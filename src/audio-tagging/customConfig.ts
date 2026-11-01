@@ -14,6 +14,10 @@ export interface AudioTaggingCustomConfig {
   labels: FileSource;
 }
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `AUDIO_TAGGING_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertAudioTaggingCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

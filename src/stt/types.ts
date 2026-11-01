@@ -323,6 +323,12 @@ export interface SttEngine {
    * Batch transcription on offline audio/text buffers.
    * Reads from an offline audio buffer and writes the final transcript to an
    * offline text output buffer.
+   * @throws {Error} `STT_INVALID_ARGUMENT` — live/offline overload mismatch or bad buffers.
+   * @throws {Error} `STT_TRANSCRIBE_FAILED` — native transcribe failed or live segment buffer missing.
+   * @throws {Error} `STT_INSTANCE_NOT_FOUND` — engine was destroyed.
+   * @throws {Error} `STT_BUFFER_NOT_FOUND` — audio or text buffer id is unknown.
+   * @throws {Error} `STT_BUFFER_KIND_MISMATCH` — buffer is not the required offline/live kind.
+   * @throws {Error} `STT_BUFFER_EMPTY` — input audio has no samples.
    */
   transcribe(
     buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,
@@ -335,6 +341,8 @@ export interface SttEngine {
    * Consumes committed speech segments from a live audio buffer and writes
    * committed transcript segments to a live text output buffer.
    * Segmentation policy is mandatory for this path.
+   * @throws {Error} `STT_INVALID_ARGUMENT` — live/offline overload mismatch or missing segmentation.
+   * @throws {Error} `STT_TRANSCRIBE_FAILED` — live segment buffer missing or native pipeline failed.
    */
   transcribe(
     audioIn: LiveAudioBufferIdSource,
@@ -342,6 +350,10 @@ export interface SttEngine {
     options: SttLivePipelineOptions
   ): Promise<SttPipelineHandle>;
 
+  /**
+   * Update runtime recognizer config.
+   * @throws {Error} `STT_CONFIG_FAILED` — native rejected the new config.
+   */
   setConfig(options: SttRuntimeConfig): Promise<void>;
   destroy(): Promise<void>;
 }

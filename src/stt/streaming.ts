@@ -61,6 +61,11 @@ function normalizeToOnlineType(
   }
 }
 
+/**
+ * Create an online (streaming) STT engine. Call `destroy()` when finished.
+ * @throws {Error} `STT_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`Streaming STT initialization failed` / `STT_INIT_FAILED`).
+ */
 export async function createStreamingSTT(
   options: StreamingSttInitOptions
 ): Promise<LiveSttEngine> {
@@ -233,4 +238,9 @@ export async function createStreamingSTT(
   return engine;
 }
 
+/**
+ * Alias of {@link createStreamingSTT}.
+ * @throws {Error} `STT_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`Streaming STT initialization failed` / `STT_INIT_FAILED`).
+ */
 export const createLiveSTT = createStreamingSTT;

@@ -183,9 +183,21 @@ export type VADOfflineProcessInput = {
 
 export interface VADEngine {
   readonly instanceId: string;
+  /**
+   * Run VAD on live or offline audio.
+   * @throws {Error} `VAD_INVALID_STATE` — a pipeline is already running.
+   * @throws {Error} `VAD_INVALID_OPTIONS` — `onProgress` is not a function.
+   * @throws {Error} `VAD_BUFFER_NOT_FOUND` — audio or segment buffer is unknown.
+   * @throws {Error} `VAD_BUFFER_KIND_MISMATCH` — buffer is not the required kind.
+   * @throws {Error} `VAD_INTERNAL_ERROR` — native VAD failed.
+   */
   process(
     input: VADLiveProcessInput | VADOfflineProcessInput
   ): Promise<VADPipelineHandle | VADOfflineResult>;
+  /**
+   * Whether the last processed window contained speech.
+   * @throws {Error} `VAD_MODEL_INIT_FAILED` — the VAD model is not loaded.
+   */
   isSpeechDetected(): Promise<boolean>;
   destroy(): Promise<void>;
 }

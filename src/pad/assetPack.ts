@@ -114,6 +114,11 @@ export async function getAssetPackState(
   return normalizeSnapshot(raw);
 }
 
+/**
+ * Remove an on-demand / fast-follow asset pack (Android PAD) or ODR tag (iOS).
+ *
+ * @throws {Error} `PAD_REMOVE_FAILED` — native pack removal failed.
+ */
 export async function removeAssetPack(packName: string): Promise<number> {
   if (Platform.OS !== 'android' && Platform.OS !== 'ios') {
     return 0;
@@ -247,6 +252,14 @@ function withTimeout<T>(
 
 /**
  * Native fetch + listener until the pack/tag is ready (Android: COMPLETED; iOS: models path on disk).
+ *
+ * @throws {Error} `PAD_STALLED` — no byte progress within the stall timeout.
+ * @throws {Error} `PAD_NETWORK_ERROR` — Play/ODR network error.
+ * @throws {Error} `PAD_ACCESS_DENIED` — background download / access denied.
+ * @throws {Error} `PAD_PLAY_UNAVAILABLE` — Play Store / Asset Pack API unavailable.
+ * @throws {Error} `PAD_PACK_UNAVAILABLE` — pack is not available for this install.
+ * @throws {Error} `PAD_INSUFFICIENT_STORAGE` — not enough disk space.
+ * @throws {Error} `PAD_ENSURE_FAILED` — native ensure failed without a more specific code.
  */
 export async function ensureAssetPackReady(
   packName: string,

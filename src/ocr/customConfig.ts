@@ -80,6 +80,10 @@ export type OcrCustomConfigByModelType = {
 
 export type OcrCustomConfig = OcrCustomConfigByModelType[OcrConcreteModelType];
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `OCR_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertOcrCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

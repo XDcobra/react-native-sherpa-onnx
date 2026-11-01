@@ -82,6 +82,13 @@ function mapQuality(quality?: 'low' | 'medium' | 'high'): number {
  *
  * Output: FileDestination descriptor.
  * Returns a ResolvedFileRef pointing to the written file.
+ * @throws {Error} `AUDIO_SAVE_CANCELLED` — `signal` aborted before or during the save.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — destination or source kind is not valid on this OS.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — buffer id is malformed.
+ * @throws {Error} `AUDIO_SAVE_UNSUPPORTED_FORMAT` — format is not supported.
+ * @throws {Error} `AUDIO_SAVE_BUFFER_NOT_FOUND` — buffer is not in the native registry.
+ * @throws {Error} `AUDIO_SAVE_BUFFER_NOT_FINALIZED` — live buffer is still recording.
+ * @throws {Error} `AUDIO_SAVE_ENCODE_ERROR` — native encode or conversion failed.
  */
 export async function saveAudioAsFile(
   input: AudioSaveInput,
@@ -168,6 +175,13 @@ export async function saveAudioAsFile(
  * Shortcut for saveAudioAsFile(input, output, 'wav', { outputSampleRateHz: 16000 }).
  *
  * Accepts both buffer references and FileSource.
+ * @throws {Error} `AUDIO_SAVE_CANCELLED` — `signal` aborted before or during the save.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — destination or source kind is not valid on this OS.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — buffer id is malformed.
+ * @throws {Error} `AUDIO_SAVE_UNSUPPORTED_FORMAT` — format is not supported.
+ * @throws {Error} `AUDIO_SAVE_BUFFER_NOT_FOUND` — buffer is not in the native registry.
+ * @throws {Error} `AUDIO_SAVE_BUFFER_NOT_FINALIZED` — live buffer is still recording.
+ * @throws {Error} `AUDIO_SAVE_ENCODE_ERROR` — native encode or conversion failed.
  */
 export function saveAudioAsWav16k(
   input: AudioSaveInput,
@@ -203,6 +217,7 @@ import type {
 /**
  * Configure the pipeline audio session coordinator.
  * Call before starting mic/PCM operations to set session-level options.
+ * @throws {Error} `AUDIO_SESSION_CONFIG_ERROR` — native session policy could not be applied.
  */
 export async function configurePipelineAudioSession(
   config: PipelineAudioSessionConfig
@@ -214,6 +229,7 @@ export async function configurePipelineAudioSession(
  * Set the global audio route preference.
  * Applied to all active and future mic/PCM sessions.
  * On iOS this sets AVAudioSession preferred input/output; on Android it calls setPreferredDevice on all AudioRecord/AudioTrack instances.
+ * @throws {Error} `AUDIO_SESSION_ROUTE_ERROR` — preferred input/output device could not be applied.
  */
 export async function setPipelineAudioRoutePreference(
   preference: PipelineAudioRoutePreference
@@ -226,6 +242,7 @@ export async function setPipelineAudioRoutePreference(
 
 /**
  * Clear the global audio route preference, reverting to system defaults.
+ * @throws {Error} `AUDIO_SESSION_ROUTE_ERROR` — native route preference could not be cleared.
  */
 export async function clearPipelineAudioRoutePreference(): Promise<void> {
   await SherpaOnnx.clearPipelineAudioRoutePreference();
@@ -233,6 +250,7 @@ export async function clearPipelineAudioRoutePreference(): Promise<void> {
 
 /**
  * Get a snapshot of the current pipeline audio session state.
+ * @throws {Error} `AUDIO_SESSION_STATE_ERROR` — native session snapshot failed.
  */
 export async function getPipelineAudioSessionState(): Promise<PipelineAudioSessionState> {
   const snapshot = await SherpaOnnx.getPipelineAudioSessionState();
@@ -241,6 +259,7 @@ export async function getPipelineAudioSessionState(): Promise<PipelineAudioSessi
 
 /**
  * List available microphone/input devices for global route selection.
+ * @throws {Error} `AUDIO_CAPTURE_ERROR` — native input-device enumeration failed.
  */
 export async function listAvailableInputDevices(): Promise<
   PipelineAudioDeviceInfo[]
@@ -258,6 +277,7 @@ export async function listAvailableInputDevices(): Promise<
 
 /**
  * List available output/playback devices for global route selection.
+ * @throws {Error} `PCM_PLAYER_ERROR` — native output-device enumeration failed.
  */
 export async function listAvailableOutputDevices(): Promise<
   PipelineAudioDeviceInfo[]

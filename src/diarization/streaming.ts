@@ -49,6 +49,11 @@ function createDiarizationPipelineHandle(
   };
 }
 
+/**
+ * Create an online speaker-diarization engine. Call `release()` when finished.
+ * @throws {Error} `DIARIZATION_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`Failed to initialize streaming diarization native engine` / `DIARIZATION_INIT_ERROR`).
+ */
 export async function createStreamingDiarization(
   options: StreamingDiarizationInitializeOptions
 ): Promise<StreamingDiarizationEngine> {

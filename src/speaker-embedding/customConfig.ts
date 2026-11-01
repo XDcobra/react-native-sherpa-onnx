@@ -16,6 +16,10 @@ export interface SpeakerEmbeddingCustomConfig {
   model: FileSource;
 }
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `SPEAKER_EMBEDDING_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertSpeakerEmbeddingCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

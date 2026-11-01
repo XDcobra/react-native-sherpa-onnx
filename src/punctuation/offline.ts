@@ -168,6 +168,8 @@ async function punctuateLiveOverload(
  * Create an offline punctuation engine using sherpa-onnx `OfflinePunctuation` (CT-Transformer).
  * Initialization fails deterministically if the model directory is not a valid **offline** CT layout
  * (see native detect with `ct_transformer`).
+ * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`Offline punctuation initialization failed` / `PUNCTUATION_INIT_ERROR`).
  */
 export async function createOfflinePunctuation(
   options: OfflinePunctuationInitializeOptions

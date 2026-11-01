@@ -16,6 +16,10 @@ export interface VadCustomConfig {
   model: FileSource;
 }
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `VAD_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertVadCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

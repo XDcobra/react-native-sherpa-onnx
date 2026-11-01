@@ -138,12 +138,31 @@ export type MapDiarizationToNamesResult = {
 export interface DiarizationEngine {
   readonly instanceId: string;
   readonly sampleRate: number;
+  /**
+   * Cluster speakers in offline audio and write spans into `segmentOut`.
+   * @throws {Error} `DIARIZATION_INVALID_ARGUMENT` — buffers or options are invalid.
+   * @throws {Error} `DIARIZATION_CANCELLED` — diarize was aborted.
+   * @throws {Error} `DIARIZATION_ERROR` — native diarize failed.
+   * @throws {Error} `DIARIZATION_BUFFER_NOT_FOUND` — audio or segment buffer is unknown.
+   * @throws {Error} `DIARIZATION_NOT_INITIALIZED` — engine is not initialized.
+   */
   diarize(
     audioIn: OfflineAudioBufferIdSource,
     segmentOut: OfflineSegmentBufferIdSource | OfflineSegmentBufferRef,
     options?: DiarizeOptions
   ): Promise<DiarizeResult>;
+  /**
+   * Re-run clustering on the last diarize result.
+   * @throws {Error} `DIARIZATION_INVALID_ARGUMENT` — recluster options are invalid.
+   * @throws {Error} `DIARIZATION_ERROR` — native recluster failed.
+   * @throws {Error} `DIARIZATION_NOT_INITIALIZED` — engine is not initialized.
+   */
   recluster(options?: DiarizationReclusterOptions): Promise<DiarizeResult>;
+  /**
+   * Return per-cluster embeddings from the last diarize.
+   * @throws {Error} `DIARIZATION_ERROR` — native embedding read failed.
+   * @throws {Error} `DIARIZATION_NOT_INITIALIZED` — engine is not initialized.
+   */
   getClusterEmbeddings(): Promise<DiarizationClusterEmbedding[]>;
   destroy(): Promise<void>;
 }

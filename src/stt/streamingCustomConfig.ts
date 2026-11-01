@@ -45,6 +45,10 @@ export type StreamingSttCustomConfig =
 
 const STREAMING_STT_CATEGORY = 'stt_streaming';
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `STT_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertStreamingSttCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

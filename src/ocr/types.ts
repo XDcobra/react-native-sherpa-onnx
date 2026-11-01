@@ -487,6 +487,16 @@ export interface OcrEngineOf<F extends OcrFamily> {
   readonly instanceId: string;
   readonly family: F;
   readonly capabilities: OcrCapabilitiesOf<F>;
+  /**
+   * Run OCR into `textOut`.
+   * @throws {Error} `OCR_INSTANCE_NOT_FOUND` — engine was destroyed.
+   * @throws {Error} `ERR_IMAGE_INVALID_STATE` — live image buffer is still recording.
+   * @throws {Error} `OCR_UNSUPPORTED_GRANULARITY` — granularity is not valid for this family.
+   * @throws {Error} `OCR_INSTRUCTION_UNSUPPORTED` — instruction is not valid for this family.
+   * @throws {Error} `OCR_INVALID_RECOGNIZE_SPEC` — region/spec is malformed.
+   * @throws {Error} `OCR_CANCELLED` — recognize was aborted.
+   * @throws {Error} `OCR_RECOGNIZE_FAILED` — native recognize failed.
+   */
   recognize(
     imageBuffer: OfflineImageBufferIdSource,
     textOut: OfflineTextBufferIdSource,

@@ -146,6 +146,13 @@ export interface SpeakerIdentificationEngine {
   /**
    * Enroll a named speaker from one or more offline audio buffers.
    * Multiple clips are averaged (L2-normalized) by the native manager.
+   * @throws {Error} `SID_ENROLL_INVALID_RESULT` — native returned no usable embeddings.
+   * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
+   * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH` — buffer is not offline audio.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager add failed.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   enroll(
     name: string,
@@ -159,6 +166,10 @@ export interface SpeakerIdentificationEngine {
    * - `string[]`: one name per speech span (`names.length` must equal the speech-span
    *   count after skipping silence/empty rows). Duplicate names in the list are
    *   grouped and averaged under that speaker (same multi-embedding `add` path).
+   * @throws {Error} `SID_INVALID_OPTIONS` — names, spans, or options are invalid.
+   * @throws {Error} `SID_ENROLL_INVALID_RESULT` — native returned no usable embeddings.
+   * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager add failed.
    */
   enrollOfflineSegments(
     nameOrNames: string | string[],
@@ -167,6 +178,15 @@ export interface SpeakerIdentificationEngine {
     options?: SpeakerIdentificationSegmentOptions
   ): Promise<void>;
 
+  /**
+   * Identify the closest enrolled speaker in offline audio.
+   * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
+   * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH` — buffer is not offline audio.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native search failed.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   */
   identify(
     audio: OfflineAudioBufferIdSource,
     options?: SpeakerIdentificationThresholdOptions
@@ -176,6 +196,7 @@ export interface SpeakerIdentificationEngine {
    * Search the enrollment gallery with a precomputed embedding (e.g. a
    * diarization cluster centroid from `getClusterEmbeddings()`).
    * Returns the best enrolled name above threshold, or `null`.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native search failed.
    */
   search(
     embedding: Float32Array,
@@ -185,6 +206,9 @@ export interface SpeakerIdentificationEngine {
   /**
    * Identify each speech span and write a labeled copy into an empty
    * `segmentsOut` buffer (`payload.source: 'sid'`).
+   * @throws {Error} `SID_INVALID_OPTIONS` — buffers or label options are invalid.
+   * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native search failed.
    */
   labelOfflineSegments(
     audioIn: OfflineAudioBufferIdSource,
@@ -196,6 +220,10 @@ export interface SpeakerIdentificationEngine {
   /**
    * Live overload: attach speech segmentation to `audioIn`, label each committed
    * utterance into `segmentsOut`, and return a pipeline handle.
+   * @throws {Error} `SID_INVALID_OPTIONS` — live label options are invalid.
+   * @throws {Error} `SID_INVALID_ARGUMENT` — live/offline overload mismatch or bad buffers.
+   * @throws {Error} `SID_LABEL_FAILED` — live labeling pipeline failed.
+   * @throws {Error} `LIVE_OFFLINE_SEGMENTATION_REQUIRED` — live path requires a segmentation policy.
    */
   labelLiveSegments(
     audioIn: LiveAudioBufferIdSource,
@@ -203,6 +231,13 @@ export interface SpeakerIdentificationEngine {
     options: SpeakerIdentificationLiveLabelOptions
   ): Promise<SpeakerIdentificationPipelineHandle>;
 
+  /**
+   * Verify that offline audio matches an enrolled name.
+   * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
+   * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native verify failed.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   */
   verify(
     name: string,
     audio: OfflineAudioBufferIdSource,
@@ -217,6 +252,9 @@ export interface SpeakerIdentificationEngine {
    *   the speech-span count after skipping silence/empty rows).
    *
    * Returns per-span match flags plus aggregate counts.
+   * @throws {Error} `SID_INVALID_OPTIONS` — names, spans, or options are invalid.
+   * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native verify failed.
    */
   verifyOfflineSegments(
     nameOrNames: string | string[],
@@ -225,9 +263,25 @@ export interface SpeakerIdentificationEngine {
     options?: SpeakerIdentificationVerifyOptions
   ): Promise<VerifyOfflineSegmentsResult>;
 
+  /**
+   * Remove an enrolled speaker.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager remove failed.
+   */
   removeSpeaker(name: string): Promise<boolean>;
+  /**
+   * List enrolled speaker names.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager list failed.
+   */
   listSpeakers(): Promise<string[]>;
+  /**
+   * Whether `name` is enrolled.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager lookup failed.
+   */
   contains(name: string): Promise<boolean>;
+  /**
+   * Number of enrolled speakers.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager count failed.
+   */
   numSpeakers(): Promise<number>;
 
   /**
@@ -239,6 +293,10 @@ export interface SpeakerIdentificationEngine {
   /**
    * Restore speakers from a {@link SpeakerEnrollmentBundle} into this manager.
    * Does not write or read files — pass a previously exported (or app-built) bundle.
+   * @throws {Error} `SID_ENROLLMENT_BUNDLE_INVALID` — bundle payload is malformed.
+   * @throws {Error} `SID_ENROLLMENT_DIM_MISMATCH` — bundle dim does not match this engine.
+   * @throws {Error} `SID_ENROLLMENT_MODEL_MISMATCH` — bundle model does not match this engine.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager add failed.
    */
   importEnrollments(
     bundle: SpeakerEnrollmentBundle,

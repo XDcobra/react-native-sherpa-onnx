@@ -517,6 +517,10 @@ function normalizeOfflineFromLiveMode(
   );
 }
 
+/**
+ * Resolve an offline segment buffer source to a native id.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — id is not `seg_off_<uuid>` or `seg_live_<uuid>`.
+ */
 export function resolveOfflineSegmentBufferId(
   source: OfflineSegmentBufferIdSource
 ): string {
@@ -532,6 +536,10 @@ export function resolveOfflineSegmentBufferId(
   );
 }
 
+/**
+ * Resolve a live segment buffer source to a native id.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — id is not `seg_off_<uuid>` or `seg_live_<uuid>`.
+ */
 export function resolveLiveSegmentBufferId(
   source: LiveSegmentBufferIdSource
 ): string {
@@ -547,6 +555,10 @@ export function resolveLiveSegmentBufferId(
   );
 }
 
+/**
+ * Resolve any pipeline segment buffer source to a native id.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — id is not `seg_off_<uuid>` or `seg_live_<uuid>`.
+ */
 export function resolvePipelineSegmentBufferId(
   source: PipelineSegmentBufferIdSource
 ): string {
@@ -764,6 +776,7 @@ function registerLiveSegmentBufferCallbacks(
 /**
  * Subscribe to live segment-buffer events without creating a new buffer.
  * Used by SID live `onLabeled` (native worker → segmentAppended → JS).
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed live segment buffer id.
  */
 export function subscribeLiveSegmentBufferEvents(
   liveBufferId: LiveSegmentBufferIdSource,
@@ -776,6 +789,12 @@ export function subscribeLiveSegmentBufferEvents(
   return registerLiveSegmentBufferCallbacks(id, callbacks);
 }
 
+/**
+ * Create a recording live segment buffer.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — optional `sourceAudioBufferId` is malformed.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — native rejected create options.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native create failed.
+ */
 export async function createLiveSegmentBuffer(
   options: CreateLiveSegmentBufferOptions = {}
 ): Promise<LiveSegmentBufferRef> {
@@ -823,6 +842,11 @@ export async function createLiveSegmentBuffer(
   };
 }
 
+/**
+ * Create an empty immutable offline segment buffer.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — optional `sourceAudioBufferId` is malformed.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native create failed.
+ */
 export async function createEmptyOfflineSegmentBuffer(
   options: CreateEmptyOfflineSegmentBufferOptions = {}
 ): Promise<OfflineSegmentBufferRef> {
@@ -840,6 +864,13 @@ export async function createEmptyOfflineSegmentBuffer(
   };
 }
 
+/**
+ * Append a speech, alignment, or diarization segment to a recording live buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id, kind, or payload.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — `sourceAudioBufferId` is malformed.
+ * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native append failed.
+ */
 export async function appendLiveSegment(
   buffer: LiveSegmentBufferRecordingSource,
   segment: SegmentInput
@@ -869,6 +900,12 @@ export async function appendLiveSegment(
   );
 }
 
+/**
+ * Finalize a live segment buffer (recording → finished).
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native finalize failed.
+ */
 export async function finalizeLiveSegmentBuffer(
   buffer: LiveSegmentBufferRecordingSource
 ): Promise<void> {
@@ -882,6 +919,13 @@ export async function finalizeLiveSegmentBuffer(
   await getNative().finalizeLiveSegmentBuffer(id);
 }
 
+/**
+ * Snapshot a live segment buffer into a new immutable offline buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid `mode`.
+ * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — live buffer was released.
+ * @throws {Error} `SEGMENT_INVALID_STATE` — live buffer is not snapshottable.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native create failed.
+ */
 export async function createOfflineSegmentBufferFromLive(
   liveBuffer: LiveSegmentBufferIdSource,
   mode: OfflineSegmentBufferFromLiveMode = 'fullIfSpooled'
@@ -898,6 +942,13 @@ export async function createOfflineSegmentBufferFromLive(
   };
 }
 
+/**
+ * Fill an empty offline segment buffer from a live buffer (no-op if already populated).
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid `mode`.
+ * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — target or live buffer was released.
+ * @throws {Error} `SEGMENT_INVALID_STATE` — target is not empty or live is not snapshottable.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native populate failed.
+ */
 export async function populateOfflineSegmentBufferIfEmpty(
   targetBuffer: OfflineSegmentBufferIdSource,
   liveBuffer: LiveSegmentBufferIdSource,
@@ -913,6 +964,12 @@ export async function populateOfflineSegmentBufferIfEmpty(
   );
 }
 
+/**
+ * Get metadata for any pipeline segment buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native info lookup failed.
+ */
 export async function getPipelineSegmentBufferInfo(
   buffer: PipelineSegmentBufferIdSource
 ): Promise<PipelineSegmentBufferInfo> {
@@ -921,6 +978,13 @@ export async function getPipelineSegmentBufferInfo(
   return mapPipelineInfo(raw);
 }
 
+/**
+ * Read committed segments from an offline segment buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid returned payload.
+ * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `SEGMENT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native read failed.
+ */
 export async function getOfflineSegmentBufferSegments(
   buffer: OfflineSegmentBufferIdSource,
   start = 0,
@@ -989,6 +1053,13 @@ export async function getOfflineSegmentBufferSegments(
   });
 }
 
+/**
+ * Read committed segments from a live segment buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid returned payload.
+ * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `SEGMENT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native read failed.
+ */
 export async function getLiveSegmentBufferSegments(
   liveBuffer: LiveSegmentBufferIdSource,
   startIndex: number,
@@ -1057,6 +1128,12 @@ export async function getLiveSegmentBufferSegments(
   });
 }
 
+/**
+ * Return the number of committed segments in a live segment buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native count failed.
+ */
 export async function getLiveSegmentBufferSegmentCount(
   liveBuffer: LiveSegmentBufferIdSource
 ): Promise<number> {
@@ -1064,6 +1141,11 @@ export async function getLiveSegmentBufferSegmentCount(
   return getNative().getLiveSegmentBufferSegmentCount(id);
 }
 
+/**
+ * Release any pipeline segment buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native release failed.
+ */
 export async function releasePipelineSegmentBuffer(
   buffer: PipelineSegmentBufferIdSource
 ): Promise<void> {

@@ -55,7 +55,8 @@ function hasVoiceCloneReferenceAudio(
  * Fail-fast before the native bridge when `numSteps` is set but not applicable.
  * No-op when `numSteps` is omitted (upstream default).
  *
- * @throws Error with code prefix TTS_NUM_STEPS_UNSUPPORTED or TTS_NUM_STEPS_REQUIRES_VOICE_CLONE
+ * @throws {Error} `TTS_NUM_STEPS_UNSUPPORTED` — `numSteps` set on a model type that does not support it.
+ * @throws {Error} `TTS_NUM_STEPS_REQUIRES_VOICE_CLONE` — zipvoice/pocket `numSteps` without `voiceClone.referenceAudio`.
  */
 export function assertNumStepsOptions(
   modelType: TTSModelType | undefined,

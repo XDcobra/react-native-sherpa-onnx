@@ -148,6 +148,9 @@ export async function listBundledArchives(
  * @param archive    Descriptor from `listBundledArchives` or `listBundledArchivesFromApkAssets`
  * @param targetPath Directory to extract into (e.g. `DocumentDirectoryPath + '/models'`)
  * @param options    `force` (default `true`), `onProgress`, `signal` (AbortSignal)
+ *
+ * @throws {Error} `AbortError` — `signal` aborted before or during extraction.
+ * @throws {Error} — native extraction failed (unprefixed message).
  */
 export async function extractArchive(
   archive: BundledArchive,

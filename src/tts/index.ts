@@ -251,6 +251,11 @@ async function synthesizeLiveOverload(
  * @param options - Optional modelType (default: 'auto')
  * @returns Object with success, detectedModels, modelType, isStreaming (always true for TTS),
  * optional error, lexiconLanguages, languages, quantization, sizeTier
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
  * @example
  * ```typescript
  * const result = await detectTtsModel({ kind: 'fs', path: '/path/to/vits-piper-en' });
@@ -349,6 +354,8 @@ export async function detectTtsModel(
  *
  * @param options - TTS initialization options
  * @returns Promise resolving to a TtsEngine instance
+ * @throws {Error} `TTS_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`TTS initialization failed` / `TTS_INIT_ERROR`).
  * @example
  * ```typescript
  * const tts = await createTTS({

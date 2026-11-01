@@ -146,6 +146,10 @@ export function validateSegment(segment: Segment): void {
   assertSpeechSegmentFields(segment);
 }
 
+/**
+ * Validate a public `SegmentLink` value.
+ * @throws {Error} `SEGMENT_LINK_INVALID` — ids, `linkType`, confidence, or meta are invalid.
+ */
 export function validateSegmentLink(link: SegmentLink): void {
   if (!link.linkId?.trim())
     throw new Error('SEGMENT_LINK_INVALID: linkId must be non-empty');

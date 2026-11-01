@@ -223,7 +223,14 @@ function pathFromRaw(value: unknown): string | undefined {
   return undefined;
 }
 
-/** Detect OCR pack layout without loading the engine. */
+/**
+ * Detect OCR pack layout without loading the engine.
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
+ */
 export async function detectOcrModel(
   source: FileSource,
   options?: { modelType?: OcrModelType; quantization?: QuantizationPreference }
@@ -563,6 +570,9 @@ function readRecognizeResult(
 
 /**
  * Create an offline OCR engine. Call `destroy()` when finished.
+ * @throws {Error} `OCR_INVALID_ARGUMENT` — custom paths or init args are invalid.
+ * @throws {Error} `OCR_INTERNAL_ERROR` — family could not be resolved.
+ * @throws {Error} `OCR_CAPABILITIES_MISMATCH` — native tasks/granularities do not match the family.
  */
 export async function createOCR<O extends OcrInitializeOptions>(
   options: O

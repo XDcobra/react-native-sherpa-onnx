@@ -96,6 +96,10 @@ export type TtsCustomConfigByModelType = {
 
 export type TtsCustomConfig = TtsCustomConfigByModelType[TTSConcreteModelType];
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `TTS_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertTtsCustomConfig(
   customConfig: Record<string, unknown>
 ): void {
