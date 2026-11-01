@@ -176,11 +176,24 @@ jobs:
           name: FFmpeg Android ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt FFmpeg, libshine, libopus, and libvpx for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
-            - **ffmpeg-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so) and `include/` (FFmpeg headers). Gradle extracts .so to jniLibs and include/ to android/src/main/cpp/include/ffmpeg.
+            ## Archive Structure
+            Prebuilt **FFmpeg** for Android (arm64-v8a, armeabi-v7a, x86, x86_64). Used by audio convert, OfflineAudioBuffer, and VideoBuffer in `react-native-sherpa-onnx`.
+            - **ffmpeg-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (`libavcodec.so`, `libavformat.so`, `libavutil.so`, `libswresample.so`, `libavfilter.so`, `libshine.so`, `libopus.so`) and `include/` (C headers under `libavcodec/`, `libavformat/`, …). libvpx is statically linked into `libavcodec.so`.
             - **ffmpeg-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:ffmpeg`.
 
-            **Maven:** The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:ffmpeg` when MAVEN_REPO_PAT is set.
+            ## Maven
+            The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:ffmpeg` when `MAVEN_REPO_PAT` is set.
+
+            ```gradle
+            repositories {
+                maven { url 'https://xdcobra.github.io/maven/' }
+            }
+            dependencies {
+                implementation 'com.xdcobra.sherpa:ffmpeg:${{ steps.tag.outputs.maven_version }}'
+            }
+            ```
+
+            Disable with `sherpaOnnxDisableFfmpeg=true` in `gradle.properties`.
           files: |
             ffmpeg-android.zip
             ffmpeg-${{ steps.tag.outputs.maven_version }}.aar
