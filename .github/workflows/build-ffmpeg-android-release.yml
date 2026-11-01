@@ -63,6 +63,7 @@ jobs:
           echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "opus=$(git -C third_party/opus rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "libvpx=$(git -C third_party/libvpx rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Cache FFmpeg prebuilts
         uses: actions/cache@v6
@@ -72,7 +73,8 @@ jobs:
             third_party/ffmpeg_prebuilt/android
             third_party/shine_prebuilt/android
             third_party/opus_prebuilt/android
-          key: ffmpeg-android-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ steps.submodules.outputs.opus }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh', 'third_party/opus_prebuilt/build_opus.sh') }}
+            third_party/libvpx_prebuilt/android
+          key: ffmpeg-android-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ steps.submodules.outputs.opus }}-${{ steps.submodules.outputs.libvpx }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg.sh', 'third_party/shine_prebuilt/build_shine.sh', 'third_party/opus_prebuilt/build_opus.sh', 'third_party/libvpx_prebuilt/build_libvpx.sh') }}
 
       - name: Install FFmpeg build dependencies
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -98,7 +100,17 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      - name: Build FFmpeg (with libshine + libopus)
+      - name: Build libvpx
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/libvpx_prebuilt
+          chmod +x build_libvpx.sh
+          ./build_libvpx.sh
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+
+      - name: Build FFmpeg (with libshine + libopus + libvpx)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
         run: |
           cd third_party/ffmpeg_prebuilt
@@ -108,7 +120,7 @@ jobs:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
-      - name: Package jniLibs layout (FFmpeg + shine + opus only)
+      - name: Package jniLibs layout (FFmpeg + shine + opus; libvpx is static inside libavcodec)
         run: |
           LAYOUT=ffmpeg-android-layout
           rm -rf "$LAYOUT"
@@ -164,7 +176,7 @@ jobs:
           name: FFmpeg Android ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt FFmpeg, libshine, and libopus for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
+            Prebuilt FFmpeg, libshine, libopus, and libvpx for Android (arm64-v8a, armeabi-v7a, x86, x86_64).
             - **ffmpeg-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (.so) and `include/` (FFmpeg headers). Gradle extracts .so to jniLibs and include/ to android/src/main/cpp/include/ffmpeg.
             - **ffmpeg-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:ffmpeg`.
 

@@ -7,6 +7,13 @@ export const LIBYUV_LICENSE = {
   url: 'https://chromium.googlesource.com/libyuv/libyuv',
 } as const;
 
+/** libvpx (BSD-3-Clause + WebM PATENTS). Submodule third_party/libvpx; full text: THIRD_PARTY_LICENSES/libvpx.txt */
+export const LIBVPX_LICENSE = {
+  name: 'libvpx',
+  license: 'BSD-3-Clause',
+  url: 'https://github.com/webmproject/libvpx',
+} as const;
+
 export interface ModelLicense {
   asset_name: string;
   license_type: string;

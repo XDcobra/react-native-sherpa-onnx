@@ -10,6 +10,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 FFMPEG_SRC="$REPO_ROOT/third_party/ffmpeg"
 SHINE_BASE="$REPO_ROOT/third_party/shine_prebuilt/ios"
 OPUS_BASE="$REPO_ROOT/third_party/opus_prebuilt/ios"
+VPX_BASE="$REPO_ROOT/third_party/libvpx_prebuilt/ios"
 
 BUILD_DIR="$SCRIPT_DIR/build_ios"
 OUTPUT_DIR="$SCRIPT_DIR/ios"
@@ -35,8 +36,8 @@ if ! command -v "$HOST_PKG_CONFIG" >/dev/null 2>&1; then
 fi
 
 # VIDEO_SW_DECODERS=1 adds bundled H.264/HEVC software video decoders (ffmpeg-vsw).
-DECODERS="aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus"
-PARSERS="aac,mpegaudio,vorbis,flac"
+DECODERS="aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus,vp9"
+PARSERS="aac,mpegaudio,vorbis,flac,vp9"
 if [ "${VIDEO_SW_DECODERS:-0}" = "1" ]; then
   DECODERS="${DECODERS},h264,hevc"
   PARSERS="${PARSERS},h264,hevc"
@@ -61,13 +62,14 @@ COMMON_CONFIGURE=(
 
 --enable-decoder=${DECODERS}
 --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
---enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska
+--enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska,webm
 --enable-parser=${PARSERS}
---enable-encoder=pcm_s16le,flac,aac,alac,libshine,libopus
+--enable-encoder=pcm_s16le,flac,aac,alac,libshine,libopus,libvpx_vp9
 
 --enable-protocol=file
 --enable-libshine
 --enable-libopus
+--enable-libvpx
 )
 
 build_slice() {
@@ -125,6 +127,22 @@ fi
 OPUS_CFLAGS="-I$OPUS_PREFIX/include"
 OPUS_LDFLAGS="-L$OPUS_PREFIX/lib -lopus"
 
+# libvpx prebuilt (VP9 encoder)
+VPX_PREFIX="$VPX_BASE/$PLATFORM/$ARCH"
+
+if [ ! -f "$VPX_PREFIX/lib/libvpx.a" ]; then
+  echo "Missing libvpx for $PLATFORM/$ARCH"
+  exit 1
+fi
+
+if [ ! -f "$VPX_PREFIX/include/vpx/vp8cx.h" ]; then
+  echo "Missing vpx header: $VPX_PREFIX/include/vpx/vp8cx.h"
+  exit 1
+fi
+
+VPX_CFLAGS="-I$VPX_PREFIX/include"
+VPX_LDFLAGS="-L$VPX_PREFIX/lib -lvpx"
+
 PKGDIR="$TMP_BUILD/pkgconfig"
 mkdir -p "$PKGDIR"
 cat > "$PKGDIR/shine.pc" <<PC
@@ -139,7 +157,22 @@ Version: 1.0
 Libs: -L\${libdir} -lshine
 Cflags: -I\${includedir}
 PC
-export PKG_CONFIG_PATH="$PKGDIR:$OPUS_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+if [ ! -f "$VPX_PREFIX/lib/pkgconfig/vpx.pc" ]; then
+  mkdir -p "$VPX_PREFIX/lib/pkgconfig"
+  cat > "$VPX_PREFIX/lib/pkgconfig/vpx.pc" <<PC
+prefix=$VPX_PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: vpx
+Description: WebM VP9 encoder (libvpx)
+Version: 1.17.0
+Libs: -L\${libdir} -lvpx
+Cflags: -I\${includedir}
+PC
+fi
+export PKG_CONFIG_PATH="$PKGDIR:$OPUS_PREFIX/lib/pkgconfig:$VPX_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
 if ! "$HOST_PKG_CONFIG" --exists shine; then
   echo "pkg-config cannot find shine for $PLATFORM/$ARCH"
@@ -169,9 +202,19 @@ export CXX="$CC"
 --enable-cross-compile \
 --sysroot="$SDK" \
 --pkg-config="$HOST_PKG_CONFIG" \
---extra-cflags="$CFLAGS $SHINE_CFLAGS $OPUS_CFLAGS" \
---extra-ldflags="$LDFLAGS $SHINE_LDFLAGS $OPUS_LDFLAGS"
+--extra-cflags="$CFLAGS $SHINE_CFLAGS $OPUS_CFLAGS $VPX_CFLAGS" \
+--extra-ldflags="$LDFLAGS $SHINE_LDFLAGS $OPUS_LDFLAGS $VPX_LDFLAGS"
 #$DISABLE_ASM \
+
+if ! grep -q '^#define CONFIG_LIBVPX_VP9_ENCODER 1$' "$FFMPEG_SRC/config_components.h"; then
+  echo "===== FFmpeg iOS configure did not enable libvpx-vp9 encoder ====="
+  exit 1
+fi
+if ! grep -q '^#define CONFIG_VP9_DECODER 1$' "$FFMPEG_SRC/config_components.h"; then
+  echo "===== FFmpeg iOS configure did not enable native vp9 decoder ====="
+  exit 1
+fi
+echo "FFmpeg iOS configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1"
 
 make -j"$(sysctl -n hw.ncpu)"
 
@@ -206,6 +249,11 @@ lipo -create \
 "$OPUS_BASE/iphonesimulator/x86_64/lib/libopus.a" \
 -output "$SIM_LIB/libopus.a"
 
+lipo -create \
+"$VPX_BASE/iphonesimulator/arm64/lib/libvpx.a" \
+"$VPX_BASE/iphonesimulator/x86_64/lib/libvpx.a" \
+-output "$SIM_LIB/libvpx.a"
+
 echo "===== Creating single ffmpeg static lib (same name for device and simulator) ====="
 
 mkdir -p "$BUILD_DIR/unified/device" "$BUILD_DIR/unified/simulator"
@@ -217,6 +265,7 @@ libtool -static \
 "$OUTPUT_DIR/iphoneos/arm64/lib/libswresample.a" \
 "$SHINE_BASE/iphoneos/arm64/lib/libshine.a" \
 "$OPUS_BASE/iphoneos/arm64/lib/libopus.a" \
+"$VPX_BASE/iphoneos/arm64/lib/libvpx.a" \
 -o "$BUILD_DIR/unified/device/libffmpeg.a"
 
 libtool -static \
@@ -226,6 +275,7 @@ libtool -static \
 "$SIM_LIB/libswresample.a" \
 "$SIM_LIB/libshine.a" \
 "$SIM_LIB/libopus.a" \
+"$SIM_LIB/libvpx.a" \
 -o "$BUILD_DIR/unified/simulator/libffmpeg.a"
 
 echo "===== Creating XCFramework ====="

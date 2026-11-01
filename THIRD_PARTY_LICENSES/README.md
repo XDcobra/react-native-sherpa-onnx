@@ -4,6 +4,8 @@ This directory contains **full license texts** for libraries shipped with this m
 
 VideoBuffer uses [libyuv](libyuv.txt) (BSD-3-Clause; Google `PATENTS` grant in the `third_party/libyuv` submodule). Consumer prebuilts come from `third_party/libyuv_prebuilt`.
 
+FFmpeg VP9 software encode uses [libvpx](libvpx.txt) (BSD-3-Clause + WebM `PATENTS` grant; submodule `third_party/libvpx`, pin `v1.17.0`). Prebuilts come from `third_party/libvpx_prebuilt` and are linked into the FFmpeg Android/iOS releases. FFmpeg’s native `vp9` decoder is LGPL and does not require libvpx.
+
 OCR (PP-OCR spike / `PpocrBackend`) additionally attributes RapidOCR and PaddleOCR under Apache-2.0 — see [`rapidocr-paddleocr.txt`](rapidocr-paddleocr.txt).
 
 E-documents (`react-native-sherpa-onnx/document`) use [pugixml](pugixml.txt) (MIT; submodule `third_party/pugixml`, compiled into `sherpaonnx`) and [lexbor](lexbor.txt) (Apache-2.0; submodule `third_party/lexbor`, consumer prebuilts via `third_party/lexbor_prebuilt`). MOBI/KF8 decompress and record layout follow algorithms documented in [foliate-js `mobi.js`](https://github.com/johnfactotum/foliate-js/blob/main/mobi.js) (MIT; [foliate-js.txt](foliate-js.txt)). The SDK ships its own C++ port, not that JavaScript file.
