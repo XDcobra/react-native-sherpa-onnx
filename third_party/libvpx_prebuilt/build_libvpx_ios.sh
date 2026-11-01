@@ -91,7 +91,7 @@ build_slice() {
       --enable-vp9-encoder \
       --disable-libyuv \
       --disable-webm-io \
-      "${EXTRA_FLAGS[@]}"
+      ${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"}
 
     make -j"$NCPU"
     make install
