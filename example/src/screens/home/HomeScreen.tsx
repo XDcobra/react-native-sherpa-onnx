@@ -28,6 +28,7 @@ const SECTION_ORDER = [
   'Punctuation',
   'Speakers',
   'Source Separation',
+  'Debug',
 ] as const;
 
 const FEATURES: HomeFeature[] = [
@@ -144,7 +145,7 @@ const FEATURES: HomeFeature[] = [
     sectionTitle: 'Pipelines & Demos',
     title: 'File I/O',
     description:
-      'Isolate FileDestination and AudioOutputFormat / saveAudioAsFile behavior',
+      'Audio or video FileDestination sandbox: probe, decode, encode, codec policy',
     icon: 'folder-open-outline',
     screen: 'FileIO',
     implemented: true,

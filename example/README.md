@@ -191,7 +191,7 @@ This screen runs online punctuation over live text buffers. It shows incremental
 | -------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
 |                                                    |                                                    |                                                    |
 
-This screen validates file and conversion workflows: **Probe**, **Decode**, and **Encode** over `FileSource` / `FileDestination`. **Run all audio samples** and **Run all video samples** can both be on (audio matrix first, then video). It is the UI reference for [docs/fileio.md](../docs/fileio.md), [docs/audio-conversion.md](../docs/audio-conversion.md), and [docs/videobuffer-offline.md](../docs/videobuffer-offline.md) (`probeVideoFileDuration` / `probeVideoFileContainer` / `exportVideo`).
+This screen validates file and conversion workflows: pick **Audio** or **Video** first, then **Probe**, **Decode**, and **Encode** over `FileSource` / `FileDestination`. Batch-all applies only to the selected media. Video has a `preferHardware` / `hardware` / `software` policy for decode, still export, and clip encode. It is the UI reference for [docs/fileio.md](../docs/fileio.md), [docs/audio-conversion.md](../docs/audio-conversion.md), and [docs/videobuffer-offline.md](../docs/videobuffer-offline.md) (`probeVideoFileDuration` / `probeVideoFileContainer` / `exportVideo`).
 
 **Audio sandbox (`test_codec/`):** probe (`probeAudioFileDuration` + `probeAudioFileContainer`), decode (`createOfflineAudioBufferFromFile`), encode (`saveAudioAsFile`). Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }`.
 
