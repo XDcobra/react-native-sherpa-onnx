@@ -31,8 +31,12 @@ FfmpegVideoDecoder::~FfmpegVideoDecoder() { Close(); }
 Status FfmpegVideoDecoder::Configure(const VideoTrackInfo& track) {
   Close();
   impl_->track = track;
-  const AVCodecID id =
-      track.codec == VideoCodec::Hevc ? AV_CODEC_ID_HEVC : AV_CODEC_ID_H264;
+  AVCodecID id = AV_CODEC_ID_H264;
+  if (track.codec == VideoCodec::Hevc) {
+    id = AV_CODEC_ID_HEVC;
+  } else if (track.codec == VideoCodec::Vp9) {
+    id = AV_CODEC_ID_VP9;
+  }
   const AVCodec* codec = avcodec_find_decoder(id);
   if (codec == nullptr) {
     return Status::Fail(kErrSwDecoderDisabled, "avcodec_find_decoder");

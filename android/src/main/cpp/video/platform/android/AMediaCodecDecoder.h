@@ -58,6 +58,8 @@ class AMediaCodecDecoder : public DecoderBackend {
   bool queuedSinceStart_ = false;
   bool sawEos_ = false;
   bool reclaimed_ = false;
+  bool loggedUvMinlen_ = false;
+  bool loggedCopyPath_ = false;
   std::atomic<uint64_t> imageGen_{0};
   std::mutex outMu_;
   std::condition_variable outCv_;

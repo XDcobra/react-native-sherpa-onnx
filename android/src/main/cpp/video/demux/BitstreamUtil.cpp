@@ -319,6 +319,9 @@ Status BitstreamUtil::MakeAnnexBCsd(VideoCodec codec,
   if (config.empty()) {
     return Status::Fail(kErrInvalidArgument, "empty codec config");
   }
+  if (codec == VideoCodec::Vp9) {
+    return Status::Fail(kErrInvalidArgument, "vp9 has no annex-b csd");
+  }
   if (codec == VideoCodec::Hevc) {
     std::vector<std::vector<uint8_t>> vps, sps, pps;
     auto st = ExtractHevcParameterSets(config, &vps, &sps, &pps);
