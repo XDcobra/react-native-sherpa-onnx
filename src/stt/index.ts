@@ -212,6 +212,11 @@ function normalizeOfflineBufferInput(
  * @param source - FileSource describing where to find the model
  * @param options - Optional quantization/modelType plus optional assetName and debug flag
  * @returns Object with success, detectedModels, modelType, isStreaming, optional languages, quantization, error, and isHardwareSpecificUnsupported
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
  * @example
  * ```typescript
  * const result = await detectSttModel({ kind: 'fs', path: '/path/to/sherpa-onnx-whisper-tiny-en' });
@@ -291,6 +296,8 @@ export async function detectSttModel(
  *
  * @param options - STT initialization options
  * @returns Promise resolving to an SttEngine instance
+ * @throws {Error} `STT_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`STT initialization failed` / `STT_INIT_FAILED`).
  * @example
  * ```typescript
  * import { createOfflineAudioBufferFromFile } from 'react-native-sherpa-onnx/audiobuffer';

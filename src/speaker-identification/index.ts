@@ -295,6 +295,9 @@ function resolvePerSpanSpeakerNames(
  * Create a Speaker Identification engine on the shared embedding extractor +
  * named-speaker manager. Extractor ONNX weights are shared process-wide with
  * diarization via the C++ `SpeakerEmbeddingRunner` registry.
+ * @throws {Error} `SPEAKER_EMBEDDING_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native extractor init failed (`Speaker embedding initialization failed` / `SPEAKER_EMBEDDING_INIT_ERROR`).
+ * @throws {Error} Native manager create failed (`Speaker embedding manager creation failed` / `SPEAKER_EMBEDDING_MANAGER_ERROR`).
  */
 export async function createSpeakerIdentification(
   options: SpeakerIdentificationOptions

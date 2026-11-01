@@ -150,7 +150,10 @@ export type SttCustomConfigByModelType = {
 
 export type SttCustomConfig = SttCustomConfigByModelType[STTConcreteModelType];
 
-/** Structural check: every present customConfig value must be a FileSource. */
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `STT_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertSttCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

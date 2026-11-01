@@ -38,6 +38,10 @@ function assertBudget(value: number | undefined, field: string): void {
   }
 }
 
+/**
+ * Set global video/image codec policy and slot budgets (1–4).
+ * @throws {Error} `CODEC_INVALID_ARGUMENT` — policy is not `hardware` | `software` | `preferHardware`, or a budget is outside 1–4.
+ */
 export async function configureCodecs(
   options?: ConfigureCodecsOptions
 ): Promise<void> {
@@ -66,6 +70,10 @@ export async function configureCodecs(
   });
 }
 
+/**
+ * Snapshot of RAM class, slot `max` / `inUse`, and catalog providers.
+ * @throws {Error} `CODEC_INVALID_ARGUMENT` — native returned an empty codec-info payload.
+ */
 export async function getCodecInfo(): Promise<CodecInfo> {
   const raw = await getNative().getCodecInfo();
   if (typeof raw !== 'string' || raw.length === 0) {

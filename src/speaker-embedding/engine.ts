@@ -22,6 +22,8 @@ function embeddingArrayToFloat32(values: number[]): Float32Array {
  * Create a standalone speaker-embedding extractor engine (no enrollment manager).
  * ONNX weights are shared process-wide with other SID/diarization acquires via
  * the C++ `SpeakerEmbeddingRunner` registry (same model/provider/threads/debug).
+ * @throws {Error} `SPEAKER_EMBEDDING_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`Speaker embedding initialization failed` / `SPEAKER_EMBEDDING_INIT_ERROR`).
  */
 export async function createSpeakerEmbeddingEngine(
   options: SpeakerEmbeddingInitializeOptions

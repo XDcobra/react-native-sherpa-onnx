@@ -29,6 +29,7 @@ function embeddingToNumberArray(embedding: Float32Array): number[] {
 /**
  * Create a native named-speaker manager (enrollment / search / verify).
  * Not used for diarization cluster indices.
+ * @throws {Error} Native manager create failed (`Speaker embedding manager creation failed` / `SPEAKER_EMBEDDING_MANAGER_ERROR`).
  */
 export async function createSpeakerEmbeddingManager(
   dim: number

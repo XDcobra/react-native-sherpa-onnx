@@ -14,6 +14,10 @@ export interface LanguageIdCustomConfig {
   decoder: FileSource;
 }
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `LANGUAGE_ID_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertLanguageIdCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

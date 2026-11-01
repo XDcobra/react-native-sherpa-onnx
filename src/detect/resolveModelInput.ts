@@ -549,6 +549,12 @@ async function resolveAutoFileSourceForDetect(source: {
 /**
  * Resolve a {@link FileSource} into the `modelDir` + `assetName` required by
  * native detect methods.
+ *
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
  */
 export async function resolveFileSourceForDetect(
   source: FileSource
@@ -566,6 +572,12 @@ export async function resolveFileSourceForDetect(
 /**
  * Resolve a {@link FileSource} to a concrete local model directory for engine
  * initialization.
+ *
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS, or `contentUri` / `securityScoped` used for init.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model directory.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
  */
 export async function resolveFileSourceForModelInit(
   source: FileSource
@@ -597,6 +609,12 @@ export async function resolveFileSourceForModelInit(
 /**
  * Resolve a {@link FileSource} to an absolute filesystem path for a single model file.
  * Mirror of {@link resolveFileSourceForModelInit} for file-backed custom configs.
+ *
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a file path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
  */
 export async function resolveFileSourceForModelFile(
   source: FileSource

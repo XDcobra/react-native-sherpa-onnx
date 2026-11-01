@@ -557,6 +557,7 @@ function clearLiveAudioBufferCallbacks(liveBufferId: string): void {
 /**
  * Subscribe callbacks for a live audio buffer.
  * Returns an unsubscribe function.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — id is not `off_<uuid>` or `live_<uuid>`.
  */
 export function subscribeLiveAudioBufferEvents(
   liveBufferId: LiveAudioBufferIdSource,
@@ -672,6 +673,16 @@ async function commitFinalizeSegmentIfNeeded(
  * @param source - Any FileSource: fs, app, contentUri, securityScoped, pad.
  * @param options - Decode options (sample rate, mono, cancellation, progress).
  * @returns Immutable offline buffer reference.
+ * @throws {Error} `DECODE_CANCELLED` — `signal` already aborted or decode was cancelled.
+ * @throws {Error} `DECODE_NOT_FOUND` — file was not found or fd is invalid.
+ * @throws {Error} `DECODE_OPEN_FAILED` — FFmpeg could not open or probe the input.
+ * @throws {Error} `DECODE_NO_AUDIO_STREAM` — container has no audio stream.
+ * @throws {Error} `DECODE_CODEC_UNSUPPORTED` — decoder init failed (unsupported codec).
+ * @throws {Error} `DECODE_DECODE_ERROR` — decode loop failed (corrupt frames or read error).
+ * @throws {Error} `DECODE_RESAMPLE_ERROR` — resample or downmix setup failed.
+ * @throws {Error} `DECODE_EMPTY` — decode produced no PCM.
+ * @throws {Error} `DECODE_INVALID_SOURCE` — `FileSource` could not be opened for decode.
+ * @throws {Error} `DECODE_INTERNAL_ERROR` — native decode failed internally.
  */
 export async function createOfflineAudioBufferFromFile(
   source: import('../fileio/types').FileSource,
@@ -746,6 +757,9 @@ export async function createOfflineAudioBufferFromFile(
  * - omitted / undefined -> defaults to 16000 Hz
  * - 0 -> keep `inputSampleRateHz`
  * - > 0 -> resample to that target rate before writing to the buffer
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — `inputSampleRateHz` or `targetSampleRateHz` is ≤ 0 when resampling.
+ * @throws {Error} `JSI_NOT_INSTALLED` — JSI bindings are not available.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — JSI returned unparseable buffer info.
  */
 export function createOfflineAudioBufferFromSamples(
   samples: Float32Array,
@@ -818,6 +832,10 @@ export function createOfflineAudioBufferFromSamples(
  *
  * Rate-changing transfers are not supported — use this API instead of
  * {@link transferOfflineAudioBufferFromLive} when resampling.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id, or native rejected the options.
+ * @throws {Error} `BUFFER_INVALIDATED` — live buffer was already transferred.
+ * @throws {Error} `AUDIO_INVALID_STATE` — live buffer is not in a transferable state.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native create failed.
  */
 export async function createOfflineAudioBufferFromLive(
   liveBufferId: LiveAudioBufferIdSource,
@@ -838,6 +856,9 @@ export async function createOfflineAudioBufferFromLive(
  * The source buffer stays valid and independent. `targetSampleRateHz` omit/`0`
  * copies at the source rate; `> 0` forces that rate via native linear resample
  * (mono only).
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed offline id or invalid target rate.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — source buffer was released.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native create failed.
  */
 export async function createOfflineAudioBufferFromOffline(
   offlineBufferId: OfflineAudioBufferIdSource,
@@ -857,6 +878,11 @@ export async function createOfflineAudioBufferFromOffline(
  * On success, the source live buffer becomes invalidated and must no longer be used.
  * This path always preserves the live sample rate — use
  * {@link createOfflineAudioBufferFromLive} with `targetSampleRateHz` to resample.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `TRANSFER_INVALID_STATE` — live buffer is not finalized or not transferable.
+ * @throws {Error} `TRANSFER_SPOOL_UNAVAILABLE` — no spool to take ownership of.
+ * @throws {Error} `TRANSFER_CURSORS_ACTIVE` — consumers still hold cursors on the live buffer.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native transfer failed.
  */
 export async function transferOfflineAudioBufferFromLive(
   liveBufferId: LiveAudioBufferIdSource,
@@ -874,6 +900,8 @@ export async function transferOfflineAudioBufferFromLive(
  *
  * @param sampleRate - Expected sample rate. For TTS: must match model output rate (use `tts.getSampleRate()`).
  * @param channelCount - Channel count (only 1/mono supported, default 1).
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — invalid sample rate or channel count.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native create failed.
  */
 export async function createEmptyOfflineAudioBuffer(
   sampleRate: number,
@@ -892,6 +920,8 @@ export async function createEmptyOfflineAudioBuffer(
 /**
  * Create a live audio buffer with a rolling-window ring buffer.
  * `options.sampleRate` defaults to 16000 Hz when omitted.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — native rejected rate, channels, or retention.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native create failed.
  */
 export async function createEmptyLiveAudioBuffer(
   options: CreateEmptyLiveAudioBufferOptions
@@ -1014,6 +1044,10 @@ export async function createEmptyLiveAudioBuffer(
 
 /**
  * Append Float32 samples to a live audio buffer (recording state only).
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id, or JSI rejected samples/rate.
+ * @throws {Error} `JSI_NOT_INSTALLED` — JSI bindings are not available.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — live buffer was released.
+ * @throws {Error} `AUDIO_INVALID_STATE` — buffer is not recording.
  */
 export function appendSamplesToLiveAudioBuffer(
   liveBufferId: LiveAudioBufferRecordingSource,
@@ -1027,6 +1061,10 @@ export function appendSamplesToLiveAudioBuffer(
 
 /**
  * Append all samples from an offline buffer to a live buffer.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live or offline id.
+ * @throws {Error} `BUFFER_INVALIDATED` — live buffer was already transferred.
+ * @throws {Error} `AUDIO_ALREADY_FINALIZED` — live buffer is finished.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native append failed.
  */
 export async function appendOfflineToLiveAudioBuffer(
   liveBufferId: LiveAudioBufferRecordingSource,
@@ -1042,6 +1080,12 @@ export async function appendOfflineToLiveAudioBuffer(
  * Finalize a live audio buffer (recording → finished).
  * Returns the finished handle plus fresh `info` from native (authoritative duration, etc.).
  * No more appends allowed after this.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `BUFFER_INVALIDATED` — buffer was already transferred.
+ * @throws {Error} `AUDIO_INVALID_STATE` — buffer is not recording.
+ * @throws {Error} `AUDIO_BUFFER_KIND_MISMATCH` — refresh after finalize did not return a live buffer.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native finalize failed.
  */
 export async function finalizeLiveAudioBuffer(
   liveBufferId: LiveAudioBufferRecordingSource
@@ -1065,6 +1109,10 @@ export async function finalizeLiveAudioBuffer(
 
 /**
  * Get info for any pipeline audio buffer (offline or live).
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `BUFFER_INVALIDATED` — buffer was already transferred.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native info lookup failed.
  */
 export async function getPipelineAudioBufferInfo(
   bufferId: PipelineAudioBufferIdSource
@@ -1079,6 +1127,11 @@ export async function getPipelineAudioBufferInfo(
  *
  * While `state === 'recording'`, `numSamples` reflects the ring window, not always
  * total session length — use `onFramesAppended` → `totalSamplesWritten` for live timers.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `BUFFER_INVALIDATED` — buffer was already transferred.
+ * @throws {Error} `AUDIO_BUFFER_KIND_MISMATCH` — id is not a live buffer.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native info lookup failed.
  */
 export async function refreshLiveAudioBufferInfo(
   source: LiveAudioBufferIdSource
@@ -1094,6 +1147,11 @@ export async function refreshLiveAudioBufferInfo(
 
 /**
  * Same as {@link refreshLiveAudioBufferInfo}, merged into a recording ref (handle unchanged).
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `BUFFER_INVALIDATED` — buffer was already transferred.
+ * @throws {Error} `AUDIO_BUFFER_KIND_MISMATCH` — id is not a live buffer.
+ * @throws {Error} `AUDIO_INTERNAL_ERROR` — native info lookup failed.
  */
 export async function refreshLiveAudioBufferRef(
   ref: LiveAudioBufferRef
@@ -1108,6 +1166,7 @@ export async function refreshLiveAudioBufferRef(
 
 /**
  * Release any pipeline audio buffer (offline or live).
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed buffer id.
  */
 export async function releasePipelineAudioBuffer(
   bufferId: PipelineAudioBufferIdSource
@@ -1122,6 +1181,10 @@ export async function releasePipelineAudioBuffer(
 
 /**
  * Get a slice of Float32 samples from an offline in-memory buffer.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed offline id or invalid slice range.
+ * @throws {Error} `JSI_NOT_INSTALLED` — JSI bindings are not available.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `AUDIO_INVALID_STATE` — buffer cannot be sliced.
  */
 export function getOfflineAudioBufferSamplesSlice(
   offlineBufferId: OfflineAudioBufferIdSource,
@@ -1137,6 +1200,10 @@ export function getOfflineAudioBufferSamplesSlice(
 /**
  * Get a slice of Float32 samples from a live buffer's ring.
  * Useful for debug visualization or export.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id or invalid slice range.
+ * @throws {Error} `JSI_NOT_INSTALLED` — JSI bindings are not available.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `AUDIO_INVALID_STATE` — buffer cannot be sliced.
  */
 export function getLiveAudioBufferSamplesSlice(
   liveBufferId: LiveAudioBufferIdSource,
@@ -1165,6 +1232,8 @@ export function installJSI(): boolean {
 /**
  * Start microphone capture directly into a live audio buffer (no JS roundtrip).
  * Mic audio is resampled and written directly into the live buffer's ring.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id or invalid capture options.
+ * @throws {Error} `AUDIO_CAPTURE_ERROR` — microphone start failed.
  */
 export async function startMicToLiveAudioBuffer(
   liveBufferId: LiveAudioBufferRecordingSource,
@@ -1183,6 +1252,7 @@ export async function startMicToLiveAudioBuffer(
 
 /**
  * Stop microphone capture to a live audio buffer.
+ * @throws {Error} `AUDIO_CAPTURE_ERROR` — microphone stop failed.
  */
 export async function stopMicToLiveAudioBuffer(): Promise<void> {
   await getNative().stopMicToLiveAudioBuffer();
@@ -1209,6 +1279,11 @@ export async function stopMicToLiveAudioBuffer(): Promise<void> {
  * targetSampleRateHz semantics are the same as `createOfflineAudioBufferFromFile`:
  * omitted -> 16000, 0 -> keep source, >0 -> force explicit target.
  * @returns Handle to monitor/cancel the ingest operation.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `DECODE_CANCELLED` — `signal` already aborted.
+ * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — live buffer was released.
+ * @throws {Error} `AUDIO_INVALID_STATE` — live buffer is not recording.
+ * @throws {Error} `DECODE_INTERNAL_ERROR` — native ingest failed to start.
  */
 export async function ingestFileToLiveAudioBuffer(
   liveBuffer: LiveAudioBufferRecordingSource,
@@ -1399,5 +1474,6 @@ export type {
 /**
  * Resolve an audio buffer source to a native buffer ID string.
  * Accepts buffer references, info objects, handles, or raw strings.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — id is not `off_<uuid>` or `live_<uuid>`.
  */
 export { resolvePipelineAudioBufferId };

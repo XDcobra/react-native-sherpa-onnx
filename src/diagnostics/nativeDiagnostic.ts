@@ -27,11 +27,21 @@ export function parseNativeDiagnosticSnapshot(
   };
 }
 
+/**
+ * Read the native diagnostic ring-buffer snapshot.
+ *
+ * @throws {Error} `DIAGNOSTIC_ERROR` — native snapshot failed.
+ */
 export async function getNativeDiagnosticSnapshot(): Promise<NativeDiagnosticSnapshot> {
   const json = await SherpaOnnx.getNativeDiagnosticSnapshot();
   return parseNativeDiagnosticSnapshot(json);
 }
 
+/**
+ * Enable or configure the native diagnostic ring / signal handler.
+ *
+ * @throws {Error} `DIAGNOSTIC_ERROR` — native configure failed.
+ */
 export async function configureNativeDiagnostics(options?: {
   enabled?: boolean;
   installSignalHandler?: boolean;

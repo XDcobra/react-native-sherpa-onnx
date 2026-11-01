@@ -14,6 +14,10 @@ export interface DiarizationCustomConfig {
   metadata?: FileSource;
 }
 
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} `DIARIZATION_INVALID_ARGUMENT` — a customConfig value is not a FileSource.
+ */
 export function assertDiarizationCustomConfig(
   customConfig: Record<string, unknown>
 ): void {

@@ -144,6 +144,11 @@ async function resolveInitPaths(
   return detected.paths;
 }
 
+/**
+ * Create a keyword-spotting engine. Call `destroy()` when finished.
+ * @throws {Error} `KWS_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`Keyword spotting initialization failed` / `KWS_INIT_FAILED`).
+ */
 export async function createKeywordSpotting(
   options: KeywordSpottingInitOptions
 ): Promise<KeywordSpottingEngine> {

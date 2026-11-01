@@ -2,12 +2,17 @@ import { Platform } from 'react-native';
 import { FileIOErrorCode } from './types';
 import type { FileDestination, FileSource } from './types';
 
+/** Build an `Error` with a `FILEIO_*` `code` property. */
 export function createFileIOError(code: string, message: string): Error {
   const err = new Error(message) as Error & { code?: string };
   err.code = code;
   return err;
 }
 
+/**
+ * Rejects a `FileSource` kind that this OS cannot open.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — iOS-only or Android-only kind used on the other OS.
+ */
 export function assertFileSourceSupportedOnPlatform(source: FileSource): void {
   if (source.kind === 'auto') {
     return;
@@ -44,6 +49,10 @@ export function assertFileSourceSupportedOnPlatform(source: FileSource): void {
   }
 }
 
+/**
+ * Rejects a `FileDestination` kind that this OS cannot write.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — iOS-only or Android-only kind used on the other OS.
+ */
 export function assertFileDestinationSupportedOnPlatform(
   destination: FileDestination
 ): void {
@@ -78,6 +87,10 @@ export function assertFileDestinationSupportedOnPlatform(
   }
 }
 
+/**
+ * Rejects a source or destination kind that this OS cannot use.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — iOS-only or Android-only kind used on the other OS.
+ */
 export function assertFileLocationsSupportedOnPlatform(
   source: FileSource,
   destination: FileDestination

@@ -387,6 +387,13 @@ function normalizeOptions(
   return nativeOptions as NativeVisualizationOptions;
 }
 
+/**
+ * Compute a spectrum-bars visualization profile from a file, offline buffer, or live handle.
+ * @throws {Error} `AUDIO_VISUALIZATION_INVALID_INPUT` — input is not a FileSource, `off_*` buffer, or `live_*` handle.
+ * @throws {Error} `AUDIO_VISUALIZATION_INVALID_OPTIONS` — options are out of range or unsupported.
+ * @throws {Error} `AUDIO_VISUALIZATION_PAYLOAD_TOO_LARGE` — `frameCount * barCount` exceeds 131072.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — pipeline buffer id is malformed.
+ */
 export async function computeAudioVisualizationProfile(
   input: AudioVisualizationInput,
   options?: AudioVisualizationOptions

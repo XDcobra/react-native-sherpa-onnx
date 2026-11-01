@@ -93,7 +93,10 @@ function resolveImageBufferId(source: OfflineImageBufferIdSource): string {
   );
 }
 
-/** Resolve ref/handle/string to a native offline image buffer id. */
+/**
+ * Resolve ref/handle/string to a native offline image buffer id.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — missing or malformed `img_off_*` / `img_live_*` id.
+ */
 export function resolveOfflineImageBufferId(
   source: OfflineImageBufferIdSource
 ): string {
@@ -106,6 +109,10 @@ export function resolveOfflineImageBufferId(
   return id;
 }
 
+/**
+ * Resolve a live image buffer source to a native id.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — missing or malformed `img_live_*` id.
+ */
 export function resolveLiveImageBufferId(
   source: LiveImageBufferIdSource
 ): string {
@@ -118,6 +125,10 @@ export function resolveLiveImageBufferId(
   return id;
 }
 
+/**
+ * Resolve an offline or live image buffer source to a native id.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — missing or malformed `img_off_*` / `img_live_*` id.
+ */
 export function resolvePipelineImageBufferId(
   source: PipelineImageBufferIdSource
 ): string {
@@ -384,6 +395,11 @@ function mapCreateError(err: unknown): never {
   mapWebpDisabled(err);
 }
 
+/**
+ * Create an empty offline image buffer.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — native returned a malformed id.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native create failed.
+ */
 export async function createEmptyOfflineImageBuffer(): Promise<OfflineImageBufferRef> {
   const raw = await getNative().createEmptyOfflineImageBuffer();
   const info = mapInfo(raw);
@@ -398,6 +414,11 @@ export async function createEmptyOfflineImageBuffer(): Promise<OfflineImageBuffe
  * Index one or more images from {@link FileSource}(s) into a lazy offline ImageBuffer.
  * RGB is decoded on {@link ensureOfflineImageBufferFrame}, FrameView, or OCR.
  * Pass `onProgress` and/or `signal` in options for create progress and cancellation.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — empty list or a source is not a `FileSource`.
+ * @throws {Error} `ERR_IMAGE_CANCELLED` — `signal` aborted or native create was cancelled.
+ * @throws {Error} `ERR_IMAGE_WEBP_DISABLED` — WebP input and libwebp is not linked.
+ * @throws {Error} `ERR_IMAGE_DECODE_FAILED` — a source image could not be decoded.
+ * @throws {Error} `ERR_IMAGE_FORMAT_UNSUPPORTED` — a source format is not supported.
  */
 export async function createOfflineImageBufferFromFiles(
   sources: FileSource | FileSource[],
@@ -447,6 +468,14 @@ export async function createOfflineImageBufferFromFiles(
   }
 }
 
+/**
+ * Index base64-encoded images into a lazy offline ImageBuffer.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — `base64List` is empty.
+ * @throws {Error} `ERR_IMAGE_CANCELLED` — `signal` aborted or native create was cancelled.
+ * @throws {Error} `ERR_IMAGE_WEBP_DISABLED` — WebP input and libwebp is not linked.
+ * @throws {Error} `ERR_IMAGE_DECODE_FAILED` — a frame could not be decoded.
+ * @throws {Error} `ERR_IMAGE_FORMAT_UNSUPPORTED` — a source format is not supported.
+ */
 export async function createOfflineImageBufferFromBase64(
   base64List: string[],
   options?: CreateOfflineImageBufferOptions
@@ -471,6 +500,12 @@ export async function createOfflineImageBufferFromBase64(
   }
 }
 
+/**
+ * Get metadata for an offline image buffer.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `ERR_IMAGE_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native info lookup failed.
+ */
 export async function getOfflineImageBufferInfo(
   buffer: OfflineImageBufferIdSource
 ): Promise<OfflineImageBufferInfo> {
@@ -507,6 +542,12 @@ function mapPipelineInfo(raw: {
   });
 }
 
+/**
+ * Get metadata for any pipeline image buffer (offline or live).
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `ERR_IMAGE_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native info lookup failed.
+ */
 export async function getPipelineImageBufferInfo(
   buffer: PipelineImageBufferIdSource
 ): Promise<PipelineImageBufferInfo> {
@@ -514,6 +555,11 @@ export async function getPipelineImageBufferInfo(
   return mapPipelineInfo(await getNative().getOfflineImageBufferInfo(id));
 }
 
+/**
+ * Release any pipeline image buffer (offline or live).
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native release failed.
+ */
 export async function releasePipelineImageBuffer(
   buffer: PipelineImageBufferIdSource
 ): Promise<void> {
@@ -536,6 +582,11 @@ function assertFileSource(source: FileSource): void {
   }
 }
 
+/**
+ * Create a recording live image ring (optional spool).
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — native returned a malformed live id.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native create failed.
+ */
 export async function createEmptyLiveImageBuffer(
   options?: CreateEmptyLiveImageBufferOptions
 ): Promise<LiveImageBufferRef> {
@@ -566,6 +617,13 @@ export async function createEmptyLiveImageBuffer(
   };
 }
 
+/**
+ * Append a compressed JPEG/WebP/HEIC frame to a recording live image buffer.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed live id or empty base64.
+ * @throws {Error} `ERR_IMAGE_INVALID_STATE` — buffer is not recording.
+ * @throws {Error} `ERR_IMAGE_DECODE_FAILED` — compressed frame could not be decoded.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native append failed.
+ */
 export async function appendLiveImageFrame(
   live: LiveImageBufferIdSource,
   compressedBase64: string
@@ -594,6 +652,15 @@ export async function appendLiveImageFrame(
   return info;
 }
 
+/**
+ * Decode an image file and append it to a recording live image buffer.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — source is not a `FileSource`, or malformed live id.
+ * @throws {Error} `ERR_IMAGE_DECODE_FAILED` — file could not be decoded.
+ * @throws {Error} `ERR_IMAGE_FORMAT_UNSUPPORTED` — format is not supported.
+ * @throws {Error} `ERR_IMAGE_WEBP_DISABLED` — WebP input and libwebp is not linked.
+ * @throws {Error} `ERR_IMAGE_INVALID_STATE` — buffer is not recording.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native ingest failed.
+ */
 export async function ingestFileToLiveImageBuffer(
   source: FileSource,
   live: LiveImageBufferIdSource
@@ -616,6 +683,12 @@ export async function ingestFileToLiveImageBuffer(
   return info;
 }
 
+/**
+ * Finalize a live image buffer (recording → finished).
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `ERR_IMAGE_INVALID_STATE` — buffer is not recording.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native finalize failed.
+ */
 export async function finalizeLiveImageBuffer(
   live: LiveImageBufferIdSource
 ): Promise<LiveImageBufferFinishedRef> {
@@ -630,6 +703,10 @@ export async function finalizeLiveImageBuffer(
   };
 }
 
+/**
+ * Subscribe to live image-buffer events.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed live id.
+ */
 export function subscribeLiveImageBufferEvents(
   live: LiveImageBufferIdSource,
   onEvent: (event: LiveImageBufferEvent) => void
@@ -663,6 +740,15 @@ export { getOfflineImageBufferFrameInfo } from './getFrameInfo';
  * For lazy file and PDF buffers: decode/rasterize cold slots, update LRU, may prefetch ±1.
  * Finished live buffers decode a compressed ring/spool frame into the hot RGB cache.
  * Recording live buffers reject with `ERR_IMAGE_INVALID_STATE`.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed id or negative `frameIndex`.
+ * @throws {Error} `ERR_IMAGE_INVALID_STATE` — still-recording live buffer.
+ * @throws {Error} `ERR_IMAGE_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `ERR_IMAGE_FRAME_EVICTED` — compressed frame is no longer in ring/spool.
+ * @throws {Error} `ERR_IMAGE_DECODE_FAILED` — RGB decode failed.
+ * @throws {Error} `ERR_IMAGE_FORMAT_UNSUPPORTED` — frame format is not supported.
+ * @throws {Error} `ERR_IMAGE_WEBP_DISABLED` — WebP frame and libwebp is not linked.
+ * @throws {Error} `ERR_IMAGE_HW_DECODER_UNAVAILABLE` — hardware decode required but unavailable.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native ensure failed.
  */
 export async function ensureOfflineImageBufferFrame(
   buffer: OfflineImageBufferIdSource,
@@ -688,6 +774,11 @@ export async function ensureOfflineImageBufferFrame(
   return mapFrameInfo(raw);
 }
 
+/**
+ * Release an offline image buffer.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native release failed.
+ */
 export async function releaseOfflineImageBuffer(
   buffer: OfflineImageBufferIdSource
 ): Promise<void> {
@@ -712,6 +803,14 @@ function parseResolvedFileRef(result: {
 /**
  * Encode one frame to a {@link FileDestination} (same write model as `saveAudioAsFile`).
  * Returns a {@link ResolvedFileRef} for the written file.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed id, negative `frameIndex`, or bad format.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — destination kind is not valid on this OS.
+ * @throws {Error} `ERR_IMAGE_WEBP_DISABLED` — software WebP export and libwebp is not linked.
+ * @throws {Error} `ERR_IMAGE_ENCODE_FAILED` — encode or write failed.
+ * @throws {Error} `ERR_IMAGE_HW_ENCODER_UNAVAILABLE` — hardware encode required but unavailable.
+ * @throws {Error} `ERR_IMAGE_SW_ENCODER_UNAVAILABLE` — software encode required but unavailable.
+ * @throws {Error} `ERR_IMAGE_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native export failed.
  */
 export async function exportOfflineImageBufferFrame(
   buffer: OfflineImageBufferIdSource,

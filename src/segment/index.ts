@@ -640,6 +640,15 @@ async function resolveSpeechSegmentBufferRef(
   };
 }
 
+/**
+ * Attach an auto-segmentation engine to a live text or live audio buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — not a live text or live audio buffer, or invalid policy fields.
+ * @throws {Error} `SEGMENTATION_POLICY_INVALID` — pyannote policy used on a live buffer.
+ * @throws {Error} `POLICY_MODEL_UNAVAILABLE` — VAD or pyannote model could not be resolved.
+ * @throws {Error} `POLICY_INVALID` — native rejected the policy.
+ * @throws {Error} `ENGINE_ALREADY_ATTACHED` — an engine is already attached to this buffer.
+ * @throws {Error} `BUFFER_STATE_INVALID` — buffer cannot accept an engine in its current state.
+ */
 export async function attachSegmentationEngine(
   buffer: PipelineTextBufferIdSource | PipelineAudioBufferIdSource,
   config: SegmentationConfig
@@ -690,6 +699,10 @@ export async function attachSegmentationEngine(
   return { engineId: attached.engineId };
 }
 
+/**
+ * Detach a segmentation engine from its buffer.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native detach failed.
+ */
 export async function detachSegmentationEngine(
   engine: SegmentationEngineRef | string,
   options?: { flushFinal?: boolean }
@@ -699,6 +712,10 @@ export async function detachSegmentationEngine(
   clearAttachedSegmentationEngineByEngineId(engineId);
 }
 
+/**
+ * Get info for an attached segmentation engine.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native lookup failed or policy payload is invalid.
+ */
 export async function getSegmentationEngineInfo(
   engine: SegmentationEngineRef | string
 ): Promise<SegmentationEngineInfo> {
@@ -723,6 +740,13 @@ export async function getSegmentationEngineInfo(
   return info;
 }
 
+/**
+ * Segment an offline text or offline audio buffer with a policy.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — not an offline text/audio buffer, or invalid policy fields.
+ * @throws {Error} `POLICY_MODEL_UNAVAILABLE` — VAD or pyannote model could not be resolved.
+ * @throws {Error} `SEGMENT_INTERNAL_ERROR` — native speech path did not return a segment buffer id.
+ * @throws {Error} `POLICY_INVALID` — native rejected the policy.
+ */
 export async function segmentOfflineBuffer(
   buffer: PipelineTextBufferIdSource | PipelineAudioBufferIdSource,
   policy: SegmentationPolicy
@@ -799,6 +823,10 @@ export async function segmentOfflineBuffer(
   };
 }
 
+/**
+ * Replace the live text buffer partial hypothesis.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — not a live text buffer.
+ */
 export async function setPartial(
   buffer: PipelineTextBufferIdSource,
   text: string
@@ -812,6 +840,10 @@ export async function setPartial(
   await getNative().setLiveTextBufferPartial(liveTextBufferId, text);
 }
 
+/**
+ * Append to the live text buffer partial hypothesis.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — not a live text buffer.
+ */
 export async function appendPartial(
   buffer: PipelineTextBufferIdSource,
   text: string
@@ -825,6 +857,12 @@ export async function appendPartial(
   await getNative().appendLiveTextBufferPartial(liveTextBufferId, text);
 }
 
+/**
+ * Commit the current partial text or uncommitted audio as a segment.
+ * @throws {Error} `SEGMENT_NOT_AVAILABLE` — segmentation is disabled for this buffer.
+ * @throws {Error} `SEGMENT_COMMIT_FAILED` — no partial/uncommitted data, or materialize failed.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — not a live text or live audio buffer.
+ */
 export async function commitSegment(
   buffer: PipelineTextBufferIdSource | PipelineAudioBufferIdSource,
   options: CommitSegmentOptions = {}
@@ -945,6 +983,11 @@ export async function commitSegment(
   return segments[0]!;
 }
 
+/**
+ * Resolve a parent or segment buffer to a `SegmentBufferRef`.
+ * @throws {Error} `SEGMENT_NOT_AVAILABLE` — live audio segmentation is off, or offline text is not materialized.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — unsupported buffer source.
+ */
 export async function getSegmentBuffer(
   buffer: SegmentBufferSource
 ): Promise<SegmentBufferRef> {
@@ -991,6 +1034,12 @@ export async function getSegmentBuffer(
   return resolveSpeechSegmentBufferRef(audioBufferId);
 }
 
+/**
+ * Read segments for a text, audio, or segment buffer.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — bad window or unsupported buffer source.
+ * @throws {Error} `SEGMENT_INDEX_OUT_OF_RANGE` — `startIndex` is outside the segment count.
+ * @throws {Error} `SEGMENT_NOT_AVAILABLE` — offline text is not materialized, or live audio segmentation is off.
+ */
 export async function getSegments(
   buffer: SegmentBufferSource,
   startIndex = 0,
@@ -1032,6 +1081,11 @@ export async function getSegments(
   );
 }
 
+/**
+ * Return the number of committed segments for a buffer.
+ * @throws {Error} `SEGMENT_NOT_AVAILABLE` — offline text is not materialized, or live audio segmentation is off.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — unsupported speech segment buffer id.
+ */
 export async function getSegmentCount(
   buffer: SegmentBufferSource
 ): Promise<number> {
@@ -1064,6 +1118,10 @@ export async function getSegmentCount(
   return info.segmentCount;
 }
 
+/**
+ * Create an empty text↔speech segment link map.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native returned an empty `linkMapId`.
+ */
 export async function createSegmentLinkMap(options?: {
   textBufferId?: string;
   audioBufferId?: string;
@@ -1079,6 +1137,12 @@ export async function createSegmentLinkMap(options?: {
   return { linkMapId };
 }
 
+/**
+ * Add one text↔speech link to a link map.
+ * @throws {Error} `SEGMENT_LINK_INVALID` — ids, `linkType`, or native payload is invalid.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was released.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native add failed.
+ */
 export async function addSegmentLink(
   linkMap: SegmentLinkMapRef | string,
   link: {
@@ -1100,6 +1164,12 @@ export async function addSegmentLink(
   return sanitizeLink(out);
 }
 
+/**
+ * Add many text↔speech links to a link map.
+ * @throws {Error} `SEGMENT_LINK_INVALID` — ids, `linkType`, or native payload is invalid.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was released.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native add failed.
+ */
 export async function addSegmentLinks(
   linkMap: SegmentLinkMapRef | string,
   links: Array<{
@@ -1126,6 +1196,11 @@ export async function addSegmentLinks(
   return out.links.map(sanitizeLink);
 }
 
+/**
+ * Remove one link from a link map.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was released.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native remove failed.
+ */
 export async function removeSegmentLink(
   linkMap: SegmentLinkMapRef | string,
   linkId: string
@@ -1134,6 +1209,12 @@ export async function removeSegmentLink(
   await getNative().removeSegmentLink(linkMapId, linkId);
 }
 
+/**
+ * Get speech links for a text segment.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was released.
+ * @throws {Error} `SEGMENT_LINK_INVALID` — native returned an unknown `linkType`.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native read failed.
+ */
 export async function getSpeechSegmentsForText(
   linkMap: SegmentLinkMapRef | string,
   textSegmentId: string
@@ -1146,6 +1227,12 @@ export async function getSpeechSegmentsForText(
   return out.links.map(sanitizeLink);
 }
 
+/**
+ * Get text links for a speech segment.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was released.
+ * @throws {Error} `SEGMENT_LINK_INVALID` — native returned an unknown `linkType`.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native read failed.
+ */
 export async function getTextSegmentsForSpeech(
   linkMap: SegmentLinkMapRef | string,
   speechSegmentId: string
@@ -1158,6 +1245,12 @@ export async function getTextSegmentsForSpeech(
   return out.links.map(sanitizeLink);
 }
 
+/**
+ * Read all links in a link map by index window.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was released.
+ * @throws {Error} `SEGMENT_LINK_INVALID` — native returned an unknown `linkType`.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native read failed.
+ */
 export async function getAllSegmentLinks(
   linkMap: SegmentLinkMapRef | string,
   startIndex = 0,
@@ -1172,6 +1265,11 @@ export async function getAllSegmentLinks(
   return out.links.map(sanitizeLink);
 }
 
+/**
+ * Return the number of links in a link map.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was released.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native count failed.
+ */
 export async function getSegmentLinkCount(
   linkMap: SegmentLinkMapRef | string
 ): Promise<number> {
@@ -1179,6 +1277,11 @@ export async function getSegmentLinkCount(
   return getNative().getSegmentLinkCount(linkMapId);
 }
 
+/**
+ * Get metadata for a segment link map.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was released.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native info lookup failed.
+ */
 export async function getSegmentLinkMapInfo(
   linkMap: SegmentLinkMapRef | string
 ): Promise<SegmentLinkMapInfo> {
@@ -1196,6 +1299,11 @@ export async function getSegmentLinkMapInfo(
   };
 }
 
+/**
+ * Release a segment link map.
+ * @throws {Error} `SEGMENT_LINK_MAP_NOT_FOUND` — link map was already released.
+ * @throws {Error} `SEGMENT_LINK_INTERNAL_ERROR` — native release failed.
+ */
 export async function releaseSegmentLinkMap(
   linkMap: SegmentLinkMapRef | string
 ): Promise<void> {

@@ -20,6 +20,14 @@ export type KwsDetectOptions = {
   quantization?: QuantizationPreference;
 };
 
+/**
+ * Detect a keyword-spotting model layout without loading the engine.
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
+ */
 export async function detectKwsModel(
   source: FileSource,
   options?: KwsDetectOptions

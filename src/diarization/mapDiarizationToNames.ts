@@ -26,6 +26,11 @@ function resolveThreshold(options?: MapDiarizationToNamesOptions): number {
  *
  * Does not mutate the segment buffer. Prefer the same embedding model for SID
  * enroll and `createDiarization({ embedding })`.
+ * @throws {Error} `DIARIZATION_INVALID_ARGUMENT` — `diar` or `sid` is missing the required methods.
+ * @throws {Error} `DIARIZATION_ERROR` — native cluster embedding read failed.
+ * @throws {Error} `DIARIZATION_NOT_INITIALIZED` — diarization engine is not initialized.
+ * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — segment buffer id is malformed.
+ * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — SID `search` failed.
  */
 export async function mapDiarizationToNames(
   diar: DiarizationEngine,

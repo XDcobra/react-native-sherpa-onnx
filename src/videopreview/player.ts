@@ -278,6 +278,14 @@ function wrapPlayer(
   return player;
 }
 
+/**
+ * Create a video preview player for a pipeline video buffer.
+ * @throws {VideoPreviewError} `VIDEO_PREVIEW_INVALID_ARGUMENT` — missing or malformed buffer id, or invalid options.
+ * @throws {VideoPreviewError} `VIDEO_BUFFER_NOT_FOUND` — buffer is not in the registry (may remap to `VIDEO_PREVIEW_INVALID_STATE`).
+ * @throws {VideoPreviewError} `VIDEO_PREVIEW_AUDIO_UNSUPPORTED` — `audio.required` is true but the track is absent or not playable.
+ * @throws {VideoPreviewError} `VIDEO_PREVIEW_AUDIO_OUTPUT_FAILED` — audio renderer could not open an output.
+ * @throws {VideoPreviewError} `VIDEO_PREVIEW_INVALID_STATE` — native create failed or an unknown code was remapped.
+ */
 export async function createVideoPreviewPlayer(
   source: PipelineVideoBufferIdSource,
   options?: VideoPreviewPlayerOptions

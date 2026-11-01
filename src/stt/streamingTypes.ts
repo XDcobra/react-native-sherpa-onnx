@@ -137,6 +137,13 @@ export interface LiveSttEngine {
    * - drains audio from a live audio buffer
    * - runs online recognizer decode loop
    * - writes partials + committed segments to a live text buffer
+   * @throws {Error} `STT_PIPELINE_INSTANCE_NOT_FOUND` — engine was destroyed.
+   * @throws {Error} `STT_PIPELINE_AUDIO_BUFFER_NOT_FOUND` — live audio buffer is unknown.
+   * @throws {Error} `STT_PIPELINE_TEXT_BUFFER_NOT_FOUND` — live text buffer is unknown.
+   * @throws {Error} `STT_PIPELINE_BUFFER_KIND_MISMATCH` — buffer is not the required live kind.
+   * @throws {Error} `STT_PIPELINE_BUFFER_NOT_RECORDING` — live buffer is not recording.
+   * @throws {Error} `STT_PIPELINE_SAMPLE_RATE_MISMATCH` — audio sample rate does not match the model.
+   * @throws {Error} `STT_PIPELINE_ALREADY_RUNNING` — another transcribe pipeline is already active.
    */
   transcribe(
     audioIn: LiveAudioBufferIdSource,

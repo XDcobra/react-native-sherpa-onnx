@@ -14,7 +14,7 @@ export type AudioFileContainerProbe = {
 
 /**
  * Probe audio file duration from container metadata (no decode).
- * Returns null when the probe fails so callers can degrade gracefully.
+ * Never throws; returns null when the probe fails so callers can degrade gracefully.
  */
 export async function probeAudioFileDuration(
   source: FileSource
@@ -41,7 +41,7 @@ export async function probeAudioFileDuration(
 /**
  * Probe container format and primary audio codec from file content (no PCM decode).
  * Uses FFmpeg auto-probe when needed so format is inferred from file content.
- * Returns null when the probe fails so callers can degrade gracefully.
+ * Never throws; returns null when the probe fails so callers can degrade gracefully.
  */
 export async function probeAudioFileContainer(
   source: FileSource

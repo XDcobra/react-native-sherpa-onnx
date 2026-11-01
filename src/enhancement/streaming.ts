@@ -63,6 +63,11 @@ function createEnhancementPipelineHandle(
   };
 }
 
+/**
+ * Create an online speech-enhancement engine. Call `destroy()` when finished.
+ * @throws {Error} `ENHANCEMENT_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} Native init failed (`Streaming enhancement initialization failed` / `ONLINE_ENHANCEMENT_INIT_ERROR`).
+ */
 export async function createStreamingEnhancement(
   options: StreamingEnhancementInitializeOptions
 ): Promise<StreamingEnhancementEngine> {

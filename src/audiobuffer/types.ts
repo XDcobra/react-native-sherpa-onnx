@@ -431,6 +431,8 @@ export interface FileIngestHandle {
   /**
    * Promise that resolves when ingest completes (all chunks decoded and appended).
    * Rejects on decode error or cancellation.
+   * @throws {Error} `DECODE_CANCELLED` — ingest was cancelled.
+   * @throws {Error} `DECODE_INTERNAL_ERROR` — native ingest failed.
    */
   readonly done: Promise<FileIngestResult>;
 

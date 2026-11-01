@@ -14,6 +14,10 @@ import type {
   VideoPreviewSnapshot,
 } from './types';
 
+/**
+ * Create and own a video preview player for `source`. Create failures go to
+ * `options.onError`; they do not throw.
+ */
 export function useVideoPreviewPlayer(
   source: PipelineVideoBufferIdSource | null,
   options?: VideoPreviewPlayerOptions

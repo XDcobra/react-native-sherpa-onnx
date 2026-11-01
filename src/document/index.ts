@@ -118,6 +118,14 @@ function mapSections(raw: unknown): DocumentSectionInfo[] {
  *
  * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
  * on first open (see {@link FileSource} / `apkAsset`).
+ *
+ * @throws {Error} `ERR_DOC_INVALID_ARGUMENT` — `source` is not a `FileSource`.
+ * @throws {Error} `ERR_DOC_CANCELLED` — `signal` aborted.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — missing or malformed `txt_off_*` / `txt_live_*` id.
+ * @throws {Error} `ERR_DOC_UNSUPPORTED_FORMAT` — file is not a supported markup format.
+ * @throws {Error} `ERR_DOC_OPEN_FAILED` — document could not be opened.
+ * @throws {Error} `ERR_DOC_DRM` — document is DRM-protected.
+ * @throws {Error} `ERR_DOC_NO_TEXT` — CBZ/CBR or scan-only document with no markup text.
  */
 export async function extractDocumentText(
   source: FileSource,
@@ -173,6 +181,13 @@ export async function extractDocumentText(
  *
  * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
  * on first open (see {@link FileSource} / `apkAsset`).
+ *
+ * @throws {Error} `ERR_DOC_INVALID_ARGUMENT` — `source` is not a `FileSource`.
+ * @throws {Error} `ERR_DOC_CANCELLED` — `signal` aborted.
+ * @throws {Error} `ERR_DOC_UNSUPPORTED_FORMAT` — file is not a supported image-document format.
+ * @throws {Error} `ERR_DOC_OPEN_FAILED` — document could not be opened, or native returned no `bufferId`.
+ * @throws {Error} `ERR_DOC_DRM` — document is DRM-protected.
+ * @throws {Error} `ERR_DOC_NO_IMAGES` — pure text document with no extractable images.
  */
 export async function extractDocumentImages(
   source: FileSource,

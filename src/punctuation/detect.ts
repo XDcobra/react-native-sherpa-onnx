@@ -26,7 +26,12 @@ export type OnlinePunctuationModelType = Extract<
  * ORT online-compatibility preflight passes; false for offline CT-Transformer and failed guards.
  *
  * When `success` is false (e.g. name-only / no file listing), `modelType` may still be set from the
- * native name heuristic for routing
+ * native name heuristic for routing.
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
  */
 export async function detectPunctuationModel(
   source: FileSource,

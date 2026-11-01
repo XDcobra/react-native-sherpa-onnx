@@ -967,6 +967,19 @@ async function downloadModelOnce(
   });
 }
 
+/**
+ * Download a catalog model (and extract archives).
+ *
+ * @throws {DownloadError} `DOWNLOAD_UNKNOWN_SOURCE` — `source` is not registered.
+ * @throws {DownloadError} `DOWNLOAD_NETWORK_FAILED` — transport failed before an HTTP status.
+ * @throws {DownloadError} `DOWNLOAD_HTTP_STATUS` — server returned a non-success status.
+ * @throws {DownloadError} `DOWNLOAD_CANCELLED` — `signal` aborted.
+ * @throws {DownloadError} `DOWNLOAD_SOURCE_AUTH_FAILED` — source rejected credentials (401/403).
+ * @throws {DownloadError} `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT` — archive format is not supported.
+ * @throws {DownloadError} `DOWNLOAD_INVALID_LAYOUT` — archive/folder asset layout is invalid.
+ * @throws {DownloadError} `DOWNLOAD_INTEGRITY_CHECKSUM_MISMATCH` — downloaded bytes did not match the expected checksum.
+ * @throws {PauseError} — download or extraction was paused.
+ */
 export async function downloadModel(
   category: ModelCategory,
   id: string,
@@ -1098,6 +1111,18 @@ export async function getIncompleteDownloads(
   return [...statesByModelId.values()];
 }
 
+/**
+ * Resume an incomplete download for `id`.
+ * @throws {DownloadError} `DOWNLOAD_UNKNOWN_SOURCE` — `source` is not registered.
+ * @throws {DownloadError} `DOWNLOAD_NETWORK_FAILED` — transport failed before an HTTP status.
+ * @throws {DownloadError} `DOWNLOAD_HTTP_STATUS` — server returned a non-success status.
+ * @throws {DownloadError} `DOWNLOAD_CANCELLED` — `signal` aborted.
+ * @throws {DownloadError} `DOWNLOAD_SOURCE_AUTH_FAILED` — source rejected credentials (401/403).
+ * @throws {DownloadError} `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT` — archive format is not supported.
+ * @throws {DownloadError} `DOWNLOAD_INVALID_LAYOUT` — archive/folder asset layout is invalid.
+ * @throws {DownloadError} `DOWNLOAD_INTEGRITY_CHECKSUM_MISMATCH` — downloaded bytes did not match the expected checksum.
+ * @throws {PauseError} — download or extraction was paused.
+ */
 export async function resumeDownload(
   category: ModelCategory,
   id: string,

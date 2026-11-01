@@ -199,6 +199,13 @@ export interface LanguageIdentificationEngine {
   /**
    * Mode 1: Offline Oneshot (<= 30s)
    * Evaluates audio buffer directly in a single pass.
+   * @throws {Error} `LANGUAGE_ID_DESTROYED` — engine was destroyed.
+   * @throws {Error} `LANGUAGE_ID_INVALID_ARGUMENT` — audio or options are invalid.
+   * @throws {Error} `LANGUAGE_ID_IDENTIFY_FAILED` — native identify failed.
+   * @throws {Error} `LANGUAGE_ID_NOT_INITIALIZED` — engine is not initialized.
+   * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   identify(
     audio: OfflineAudioBufferIdSource,
@@ -211,6 +218,12 @@ export interface LanguageIdentificationEngine {
    * Mode 2: Offline Segmented (Long-form Audio & Code-Switching)
    * Slices long audio via segmentation policy, evaluates each speech span,
    * compiles code-switching timeline and duration-weighted distribution.
+   * @throws {Error} `LANGUAGE_ID_DESTROYED` — engine was destroyed.
+   * @throws {Error} `LANGUAGE_ID_INVALID_ARGUMENT` — audio or options are invalid.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — segmentation policy fields are invalid.
+   * @throws {Error} `LANGUAGE_ID_IDENTIFY_FAILED` — native identify failed.
+   * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   identify(
     audio: OfflineAudioBufferIdSource,
@@ -223,6 +236,10 @@ export interface LanguageIdentificationEngine {
    * Mode 3: Live Overload (Real-time Streaming)
    * Connects LiveAudioBuffer to LiveTextBuffer via segmentation engine worker,
    * commits detected language tags to text buffer, and emits onSegment/onLanguageChanged.
+   * @throws {Error} `LANGUAGE_ID_DESTROYED` — engine was destroyed.
+   * @throws {Error} `LANGUAGE_ID_INVALID_ARGUMENT` — live/offline overload mismatch or bad buffers.
+   * @throws {Error} `LANGUAGE_ID_IDENTIFY_FAILED` — live identify pipeline failed.
+   * @throws {Error} `LIVE_OFFLINE_SEGMENTATION_REQUIRED` — live path requires a segmentation policy.
    */
   identify(
     audioIn: LiveAudioBufferIdSource,
@@ -232,6 +249,14 @@ export interface LanguageIdentificationEngine {
 
   /**
    * General signature for identify (offline).
+   * @throws {Error} `LANGUAGE_ID_DESTROYED` — engine was destroyed.
+   * @throws {Error} `LANGUAGE_ID_INVALID_ARGUMENT` — audio or options are invalid.
+   * @throws {Error} `LANGUAGE_ID_IDENTIFY_FAILED` — native identify failed.
+   * @throws {Error} `LANGUAGE_ID_NOT_INITIALIZED` — engine is not initialized.
+   * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — segmented auto policy fields are invalid.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   identify(
     audio: OfflineAudioBufferIdSource,
@@ -242,6 +267,12 @@ export interface LanguageIdentificationEngine {
 
   /**
    * Label existing speech segments in an OfflineSegmentBuffer with LanguageIdSpeechSegmentPayload.
+   * @throws {Error} `LANGUAGE_ID_DESTROYED` — engine was destroyed.
+   * @throws {Error} `LANGUAGE_ID_INVALID_ARGUMENT` — buffers or options are invalid.
+   * @throws {Error} `LANGUAGE_ID_IDENTIFY_FAILED` — native identify failed.
+   * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   labelOfflineSegments(
     audioIn: OfflineAudioBufferIdSource,

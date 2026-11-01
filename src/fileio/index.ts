@@ -73,7 +73,16 @@ function parseResolvedFileRef(result: {
  * All source/destination resolution, streaming, and error handling happens natively.
  * A single TurboModule call — no intermediate JS bridge hops.
  *
- * @throws FileIOError with code FILEIO_CANCELLED if signal is aborted.
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — `kind: 'auto'` or a malformed location.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source or destination kind is not valid on this OS.
+ * @throws {Error} `FILEIO_CANCELLED` — `signal` aborted before or during the copy.
+ * @throws {Error} `FILEIO_NOT_FOUND` — source path or URI does not exist.
+ * @throws {Error} `FILEIO_PERMISSION_DENIED` — missing SAF / security-scoped permission.
+ * @throws {Error} `FILEIO_ALREADY_EXISTS` — destination exists and `overwrite` is false.
+ * @throws {Error} `FILEIO_READ_ERROR` — native read from the source failed.
+ * @throws {Error} `FILEIO_WRITE_ERROR` — native write to the destination failed.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source or destination could not be opened.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app` path escaped the base dir whitelist.
  */
 export async function copyFile(
   input: FileSource,
@@ -153,6 +162,14 @@ export async function copyFile(
  *
  * For contentTree destinations, the mimeType from the destination is used
  * for SAF document creation.
+ *
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed destination.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — destination kind is not valid on this OS.
+ * @throws {Error} `FILEIO_PERMISSION_DENIED` — missing SAF / security-scoped permission.
+ * @throws {Error} `FILEIO_ALREADY_EXISTS` — destination exists and `overwrite` is false.
+ * @throws {Error} `FILEIO_WRITE_ERROR` — native write failed.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — destination could not be opened.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app` path escaped the base dir whitelist.
  */
 export async function saveText(
   text: string,
@@ -178,6 +195,13 @@ export async function saveText(
  * Open the system share sheet for a file.
  *
  * Side-effect only — returns void.
+ *
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — `kind: 'auto'` or a malformed source.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_NOT_FOUND` — source path or URI does not exist.
+ * @throws {Error} `FILEIO_PERMISSION_DENIED` — missing SAF / security-scoped permission.
+ * @throws {Error} `FILEIO_READ_ERROR` — native could not open the file for sharing.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened.
  */
 export async function shareFile(
   input: FileSource,
@@ -212,6 +236,8 @@ function assertNonNegInt(name: string, value: number, min: number): void {
 /**
  * Configure the stream-only demux cache (`fileio_nofd`).
  * Default: 512 MiB LRU and 24 h max age. Unpinned files only; `apkAsset` is unchanged.
+ *
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — `noFdCache` is not an object, or `maxBytes` / `maxAgeMs` is out of range.
  */
 export async function configureFileIO(
   options?: ConfigureFileIOOptions

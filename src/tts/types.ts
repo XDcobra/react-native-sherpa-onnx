@@ -521,6 +521,12 @@ export interface TtsEngine {
    * @param textIn - Offline text buffer (input text source)
    * @param audioOut - Empty offline audio buffer (output target); sampleRate must match model output rate
    * @param options - Synthesis options (sid, speed, voiceClone, etc.)
+   * @throws {Error} `TTS_INVALID_ARGUMENT` — live/offline overload mismatch or bad buffers.
+   * @throws {Error} `TTS_NUM_STEPS_UNSUPPORTED` — `numSteps` set on an unsupported model type.
+   * @throws {Error} `TTS_NUM_STEPS_REQUIRES_VOICE_CLONE` — zipvoice/pocket `numSteps` without reference audio.
+   * @throws {Error} `TTS_GENERATE_ERROR` — native synthesis failed.
+   * @throws {Error} `TTS_TEXT_BUFFER_NOT_FOUND` — input text buffer is unknown.
+   * @throws {Error} `TTS_AUDIO_OUT_NOT_FOUND` — output audio buffer is unknown.
    */
   synthesize(
     textIn: OfflineTextBufferRef | OfflineTextBufferHandle,
@@ -538,18 +544,32 @@ export interface TtsEngine {
    * @param audioOut - Live audio buffer (recording state, sampleRate must equal model sampleRate)
    * @param options - Pipeline options including mandatory segmentation policy
    * @returns Handle to control and inspect the running pipeline
+   * @throws {Error} `TTS_INVALID_ARGUMENT` — live/offline overload mismatch or missing segmentation.
+   * @throws {Error} `TTS_ERROR` — live speech-domain segment buffer missing.
    */
   synthesize(
     textIn: LiveTextBufferIdSource,
     audioOut: LiveAudioBufferIdSource,
     options: TtsLivePipelineOptions
   ): Promise<TtsPipelineHandle>;
+  /**
+   * Update runtime synthesis params.
+   * @throws {Error} `TTS_UPDATE_ERROR` — native rejected the new params.
+   */
   updateParams(options: TtsUpdateOptions): Promise<{
     success: boolean;
     detectedModels: DetectedModelEntry[];
   }>;
   getModelInfo(): Promise<TTSModelInfo>;
+  /**
+   * Model output sample rate.
+   * @throws {Error} `TTS_ERROR` — native query failed.
+   */
   getSampleRate(): Promise<number>;
+  /**
+   * Number of speakers in the loaded model.
+   * @throws {Error} `TTS_ERROR` — native query failed.
+   */
   getNumSpeakers(): Promise<number>;
   destroy(): Promise<void>;
 }

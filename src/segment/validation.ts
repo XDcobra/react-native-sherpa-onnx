@@ -52,6 +52,10 @@ export interface ValidateSegmentationOptions {
   errorPrefix?: string;
 }
 
+/**
+ * Validate a feature's segmentation mode and policy before attach/create.
+ * @throws {Error} `SEGMENTATION_POLICY_INVALID` — mode, evaluator, or policy fields are invalid (or `options.errorPrefix`).
+ */
 export function validateSegmentationConfig(
   options: ValidateSegmentationOptions
 ): {

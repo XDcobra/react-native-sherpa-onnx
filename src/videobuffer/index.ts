@@ -107,6 +107,10 @@ function asStringId(source: unknown, label: string): string {
   throw new Error(`VIDEO_INVALID_ARGUMENT: invalid ${label}`);
 }
 
+/**
+ * Resolve an offline (or finished live) video buffer id.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — missing or malformed `vid_off_*` / `vid_live_*` id.
+ */
 export function resolveOfflineVideoBufferId(
   source: OfflineVideoBufferIdSource
 ): string {
@@ -117,6 +121,10 @@ export function resolveOfflineVideoBufferId(
   return id;
 }
 
+/**
+ * Resolve a live video buffer id.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — missing or malformed `vid_live_*` id.
+ */
 export function resolveLiveVideoBufferId(
   source: LiveVideoBufferIdSource
 ): string {
@@ -127,6 +135,10 @@ export function resolveLiveVideoBufferId(
   return id;
 }
 
+/**
+ * Resolve an offline or live video buffer id.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — missing or malformed `vid_off_*` / `vid_live_*` id.
+ */
 export function resolvePipelineVideoBufferId(
   source: PipelineVideoBufferIdSource
 ): string {
@@ -232,6 +244,10 @@ function assertFileSource(source: FileSource): void {
   }
 }
 
+/**
+ * Probe clip duration without opening a buffer. Native failures return `null`.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — `source` is not a `FileSource`.
+ */
 export async function probeVideoFileDuration(
   source: FileSource
 ): Promise<VideoFileDurationProbe | null> {
@@ -255,6 +271,10 @@ export async function probeVideoFileDuration(
   }
 }
 
+/**
+ * Probe container/codec without opening a buffer. Native failures return `null`.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — `source` is not a `FileSource`.
+ */
 export async function probeVideoFileContainer(
   source: FileSource
 ): Promise<VideoFileContainerProbe | null> {
@@ -294,6 +314,17 @@ export async function probeVideoFileContainer(
   }
 }
 
+/**
+ * Open an immutable offline video buffer from a file.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — `source` is not a `FileSource`.
+ * @throws {Error} `VIDEO_FFMPEG_DISABLED` — FFmpeg is compiled out.
+ * @throws {Error} `VIDEO_CONTAINER_UNSUPPORTED` — container is not in the v1 set.
+ * @throws {Error} `VIDEO_NO_VIDEO_TRACK` — audio-only file.
+ * @throws {Error} `VIDEO_CODEC_UNSUPPORTED` — video codec is not H.264/HEVC.
+ * @throws {Error} `VIDEO_FILE_CORRUPT` — demux or index failed.
+ * @throws {Error} `VIDEO_DECODER_UNAVAILABLE` — no usable decoder for `decodePolicy`.
+ * @throws {Error} `VIDEO_SW_DECODER_DISABLED` — bundled SW requested but `ffmpeg-vsw` is missing.
+ */
 export async function createOfflineVideoBufferFromFile(
   source: FileSource,
   options?: CreateOfflineVideoBufferFromFileOptions
@@ -318,6 +349,11 @@ export async function createOfflineVideoBufferFromFile(
   };
 }
 
+/**
+ * Create a recording live video ring (optional spool).
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — native rejected ring or retention options.
+ * @throws {Error} `VIDEO_INTERNAL` — native create failed.
+ */
 export async function createEmptyLiveVideoBuffer(
   options?: CreateEmptyLiveVideoBufferOptions
 ): Promise<LiveVideoBufferRef> {
@@ -346,6 +382,13 @@ export async function createEmptyLiveVideoBuffer(
   };
 }
 
+/**
+ * Demux a file into an existing live video buffer.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — bad `FileSource` or live id.
+ * @throws {Error} `VIDEO_BUFFER_NOT_FOUND` — live buffer was released.
+ * @throws {Error} `VIDEO_FILE_CORRUPT` — ingest demux failed.
+ * @throws {Error} `VIDEO_INTERNAL` — native ingest failed.
+ */
 export async function ingestFileToLiveVideoBuffer(
   source: FileSource,
   live: LiveVideoBufferIdSource,
@@ -373,6 +416,12 @@ export async function ingestFileToLiveVideoBuffer(
   return info;
 }
 
+/**
+ * Stop ingest and freeze a live video buffer as finished.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `VIDEO_BUFFER_NOT_FOUND` — live buffer was released.
+ * @throws {Error} `VIDEO_INTERNAL` — native finalize failed.
+ */
 export async function finalizeLiveVideoBuffer(
   live: LiveVideoBufferIdSource
 ): Promise<LiveVideoBufferFinishedRef> {
@@ -385,6 +434,11 @@ export async function finalizeLiveVideoBuffer(
   };
 }
 
+/**
+ * Read current video-buffer info.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `VIDEO_BUFFER_NOT_FOUND` — buffer was released.
+ */
 export async function getVideoBufferInfo(
   source: PipelineVideoBufferIdSource
 ): Promise<PipelineVideoBufferInfo> {
@@ -392,6 +446,11 @@ export async function getVideoBufferInfo(
   return mapInfo(await getNative().getVideoBufferInfo(id));
 }
 
+/**
+ * List keyframe timestamps in `[fromUs, toUs]`.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `VIDEO_BUFFER_NOT_FOUND` — buffer was released.
+ */
 export async function getVideoKeyframeTimes(
   source: PipelineVideoBufferIdSource,
   range: { fromUs: number; toUs: number },
@@ -406,6 +465,10 @@ export async function getVideoKeyframeTimes(
   );
 }
 
+/**
+ * Release a video buffer and its native resources.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — malformed buffer id.
+ */
 export async function releaseVideoBuffer(
   source: PipelineVideoBufferIdSource
 ): Promise<void> {
@@ -413,6 +476,15 @@ export async function releaseVideoBuffer(
   await getNative().releaseVideoBuffer(id);
 }
 
+/**
+ * Sample decoded frames into an offline ImageBuffer.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — malformed video id.
+ * @throws {Error} `VIDEO_BUFFER_INVALID_STATE` — still-recording live buffer.
+ * @throws {Error} `VIDEO_DECODER_BUSY` — decode slot full.
+ * @throws {Error} `VIDEO_DECODER_UNAVAILABLE` — no usable decoder for the policy.
+ * @throws {Error} `VIDEO_MEMORY_BUDGET_EXCEEDED` — decoded/RGB copy exceeded the process cap.
+ * @throws {Error} `VIDEO_SW_DECODER_DISABLED` — bundled SW requested but missing.
+ */
 export async function createOfflineImageBufferFromVideo(
   video: OfflineVideoBufferIdSource,
   options?: CreateOfflineImageFromVideoOptions
@@ -462,6 +534,10 @@ export async function createOfflineImageBufferFromVideo(
   };
 }
 
+/**
+ * Subscribe to live-ring ingest events. Unsubscribe with the returned function.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — malformed live id.
+ */
 export function subscribeLiveVideoBufferEvents(
   live: LiveVideoBufferIdSource,
   onEvent: (event: LiveVideoBufferEvent) => void
@@ -498,6 +574,14 @@ export function subscribeLiveVideoBufferEvents(
   return () => sub.remove();
 }
 
+/**
+ * Extract clip audio into an offline AudioBuffer.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — bad id, `targetSampleRateHz`, or `rangeMs`.
+ * @throws {Error} `VIDEO_CANCELLED` — `signal` aborted.
+ * @throws {Error} `VIDEO_NO_AUDIO_TRACK` — clip has no audio.
+ * @throws {Error} `VIDEO_AUDIO_CODEC_UNSUPPORTED` — audio codec not in the SDK FFmpeg build.
+ * @throws {Error} `VIDEO_AUDIO_DECODE_FAILED` — extract produced no PCM or decode failed.
+ */
 export async function createOfflineAudioBufferFromVideo(
   video: OfflineVideoBufferIdSource,
   options?: CreateOfflineAudioFromVideoOptions
@@ -603,12 +687,22 @@ export async function createOfflineAudioBufferFromVideo(
   }
 }
 
+/**
+ * Apply global codec policy/budgets (alias of `configureCodecs()`).
+ * @throws {Error} `CODEC_INVALID_ARGUMENT` — invalid policy or budget outside 1–4.
+ */
 export async function configureVideoBuffer(
   _options?: ConfigureVideoBufferOptions
 ): Promise<void> {
   await configureCodecs();
 }
 
+/**
+ * Tap live-video audio into a recording AudioBuffer. `stop()` ends the tap and finalizes audio.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `AUDIO_INVALID_ARGUMENT` — live audio create rejected rate/channels.
+ * @throws {Error} `VIDEO_INTERNAL` — native tap failed.
+ */
 export async function createLiveAudioBufferFromLiveVideo(
   live: LiveVideoBufferIdSource,
   options?: {
@@ -638,6 +732,18 @@ export async function createLiveAudioBufferFromLiveVideo(
   };
 }
 
+/**
+ * Transcode a clip to `output` (`mp4`/`mov`/`mkv`/`webm`).
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — bad id, format, codec, bitrate, range, or `maxSide`.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — destination kind is not valid on this OS.
+ * @throws {Error} `VIDEO_CANCELLED` — `signal` aborted.
+ * @throws {Error} `VIDEO_DECODER_BUSY` — decode slot full.
+ * @throws {Error} `VIDEO_ENCODER_BUSY` — encode slot full.
+ * @throws {Error} `VIDEO_DECODER_UNAVAILABLE` — no usable decoder for `decodePolicy`.
+ * @throws {Error} `VIDEO_ENCODER_UNAVAILABLE` — no usable encoder for `codec` / `encodePolicy`.
+ * @throws {Error} `VIDEO_MEMORY_BUDGET_EXCEEDED` — decoded-frame cap exceeded.
+ * @throws {Error} `VIDEO_ENCODE_FAILED` — encode or mux failed.
+ */
 export async function exportVideo(
   video: OfflineVideoBufferIdSource,
   output: FileDestination,
@@ -750,6 +856,16 @@ export async function exportVideo(
   }
 }
 
+/**
+ * Decode the nearest frame at `ptsUs` and write it via fileio.
+ * @throws {Error} `VIDEO_INVALID_ARGUMENT` — malformed video id.
+ * @throws {Error} `VIDEO_FRAME_OUT_OF_RANGE` — `ptsUs` outside the clip.
+ * @throws {Error} `VIDEO_DECODER_BUSY` — decode slot full.
+ * @throws {Error} `VIDEO_DECODER_UNAVAILABLE` — no usable decoder for the policy.
+ * @throws {Error} `VIDEO_MEMORY_BUDGET_EXCEEDED` — decoded/RGB copy exceeded the process cap.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — destination kind is not valid on this OS.
+ * @throws {Error} `ERR_IMAGE_ENCODE_FAILED` — still encode failed.
+ */
 export async function exportVideoFrame(
   video: OfflineVideoBufferIdSource,
   ptsUs: number,

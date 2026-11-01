@@ -85,6 +85,11 @@ export function unregisterSource(sourceId: string): void {
   }
 }
 
+/**
+ * Look up a registered source provider by id.
+ *
+ * @throws {DownloadError} `DOWNLOAD_UNKNOWN_SOURCE` — `sourceId` is not registered.
+ */
 export function getSource(sourceId: string): SourceProvider {
   ensureBuiltinSourcesRegistered();
   const provider = sourceProviders.get(sourceId);
@@ -117,6 +122,11 @@ export function listBuiltinSources(): SourceProvider[] {
     .filter((provider): provider is SourceProvider => provider != null);
 }
 
+/**
+ * Merge config onto a registered source.
+ *
+ * @throws {DownloadError} `DOWNLOAD_UNKNOWN_SOURCE` — `sourceId` is not registered.
+ */
 export function configureSource(sourceId: string, config: SourceConfig): void {
   ensureBuiltinSourcesRegistered();
   getSource(sourceId);
@@ -141,6 +151,12 @@ export function getSourceConfig(sourceId: string): Readonly<SourceConfig> {
   return sourceConfigs.get(sourceId) ?? {};
 }
 
+/**
+ * Set the default catalog source for a model category.
+ *
+ * @throws {DownloadError} `DOWNLOAD_UNKNOWN_SOURCE` — `sourceId` is not registered.
+ * @throws {DownloadError} `DOWNLOAD_SOURCE_LIST_FAILED` — source does not support `category`.
+ */
 export function setDefaultSourceForCategory(
   category: ModelCategory,
   sourceId: string

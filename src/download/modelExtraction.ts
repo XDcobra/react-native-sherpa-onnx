@@ -211,6 +211,11 @@ async function runExtraction(
 
 /**
  * Start extraction for a model. Archive must already exist.
+ *
+ * @throws {DownloadError} `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT` — archive format is not supported.
+ * @throws {DownloadError} `DOWNLOAD_INVALID_LAYOUT` — model is not archive-layout, or archive layout is invalid.
+ * @throws {DownloadError} `DOWNLOAD_INTEGRITY_CHECKSUM_MISMATCH` — extracted bytes did not match the expected checksum.
+ * @throws {PauseError} — extraction was paused.
  */
 export async function extractModel(
   category: ModelCategory,

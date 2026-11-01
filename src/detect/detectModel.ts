@@ -289,6 +289,14 @@ function toNativeDetectInput(resolved: ResolvedDetectModelInput): {
 
 /**
  * Detect model category and type via native unified detection (single bridge call).
+ * Unmatched folders return `{ matched: false }` and do not throw.
+ *
+ * @throws {Error} `DETECT_ERROR` — native unified detection failed.
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
  */
 export async function detectModel(
   input: DetectModelInput,
@@ -308,7 +316,15 @@ export async function detectModel(
   return mapNativeDetectResult(resolved, raw, true);
 }
 
-/** Batch wrapper around unified native detection with optional chunked parallelism. */
+/**
+ * Batch wrapper around unified native detection with optional chunked parallelism.
+ * @throws {Error} `DETECT_ERROR` — native unified detection failed.
+ * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
+ * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
+ * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
+ * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened or resolved to a model path.
+ * @throws {Error} `FILEIO_PATH_TRAVERSAL_BLOCKED` — `app`/`pad` path escaped the base dir whitelist.
+ */
 export async function detectModelsBatch(
   inputs: readonly DetectModelInput[],
   options?: DetectModelsBatchOptions

@@ -100,6 +100,8 @@ export interface StreamingDiarizationEngine {
   /**
    * Starts a zero-JS background worker draining audio directly from `audioIn`
    * and writing detected speaker segments into `segmentOut`.
+   * @throws {Error} `DIARIZATION_ERROR` — native streaming pipeline failed.
+   * @throws {Error} `DIARIZATION_BUFFER_NOT_FOUND` — live audio or segment buffer is unknown.
    */
   startPipeline(
     audioIn: LiveAudioBufferIdSource,
@@ -109,6 +111,8 @@ export interface StreamingDiarizationEngine {
 
   /**
    * Feed a chunk of offline audio samples to the engine manually.
+   * @throws {Error} `DIARIZATION_ERROR` — native feed failed.
+   * @throws {Error} `DIARIZATION_BUFFER_NOT_FOUND` — audio buffer is unknown.
    */
   feed(
     audioIn: OfflineAudioBufferIdSource
@@ -116,16 +120,20 @@ export interface StreamingDiarizationEngine {
 
   /**
    * Flush remaining buffered audio, returning final detected segments.
+   * @throws {Error} `DIARIZATION_ERROR` — native flush failed.
+   * @throws {Error} `DIARIZATION_BUFFER_NOT_FOUND` — audio buffer is unknown.
    */
   flush(): Promise<Array<{ start: number; end: number; speaker: number }>>;
 
   /**
    * Reset internal streaming states (FIFO, speaker cache, silence tracking).
+   * @throws {Error} `DIARIZATION_ERROR` — native reset failed.
    */
   reset(): Promise<void>;
 
   /**
    * Release native resources and unload model.
+   * @throws {Error} `DIARIZATION_ERROR` — native release failed.
    */
   release(): Promise<void>;
 }

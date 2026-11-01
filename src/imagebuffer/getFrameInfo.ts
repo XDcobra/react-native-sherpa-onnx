@@ -112,6 +112,12 @@ function mapFrameInfo(raw: {
   return frame;
 }
 
+/**
+ * Get per-frame metadata without ensuring RGB is resident.
+ * @throws {Error} `ERR_IMAGE_INVALID_ARGUMENT` — malformed id.
+ * @throws {Error} `ERR_IMAGE_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `ERR_IMAGE_INTERNAL` — native frame-info lookup failed.
+ */
 export async function getOfflineImageBufferFrameInfo(
   buffer: OfflineImageBufferIdSource,
   frameIndex: number

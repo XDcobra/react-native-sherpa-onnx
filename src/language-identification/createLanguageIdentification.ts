@@ -33,6 +33,11 @@ import {
 
 let instanceCounter = 0;
 
+/**
+ * Create a language-identification engine. Call `destroy()` when finished.
+ * @throws {Error} `LANGUAGE_ID_INVALID_ARGUMENT` — options, `modelSource`, or custom paths are invalid.
+ * @throws {Error} `LANGUAGE_ID_INIT_ERROR` — detect or native init failed (`LANGUAGE_ID_INIT_ERROR` / `OFFLINE_OOM`).
+ */
 export async function createLanguageIdentification(
   options: LanguageIdentificationInitializeOptions
 ): Promise<LanguageIdentificationEngine> {

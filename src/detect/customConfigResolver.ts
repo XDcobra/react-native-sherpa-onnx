@@ -26,7 +26,10 @@ export function createInvalidArgumentError(
   throw err;
 }
 
-/** Structural check: every present customConfig value must be a FileSource. */
+/**
+ * Structural check: every present customConfig value must be a FileSource.
+ * @throws {Error} the given `errorCode` — a customConfig value is not a FileSource.
+ */
 export function assertCustomModelConfig(
   customConfig: Record<string, unknown>,
   errorCode: string

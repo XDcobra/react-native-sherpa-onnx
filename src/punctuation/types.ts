@@ -96,6 +96,11 @@ export type OfflinePunctuationEngine = {
    * Batch punctuation on offline text buffers.
    * Reads from an `OfflineTextBuffer` and writes punctuated text into an
    * offline output buffer.
+   * @throws {Error} `PUNCTUATION_ORCHESTRATION_ERROR` — segmented output was not an offline text buffer.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — segmentation policy fields are invalid.
+   * @throws {Error} `PUNCTUATION_ERROR` — native punctuate failed.
+   * @throws {Error} `PUNCTUATION_INSTANCE_NOT_FOUND` — engine was destroyed.
+   * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — text buffers or options are invalid.
    */
   punctuate(
     textIn: OfflineTextBufferIdSource,
@@ -108,6 +113,9 @@ export type OfflinePunctuationEngine = {
    * Consumes committed text segments from a `LiveTextBuffer` and writes
    * punctuated committed segments to a live output buffer.
    * Segmentation policy is mandatory for this path.
+   * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — live/offline overload mismatch.
+   * @throws {Error} `PUNCTUATION_ERROR` — live segment buffer missing or native pipeline failed.
+   * @throws {Error} `LIVE_OFFLINE_SEGMENTATION_REQUIRED` — live path requires a segmentation policy.
    */
   punctuate(
     textIn: LiveTextBufferIdSource,
@@ -115,7 +123,14 @@ export type OfflinePunctuationEngine = {
     options: PunctuationLivePipelineOptions
   ): Promise<PunctuationPipelineHandle>;
 
-  /** Caller-owned `textOut` buffer; engine only populates it. */
+  /**
+   * Punctuate a plain string into caller-owned `textOut`.
+   * @throws {Error} `PUNCTUATION_ORCHESTRATION_ERROR` — segmented output was not an offline text buffer.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — segmentation policy fields are invalid.
+   * @throws {Error} `PUNCTUATION_ERROR` — native punctuate failed.
+   * @throws {Error} `PUNCTUATION_INSTANCE_NOT_FOUND` — engine was destroyed.
+   * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — `textOut` or options are invalid.
+   */
   punctuateString(
     plain: string,
     textOut: OfflineTextBufferRef,

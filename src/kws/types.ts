@@ -112,6 +112,15 @@ export interface KeywordSpottingEngine {
    * If you only consume `onKeyword` / `onSegment` and do not need spool replay, create
    * the buffer with `spooling: { mode: 'off' }` to avoid disk I/O on each hit — same
    * LiveTextBuffer default as STT/VAD; KWS does not override it.
+   * @throws {Error} `KWS_PIPELINE_INSTANCE_NOT_FOUND` — engine was destroyed.
+   * @throws {Error} `KWS_PIPELINE_AUDIO_BUFFER_NOT_FOUND` — live audio buffer is unknown.
+   * @throws {Error} `KWS_PIPELINE_TEXT_BUFFER_NOT_FOUND` — live text buffer is unknown.
+   * @throws {Error} `KWS_PIPELINE_BUFFER_KIND_MISMATCH` — buffer is not the required live kind.
+   * @throws {Error} `KWS_PIPELINE_BUFFER_NOT_RECORDING` — live buffer is not recording.
+   * @throws {Error} `KWS_PIPELINE_SAMPLE_RATE_MISMATCH` — audio sample rate does not match the model.
+   * @throws {Error} `KWS_PIPELINE_ALREADY_RUNNING` — another spot pipeline is already active.
+   * @throws {Error} `BUFFER_INVALIDATED` — a live buffer was released while the pipeline ran.
+   * @throws {Error} `STREAMING_PIPELINE_ERROR` — native pipeline worker failed.
    */
   spot(
     audioIn: LiveAudioBufferIdSource,

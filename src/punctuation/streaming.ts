@@ -68,6 +68,11 @@ function createPunctuationPipelineHandle(
   };
 }
 
+/**
+ * Create an online punctuation engine. Call `destroy()` when finished.
+ * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — custom paths are invalid, or the pack is not an online cnn_bilstm.
+ * @throws {Error} Native init failed (`Streaming punctuation initialization failed` / `PUNCTUATION_INIT_ERROR`).
+ */
 export async function createStreamingPunctuation(
   options: StreamingPunctuationInitializeOptions
 ): Promise<StreamingPunctuationEngine> {

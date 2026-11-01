@@ -511,6 +511,7 @@ function registerLiveTextCallbacks(
 /**
  * Create an empty offline text buffer as output target for offline STT.
  * Native allocates the buffer; STT materializes results into it during recognition.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native create failed.
  */
 export async function createEmptyOfflineTextBuffer(): Promise<OfflineTextBufferRef> {
   const raw = await getNative().createEmptyOfflineTextBuffer();
@@ -536,6 +537,9 @@ export async function createEmptyOfflineTextBuffer(): Promise<OfflineTextBufferR
 
 /**
  * Create an offline text buffer from a live text buffer (snapshot or finalized spool equivalent).
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — live buffer was released.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native create failed.
  */
 export async function createOfflineTextBufferFromLive(
   liveBufferId: LiveTextBufferIdSource,
@@ -569,6 +573,8 @@ export async function createOfflineTextBufferFromLive(
  *
  * @param text - The text content to populate the buffer with (must not be empty).
  * @param options - Optional metadata: `lang`, `emotion`, `event`.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — text is empty.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native create failed.
  */
 export async function createOfflineTextBufferFromText(
   text: string,
@@ -602,6 +608,7 @@ export async function createOfflineTextBufferFromText(
 
 /**
  * Create a live text buffer for streaming/incremental text.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native create failed.
  */
 export async function createLiveTextBuffer(
   options: CreateLiveTextBufferOptions = {}
@@ -688,6 +695,7 @@ export async function createLiveTextBuffer(
  * @param liveBufferId The live text buffer to subscribe to.
  * @param callbacks The callback functions to invoke when events occur.
  * @returns A function to remove these specific event listeners.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — id is not `txt_off_<uuid>` or `txt_live_<uuid>`.
  */
 export function subscribeLiveTextBufferEvents(
   liveBufferId: LiveTextBufferIdSource,
@@ -699,6 +707,9 @@ export function subscribeLiveTextBufferEvents(
 
 /**
  * Create a live text buffer seeded from an offline text buffer (for UI streaming / editing).
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — offline buffer was released.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native create failed.
  */
 export async function createLiveTextBufferFromOffline(
   offlineBufferId: OfflineTextBufferIdSource
@@ -729,6 +740,10 @@ export async function createLiveTextBufferFromOffline(
 
 /**
  * Finalize a live text buffer (recording → finished). No more writes allowed after this.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_ALREADY_FINALIZED` — buffer is already finished.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native finalize failed.
  */
 export async function finalizeLiveTextBuffer(
   liveBufferId: LiveTextBufferRecordingSource
@@ -763,6 +778,9 @@ export async function finalizeLiveTextBuffer(
 
 /**
  * Get metadata for any pipeline text buffer (offline or live).
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native info lookup failed.
  */
 export async function getPipelineTextBufferInfo(
   bufferId: PipelineTextBufferIdSource
@@ -800,6 +818,8 @@ export async function getPipelineTextBufferInfo(
 
 /**
  * Release any pipeline text buffer (offline or live). Frees native memory.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed buffer id.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native release failed.
  */
 export async function releasePipelineTextBuffer(
   bufferId: PipelineTextBufferIdSource
@@ -1023,6 +1043,11 @@ function mapNativeSpatialSpan(raw: {
 
 /**
  * Get a slice of the hypothesis text from an offline text buffer.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `TEXT_SLICE_TOO_LARGE` — requested slice exceeds the native cap.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getOfflineTextBufferTextSlice(
   bufferId: OfflineTextBufferIdSource,
@@ -1039,6 +1064,11 @@ export async function getOfflineTextBufferTextSlice(
 
 /**
  * Get a slice of tokens from an offline text buffer.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `TEXT_SLICE_TOO_LARGE` — requested slice exceeds the native cap.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getOfflineTextBufferTokensSlice(
   bufferId: OfflineTextBufferIdSource,
@@ -1056,6 +1086,11 @@ export async function getOfflineTextBufferTokensSlice(
 
 /**
  * Get a slice of timestamps from an offline text buffer.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `TEXT_SLICE_TOO_LARGE` — requested slice exceeds the native cap.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getOfflineTextBufferTimestampsSlice(
   bufferId: OfflineTextBufferIdSource,
@@ -1074,6 +1109,11 @@ export async function getOfflineTextBufferTimestampsSlice(
 
 /**
  * Get a slice of durations from an offline text buffer.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `TEXT_SLICE_TOO_LARGE` — requested slice exceeds the native cap.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getOfflineTextBufferDurationsSlice(
   bufferId: OfflineTextBufferIdSource,
@@ -1093,6 +1133,11 @@ export async function getOfflineTextBufferDurationsSlice(
 /**
  * Get a slice of spatial spans from an offline text buffer (OCR / text-layer).
  * Empty when the buffer has no spatial metadata (typical for STT results).
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `TEXT_SLICE_TOO_LARGE` — requested slice exceeds the native cap.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getOfflineTextBufferSpatialSpansSlice(
   bufferId: OfflineTextBufferIdSource,
@@ -1112,6 +1157,9 @@ export async function getOfflineTextBufferSpatialSpansSlice(
 
 /**
  * Get the language string from an offline text buffer.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getOfflineTextBufferLang(
   bufferId: OfflineTextBufferIdSource
@@ -1122,6 +1170,9 @@ export async function getOfflineTextBufferLang(
 
 /**
  * Get the emotion string from an offline text buffer.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getOfflineTextBufferEmotion(
   bufferId: OfflineTextBufferIdSource
@@ -1132,6 +1183,9 @@ export async function getOfflineTextBufferEmotion(
 
 /**
  * Get the event string from an offline text buffer.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed offline id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getOfflineTextBufferEvent(
   bufferId: OfflineTextBufferIdSource
@@ -1142,6 +1196,10 @@ export async function getOfflineTextBufferEvent(
 
 /**
  * Get a slice of partial text from a live text buffer (for debug/UI).
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getLiveTextBufferPartialSlice(
   liveBufferId: LiveTextBufferIdSource,
@@ -1154,7 +1212,12 @@ export async function getLiveTextBufferPartialSlice(
 
 const MAX_SEGMENT_EVENT_TEXT_CHARS = 4096;
 
-/** Commit a text segment to a live text buffer segment log. */
+/**
+ * Commit a text segment to a live text buffer segment log.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native append failed.
+ */
 export async function appendLiveTextSegment(
   liveBufferId: LiveTextBufferIdSource,
   text: string,
@@ -1196,6 +1259,11 @@ export async function appendLiveTextSegment(
 /**
  * Read committed live text segments by index window.
  * tokens/timestamps are omitted by default unless explicitly requested.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_SLICE_INVALID` — start or count is out of range.
+ * @throws {Error} `TEXT_SLICE_TOO_LARGE` — requested window exceeds the native cap.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native read failed.
  */
 export async function getLiveTextBufferSegments(
   liveBufferId: LiveTextBufferIdSource,
@@ -1234,7 +1302,12 @@ export async function getLiveTextBufferSegments(
   }));
 }
 
-/** Return number of committed segments currently retained in the live segment log. */
+/**
+ * Return number of committed segments currently retained in the live segment log.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed live id.
+ * @throws {Error} `TEXT_BUFFER_NOT_FOUND` — buffer was released.
+ * @throws {Error} `TEXT_INTERNAL_ERROR` — native count failed.
+ */
 export async function getLiveTextBufferSegmentCount(
   liveBufferId: LiveTextBufferIdSource
 ): Promise<number> {
@@ -1306,5 +1379,6 @@ export {
 /**
  * Resolve a text buffer source to a native buffer ID string.
  * Accepts buffer references, info objects, handles, or raw strings.
+ * @throws {Error} `TEXT_INVALID_ARGUMENT` — id is not `txt_off_<uuid>` or `txt_live_<uuid>`.
  */
 export { resolvePipelineTextBufferId, resolveOfflineTextBufferId };

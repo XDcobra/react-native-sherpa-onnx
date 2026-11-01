@@ -303,6 +303,35 @@ export interface AlignmentEngineOptions {
 }
 
 export interface AlignmentEngine {
+  /**
+   * Force-align offline text onto offline audio and write spans into `segmentOut`.
+   * @throws {Error} `ALIGNMENT_ENGINE_DESTROYED` — called after `destroy()`.
+   * @throws {Error} `ALIGNMENT_OPTIONS_INVALID` — align options are malformed.
+   * @throws {Error} `ALIGNMENT_MODEL_PATH_INVALID` — custom model paths are incomplete or invalid.
+   * @throws {Error} `ALIGNMENT_GRANULARITY_INVALID` — requested granularity is not supported.
+   * @throws {Error} `ALIGNMENT_ASR_HYPOTHESIS_MISSING` — accurate mode has no ASR hypothesis.
+   * @throws {Error} `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS` — hypothesis has no timestamps.
+   * @throws {Error} `ALIGNMENT_MODEL_MISSING` — auto mode resolved an empty model directory.
+   * @throws {Error} `ALIGNMENT_MODEL_LOAD_FAILED` — alignment model could not be loaded.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — VAD/segmentation options are invalid.
+   * @throws {Error} `ALIGNMENT_LINKER_INPUT_INVALID` — linker inputs are malformed.
+   * @throws {Error} `ALIGNMENT_LINKER_FAILED` — linker could not produce a mapping.
+   * @throws {Error} `ALIGNMENT_LINKER_NO_MAPPING` — linker produced no usable mapping.
+   * @throws {Error} `ALIGNMENT_ANCHOR_OUT_OF_RANGE` — an alignment anchor is outside the audio.
+   * @throws {Error} `ALIGNMENT_FORCED_CTC_STUCK` — forced CTC cursor made no progress.
+   * @throws {Error} `ALIGNMENT_FORCED_CTC_FAILED` — native forced CTC failed.
+   * @throws {Error} `ALIGNMENT_NATIVE_ACCURATE_FAILED` — native accurate align failed.
+   * @throws {Error} `ALIGNMENT_NATIVE_UNKNOWN` — native returned an unknown alignment error.
+   * @throws {Error} `ALIGNMENT_CONSTRAINED_ACCURATE_ERROR` — constrained accurate pass failed.
+   * @throws {Error} `ALIGNMENT_ERROR` — VAD helper or native align failed.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_NOT_FOUND` — text buffer is unknown.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH` — text buffer is not offline.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_EMPTY` — text buffer has no content.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH` — audio buffer is not offline.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   */
   alignTextToAudio: AlignTextToAudioFn;
   destroy(): Promise<void>;
 }

@@ -81,6 +81,12 @@ function normalizeCustomModelPathRequirements(
   return { fields };
 }
 
+/**
+ * Validate custom-init path keys for a category + model type.
+ * Schema / missing-field failures return `{ ok: false }` and do not throw.
+ *
+ * @throws {Error} `VALIDATE_ERROR` — native custom-path validation failed.
+ */
 export async function validateCustomModelPaths(
   category: CustomModelPathCategory | string,
   modelType: string,

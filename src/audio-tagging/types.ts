@@ -144,7 +144,17 @@ export interface AudioTaggingLivePipelineOptions
 export interface AudioTaggingEngine {
   readonly instanceId: string;
 
-  /** Mode 1: Offline oneshot. Mode 2: Offline segmented when segmentation.mode=auto. */
+  /**
+   * Mode 1: Offline oneshot. Mode 2: Offline segmented when segmentation.mode=auto.
+   * @throws {Error} `AUDIO_TAGGING_DESTROYED` — engine was destroyed.
+   * @throws {Error} `AUDIO_TAGGING_INVALID_ARGUMENT` — audio or options are invalid.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — segmented auto policy fields are invalid.
+   * @throws {Error} `AUDIO_TAGGING_TAG_FAILED` — native tag failed.
+   * @throws {Error} `AUDIO_TAGGING_NOT_INITIALIZED` — engine is not initialized.
+   * @throws {Error} `AUDIO_TAGGING_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `AUDIO_TAGGING_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `AUDIO_TAGGING_OFFLINE_OOM` — native ran out of memory.
+   */
   tag(
     offlineAudio: OfflineAudioBufferIdSource,
     options?: AudioTaggingTagOptions
@@ -153,6 +163,10 @@ export interface AudioTaggingEngine {
   /**
    * Mode 3: Live overload — mandatory segmentation; commits primary event name
    * (+ meta top-K) into LiveText; optional live targetSegmentBuffer.
+   * @throws {Error} `AUDIO_TAGGING_DESTROYED` — engine was destroyed.
+   * @throws {Error} `AUDIO_TAGGING_INVALID_ARGUMENT` — live/offline overload mismatch or bad buffers.
+   * @throws {Error} `AUDIO_TAGGING_TAG_FAILED` — live tag pipeline failed.
+   * @throws {Error} `LIVE_OFFLINE_SEGMENTATION_REQUIRED` — live path requires a segmentation policy.
    */
   tag(
     audioIn: LiveAudioBufferIdSource,
