@@ -189,12 +189,111 @@ export type AlignTextToAudioOptions =
 
 export type { OrchestrationProgress };
 
-export type AlignTextToAudioFn = (
-  textIn: OfflineTextBufferIdSource,
-  audioIn: OfflineAudioBufferIdSource,
-  segmentOut: OfflineSegmentBufferIdSource,
-  options: AlignTextToAudioOptions
-) => Promise<AlignTextToAudioWriteResult>;
+/**
+ * `alignTextToAudio` overloads by `options.mode`. No catch-all union — hover
+ * shows only the codes for the mode you call (same pattern as STT `transcribe`).
+ */
+export interface AlignTextToAudioFn {
+  /**
+   * Duration × text-weight. No model, no VAD.
+   * @throws {Error} `ALIGNMENT_ENGINE_DESTROYED` — called after `destroy()`.
+   * @throws {Error} `ALIGNMENT_OPTIONS_INVALID` — options are malformed.
+   * @throws {Error} `ALIGNMENT_GRANULARITY_INVALID` — not `sentence` or `word`.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_NOT_FOUND` — text buffer is unknown.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH` — text buffer is not offline.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_EMPTY` — text buffer has no content.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH` — audio buffer is not offline.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `ALIGNMENT_ERROR` — native proportional align failed.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   */
+  (
+    textIn: OfflineTextBufferIdSource,
+    audioIn: OfflineAudioBufferIdSource,
+    segmentOut: OfflineSegmentBufferIdSource,
+    options: AlignTextToAudioOptionsProportional
+  ): Promise<AlignTextToAudioWriteResult>;
+
+  /**
+   * Use caller-supplied chunk sample counts.
+   * @throws {Error} `ALIGNMENT_ENGINE_DESTROYED` — called after `destroy()`.
+   * @throws {Error} `ALIGNMENT_OPTIONS_INVALID` — `chunks` or options are malformed.
+   * @throws {Error} `ALIGNMENT_GRANULARITY_INVALID` — not `sentence` or `word`.
+   * @throws {Error} `ALIGNMENT_CHUNKS_MISSING` — native estimated path has no sample counts.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_NOT_FOUND` — text buffer is unknown.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH` — text buffer is not offline.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_EMPTY` — text buffer has no content.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH` — audio buffer is not offline.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `ALIGNMENT_ERROR` — native estimated align failed.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   */
+  (
+    textIn: OfflineTextBufferIdSource,
+    audioIn: OfflineAudioBufferIdSource,
+    segmentOut: OfflineSegmentBufferIdSource,
+    options: AlignTextToAudioOptionsEstimated
+  ): Promise<AlignTextToAudioWriteResult>;
+
+  /**
+   * VAD-anchored timing, no CTC model.
+   * @throws {Error} `ALIGNMENT_ENGINE_DESTROYED` — called after `destroy()`.
+   * @throws {Error} `ALIGNMENT_OPTIONS_INVALID` — `segmentation` is missing or malformed.
+   * @throws {Error} `ALIGNMENT_GRANULARITY_INVALID` — not `sentence` or `word`.
+   * @throws {Error} `ALIGNMENT_ERROR` — VAD helper failed or segmentation is missing.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — `segmentation.mode` is `manual`.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_NOT_FOUND` — text buffer is unknown.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH` — text buffer is not offline.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_EMPTY` — text buffer has no content.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH` — audio buffer is not offline.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   */
+  (
+    textIn: OfflineTextBufferIdSource,
+    audioIn: OfflineAudioBufferIdSource,
+    segmentOut: OfflineSegmentBufferIdSource,
+    options: AlignTextToAudioOptionsVad
+  ): Promise<AlignTextToAudioWriteResult>;
+
+  /**
+   * wav2vec2 CTC (`accurate`). Linker / forced-CTC / native only on this path.
+   * @throws {Error} `ALIGNMENT_ENGINE_DESTROYED` — called after `destroy()`.
+   * @throws {Error} `ALIGNMENT_OPTIONS_INVALID` — options or accurate segmentation are malformed.
+   * @throws {Error} `ALIGNMENT_GRANULARITY_INVALID` — granularity is not valid for this accurate path.
+   * @throws {Error} `ALIGNMENT_MODEL_PATH_INVALID` — custom paths or `modelSource` are invalid.
+   * @throws {Error} `ALIGNMENT_MODEL_MISSING` — auto mode resolved an empty model directory.
+   * @throws {Error} `ALIGNMENT_MODEL_LOAD_FAILED` — alignment model could not be loaded.
+   * @throws {Error} `ALIGNMENT_ASR_HYPOTHESIS_MISSING` — `asr_mediated` has no hypothesis buffer.
+   * @throws {Error} `ALIGNMENT_ASR_HYPOTHESIS_MISSING_TIMESTAMPS` — hypothesis has no timestamps.
+   * @throws {Error} `SEGMENTATION_POLICY_INVALID` — `segmentation.mode` is `manual`.
+   * @throws {Error} `ALIGNMENT_LINKER_INPUT_INVALID` — linker inputs are malformed.
+   * @throws {Error} `ALIGNMENT_LINKER_FAILED` — linker could not produce a mapping.
+   * @throws {Error} `ALIGNMENT_LINKER_NO_MAPPING` — linker produced no usable mapping.
+   * @throws {Error} `ALIGNMENT_ANCHOR_OUT_OF_RANGE` — an alignment anchor is outside the audio.
+   * @throws {Error} `ALIGNMENT_FORCED_CTC_STUCK` — forced CTC cursor made no progress.
+   * @throws {Error} `ALIGNMENT_FORCED_CTC_FAILED` — native forced CTC failed.
+   * @throws {Error} `ALIGNMENT_NATIVE_ACCURATE_FAILED` — native accurate align failed.
+   * @throws {Error} `ALIGNMENT_NATIVE_UNKNOWN` — native returned an unknown alignment error.
+   * @throws {Error} `ALIGNMENT_CONSTRAINED_ACCURATE_ERROR` — constrained accurate pass failed.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_NOT_FOUND` — text buffer is unknown.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_KIND_MISMATCH` — text buffer is not offline.
+   * @throws {Error} `ALIGNMENT_TEXT_BUFFER_EMPTY` — text buffer has no content.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH` — audio buffer is not offline.
+   * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   */
+  (
+    textIn: OfflineTextBufferIdSource,
+    audioIn: OfflineAudioBufferIdSource,
+    segmentOut: OfflineSegmentBufferIdSource,
+    options: AlignTextToAudioOptionsAccurate
+  ): Promise<AlignTextToAudioWriteResult>;
+}
 
 export type AlignmentErrorCode =
   | 'OFFLINE_OOM'

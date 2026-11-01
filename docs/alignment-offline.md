@@ -327,9 +327,15 @@ alignTextToAudio(
   textIn: OfflineTextBufferIdSource,
   audioIn: OfflineAudioBufferIdSource,
   segmentOut: OfflineSegmentBufferIdSource,
-  options: AlignTextToAudioOptions
+  options:
+    | AlignTextToAudioOptionsProportional
+    | AlignTextToAudioOptionsEstimated
+    | AlignTextToAudioOptionsVad
+    | AlignTextToAudioOptionsAccurate
 ): Promise<AlignTextToAudioWriteResult>;
 ```
+
+Four TypeScript overloads (no catch-all). Hover lists only the error codes for that `mode`.
 
 ```ts
 const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {

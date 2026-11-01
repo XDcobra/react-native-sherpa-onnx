@@ -16,10 +16,13 @@ import {
   resolveAlignmentOnnxPath,
 } from './resolveAlignmentOnnxPath';
 import type {
-  AlignTextToAudioFn,
   AlignTextToAudioOptions,
+  AlignTextToAudioWriteResult,
   AlignmentGranularity,
 } from './types';
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import type { OfflineSegmentBufferIdSource } from '../segmentbuffer/types';
+import type { OfflineTextBufferIdSource } from '../textbuffer/types';
 
 type NativeAlignmentMode = 'proportional' | 'estimated' | 'accurate' | 'vad';
 type NativeGranularity = 'sentence' | 'word' | 'character';
@@ -138,12 +141,12 @@ async function buildNativeOptions(
 /**
  * Build alignment segments into a caller-provided offline segment buffer.
  */
-export const runAlignTextToAudio: AlignTextToAudioFn = async (
-  textIn,
-  audioIn,
-  segmentOut,
-  options
-) => {
+export async function runAlignTextToAudio(
+  textIn: OfflineTextBufferIdSource,
+  audioIn: OfflineAudioBufferIdSource,
+  segmentOut: OfflineSegmentBufferIdSource,
+  options: AlignTextToAudioOptions
+): Promise<AlignTextToAudioWriteResult> {
   if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
     const onProgress = options.onProgress;
     const model = accurateOptionsToModelConfig(options);
@@ -227,4 +230,4 @@ export const runAlignTextToAudio: AlignTextToAudioFn = async (
     granularity,
     nativeOptions
   );
-};
+}
