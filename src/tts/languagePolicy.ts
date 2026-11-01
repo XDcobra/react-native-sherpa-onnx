@@ -4,13 +4,15 @@ import type { TtsLexiconLanguage } from '../types/modelDetect';
 /**
  * TTS language mechanisms (compact reference for app/UI code).
  *
- * - **`lexiconLanguageId` (init):** selects which `lexicon-*.txt` is loaded (vits, matcha, kokoro,
- *   zipvoice). Re-init to change.
- * - **`modelOptions.kokoro.lang` (init):** Kokoro-only. Not lexicon, not eSpeak `data_dir`.
+ * - **`lexiconLanguageId` (init):** selects which `lexicon.txt` / `lexicon-*.txt` is loaded
+ *   (vits, matcha, kokoro, kitten, zipvoice). Re-init to change.
+ * - **`modelOptions.kokoro.lang` (init):** Kokoro-only. Ignored by sherpa-onnx 2.0.1 as an
+ *   espeak substitute; kept for API compatibility.
  * - **`synthesize({ lang })` (runtime):** `extra["lang"]`. Effective: kokoro and supertonic only.
  * - **Detect `languages`:** catalog/name hints for UI — not an engine switch.
  *
- * eSpeak (`espeak-ng-data` / `data_dir`) is configured at init; vits/kitten do not honor runtime `lang`.
+ * Raw text needs a lexicon file (in the model folder for auto-init, or `customConfig.lexicon`).
+ * `espeak-ng-data` is ignored. vits/matcha/kitten do not honor runtime `lang`.
  */
 
 export type TtsLanguageMechanism =
@@ -22,6 +24,7 @@ const LEXICON_MODEL_TYPES: ReadonlySet<TTSModelType> = new Set([
   'vits',
   'matcha',
   'kokoro',
+  'kitten',
   'zipvoice',
 ]);
 
@@ -30,7 +33,7 @@ const SYNTHESIS_LANG_MODEL_TYPES: ReadonlySet<TTSModelType> = new Set([
   'supertonic',
 ]);
 
-/** Init can select a lexicon file by id (vits, matcha, kokoro, zipvoice). */
+/** Init can select a lexicon file by id (vits, matcha, kokoro, kitten, zipvoice). */
 export function supportsLexiconLanguageId(
   modelType: TTSModelType | undefined
 ): boolean {

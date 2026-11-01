@@ -2805,6 +2805,8 @@ export interface Spec extends TurboModule {
       lang?: string;
       numSteps?: number;
       silenceScale?: number;
+      phonemeCodepoints?: Object;
+      tokens?: Object;
       referenceAudioBufferId?: string;
       referenceText?: string;
     }

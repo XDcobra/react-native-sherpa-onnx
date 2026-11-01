@@ -1,4 +1,7 @@
-import { buildTtsInitBridgeOptions } from '../ttsNativeBridge';
+import {
+  buildTtsInitBridgeOptions,
+  toNativeSynthesisOptions,
+} from '../ttsNativeBridge';
 
 jest.mock('../../detect/resolveModelInput', () => ({
   resolveFileSourceForModelInit: jest.fn(async () => '/models/vits-piper-en'),
@@ -46,5 +49,51 @@ describe('ttsNativeBridge', () => {
       tokens: '/tokens.txt',
     });
     expect(bridge.modelType).toBe('vits');
+  });
+
+  it('buildTtsInitBridgeOptions maps kitten customConfig without dataDir', async () => {
+    const { resolveTtsCustomConfigPaths } = jest.requireMock('../customConfig');
+    resolveTtsCustomConfigPaths.mockResolvedValueOnce({
+      ttsModel: '/kitten.onnx',
+      tokens: '/tokens.txt',
+      voices: '/voices.bin',
+      lexicon: '/lexicon-en-us.txt',
+    });
+    const bridge = await buildTtsInitBridgeOptions({
+      initMode: 'custom',
+      modelType: 'kitten',
+      customConfig: {
+        ttsModel: { kind: 'fs', path: '/kitten.onnx' },
+        tokens: { kind: 'fs', path: '/tokens.txt' },
+        voices: { kind: 'fs', path: '/voices.bin' },
+        lexicon: { kind: 'fs', path: '/lexicon-en-us.txt' },
+      },
+    });
+    expect(bridge.modelPaths).toEqual({
+      ttsModel: '/kitten.onnx',
+      tokens: '/tokens.txt',
+      voices: '/voices.bin',
+      lexicon: '/lexicon-en-us.txt',
+    });
+    expect(bridge.modelPaths).not.toHaveProperty('dataDir');
+  });
+
+  it('toNativeSynthesisOptions forwards phonemeCodepoints and tokens', () => {
+    expect(
+      toNativeSynthesisOptions({
+        sid: 0,
+        phonemeCodepoints: [[116, 601, 100]],
+      })
+    ).toEqual({
+      sid: 0,
+      phonemeCodepoints: [[116, 601, 100]],
+    });
+    expect(
+      toNativeSynthesisOptions({
+        tokens: [['ð', 'ə']],
+      })
+    ).toEqual({
+      tokens: [['ð', 'ə']],
+    });
   });
 });

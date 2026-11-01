@@ -8,7 +8,6 @@ jest.mock('../../detect/validateCustomModelPaths', () => {
       fields: [
         { key: 'ttsModel', required: true, kind: 'file' },
         { key: 'tokens', required: true, kind: 'file' },
-        { key: 'dataDir', required: false, kind: 'dir' },
         { key: 'lexicon', required: false, kind: 'file' },
       ],
     })),
@@ -70,7 +69,6 @@ describe('resolveTtsCustomConfigPaths', () => {
       fields: [
         { key: 'ttsModel', required: true, kind: 'file' },
         { key: 'tokens', required: true, kind: 'file' },
-        { key: 'dataDir', required: false, kind: 'dir' },
         { key: 'lexicon', required: false, kind: 'file' },
       ],
     });
@@ -97,5 +95,70 @@ describe('resolveTtsCustomConfigPaths', () => {
       tokens: '/tokens.txt',
     });
     expect(mockValidate).toHaveBeenCalled();
+  });
+
+  it('rejects dataDir for vits after espeak removal', async () => {
+    await expect(
+      resolveTtsCustomConfigPaths('vits', {
+        ttsModel: fsPath('/model.onnx'),
+        tokens: fsPath('/tokens.txt'),
+        dataDir: fsPath('/espeak-ng-data'),
+      } as never)
+    ).rejects.toThrow(TtsErrorCode.INVALID_ARGUMENT);
+  });
+
+  it('accepts optional Kitten lexicon and rejects dataDir', async () => {
+    mockGetRequirements.mockResolvedValue({
+      fields: [
+        { key: 'ttsModel', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+        { key: 'voices', required: true, kind: 'file' },
+        { key: 'lexicon', required: false, kind: 'file' },
+      ],
+    });
+    const paths = await resolveTtsCustomConfigPaths('kitten', {
+      ttsModel: fsPath('/kitten.onnx'),
+      tokens: fsPath('/tokens.txt'),
+      voices: fsPath('/voices.bin'),
+      lexicon: fsPath('/lexicon-en-us.txt'),
+    });
+    expect(paths).toEqual({
+      ttsModel: '/kitten.onnx',
+      tokens: '/tokens.txt',
+      voices: '/voices.bin',
+      lexicon: '/lexicon-en-us.txt',
+    });
+    await expect(
+      resolveTtsCustomConfigPaths('kitten', {
+        ttsModel: fsPath('/kitten.onnx'),
+        tokens: fsPath('/tokens.txt'),
+        voices: fsPath('/voices.bin'),
+        dataDir: fsPath('/espeak-ng-data'),
+      } as never)
+    ).rejects.toThrow(TtsErrorCode.INVALID_ARGUMENT);
+  });
+
+  it('accepts zipvoice customConfig without dataDir', async () => {
+    mockGetRequirements.mockResolvedValue({
+      fields: [
+        { key: 'encoder', required: true, kind: 'file' },
+        { key: 'decoder', required: true, kind: 'file' },
+        { key: 'vocoder', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+        { key: 'lexicon', required: false, kind: 'file' },
+      ],
+    });
+    const paths = await resolveTtsCustomConfigPaths('zipvoice', {
+      encoder: fsPath('/enc.onnx'),
+      decoder: fsPath('/dec.onnx'),
+      vocoder: fsPath('/voc.onnx'),
+      tokens: fsPath('/tokens.txt'),
+    });
+    expect(paths).toEqual({
+      encoder: '/enc.onnx',
+      decoder: '/dec.onnx',
+      vocoder: '/voc.onnx',
+      tokens: '/tokens.txt',
+    });
   });
 });

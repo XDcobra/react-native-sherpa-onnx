@@ -98,9 +98,9 @@ export type TtsExecutionProvider =
 // See `languagePolicy.ts`: lexicon file at init (`lexiconLanguageId`), Kokoro init lang
 // (`modelOptions.kokoro.lang`), runtime lang (`synthesize({ lang })` → extra["lang"]).
 //
-// Lexikon-Wechsel ⇒ re-init. eSpeak (data_dir) is init-only — not synthesize.lang. Runtime lang
-// is effective for kokoro + supertonic only; vits/matcha/kitten ignore extra["lang"]. Detect
-// `languages` is catalog metadata only. synthesize.lang does not replace lexicon file selection.
+// Lexikon-Wechsel ⇒ re-init. Runtime lang is effective for kokoro + supertonic only;
+// vits/matcha/kitten ignore extra["lang"]. Detect `languages` is catalog metadata only.
+// synthesize.lang does not replace lexicon file selection. espeak-ng-data is ignored.
 
 // ========== Model-specific options (only applied when that model type is loaded) ==========
 
@@ -134,7 +134,7 @@ export interface TtsKokoroModelOptions {
   lengthScale?: number;
   /**
    * Kokoro init language / voice hint (`config.model.kokoro.lang`).
-   * Multi-Kokoro v2+: satisfies init when no lexicon path is set (upstream: lexicon or lang).
+   * sherpa-onnx 2.0.1 no longer treats this as an espeak substitute.
    * Default for synthesis unless overridden by `tts.synthesize({ lang })`.
    *
    * No-op for non-kokoro model types. Does not load a different lexicon file — use
@@ -239,11 +239,14 @@ export type TTSAutoInitOptionsBase = TTSInitOptionsShared & {
   /**
    * Which detected lexicon file to load at init, from `detectTtsModel().lexiconLanguages`
    *
-   * Supported model types: `vits`, `matcha`, `kokoro`, `zipvoice`. No-op for `kitten` (no lexicon
-   * field), `pocket`, `supertonic`. Changing this requires a new `createTTS()` (engine re-init).
+   * Supported model types: `vits`, `matcha`, `kokoro`, `kitten`, `zipvoice`. No-op for
+   * `pocket` and `supertonic`. Changing this requires a new `createTTS()` (engine re-init).
    *
-   * Not the same as catalog `languages` hints or `synthesize({ lang })`. For VITS Piper, if the
-   * bundle uses `espeak-ng-data` (`data_dir`), upstream may ignore `lexicon` when `data_dir` is set.
+   * Auto-detect only sees `lexicon.txt` / `lexicon-*.txt` **inside** `modelSource`
+   * (e.g. drop `lexicon-en-us.txt` into the Piper folder). A lexicon outside that
+   * directory must be passed as `customConfig.lexicon`.
+   *
+   * Not the same as catalog `languages` hints or `synthesize({ lang })`.
    */
   lexiconLanguageId?: string;
 };
@@ -410,12 +413,36 @@ export type TtsVoiceClonePocket = {
 export type TtsVoiceClone = TtsVoiceCloneZipvoice | TtsVoiceClonePocket;
 
 /**
+ * Pre-phonemized generate input. Exclusive: set one of these, not both.
+ * Runtime does not reject both — upstream yields empty audio / `TTS_GENERATE_ERROR`.
+ *
+ * These are **not** the init-time `tokens.txt` / `customConfig.tokens` vocabulary file.
+ */
+export type TtsPhonemeInput =
+  | {
+      /**
+       * Unicode codepoints of phonemes (`ch.codePointAt(0)`), one inner array per sentence.
+       * Not `tokens.txt` IDs. Honored for vits / matcha / kokoro / kitten. ZipVoice ignores this.
+       */
+      phonemeCodepoints: number[][];
+      tokens?: never;
+    }
+  | {
+      /**
+       * Phoneme strings for ZipVoice (and pinyin-like frontends), one inner array per sentence.
+       * Not the init-time `tokens.txt` path.
+       */
+      tokens: string[][];
+      phonemeCodepoints?: never;
+    };
+
+/**
  * Options for buffer-to-buffer TTS synthesis via `tts.synthesize()`.
  * No subtitle/alignment options — those are separate modules.
  *
  * **Language:** `lang` is forwarded as `GenerationConfig.extra["lang"]` when the native batch path
  * uses `generateWithConfig`. Upstream **honors** it only for `kokoro` and `supertonic`. For `vits`,
- * `matcha`, and `kitten` it is ignored (eSpeak is init-only via `data_dir`, not per-synthesis `lang`).
+ * `matcha`, and `kitten` it is ignored.
  * For `zipvoice` / `pocket`, use `voiceClone` and model-specific `extra` keys — not `lang`.
  * Use {@link supportsSynthesisLang} from `./languagePolicy` before UI promises.
  *
@@ -426,6 +453,9 @@ export type TtsVoiceClone = TtsVoiceCloneZipvoice | TtsVoiceClonePocket;
  * Setting it on vits / matcha / kokoro / kitten throws `TTS_NUM_STEPS_UNSUPPORTED`.
  * Omit to keep the upstream default. See {@link supportsNumSteps} / {@link requiresVoiceCloneForNumSteps}.
  * `silenceScale` applies with `voiceClone` (and GenerationConfig paths that honor it).
+ *
+ * **Phonemes:** Prefer a lexicon at init + raw text. `phonemeCodepoints` / `tokens` are
+ * a power-user escape hatch (empty text buffer is ignored when they are set).
  */
 export type TtsSynthesisOptions = {
   sid?: number;
@@ -454,7 +484,7 @@ export type TtsSynthesisOptions = {
   overlapChars?: number;
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;
-};
+} & Partial<TtsPhonemeInput>;
 
 export interface TtsSynthesisResult {
   status: 'complete' | 'partial' | 'failed';
@@ -474,7 +504,7 @@ export interface TtsSynthesisResult {
  * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
  * See: docs/migration/liveOverload/offline-stt-live-pipeline-mandatory-segmentation.md
  */
-export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
+export type TtsLivePipelineOptions = LiveOfflinePipelineBaseOptions & {
   /** Speaker ID for the entire pipeline. Default 0. Overridable per-segment via `segment.meta.sid`. */
   sid?: number;
   /** Speed multiplier. Default 1.0. Overridable per-segment via `segment.meta.speed`. */
@@ -504,7 +534,7 @@ export interface TtsLivePipelineOptions extends LiveOfflinePipelineBaseOptions {
    * Same constraints as STT's `onSegment` (worker thread, no `onPartial`).
    */
   onSegment?: (segment: SpeechSegment) => void;
-}
+} & Partial<TtsPhonemeInput>;
 
 /**
  * Instance-based batch TTS engine returned by createTTS().
