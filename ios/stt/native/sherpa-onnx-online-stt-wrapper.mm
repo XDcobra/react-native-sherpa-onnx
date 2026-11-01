@@ -174,9 +174,15 @@ static OnlineSttInitResult createOnlineRecognizerFromPaths(
 
     try {
         sherpa_onnx::cxx::OnlineRecognizer rec = sherpa_onnx::cxx::OnlineRecognizer::Create(config);
+        if (rec.Get() == nullptr) {
+            result.error = "OnlineRecognizer::Create returned null";
+            LOGE("[SherpaOnnx:init] online-stt Create Get()==null branch=reject");
+            return result;
+        }
         recognizerOut = std::make_unique<sherpa_onnx::cxx::OnlineRecognizer>(std::move(rec));
         sampleRateOut = config.feat_config.sample_rate;
         result.success = true;
+        LOGO("[SherpaOnnx:init] online-stt Create Get() ok");
     } catch (const std::exception& e) {
         result.error = std::string("OnlineRecognizer Create failed: ") + e.what();
         LOGE("%s", result.error.c_str());

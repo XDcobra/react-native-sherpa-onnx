@@ -7,6 +7,15 @@
 
 #include "sherpa-onnx/c-api/cxx-api.h"
 
+#ifdef __APPLE__
+#include <Foundation/Foundation.h>
+#define ENH_LOGI(fmt, ...) NSLog(@"[SherpaOnnx:init] " fmt, ##__VA_ARGS__)
+#define ENH_LOGE(fmt, ...) NSLog(@"[SherpaOnnx:init] " fmt, ##__VA_ARGS__)
+#else
+#define ENH_LOGI(...)
+#define ENH_LOGE(...)
+#endif
+
 namespace sherpaonnx {
 namespace {
 
@@ -129,8 +138,15 @@ EnhancementInitializeResult EnhancementWrapper::initialize(
 
     sherpa_onnx::cxx::OfflineSpeechDenoiserConfig config;
     config.model = BuildModelConfig(detect, numThreads, provider, debug);
-    pImpl->denoiser = sherpa_onnx::cxx::OfflineSpeechDenoiser::Create(config);
+    auto created = sherpa_onnx::cxx::OfflineSpeechDenoiser::Create(config);
+    if (created.Get() == nullptr) {
+        result.error = "OfflineSpeechDenoiser::Create returned null";
+        ENH_LOGE("enhancement Create Get()==null branch=reject");
+        return result;
+    }
+    pImpl->denoiser = std::move(created);
     pImpl->initialized = true;
+    ENH_LOGI("enhancement Create Get() ok");
 
     result.success = true;
     result.sampleRate = pImpl->denoiser->GetSampleRate();
@@ -166,8 +182,15 @@ EnhancementInitializeResult EnhancementWrapper::initializeCustom(
 
     sherpa_onnx::cxx::OfflineSpeechDenoiserConfig config;
     config.model = BuildModelConfigFromPaths(selectedKind, paths, numThreads, provider, debug);
-    pImpl->denoiser = sherpa_onnx::cxx::OfflineSpeechDenoiser::Create(config);
+    auto created = sherpa_onnx::cxx::OfflineSpeechDenoiser::Create(config);
+    if (created.Get() == nullptr) {
+        result.error = "OfflineSpeechDenoiser::Create returned null";
+        ENH_LOGE("enhancement custom Create Get()==null branch=reject");
+        return result;
+    }
+    pImpl->denoiser = std::move(created);
     pImpl->initialized = true;
+    ENH_LOGI("enhancement custom Create Get() ok");
 
     result.success = true;
     result.sampleRate = pImpl->denoiser->GetSampleRate();
@@ -178,7 +201,7 @@ EnhancedAudioResult EnhancementWrapper::runSamples(
     const std::vector<float>& samples,
     int32_t sampleRate
 ) {
-    if (!pImpl->initialized || !pImpl->denoiser.has_value()) {
+    if (!pImpl->initialized || !pImpl->denoiser.has_value() || pImpl->denoiser->Get() == nullptr) {
         return {};
     }
     return ToEnhancedAudioResult(
@@ -187,7 +210,7 @@ EnhancedAudioResult EnhancementWrapper::runSamples(
 }
 
 int32_t EnhancementWrapper::getSampleRate() const {
-    if (!pImpl->initialized || !pImpl->denoiser.has_value()) return 0;
+    if (!pImpl->initialized || !pImpl->denoiser.has_value() || pImpl->denoiser->Get() == nullptr) return 0;
     return pImpl->denoiser->GetSampleRate();
 }
 
@@ -241,8 +264,15 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initialize(
 
     sherpa_onnx::cxx::OnlineSpeechDenoiserConfig config;
     config.model = BuildModelConfig(detect, numThreads, provider, debug);
-    pImpl->denoiser = sherpa_onnx::cxx::OnlineSpeechDenoiser::Create(config);
+    auto created = sherpa_onnx::cxx::OnlineSpeechDenoiser::Create(config);
+    if (created.Get() == nullptr) {
+        result.error = "OnlineSpeechDenoiser::Create returned null";
+        ENH_LOGE("online-enhancement Create Get()==null branch=reject");
+        return result;
+    }
+    pImpl->denoiser = std::move(created);
     pImpl->initialized = true;
+    ENH_LOGI("online-enhancement Create Get() ok");
 
     result.success = true;
     result.sampleRate = pImpl->denoiser->GetSampleRate();
@@ -279,8 +309,15 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initializeCustom(
 
     sherpa_onnx::cxx::OnlineSpeechDenoiserConfig config;
     config.model = BuildModelConfigFromPaths(selectedKind, paths, numThreads, provider, debug);
-    pImpl->denoiser = sherpa_onnx::cxx::OnlineSpeechDenoiser::Create(config);
+    auto created = sherpa_onnx::cxx::OnlineSpeechDenoiser::Create(config);
+    if (created.Get() == nullptr) {
+        result.error = "OnlineSpeechDenoiser::Create returned null";
+        ENH_LOGE("online-enhancement custom Create Get()==null branch=reject");
+        return result;
+    }
+    pImpl->denoiser = std::move(created);
     pImpl->initialized = true;
+    ENH_LOGI("online-enhancement custom Create Get() ok");
 
     result.success = true;
     result.sampleRate = pImpl->denoiser->GetSampleRate();
@@ -292,7 +329,7 @@ EnhancedAudioResult OnlineEnhancementWrapper::runSamples(
     const std::vector<float>& samples,
     int32_t sampleRate
 ) {
-    if (!pImpl->initialized || !pImpl->denoiser.has_value()) {
+    if (!pImpl->initialized || !pImpl->denoiser.has_value() || pImpl->denoiser->Get() == nullptr) {
         return {};
     }
     return ToEnhancedAudioResult(
@@ -301,24 +338,24 @@ EnhancedAudioResult OnlineEnhancementWrapper::runSamples(
 }
 
 EnhancedAudioResult OnlineEnhancementWrapper::flush() {
-    if (!pImpl->initialized || !pImpl->denoiser.has_value()) {
+    if (!pImpl->initialized || !pImpl->denoiser.has_value() || pImpl->denoiser->Get() == nullptr) {
         return {};
     }
     return ToEnhancedAudioResult(pImpl->denoiser->Flush());
 }
 
 void OnlineEnhancementWrapper::reset() {
-    if (!pImpl->initialized || !pImpl->denoiser.has_value()) return;
+    if (!pImpl->initialized || !pImpl->denoiser.has_value() || pImpl->denoiser->Get() == nullptr) return;
     pImpl->denoiser->Reset();
 }
 
 int32_t OnlineEnhancementWrapper::getSampleRate() const {
-    if (!pImpl->initialized || !pImpl->denoiser.has_value()) return 0;
+    if (!pImpl->initialized || !pImpl->denoiser.has_value() || pImpl->denoiser->Get() == nullptr) return 0;
     return pImpl->denoiser->GetSampleRate();
 }
 
 int32_t OnlineEnhancementWrapper::getFrameShiftInSamples() const {
-    if (!pImpl->initialized || !pImpl->denoiser.has_value()) return 0;
+    if (!pImpl->initialized || !pImpl->denoiser.has_value() || pImpl->denoiser->Get() == nullptr) return 0;
     return pImpl->denoiser->GetFrameShiftInSamples();
 }
 

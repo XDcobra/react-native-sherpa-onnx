@@ -67,6 +67,10 @@ bool ShouldRejectEmptyText(const std::string& text, bool allowEmpty) {
     return true;
 }
 
+bool HasLiveTtsHandle(const std::optional<sherpa_onnx::cxx::OfflineTts>& tts) {
+    return tts.has_value() && tts->Get() != nullptr;
+}
+
 }  // namespace
 
 class TtsWrapper::Impl {
@@ -249,13 +253,14 @@ TtsInitializeResult TtsWrapper::initialize(
         LOGI("TTS: modelDir=%s lexicon=%s", modelDir.c_str(),
              detect.paths.lexicon.empty() ? "(empty)" : detect.paths.lexicon.c_str());
         LOGI("TTS: Creating OfflineTts instance...");
-        pImpl->tts = sherpa_onnx::cxx::OfflineTts::Create(config);
-
-        if (!pImpl->tts.has_value()) {
-            result.error = "TTS: Failed to create OfflineTts instance (invalid model or missing files)";
-            LOGE("%s", result.error.c_str());
+        auto created = sherpa_onnx::cxx::OfflineTts::Create(config);
+        if (created.Get() == nullptr) {
+            result.error = "TTS: OfflineTts::Create returned null";
+            LOGE("[SherpaOnnx:init] tts Create Get()==null branch=reject");
             return result;
         }
+        pImpl->tts = std::move(created);
+        LOGI("[SherpaOnnx:init] tts Create Get() ok");
 
         pImpl->initialized = true;
         pImpl->modelDir = modelDir;
@@ -428,13 +433,14 @@ TtsInitializeResult TtsWrapper::initializeCustom(
         }
 
         LOGI("TTS: Creating OfflineTts instance (custom init)...");
-        pImpl->tts = sherpa_onnx::cxx::OfflineTts::Create(config);
-
-        if (!pImpl->tts.has_value()) {
-            result.error = "TTS: Failed to create OfflineTts instance (invalid model or missing files)";
-            LOGE("%s", result.error.c_str());
+        auto created = sherpa_onnx::cxx::OfflineTts::Create(config);
+        if (created.Get() == nullptr) {
+            result.error = "TTS: OfflineTts::Create returned null";
+            LOGE("[SherpaOnnx:init] tts custom Create Get()==null branch=reject");
             return result;
         }
+        pImpl->tts = std::move(created);
+        LOGI("[SherpaOnnx:init] tts custom Create Get() ok");
 
         pImpl->initialized = true;
         pImpl->modelDir = "custom";
@@ -463,7 +469,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     AudioResult result;
     result.sampleRate = 0;
 
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+    if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
         return result;
     }
@@ -504,7 +510,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     AudioResult result;
     result.sampleRate = 0;
 
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+    if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
         return result;
     }
@@ -554,7 +560,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         AudioResult result;
         result.sampleRate = 0;
 
-        if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
             LOGE("TTS: Not initialized. Call initialize() first.");
             return result;
         }
@@ -595,7 +601,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     AudioResult result;
     result.sampleRate = 0;
 
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+    if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
         return result;
     }
@@ -636,7 +642,7 @@ bool TtsWrapper::generateStream(
     float speed,
     const TtsStreamCallback& callback
 ) {
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+    if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
         return false;
     }
@@ -682,7 +688,7 @@ bool TtsWrapper::generateStream(
     const TtsStreamCallback& callback,
     int32_t numSteps
 ) {
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+    if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
         return false;
     }
@@ -736,7 +742,7 @@ bool TtsWrapper::generateStream(
         (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0) &&
         (cloning->apply_num_steps || !cloning->phoneme_codepoints.empty() ||
          !cloning->tokens.empty() || !cloning->extra.empty())) {
-        if (!pImpl->initialized || !pImpl->tts.has_value()) {
+        if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
             LOGE("TTS: Not initialized. Call initialize() first.");
             return false;
         }
@@ -781,7 +787,7 @@ bool TtsWrapper::generateStream(
         return generateStream(text, sid, speed, callback);
     }
 
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+    if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
         return false;
     }
@@ -827,7 +833,7 @@ bool TtsWrapper::generateStream(
 }
 
 int32_t TtsWrapper::getSampleRate() const {
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+    if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
         return 0;
     }
@@ -835,7 +841,7 @@ int32_t TtsWrapper::getSampleRate() const {
 }
 
 int32_t TtsWrapper::getNumSpeakers() const {
-    if (!pImpl->initialized || !pImpl->tts.has_value()) {
+    if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
         return 0;
     }

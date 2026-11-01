@@ -40,6 +40,12 @@ namespace sherpaonnx {
 
 namespace {
 
+bool HasLiveRecognizerHandle(
+    const std::optional<sherpa_onnx::cxx::OfflineRecognizer>& recognizer
+) {
+    return recognizer.has_value() && recognizer->Get() != nullptr;
+}
+
 /** Qwen3-ASR reads hotwords from the stream option "hotwords" (comma-separated), not from hotwords_file. */
 static std::string NormalizeQwen3HotwordsCsv(const std::string& s) {
     if (s.empty()) return "";
@@ -440,7 +446,15 @@ SttInitializeResult SttWrapper::initialize(
             LOGI("Initializing non-Whisper model");
         }
         try {
-            pImpl->recognizer = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
+            auto created = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
+            if (created.Get() == nullptr) {
+                result.success = false;
+                result.error = "OfflineRecognizer::Create returned null";
+                LOGE("[SherpaOnnx:init] stt Create Get()==null branch=reject");
+                return result;
+            }
+            pImpl->recognizer = std::move(created);
+            LOGI("[SherpaOnnx:init] stt Create Get() ok");
         } catch (const std::exception& e) {
             LOGE("Failed to create recognizer: %s", e.what());
             result.success = false;
@@ -729,7 +743,14 @@ SttInitializeResult SttWrapper::initializeCustom(
         }
 
         try {
-            pImpl->recognizer = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
+            auto created = sherpa_onnx::cxx::OfflineRecognizer::Create(config);
+            if (created.Get() == nullptr) {
+                result.error = "OfflineRecognizer::Create returned null";
+                LOGE("[SherpaOnnx:init] stt custom Create Get()==null branch=reject");
+                return result;
+            }
+            pImpl->recognizer = std::move(created);
+            LOGI("[SherpaOnnx:init] stt custom Create Get() ok");
         } catch (const std::exception& e) {
             result.error = std::string("INIT_ERROR: ") + e.what();
             return result;
@@ -766,7 +787,7 @@ SttRecognitionResult offlineResultToSttResult(const sherpa_onnx::cxx::OfflineRec
 }  // namespace
 
 SttRecognitionResult SttWrapper::transcribeFile(const std::string& filePath) {
-    if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
+    if (!pImpl->initialized || !HasLiveRecognizerHandle(pImpl->recognizer)) {
         LOGE("Not initialized. Call initialize() first.");
         throw std::runtime_error("STT not initialized. Call initialize() first.");
     }
@@ -834,7 +855,7 @@ SttRecognitionResult SttWrapper::transcribeFile(const std::string& filePath) {
 }
 
 SttRecognitionResult SttWrapper::transcribeSamples(const std::vector<float>& samples, int32_t sampleRate) {
-    if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
+    if (!pImpl->initialized || !HasLiveRecognizerHandle(pImpl->recognizer)) {
         LOGE("Not initialized. Call initialize() first.");
         throw std::runtime_error("STT not initialized. Call initialize() first.");
     }
@@ -865,7 +886,7 @@ SttRecognitionResult SttWrapper::transcribeSamples(const std::vector<float>& sam
 }
 
 SttRecognitionResult SttWrapper::transcribeSamplesChunked(const std::vector<float>& samples, int32_t sampleRate, int32_t chunkSize) {
-    if (!pImpl->initialized || !pImpl->recognizer.has_value()) {
+    if (!pImpl->initialized || !HasLiveRecognizerHandle(pImpl->recognizer)) {
         LOGE("Not initialized. Call initialize() first.");
         throw std::runtime_error("STT not initialized. Call initialize() first.");
     }
@@ -903,7 +924,7 @@ SttRecognitionResult SttWrapper::transcribeSamplesChunked(const std::vector<floa
 }
 
 void SttWrapper::setConfig(const SttRuntimeConfigOptions& options) {
-    if (!pImpl->initialized || !pImpl->recognizer.has_value() || !pImpl->lastConfig.has_value()) {
+    if (!pImpl->initialized || !HasLiveRecognizerHandle(pImpl->recognizer) || !pImpl->lastConfig.has_value()) {
         LOGE("Not initialized or no stored config.");
         throw std::runtime_error("STT not initialized. Call initialize() first.");
     }
