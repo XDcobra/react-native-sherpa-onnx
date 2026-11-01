@@ -27,6 +27,11 @@ int FpsFromTrack(const VideoTrackInfo& track) {
 void PackNv12(const Nv12View& nv12, std::vector<uint8_t>* packed) {
   const int w = nv12.width;
   const int h = nv12.height;
+  if (nv12.y.data == nullptr || nv12.uv.data == nullptr || w <= 0 || h <= 0 ||
+      nv12.y.stride < w || nv12.uv.stride < w) {
+    packed->clear();
+    return;
+  }
   const size_t yBytes = static_cast<size_t>(w) * static_cast<size_t>(h);
   const size_t uvBytes = static_cast<size_t>(w) * static_cast<size_t>((h + 1) / 2);
   packed->resize(yBytes + uvBytes);
@@ -178,6 +183,9 @@ Status AMediaCodecEncoder::Encode(const RawFrame& frame,
     return Status::Fail(kErrInvalidArgument, "enc nv12");
   }
   PackNv12(frame.nv12, &packed_);
+  if (packed_.empty()) {
+    return Status::Fail(kErrInvalidArgument, "enc nv12 pack");
+  }
   ssize_t ix = AMediaCodec_dequeueInputBuffer(codec_, 10000);
   if (ix < 0) {
     auto drain = DrainOutputs(out, 0, false);

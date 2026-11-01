@@ -11,6 +11,7 @@
 #include <media/NdkMediaError.h>
 
 #include <android/hardware_buffer.h>
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <string>
@@ -378,6 +379,28 @@ Status AMediaCodecDecoder::CopyImageToFrame(AImage* image, DecodedRawFrame* out,
   AImage_getPlaneData(image, 0, &y, &yLen);
   AImage_getPlaneData(image, 1, &u, &uLen);
   AImage_getPlaneData(image, 2, &v, &vLen);
+  if (y == nullptr || u == nullptr || w <= 0 || h <= 0 || yStride < w ||
+      uStride <= 0) {
+    return Status::Fail(kErrDecodeFailed, "amc image planes");
+  }
+  const int uvH = (h + 1) / 2;
+  const int uvW = (w + 1) / 2;
+  const int yPixSafe = yPix > 0 ? yPix : 1;
+  const int uPixSafe = uPix > 0 ? uPix : 1;
+  const int64_t yNeed =
+      static_cast<int64_t>(yStride) * (h - 1) +
+      static_cast<int64_t>(w) * yPixSafe;
+  const int64_t uNeed =
+      static_cast<int64_t>(uStride) * std::max(0, uvH - 1) +
+      static_cast<int64_t>(uvW) * uPixSafe;
+  if (yLen < yNeed || uLen < uNeed) {
+    VIDEO_LOGW(
+        "video.decode amc plane short w=%d h=%d yLen=%d yNeed=%lld uLen=%d "
+        "uNeed=%lld yStride=%d uStride=%d",
+        w, h, yLen, static_cast<long long>(yNeed), uLen,
+        static_cast<long long>(uNeed), yStride, uStride);
+    return Status::Fail(kErrDecodeFailed, "amc plane size");
+  }
   const int dstYStride = AlignUp(w);
   const int dstUvStride = AlignUp(w);
   const int i420Y = AlignUp(w);
