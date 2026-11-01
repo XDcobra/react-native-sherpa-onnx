@@ -564,8 +564,8 @@ Full guide: [Audio visualization](./docs/audio-visualization.md).
 
 | Platform | Version |
 |----------|---------|
-| Android | 1.13.8 |
-| iOS | 1.13.8 |
+| Android | 2.0.1 |
+| iOS | 2.0.1 |
 
 ## Known issues
 

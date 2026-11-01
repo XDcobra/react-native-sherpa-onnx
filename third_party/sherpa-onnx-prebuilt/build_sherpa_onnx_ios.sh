@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Build sherpa-onnx XCFramework for iOS (device + simulator).
 # Uses the sherpa-onnx submodule at third_party/sherpa-onnx if present; otherwise clones
-# from k2-fsa/sherpa-onnx. Applies espeak-ng path-length patch, runs upstream build-ios.sh
-# (SherpaOnnxC.framework per slice), merges cxx-api + ONNX Runtime into the framework binary,
-# and outputs sherpa_onnx.xcframework.
+# from k2-fsa/sherpa-onnx. Runs upstream build-ios.sh (SherpaOnnxC.framework per slice),
+# merges cxx-api + ONNX Runtime into the framework binary, and outputs sherpa_onnx.xcframework.
 #
 # Usage: build_sherpa_onnx_ios.sh <GIT_REF>
-#   GIT_REF: branch or tag to use (e.g. v1.13.8, main). Required.
+#   GIT_REF: branch or tag to use (e.g. v2.0.1, main). Required.
 #
 # Environment:
 #   SHERPA_ONNX_ONNXRUNTIME_VERSION or ONNXRUNTIME_VERSION — ORT version (default 1.28.2)
@@ -18,7 +17,7 @@ set -e
 
 if [ -z "$1" ]; then
   echo "Usage: $0 <GIT_REF>" >&2
-  echo "  GIT_REF: branch or tag for k2-fsa/sherpa-onnx (e.g. v1.13.8, main)" >&2
+  echo "  GIT_REF: branch or tag for k2-fsa/sherpa-onnx (e.g. v2.0.1, main)" >&2
   exit 1
 fi
 GIT_REF="$1"
@@ -51,38 +50,6 @@ else
   git checkout "$GIT_REF" || git checkout main
   git log -1 --oneline
   SHERPA_SRC="$BUILD_TOP/sherpa-onnx-source"
-fi
-
-# espeak-ng (Piper/Vits TTS) uses a fixed path buffer (N_PATH_HOME_DEF 255 on Posix). Long iOS paths get
-# truncated and cause fallback to /usr/share/espeak-ng-data and init failure. Patch sherpa-onnx's CMake
-# so the espeak-ng target is built with N_PATH_HOME=512. See issue-tts-espeak-ng-path-length.md (in this directory).
-echo "===== Patching espeak-ng N_PATH_HOME (CMake) ====="
-CMAKE_FILE="${SHERPA_SRC}/cmake/espeak-ng-for-piper.cmake"
-if [ ! -f "$CMAKE_FILE" ]; then
-  echo "Note: $CMAKE_FILE not found, skipping N_PATH_HOME patch."
-else
-  if grep -q "N_PATH_HOME=512" "$CMAKE_FILE" 2>/dev/null; then
-    echo "N_PATH_HOME=512 already present in $CMAKE_FILE, skipping."
-  else
-    case "$(uname -s)" in
-      Darwin)
-        sed -i.bak '/add_subdirectory.*espeak_ng_SOURCE_DIR.*espeak_ng_BINARY_DIR/a\
-  target_compile_definitions(espeak-ng PRIVATE N_PATH_HOME=512)
-' "$CMAKE_FILE"
-        rm -f "${CMAKE_FILE}.bak"
-        ;;
-      *)
-        sed -i '/add_subdirectory.*espeak_ng_SOURCE_DIR.*espeak_ng_BINARY_DIR/a\  target_compile_definitions(espeak-ng PRIVATE N_PATH_HOME=512)' "$CMAKE_FILE"
-        ;;
-    esac
-    echo "Patched $CMAKE_FILE: added target_compile_definitions(espeak-ng PRIVATE N_PATH_HOME=512)"
-    if ! grep -q "N_PATH_HOME=512" "$CMAKE_FILE" 2>/dev/null; then
-      echo "Error: Failed to apply N_PATH_HOME=512 patch to $CMAKE_FILE." >&2
-      echo "The upstream CMake file may have changed. Without this patch, espeak-ng may fail to" >&2
-      echo "initialize on long paths (N_PATH_HOME_DEF 255 truncation). Aborting build." >&2
-      exit 1
-    fi
-  fi
 fi
 
 echo "===== Building sherpa-onnx XCFramework (upstream build-ios.sh) ====="

@@ -1,5 +1,5 @@
 # Builds sherpa-onnx XCFramework for iOS (device + simulator) via build_sherpa_onnx_ios.sh.
-# The framework includes the C++ API and espeak-ng N_PATH_HOME patch; see third_party/sherpa-onnx-prebuilt/build_sherpa_onnx_ios.sh.
+# The framework includes the C++ API; see third_party/sherpa-onnx-prebuilt/build_sherpa_onnx_ios.sh.
 name: Framework - Sherpa-Onnx (iOS) Release
 
 on:
