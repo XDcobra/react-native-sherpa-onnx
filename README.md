@@ -509,7 +509,7 @@ The SDK exposes a public API for native VideoBuffer playback (`react-native-sher
 <table>
 <tr>
 <td align="center" width="33%"></td>
-<td align="center" width="33%"><img src="./docs/images/example/video_preview_1.png" alt="Video preview player" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/videobuffer-videopreview.png" alt="Video preview player" width="180" /></td>
 <td align="center" width="33%"></td>
 </tr>
 <tr>
