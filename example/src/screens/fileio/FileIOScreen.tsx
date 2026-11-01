@@ -17,7 +17,10 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import type { AudioOutputFormat } from 'react-native-sherpa-onnx/audio';
 import type { CodecPolicy } from 'react-native-sherpa-onnx/codec';
 import type { FileDestination } from 'react-native-sherpa-onnx/fileio';
-import type { VideoExportContainer } from 'react-native-sherpa-onnx/videobuffer';
+import type {
+  VideoExportCodec,
+  VideoExportContainer,
+} from 'react-native-sherpa-onnx/videobuffer';
 import { CODEC_ASSET_ENTRIES, type CodecAssetFormat } from '../../audioConfig';
 import {
   VIDEO_CODEC_ASSET_ENTRIES,
@@ -31,6 +34,7 @@ import {
   type FileioOperation,
   type FileioSampleSelection,
   FILEIO_OUTPUT_FORMATS,
+  FILEIO_VIDEO_EXPORT_CODECS,
   FILEIO_VIDEO_OUTPUT_FORMATS,
   fileioSampleMedia,
   listFileioInputChannels,
@@ -131,6 +135,7 @@ export default function FileIOScreen() {
   const [destMenuOpen, setDestMenuOpen] = useState(false);
   const [formatMenuOpen, setFormatMenuOpen] = useState(false);
   const [videoFormatMenuOpen, setVideoFormatMenuOpen] = useState(false);
+  const [videoCodecMenuOpen, setVideoCodecMenuOpen] = useState(false);
 
   const [operation, setOperation] = useState<FileioOperation>('probe');
   const [mediaMode, setMediaMode] = useState<'audio' | 'video'>('audio');
@@ -157,6 +162,8 @@ export default function FileIOScreen() {
   const [outputFormat, setOutputFormat] = useState<AudioOutputFormat>('wav');
   const [videoOutputFormat, setVideoOutputFormat] =
     useState<VideoExportContainer>('mp4');
+  const [videoExportCodec, setVideoExportCodec] =
+    useState<VideoExportCodec>('h264');
 
   const [batchAllAudioSamples, setBatchAllAudioSamples] = useState(false);
   const [batchAllVideoSamples, setBatchAllVideoSamples] = useState(false);
@@ -376,6 +383,7 @@ export default function FileIOScreen() {
               inputSource: inputSource!.fileSource,
               inputLabel: inputSource!.label,
               outputFormat: videoOutputFormat,
+              codec: videoOutputFormat === 'webm' ? videoExportCodec : 'h264',
               decodePolicy: codecPolicy,
               encodePolicy: codecPolicy,
             })
@@ -420,6 +428,7 @@ export default function FileIOScreen() {
     audioSource,
     outputFormat,
     videoOutputFormat,
+    videoExportCodec,
     mediaMode,
     codecPolicy,
   ]);
@@ -527,7 +536,7 @@ export default function FileIOScreen() {
           <Text style={styles.sectionHint}>
             {mediaMode === 'audio'
               ? 'Bundled test_codec files (+ Legacy WAV).'
-              : '1 s 144p H.264 clips under test_videos/.'}
+              : '1 s 144p clips under test_videos/ (H.264 + WebM VP9).'}
           </Text>
           <View style={styles.batchToggleRow}>
             <View style={styles.batchToggleTextCol}>
@@ -539,7 +548,7 @@ export default function FileIOScreen() {
               <Text style={styles.batchToggleHint}>
                 {mediaMode === 'audio'
                   ? 'On Run: every audio format chip (+ Legacy)'
-                  : 'On Run: MP4, MOV, MKV, WebM'}
+                  : 'On Run: MP4, MOV, MKV, WebM, WebM VP9'}
               </Text>
             </View>
             <Switch
@@ -1035,11 +1044,34 @@ export default function FileIOScreen() {
                       {formatLabel(videoOutputFormat)}
                     </Text>
                     <Text style={styles.dropdownHint}>
-                      exportVideo (H.264), policy {codecPolicy}
+                      exportVideo (
+                      {videoOutputFormat === 'webm' ? videoExportCodec : 'h264'}
+                      ), policy {codecPolicy}
                     </Text>
                   </View>
                   <Ionicons name="chevron-down" size={20} color="#007AFF" />
                 </Pressable>
+                {videoOutputFormat === 'webm' && (
+                  <Pressable
+                    style={[
+                      styles.dropdownTrigger,
+                      styles.dropdownTriggerSpaced,
+                    ]}
+                    onPress={() => setVideoCodecMenuOpen(true)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose video export codec"
+                  >
+                    <View style={styles.dropdownTriggerText}>
+                      <Text style={styles.dropdownKind}>
+                        {videoExportCodec}
+                      </Text>
+                      <Text style={styles.dropdownHint}>
+                        h264 or vp9 in this WebM
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-down" size={20} color="#007AFF" />
+                  </Pressable>
+                )}
               </View>
             )}
           </>
@@ -1194,6 +1226,10 @@ export default function FileIOScreen() {
                     style={[styles.optionRow, active && styles.optionRowActive]}
                     onPress={() => {
                       setVideoOutputFormat(fmt);
+                      if (fmt !== 'webm') {
+                        setVideoExportCodec('h264');
+                        setVideoCodecMenuOpen(false);
+                      }
                       setVideoFormatMenuOpen(false);
                     }}
                   >
@@ -1204,6 +1240,62 @@ export default function FileIOScreen() {
                       ]}
                     >
                       {formatLabel(fmt)}
+                    </Text>
+                    {active && (
+                      <Ionicons name="checkmark" size={22} color="#007AFF" />
+                    )}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal
+        visible={videoCodecMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setVideoCodecMenuOpen(false)}
+      >
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setVideoCodecMenuOpen(false)}
+        >
+          <Pressable
+            style={styles.modalSheet}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.modalTitle}>Video export codec</Text>
+            <ScrollView
+              style={styles.modalList}
+              keyboardShouldPersistTaps="handled"
+            >
+              {FILEIO_VIDEO_EXPORT_CODECS.map((codec) => {
+                const active = codec === videoExportCodec;
+                return (
+                  <Pressable
+                    key={codec}
+                    style={[styles.optionRow, active && styles.optionRowActive]}
+                    onPress={() => {
+                      setVideoExportCodec(codec);
+                      if (
+                        codec === 'vp9' &&
+                        videoOutputFormat !== 'webm' &&
+                        videoOutputFormat !== 'mkv'
+                      ) {
+                        setVideoOutputFormat('webm');
+                      }
+                      setVideoCodecMenuOpen(false);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.optionKind,
+                        active && styles.optionKindActive,
+                      ]}
+                    >
+                      {codec}
                     </Text>
                     {active && (
                       <Ionicons name="checkmark" size={22} color="#007AFF" />
@@ -1555,6 +1647,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderWidth: 1,
     borderColor: '#E5E5EA',
+  },
+  dropdownTriggerSpaced: {
+    marginTop: 10,
   },
   dropdownTriggerText: {
     flex: 1,

@@ -195,7 +195,7 @@ This screen validates file and conversion workflows: pick **Audio** or **Video**
 
 **Audio sandbox (`test_codec/`):** probe (`probeAudioFileDuration` + `probeAudioFileContainer`), decode (`createOfflineAudioBufferFromFile`), encode (`saveAudioAsFile`). Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }`.
 
-**Video sandbox (`test_videos/sample.*`):** 1 s, 256×144 H.264 (AAC in MP4/MOV, Opus in MKV/WebM). Probe (duration + container sniff), decode (open + one JPEG frame), encode (`exportVideo` to mp4/mov/mkv/webm). WebM sample is H.264 in a Matroska shell (same as SDK export).
+**Video sandbox (`test_videos/sample.*`):** 1 s, 256×144. MP4/MOV/MKV/WebM are H.264 (AAC in MP4/MOV, Opus in MKV/WebM). `sample_vp9.webm` is VP9 + Opus. Probe, decode (open + one JPEG frame), encode (`exportVideo` to mp4/mov/mkv/webm with `h264` / `hevc` / `vp9`). Default `webm`+`h264` still writes an H.264 shell; `codec: 'vp9'` writes real VP9 WebM.
 
 ## Audio visualization showcase
 

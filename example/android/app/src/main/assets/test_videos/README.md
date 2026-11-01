@@ -11,7 +11,8 @@ Runtime access: `createOfflineVideoBufferFromFile({ kind: 'app', base: 'apkAsset
 | `sample.mp4` | H.264 Baseline + AAC | File I/O: 1 s, 256×144, 15 fps. |
 | `sample.mov` | H.264 Baseline + AAC | File I/O: 1 s, 256×144, 15 fps. |
 | `sample.mkv` | H.264 Baseline + Opus | File I/O: 1 s, 256×144, 15 fps. |
-| `sample.webm` | H.264 Baseline + Opus | File I/O: 1 s, 256×144. Matroska bytes with a `.webm` name (SDK WebM is H.264/HEVC, not VP9). |
+| `sample.webm` | H.264 Baseline + Opus | File I/O: 1 s, 256×144. H.264 in a WebM/Matroska shell (same as default `exportVideo(..., 'webm')`). |
+| `sample_vp9.webm` | VP9 + Opus | File I/O: 1 s, 256×144, 15 fps. Real VP9 WebM for probe / open / decode. |
 
 Regenerate the OCR clip (Homebrew `ffmpeg` without `drawtext`; stills via Pillow):
 
