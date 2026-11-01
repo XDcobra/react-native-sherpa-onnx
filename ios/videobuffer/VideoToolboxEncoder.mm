@@ -156,6 +156,9 @@ VideoToolboxEncoder::~VideoToolboxEncoder() { Close(); }
 
 Status VideoToolboxEncoder::Configure(const VideoTrackInfo& track, int bitrate) {
   Close();
+  if (track.codec == VideoCodec::Vp9) {
+    return Status::Fail(kErrEncoderUnavailable, "no VT VP9");
+  }
   if (track.codedWidth <= 0 || track.codedHeight <= 0) {
     return Status::Fail(kErrInvalidArgument, "encoder size");
   }

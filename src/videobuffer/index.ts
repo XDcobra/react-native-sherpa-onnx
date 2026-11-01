@@ -66,7 +66,11 @@ const VIDEO_EXPORT_FORMATS: readonly VideoExportContainer[] = [
   'mkv',
   'webm',
 ];
-const VIDEO_EXPORT_CODECS: readonly VideoExportCodec[] = ['h264', 'hevc'];
+const VIDEO_EXPORT_CODECS: readonly VideoExportCodec[] = [
+  'h264',
+  'hevc',
+  'vp9',
+];
 
 function parseResolvedFileRef(result: {
   outputKind: string;
@@ -320,7 +324,7 @@ export async function probeVideoFileContainer(
  * @throws {Error} `VIDEO_FFMPEG_DISABLED` — FFmpeg is compiled out.
  * @throws {Error} `VIDEO_CONTAINER_UNSUPPORTED` — container is not in the v1 set.
  * @throws {Error} `VIDEO_NO_VIDEO_TRACK` — audio-only file.
- * @throws {Error} `VIDEO_CODEC_UNSUPPORTED` — video codec is not H.264/HEVC.
+ * @throws {Error} `VIDEO_CODEC_UNSUPPORTED` — video codec is not H.264/HEVC/VP9.
  * @throws {Error} `VIDEO_FILE_CORRUPT` — demux or index failed.
  * @throws {Error} `VIDEO_DECODER_UNAVAILABLE` — no usable decoder for `decodePolicy`.
  * @throws {Error} `VIDEO_SW_DECODER_DISABLED` — bundled SW requested but `ffmpeg-vsw` is missing.
@@ -764,6 +768,11 @@ export async function exportVideo(
       `VIDEO_INVALID_ARGUMENT: codec must be one of ${VIDEO_EXPORT_CODECS.join(
         ', '
       )}`
+    );
+  }
+  if (codec === 'vp9' && format !== 'webm' && format !== 'mkv') {
+    throw new Error(
+      'VIDEO_INVALID_ARGUMENT: codec vp9 requires format webm or mkv'
     );
   }
   const bitrate = options?.bitrate ?? 2_000_000;

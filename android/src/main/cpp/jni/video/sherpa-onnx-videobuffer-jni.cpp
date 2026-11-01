@@ -653,13 +653,16 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
     jlong cancelAddr, jobject progress, jstring jDecodePolicy,
     jstring jEncodePolicy, jboolean includeAudio) {
   using sherpa_onnx::video::VideoCodec;
+  using sherpa_onnx::video::VideoCodecFromName;
   using sherpa_onnx::video::VideoExportOptions;
   using sherpa_onnx::video::VideoExportSession;
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   VideoExportOptions opts;
   const std::string codec = JstringToStd(env, jCodec);
-  opts.codec = codec == "hevc" ? VideoCodec::Hevc : VideoCodec::H264;
+  if (!VideoCodecFromName(codec, &opts.codec)) {
+    opts.codec = VideoCodec::H264;
+  }
   opts.bitrate = bitrate;
   opts.fromUs = fromUs;
   opts.toUs = toUs;
