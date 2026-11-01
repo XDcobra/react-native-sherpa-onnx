@@ -61,7 +61,6 @@ void FillTtsModelPathsFromStringMap(
     SetPathFromMap(paths, "ttsModel", out.ttsModel);
     SetPathFromMap(paths, "tokens", out.tokens);
     SetPathFromMap(paths, "lexicon", out.lexicon);
-    SetPathFromMap(paths, "dataDir", out.dataDir);
     SetPathFromMap(paths, "voices", out.voices);
     SetPathFromMap(paths, "acousticModel", out.acousticModel);
     SetPathFromMap(paths, "vocoder", out.vocoder);
@@ -248,7 +247,6 @@ std::map<std::string, std::string> TtsModelPathsToStringMap(const TtsModelPaths&
     PutPathIfNonEmpty(out, "ttsModel", paths.ttsModel);
     PutPathIfNonEmpty(out, "tokens", paths.tokens);
     PutPathIfNonEmpty(out, "lexicon", paths.lexicon);
-    PutPathIfNonEmpty(out, "dataDir", paths.dataDir);
     PutPathIfNonEmpty(out, "voices", paths.voices);
     PutPathIfNonEmpty(out, "acousticModel", paths.acousticModel);
     PutPathIfNonEmpty(out, "vocoder", paths.vocoder);

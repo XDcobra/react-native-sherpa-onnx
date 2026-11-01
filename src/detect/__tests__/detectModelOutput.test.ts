@@ -10,7 +10,7 @@ describe('readNonEmptyDetectPathsMap', () => {
       readNonEmptyDetectPathsMap({
         ttsModel: '/a/model.onnx',
         tokens: '/a/tokens.txt',
-        dataDir: '',
+        voices: '',
         lexicon: '   ',
       })
     ).toEqual({

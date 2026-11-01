@@ -330,7 +330,6 @@ struct TtsModelPaths {
     std::string ttsModel;
     std::string tokens;
     std::string lexicon;
-    std::string dataDir;
     std::string voices;
     std::string acousticModel;
     std::string vocoder;
