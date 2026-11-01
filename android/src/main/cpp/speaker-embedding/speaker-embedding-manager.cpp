@@ -2,6 +2,8 @@
 
 #include "sherpa-onnx/c-api/c-api.h"
 
+#include <cstring>
+
 namespace sherpaonnx::speaker_embedding {
 
 class SpeakerEmbeddingManagerCore::Impl {
@@ -157,6 +159,34 @@ std::vector<std::string> SpeakerEmbeddingManagerCore::AllSpeakers() const {
   }
   SherpaOnnxSpeakerEmbeddingManagerFreeAllSpeakers(names);
   return out;
+}
+
+Status SpeakerEmbeddingManagerCore::GetEmbedding(
+    const std::string& name, std::optional<std::vector<float>>* out) const {
+  if (out) {
+    out->reset();
+  }
+  if (!isReady()) {
+    return Status::Fail(kErrNotInitialized, "manager not created");
+  }
+  if (name.empty()) {
+    return Status::Fail(kErrInvalidArgument, "name is empty");
+  }
+  const float* ptr = SherpaOnnxSpeakerEmbeddingManagerGetEmbedding(
+      impl_->manager, name.c_str());
+  if (ptr == nullptr) {
+    return Status::Ok();
+  }
+  std::vector<float> emb(static_cast<size_t>(impl_->dim));
+  if (impl_->dim > 0) {
+    std::memcpy(emb.data(), ptr,
+                static_cast<size_t>(impl_->dim) * sizeof(float));
+  }
+  SherpaOnnxSpeakerEmbeddingManagerDestroyEmbedding(ptr);
+  if (out) {
+    *out = std::move(emb);
+  }
+  return Status::Ok();
 }
 
 }  // namespace sherpaonnx::speaker_embedding

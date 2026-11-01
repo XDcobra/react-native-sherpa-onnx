@@ -269,6 +269,17 @@ std::vector<std::string> SpeakerEmbeddingManagerWrapper::allSpeakers() const {
   return pImpl->core.AllSpeakers();
 }
 
+std::optional<std::vector<float>> SpeakerEmbeddingManagerWrapper::getEmbedding(
+    const std::string& name) const {
+  std::lock_guard<std::mutex> lock(pImpl->mu);
+  std::optional<std::vector<float>> out;
+  const auto st = pImpl->core.GetEmbedding(name, &out);
+  if (!st.ok) {
+    return std::nullopt;
+  }
+  return out;
+}
+
 int32_t SpeakerEmbeddingManagerWrapper::dim() const {
   std::lock_guard<std::mutex> lock(pImpl->mu);
   return pImpl->core.dim();

@@ -77,6 +77,8 @@ class SpeakerEmbeddingManagerWrapper {
   bool contains(const std::string& name);
   int32_t numSpeakers() const;
   std::vector<std::string> allSpeakers() const;
+  /** nullopt = not found, empty name, or manager not ready. */
+  std::optional<std::vector<float>> getEmbedding(const std::string& name) const;
   int32_t dim() const;
   bool isInitialized() const;
   void release();

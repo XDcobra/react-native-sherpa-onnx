@@ -5,6 +5,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -39,6 +40,12 @@ class SpeakerEmbeddingManagerCore {
   bool Contains(const std::string& name) const;
   int32_t NumSpeakers() const;
   std::vector<std::string> AllSpeakers() const;
+  /**
+   * Averaged L2-normalized row for `name`.
+   * Ok + nullopt = name not found. Fail if not ready or name empty.
+   */
+  Status GetEmbedding(const std::string& name,
+                      std::optional<std::vector<float>>* out) const;
 
  private:
   class Impl;

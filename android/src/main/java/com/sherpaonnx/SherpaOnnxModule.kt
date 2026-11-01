@@ -7092,6 +7092,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     speakerEmbeddingHelper.speakerEmbeddingManagerAllSpeakerNames(managerId, promise)
   }
 
+  override fun speakerEmbeddingManagerGetEmbedding(
+    managerId: String,
+    name: String,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerGetEmbedding(managerId, name, promise)
+  }
+
   override fun destroySpeakerEmbeddingManager(managerId: String, promise: Promise) {
     speakerEmbeddingHelper.destroySpeakerEmbeddingManager(managerId, promise)
   }
