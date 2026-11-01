@@ -54,8 +54,10 @@ inline constexpr const char* kErrImageHwEncoderUnavailable =
 inline constexpr const char* kErrImageWebpDisabled = "ERR_IMAGE_WEBP_DISABLED";
 inline constexpr const char* kErrVideoDecoderUnavailable =
     "VIDEO_DECODER_UNAVAILABLE";
+inline constexpr const char* kErrVideoDecoderBusy = "VIDEO_DECODER_BUSY";
 inline constexpr const char* kErrVideoEncoderUnavailable =
     "VIDEO_ENCODER_UNAVAILABLE";
+inline constexpr const char* kErrVideoEncoderBusy = "VIDEO_ENCODER_BUSY";
 inline constexpr const char* kErrPreviewDecoderBusy =
     "VIDEO_PREVIEW_DECODER_BUSY";
 

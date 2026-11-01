@@ -197,6 +197,15 @@ const char* ErrorCodeFor(const Request& req, Reason reason, Tier attempted) {
     }
     return kErrImageHwDecoderUnavailable;
   }
+  if (reason == Reason::PoolFull) {
+    if (req.dir == Direction::Encode) {
+      return kErrVideoEncoderBusy;
+    }
+    if (req.use == Use::Display) {
+      return kErrPreviewDecoderBusy;
+    }
+    return kErrVideoDecoderBusy;
+  }
   if (req.dir == Direction::Encode) {
     if (attempted == Tier::Software || reason == Reason::Disabled) {
       return kErrVideoSwEncoderDisabled;
@@ -205,9 +214,6 @@ const char* ErrorCodeFor(const Request& req, Reason reason, Tier attempted) {
   }
   if (attempted == Tier::Software || reason == Reason::Disabled) {
     return kErrVideoSwDecoderDisabled;
-  }
-  if (req.use == Use::Display && reason == Reason::PoolFull) {
-    return kErrPreviewDecoderBusy;
   }
   return kErrVideoDecoderUnavailable;
 }

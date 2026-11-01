@@ -103,7 +103,7 @@ TEST_F(ExportSessionTest, SecondExportPoolFull) {
   auto st = VideoExportSession::Run(e->id(), "/tmp/out.mp4", "mp4", opts,
                                     nullptr, nullptr);
   EXPECT_FALSE(st.ok);
-  EXPECT_EQ(st.errorCode, kErrEncoderUnavailable);
+  EXPECT_EQ(st.errorCode, kErrEncoderBusy);
   VideoRegistry::Instance().Release(e->id());
 }
 #endif

@@ -78,6 +78,27 @@ TEST_F(CodecSelectorTest, FallsBackWhenHwOpenFails) {
   EXPECT_EQ(result.decision.fallbackReason, Reason::ConfigureFailed);
 }
 
+TEST_F(CodecSelectorTest, ErrorCodeForSplitsBusyFromUnavailable) {
+  Request cpu = CpuReq();
+  EXPECT_STREQ(ErrorCodeFor(cpu, Reason::PoolFull, Tier::Hardware),
+               kErrVideoDecoderBusy);
+  EXPECT_STREQ(ErrorCodeFor(cpu, Reason::NotPresent, Tier::Hardware),
+               kErrVideoDecoderUnavailable);
+  EXPECT_STREQ(ErrorCodeFor(cpu, Reason::ConfigureFailed, Tier::Hardware),
+               kErrVideoDecoderUnavailable);
+  Request display = cpu;
+  display.use = Use::Display;
+  EXPECT_STREQ(ErrorCodeFor(display, Reason::PoolFull, Tier::Hardware),
+               kErrPreviewDecoderBusy);
+  Request enc = cpu;
+  enc.dir = Direction::Encode;
+  enc.use = Use::Export;
+  EXPECT_STREQ(ErrorCodeFor(enc, Reason::PoolFull, Tier::Hardware),
+               kErrVideoEncoderBusy);
+  EXPECT_STREQ(ErrorCodeFor(enc, Reason::NotPresent, Tier::Hardware),
+               kErrVideoEncoderUnavailable);
+}
+
 TEST_F(CodecSelectorTest, EmptyPlanSoftwareDisabled) {
   Provider p = Sw("ffmpeg.h264");
   p.available = false;

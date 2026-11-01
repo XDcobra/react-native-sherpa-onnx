@@ -190,7 +190,7 @@ Result<DecoderSlot> DecoderPool::AcquireSlot(DecoderClass cls,
         holders += h;
       }
       const char* code = cls == DecoderClass::Display ? kErrPreviewDecoderBusy
-                                                      : kErrDecoderUnavailable;
+                                                      : kErrDecoderBusy;
       r.status = Status::Fail(
           code, std::string(cls == DecoderClass::Display
                                 ? "display decoder busy holders="
@@ -201,7 +201,7 @@ Result<DecoderSlot> DecoderPool::AcquireSlot(DecoderClass cls,
     const bool ok =
         cv_.wait_for(lock, std::chrono::milliseconds(timeoutMs), ready);
     if (!ok) {
-      r.status = Status::Fail(kErrDecoderUnavailable, "decoder wait timeout");
+      r.status = Status::Fail(kErrDecoderBusy, "decoder wait timeout");
       return r;
     }
   }

@@ -36,7 +36,7 @@ TEST_F(DecoderPoolTest, IndependentClassLimits) {
   auto cpu2 =
       DecoderPool::Instance().AcquireSlot(DecoderClass::Cpu, "buf_b", 0);
   ASSERT_FALSE(cpu2.ok());
-  EXPECT_EQ(cpu2.status.errorCode, kErrDecoderUnavailable);
+  EXPECT_EQ(cpu2.status.errorCode, kErrDecoderBusy);
 
   auto disp2 = DecoderPool::Instance().AcquireSlot(DecoderClass::Display,
                                                    "player_b", 0);
@@ -132,6 +132,6 @@ TEST_F(DecoderPoolTest, CpuWaitTimesOut) {
   ASSERT_TRUE(first.ok());
   auto second = DecoderPool::Instance().Acquire("b", 30);
   ASSERT_FALSE(second.ok());
-  EXPECT_EQ(second.status.errorCode, kErrDecoderUnavailable);
+  EXPECT_EQ(second.status.errorCode, kErrDecoderBusy);
   DecoderPool::Instance().Release("a");
 }
