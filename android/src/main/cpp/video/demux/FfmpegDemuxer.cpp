@@ -277,6 +277,8 @@ Status FfmpegDemuxer::Open(const std::string& path) {
     track_.codec = VideoCodec::H264;
   } else if (par->codec_id == AV_CODEC_ID_HEVC) {
     track_.codec = VideoCodec::Hevc;
+  } else if (par->codec_id == AV_CODEC_ID_VP9) {
+    track_.codec = VideoCodec::Vp9;
   } else {
     return Status::Fail(kErrCodecUnsupported, avcodec_get_name(par->codec_id));
   }
@@ -320,8 +322,8 @@ Status FfmpegDemuxer::Open(const std::string& path) {
   }
   impl_->counting = false;
   openBytes_ = impl_->bytes;
-  VIDEO_LOGI("video.demux open %s codec=%s frames=%lld keys index_ms bytes=%lld",
-             name, VideoCodecName(track_.codec),
+  VIDEO_LOGI("video.demux open %s codec=%s config=%zu frames=%lld bytes=%lld",
+             name, VideoCodecName(track_.codec), track_.codecConfig.size(),
              static_cast<long long>(timeline_.frameCount()),
              static_cast<long long>(openBytes_));
   return Status::Ok();

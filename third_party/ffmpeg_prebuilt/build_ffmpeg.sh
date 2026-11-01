@@ -4,6 +4,7 @@
 # Requires: NDK (ANDROID_NDK_HOME or ANDROID_NDK_ROOT), FFmpeg source in ../../third_party/ffmpeg (submodule).
 # Requires: libshine prebuilts at third_party/shine_prebuilt/android/ABI
 # Requires: libopus prebuilts at third_party/opus_prebuilt/android/ABI
+# Requires: libvpx prebuilts at third_party/libvpx_prebuilt/android/ABI
 
 set -e
 
@@ -25,11 +26,15 @@ else
     exit 1
 fi
 
-# Host tag for NDK prebuilt toolchain (linux-x86_64, darwin-x86_64, windows-x86_64)
+# Host tag for NDK prebuilt toolchain (linux-x86_64, darwin-arm64, darwin-x86_64, windows-x86_64)
 if [[ "$(uname -s)" == "Linux" ]]; then
     HOST_TAG="linux-x86_64"
 elif [[ "$(uname -s)" == "Darwin" ]]; then
-    HOST_TAG="darwin-x86_64"
+    if [ "$(uname -m)" = "arm64" ] && [ -d "$NDK/toolchains/llvm/prebuilt/darwin-arm64" ]; then
+        HOST_TAG="darwin-arm64"
+    else
+        HOST_TAG="darwin-x86_64"
+    fi
 else
     HOST_TAG="windows-x86_64"
 fi
@@ -48,8 +53,8 @@ fi
 # Minimal audio-only: decoders/demuxers for common formats.
 # VIDEO_SW_DECODERS=1 adds bundled H.264/HEVC software video decoders (ffmpeg-vsw).
 # --prefix, --extra-cflags, --extra-ldflags are set per ABI below (so not duplicated here).
-DECODERS="aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus"
-PARSERS="aac,mpegaudio,vorbis,flac,opus"
+DECODERS="aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus,vp9"
+PARSERS="aac,mpegaudio,vorbis,flac,opus,vp9"
 if [ "${VIDEO_SW_DECODERS:-0}" = "1" ]; then
     DECODERS="${DECODERS},h264,hevc"
     PARSERS="${PARSERS},h264,hevc"
@@ -65,8 +70,8 @@ COMMON_CONFIGURE=(
     --disable-everything
     --enable-decoder=${DECODERS}
     --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
-    --enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska
-    --enable-encoder=pcm_s16le,flac,libshine,aac,alac,libopus
+    --enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska,webm
+    --enable-encoder=pcm_s16le,flac,libshine,aac,alac,libopus,libvpx_vp9
     --enable-parser=${PARSERS}
     --enable-protocol=file
     --enable-swresample
@@ -224,6 +229,53 @@ PC
 
     COMMON_CONFIGURE+=(--enable-libopus)
 
+    # Libvpx (VP9 encoder). Native vp9 decoder is enabled above and does not need this.
+    VPX_PREFIX="$REPO_ROOT/third_party/libvpx_prebuilt/android/$ABI"
+    if [ ! -d "$VPX_PREFIX" ]; then
+        echo "Error: libvpx prebuilts not found for ABI $ABI at: $VPX_PREFIX"
+        echo "Build libvpx first using: third_party/libvpx_prebuilt/build_libvpx.sh"
+        exit 1
+    fi
+    if [ ! -d "$VPX_PREFIX/lib" ] || { [ ! -f "$VPX_PREFIX/lib/libvpx.so" ] && [ ! -f "$VPX_PREFIX/lib/libvpx.a" ]; }; then
+        echo "Error: libvpx library not found at $VPX_PREFIX/lib (expected libvpx.so or libvpx.a)"
+        exit 1
+    fi
+    if [ ! -f "$VPX_PREFIX/include/vpx/vp8cx.h" ]; then
+        echo "Error: vpx/vp8cx.h not found at $VPX_PREFIX/include/vpx (required by FFmpeg --enable-libvpx)"
+        exit 1
+    fi
+
+    echo "Found libvpx prebuilts at $VPX_PREFIX — enabling libvpx"
+    VPX_CFLAGS="-I$VPX_PREFIX/include"
+    VPX_LDFLAGS="-L$VPX_PREFIX/lib -lvpx -lm"
+
+    PKGDIR_VPX="$VPX_PREFIX/lib/pkgconfig"
+    if [ ! -f "$PKGDIR_VPX/vpx.pc" ]; then
+        mkdir -p "$PKGDIR_VPX"
+        cat > "$PKGDIR_VPX/vpx.pc" <<PC
+prefix=$VPX_PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: vpx
+Description: WebM VP9 encoder (libvpx)
+Version: 1.17.0
+Libs: -L\${libdir} -lvpx -lm
+Cflags: -I\${includedir}
+PC
+    fi
+    export PKG_CONFIG_PATH="$PKGDIR_VPX:$PKG_CONFIG_PATH"
+
+    if ! pkg-config --exists vpx; then
+        echo "pkg-config: cannot find 'vpx'. Listing $PKGDIR_VPX:"
+        ls -la "$PKGDIR_VPX" || true
+        exit 1
+    fi
+    echo "pkg-config: found vpx -> $(pkg-config --modversion vpx 2>/dev/null || echo 'unknown')"
+
+    COMMON_CONFIGURE+=(--enable-libvpx)
+
     echo "===== Building FFmpeg for $ABI ====="
     cd "$FFMPEG_SRC"
     
@@ -280,14 +332,27 @@ PC
         --ranlib="${TOOLCHAIN}/bin/llvm-ranlib" \
         --strip="${TOOLCHAIN}/bin/llvm-strip" \
         --sysroot="$TOOLCHAIN/sysroot" \
-        --extra-cflags="-O3 -fPIC -I$TOOLCHAIN/sysroot/usr/include ${SHINE_CFLAGS:-} ${OPUS_CFLAGS:-}" \
-        --extra-ldflags="${SHINE_LDFLAGS:-} ${OPUS_LDFLAGS:-}" \
+        --extra-cflags="-O3 -fPIC -I$TOOLCHAIN/sysroot/usr/include ${SHINE_CFLAGS:-} ${OPUS_CFLAGS:-} ${VPX_CFLAGS:-}" \
+        --extra-ldflags="${SHINE_LDFLAGS:-} ${OPUS_LDFLAGS:-} ${VPX_LDFLAGS:-}" \
         2>&1 | tee -a "$FFMPEG_BUILD_LOG"
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
         echo "===== FFmpeg configure failed for $ABI — last 200 lines of ffbuild/config.log ====="
         if [ -f "$CONFIG_LOG" ]; then tail -200 "$CONFIG_LOG"; else echo "(config.log not found)"; fi
         exit 1
     fi
+    COMPONENTS_H="$FFMPEG_SRC/config_components.h"
+    if ! grep -q '^#define CONFIG_LIBVPX_VP9_ENCODER 1$' "$COMPONENTS_H"; then
+        echo "===== FFmpeg configure did not enable libvpx-vp9 encoder ====="
+        rg "CONFIG_LIBVPX|CONFIG_VP9" "$COMPONENTS_H" "$FFMPEG_SRC/config.h" || true
+        echo "===== last 80 lines of config.log mentioning vpx ====="
+        rg -n "vpx|libvpx" "$CONFIG_LOG" | tail -80 || true
+        exit 1
+    fi
+    if ! grep -q '^#define CONFIG_VP9_DECODER 1$' "$COMPONENTS_H"; then
+        echo "===== FFmpeg configure did not enable native vp9 decoder ====="
+        exit 1
+    fi
+    echo "FFmpeg configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1"
 
     make -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | tee -a "$FFMPEG_BUILD_LOG"
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
@@ -307,9 +372,11 @@ PC
     echo "Successfully built FFmpeg for $ABI"
 }
 
-# Build all ABIs used by the SDK (match android defaultConfig.ndk.abiFilters)
+# Build all ABIs used by the SDK (match android defaultConfig.ndk.abiFilters).
+# Override with ABIS="arm64-v8a" for a local smoke build.
 : > "$FFMPEG_BUILD_LOG"
-for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+ABIS="${ABIS:-armeabi-v7a arm64-v8a x86 x86_64}"
+for ABI in $ABIS; do
     build_abi "$ABI"
 done
 

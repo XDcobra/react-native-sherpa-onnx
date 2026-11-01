@@ -818,9 +818,13 @@ void BindVideoModule(SherpaOnnx *mod) {
   std::string pathStr = [wh.filePath UTF8String];
   std::string formatStr = [fmt UTF8String];
   sherpa_onnx::video::VideoExportOptions opts;
-  opts.codec = [codecStr isEqualToString:@"hevc"]
-                   ? sherpa_onnx::video::VideoCodec::Hevc
-                   : sherpa_onnx::video::VideoCodec::H264;
+  if ([codecStr isEqualToString:@"hevc"]) {
+    opts.codec = sherpa_onnx::video::VideoCodec::Hevc;
+  } else if ([codecStr isEqualToString:@"vp9"]) {
+    opts.codec = sherpa_onnx::video::VideoCodec::Vp9;
+  } else {
+    opts.codec = sherpa_onnx::video::VideoCodec::H264;
+  }
   opts.bitrate = bitrate;
   opts.fromUs = fromUs;
   opts.toUs = toUs;

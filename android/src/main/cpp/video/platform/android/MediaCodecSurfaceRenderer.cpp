@@ -38,8 +38,7 @@ Status MediaCodecSurfaceRenderer::EnsureCodec() {
   if (allowedName_.empty()) {
     return Status::Fail(kErrDecoderUnavailable, "no decoder name");
   }
-  const char* mime =
-      track_.codec == VideoCodec::Hevc ? "video/hevc" : "video/avc";
+  const char* mime = VideoCodecMime(track_.codec);
   AMediaFormat* fmt = AMediaFormat_new();
   AMediaFormat_setString(fmt, AMEDIAFORMAT_KEY_MIME, mime);
   AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, track_.codedWidth);
@@ -87,7 +86,8 @@ Status MediaCodecSurfaceRenderer::Submit(const EncodedPacket& pkt,
   std::vector<uint8_t> annexb;
   const uint8_t* data = pkt.payload.data();
   size_t size = pkt.payload.size();
-  if (BitstreamUtil::LooksAvcc(data, size)) {
+  if (track_.codec != VideoCodec::Vp9 &&
+      BitstreamUtil::LooksAvcc(data, size)) {
     st = BitstreamUtil::AvccToAnnexB(data, size, &annexb);
     if (!st.ok) return st;
     data = annexb.data();

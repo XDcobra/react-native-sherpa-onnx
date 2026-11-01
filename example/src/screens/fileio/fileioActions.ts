@@ -40,6 +40,7 @@ import {
   probeVideoFileDuration,
   releaseVideoBuffer,
   type VideoExportContainer,
+  type VideoExportCodec,
 } from 'react-native-sherpa-onnx/videobuffer';
 
 import { formatResolvedLocation } from '../../components/audioSaveUtils';
@@ -86,6 +87,12 @@ export const FILEIO_VIDEO_OUTPUT_FORMATS: VideoExportContainer[] = [
   'mov',
   'mkv',
   'webm',
+];
+
+export const FILEIO_VIDEO_EXPORT_CODECS: VideoExportCodec[] = [
+  'h264',
+  'hevc',
+  'vp9',
 ];
 
 /** Payload when the user runs encode (Copy) on the File I/O screen. */
@@ -140,6 +147,7 @@ export type FileioVideoEncodeInput = {
   inputSource: FileSource;
   inputLabel: string;
   outputFormat: VideoExportContainer;
+  codec?: VideoExportCodec;
   decodePolicy?: CodecPolicy;
   encodePolicy?: CodecPolicy;
 };
@@ -840,6 +848,7 @@ export async function runFileioVideoEncode(
         };
         const encodeStartedAt = performance.now();
         const staged = await exportVideo(video, dest, input.outputFormat, {
+          codec: input.codec ?? 'h264',
           decodePolicy: input.decodePolicy,
           encodePolicy: input.encodePolicy,
         });
@@ -879,7 +888,7 @@ export async function runFileioVideoEncode(
               `encode: ${formatElapsedMs(encodeElapsedMs)}`,
               `Output: ${formatResolvedLocation(resolved)}`,
               `Format: ${input.outputFormat}`,
-              'Video encode: exportVideo (H.264)',
+              `Video encode: exportVideo (${input.codec ?? 'h264'})`,
               `decodePolicy: ${input.decodePolicy ?? 'preferHardware'}`,
               `encodePolicy: ${input.encodePolicy ?? 'preferHardware'}`,
               `File input: ${input.inputLabel}`,
@@ -897,6 +906,7 @@ export async function runFileioVideoEncode(
 
     const encodeStartedAt = performance.now();
     const resolved = await exportVideo(video, dest, input.outputFormat, {
+      codec: input.codec ?? 'h264',
       decodePolicy: input.decodePolicy,
       encodePolicy: input.encodePolicy,
     });
@@ -909,7 +919,7 @@ export async function runFileioVideoEncode(
         `encode: ${formatElapsedMs(encodeElapsedMs)}`,
         `Output: ${formatResolvedLocation(resolved)}`,
         `Format: ${input.outputFormat}`,
-        'Video encode: exportVideo (H.264)',
+        `Video encode: exportVideo (${input.codec ?? 'h264'})`,
         `decodePolicy: ${input.decodePolicy ?? 'preferHardware'}`,
         `encodePolicy: ${input.encodePolicy ?? 'preferHardware'}`,
         `File input: ${input.inputLabel}`,

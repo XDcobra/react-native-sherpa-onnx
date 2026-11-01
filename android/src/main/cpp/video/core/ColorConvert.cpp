@@ -1,7 +1,8 @@
 #include "core/ColorConvert.h"
 
 #include <algorithm>
-#include <cstring>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "libyuv/convert.h"
@@ -81,6 +82,86 @@ Status NeedNv12(const Nv12View& src, const char* what) {
   if (src.width <= 0 || src.height <= 0 || src.y.data == nullptr ||
       src.uv.data == nullptr || src.y.stride <= 0 || src.uv.stride <= 0) {
     return Status::Fail(kErrInvalidArgument, std::string("invalid NV12 for ") + what);
+  }
+  return Status::Ok();
+}
+
+Status YPlaneToGray8(const Nv12View& src, const VideoTransform& transform,
+                     uint8_t* dst, int dstStride, int dstW, int dstH) {
+  if (dst == nullptr || dstStride < dstW || dstW <= 0 || dstH <= 0) {
+    return Status::Fail(kErrInvalidArgument, "YPlaneToGray8 dest");
+  }
+  const libyuv::RotationMode mode =
+      ToLibyuvRotation(transform.rotationDegrees);
+  const bool rotate = mode != libyuv::kRotate0;
+  const bool mirror = transform.mirrorHorizontal;
+  int rw = src.width;
+  int rh = src.height;
+  SwapIf90(transform.rotationDegrees, &rw, &rh);
+  const bool scale = dstW != rw || dstH != rh;
+
+  const uint8_t* cur = src.y.data;
+  int curStride = src.y.stride;
+  int curW = src.width;
+  int curH = src.height;
+  AlignedBuffer hold;
+
+  if (rotate) {
+    const bool last = !mirror && !scale;
+    uint8_t* outp = last ? dst : nullptr;
+    int os = last ? dstStride : AlignUp(rw);
+    if (!last) {
+      auto st = hold.Allocate(static_cast<size_t>(os) * static_cast<size_t>(rh));
+      if (!st.ok) {
+        return st;
+      }
+      outp = hold.data();
+    }
+    const int rc =
+        libyuv::RotatePlane(cur, curStride, outp, os, src.width, src.height,
+                            mode);
+    if (rc != 0) {
+      return Status::Fail(kErrDecodeFailed, "RotatePlane failed");
+    }
+    cur = outp;
+    curStride = os;
+    curW = rw;
+    curH = rh;
+  }
+  if (mirror) {
+    const bool last = !scale;
+    AlignedBuffer next;
+    uint8_t* outp = last ? dst : nullptr;
+    int os = last ? dstStride : AlignUp(curW);
+    if (!last) {
+      auto st =
+          next.Allocate(static_cast<size_t>(os) * static_cast<size_t>(curH));
+      if (!st.ok) {
+        return st;
+      }
+      outp = next.data();
+    }
+    const int rc =
+        libyuv::I400Mirror(cur, curStride, outp, os, curW, curH);
+    if (rc != 0) {
+      return Status::Fail(kErrDecodeFailed, "I400Mirror failed");
+    }
+    if (!last) {
+      hold = std::move(next);
+    }
+    cur = outp;
+    curStride = os;
+  }
+  if (scale) {
+    const int rc = libyuv::ScalePlane(cur, curStride, curW, curH, dst,
+                                      dstStride, dstW, dstH, libyuv::kFilterBox);
+    if (rc != 0) {
+      return Status::Fail(kErrDecodeFailed, "ScalePlane failed");
+    }
+    return Status::Ok();
+  }
+  if (cur != dst) {
+    libyuv::CopyPlane(cur, curStride, dst, dstStride, dstW, dstH);
   }
   return Status::Ok();
 }
@@ -167,37 +248,46 @@ Status ColorConvert::RotateNv12(const Nv12View& src, MutableNv12* dst,
   dst->width = outW;
   dst->height = outH;
 
-  const int i420YStride = AlignUp(src.width);
-  const int i420UStride = AlignUp((src.width + 1) / 2);
-  const int i420YSize = i420YStride * src.height;
-  const int i420USize = i420UStride * ((src.height + 1) / 2);
-  std::vector<uint8_t> i420(static_cast<size_t>(i420YSize + i420USize * 2));
-  uint8_t* sy = i420.data();
-  uint8_t* su = sy + i420YSize;
-  uint8_t* sv = su + i420USize;
-  int rc = libyuv::NV12ToI420(src.y.data, src.y.stride, src.uv.data,
-                              src.uv.stride, sy, i420YStride, su, i420UStride,
-                              sv, i420UStride, src.width, src.height);
-  if (rc != 0) {
-    return Status::Fail(kErrDecodeFailed, "NV12ToI420 failed");
+  const libyuv::RotationMode mode =
+      ToLibyuvRotation(transform.rotationDegrees);
+  const bool rotate = mode != libyuv::kRotate0;
+  const bool mirror = transform.mirrorHorizontal;
+  if (!rotate && !mirror) {
+    const int rc = libyuv::NV12Copy(src.y.data, src.y.stride, src.uv.data,
+                                    src.uv.stride, dst->y.data, dst->y.stride,
+                                    dst->uv.data, dst->uv.stride, src.width,
+                                    src.height);
+    if (rc != 0) {
+      return Status::Fail(kErrDecodeFailed, "NV12Copy failed");
+    }
+    return Status::Ok();
+  }
+  if (!rotate && mirror) {
+    const int rc = libyuv::NV12Mirror(
+        src.y.data, src.y.stride, src.uv.data, src.uv.stride, dst->y.data,
+        dst->y.stride, dst->uv.data, dst->uv.stride, src.width, src.height);
+    if (rc != 0) {
+      return Status::Fail(kErrDecodeFailed, "NV12Mirror failed");
+    }
+    return Status::Ok();
   }
 
   const int oYStride = AlignUp(outW);
   const int oUStride = AlignUp((outW + 1) / 2);
   const int oYSize = oYStride * outH;
   const int oUSize = oUStride * ((outH + 1) / 2);
-  std::vector<uint8_t> rotated(static_cast<size_t>(oYSize + oUSize * 2));
-  uint8_t* dy = rotated.data();
+  std::vector<uint8_t> i420(static_cast<size_t>(oYSize + oUSize * 2));
+  uint8_t* dy = i420.data();
   uint8_t* du = dy + oYSize;
   uint8_t* dv = du + oUSize;
-  rc = libyuv::I420Rotate(sy, i420YStride, su, i420UStride, sv, i420UStride, dy,
-                          oYStride, du, oUStride, dv, oUStride, src.width,
-                          src.height, ToLibyuvRotation(transform.rotationDegrees));
+  int rc = libyuv::NV12ToI420Rotate(
+      src.y.data, src.y.stride, src.uv.data, src.uv.stride, dy, oYStride, du,
+      oUStride, dv, oUStride, src.width, src.height, mode);
   if (rc != 0) {
-    return Status::Fail(kErrDecodeFailed, "I420Rotate failed");
+    return Status::Fail(kErrDecodeFailed, "NV12ToI420Rotate failed");
   }
-  if (transform.mirrorHorizontal) {
-    std::vector<uint8_t> mirrored(rotated.size());
+  if (mirror) {
+    std::vector<uint8_t> mirrored(i420.size());
     uint8_t* my = mirrored.data();
     uint8_t* mu = my + oYSize;
     uint8_t* mv = mu + oUSize;
@@ -206,8 +296,8 @@ Status ColorConvert::RotateNv12(const Nv12View& src, MutableNv12* dst,
     if (rc != 0) {
       return Status::Fail(kErrDecodeFailed, "I420Mirror failed");
     }
-    rotated.swap(mirrored);
-    dy = rotated.data();
+    i420.swap(mirrored);
+    dy = i420.data();
     du = dy + oYSize;
     dv = du + oUSize;
   }
@@ -230,41 +320,21 @@ Status ColorConvert::Nv12ToGray8(const Nv12View& src, PackedPlane* dst,
   if (dst == nullptr || dst->data == nullptr) {
     return Status::Fail(kErrInvalidArgument, "Nv12ToGray8 dest");
   }
-  const bool identity = transform.rotationDegrees % 360 == 0 &&
-                        !transform.mirrorHorizontal && maxSide <= 0;
-  if (identity) {
-    dst->width = src.width;
-    dst->height = src.height;
-    const int minStride = src.width;
-    if (packed) {
-      dst->stride = minStride;
-    } else if (dst->stride < minStride) {
-      dst->stride = AlignUp(minStride);
-    }
-    libyuv::CopyPlane(src.y.data, src.y.stride, dst->data, dst->stride,
-                      src.width, src.height);
-    return Status::Ok();
+  int rw = src.width;
+  int rh = src.height;
+  SwapIf90(transform.rotationDegrees, &rw, &rh);
+  int fw = rw;
+  int fh = rh;
+  ScaleDim(rw, rh, maxSide, &fw, &fh);
+  dst->width = fw;
+  dst->height = fh;
+  const int minStride = fw;
+  if (packed) {
+    dst->stride = minStride;
+  } else if (dst->stride < minStride) {
+    dst->stride = AlignUp(minStride);
   }
-
-  AlignedBuffer storage;
-  VideoFrameView view;
-  st = Convert(src, VideoPixelFormat::Gray8, transform, maxSide, packed,
-               &storage, &view);
-  if (!st.ok) {
-    return st;
-  }
-  // Convert already wrote into dst if we passed storage; copy out.
-  dst->width = view.width;
-  dst->height = view.height;
-  dst->stride = view.stride[0];
-  if (dst->data != view.plane[0]) {
-    for (int row = 0; row < view.height; ++row) {
-      std::memcpy(dst->data + static_cast<size_t>(row) * dst->stride,
-                  view.plane[0] + static_cast<size_t>(row) * view.stride[0],
-                  static_cast<size_t>(view.width));
-    }
-  }
-  return Status::Ok();
+  return YPlaneToGray8(src, transform, dst->data, dst->stride, fw, fh);
 }
 
 Status ColorConvert::Convert(const Nv12View& src, VideoPixelFormat format,
@@ -277,6 +347,32 @@ Status ColorConvert::Convert(const Nv12View& src, VideoPixelFormat format,
   }
   if (storage == nullptr || out == nullptr) {
     return Status::Fail(kErrInvalidArgument, "Convert storage/out");
+  }
+
+  if (format == VideoPixelFormat::Gray8) {
+    int rw = src.width;
+    int rh = src.height;
+    SwapIf90(transform.rotationDegrees, &rw, &rh);
+    int fw = rw;
+    int fh = rh;
+    ScaleDim(rw, rh, maxSide, &fw, &fh);
+    const int stride = packed ? fw : AlignUp(fw);
+    st = storage->Allocate(static_cast<size_t>(stride) *
+                           static_cast<size_t>(fh));
+    if (!st.ok) {
+      return st;
+    }
+    st = YPlaneToGray8(src, transform, storage->data(), stride, fw, fh);
+    if (!st.ok) {
+      return st;
+    }
+    *out = {};
+    out->width = fw;
+    out->height = fh;
+    out->format = format;
+    out->plane[0] = storage->data();
+    out->stride[0] = stride;
+    return Status::Ok();
   }
 
   Nv12View working = src;
@@ -320,7 +416,9 @@ Status ColorConvert::Convert(const Nv12View& src, VideoPixelFormat format,
 
   int sw = working.width;
   int sh = working.height;
+  bool didScale = false;
   if (ScaleDim(working.width, working.height, maxSide, &sw, &sh)) {
+    didScale = true;
     const int yStride = AlignUp(sw);
     const int uvStride = AlignUp(sw);
     const size_t yBytes = static_cast<size_t>(yStride) * static_cast<size_t>(sh);
@@ -378,37 +476,13 @@ Status ColorConvert::Convert(const Nv12View& src, VideoPixelFormat format,
       out->stride[0] = yStride;
       out->plane[1] = storage->data() + yBytes;
       out->stride[1] = uvStride;
-    } else if (needRotate || maxSide > 0) {
-      // Keep rotated/scaled buffers alive by moving into storage via copy.
+    } else if (needRotate || didScale) {
       const size_t yBytes = static_cast<size_t>(working.y.stride) *
                             static_cast<size_t>(working.height);
-      const size_t uvBytes = static_cast<size_t>(working.uv.stride) *
-                             static_cast<size_t>((working.height + 1) / 2);
-      st = storage->Allocate(yBytes + uvBytes);
-      if (!st.ok) {
-        return st;
-      }
-      std::memcpy(storage->data(), working.y.data, yBytes);
-      std::memcpy(storage->data() + yBytes, working.uv.data, uvBytes);
+      *storage = didScale ? std::move(scaledBuf) : std::move(rotatedBuf);
       out->plane[0] = storage->data();
       out->plane[1] = storage->data() + yBytes;
     }
-    return Status::Ok();
-  }
-
-  if (format == VideoPixelFormat::Gray8) {
-    const int stride = packed ? working.width : AlignUp(working.width);
-    st = storage->Allocate(static_cast<size_t>(stride) *
-                           static_cast<size_t>(working.height));
-    if (!st.ok) {
-      return st;
-    }
-    libyuv::CopyPlane(working.y.data, working.y.stride, storage->data(), stride,
-                      working.width, working.height);
-    out->plane[0] = storage->data();
-    out->stride[0] = stride;
-    out->plane[1] = nullptr;
-    out->stride[1] = 0;
     return Status::Ok();
   }
 

@@ -102,7 +102,7 @@ Status PacketSpool::WriteHeader(int fd, const VideoTrackInfo& track) {
   if (!WriteU32(io, fd, &off, kFileMagic) || !WriteU32(io, fd, &off, kVersion)) {
     return Status::Fail(kErrSpoolIo, "header magic");
   }
-  if (!WriteU32(io, fd, &off, track.codec == VideoCodec::Hevc ? 1 : 0)) {
+  if (!WriteU32(io, fd, &off, VideoCodecSpoolId(track.codec))) {
     return Status::Fail(kErrSpoolIo, "header codec");
   }
   if (!WriteU32(io, fd, &off, static_cast<uint32_t>(track.codedWidth)) ||

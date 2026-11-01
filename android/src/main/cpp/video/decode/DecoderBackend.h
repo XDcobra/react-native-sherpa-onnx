@@ -68,7 +68,7 @@ using NamedDecoderOpener =
     std::function<std::unique_ptr<DecoderBackend>(const std::string&)>;
 void SetNamedDecoderOpener(NamedDecoderOpener opener);
 
-/** Runtime-detect FFmpeg h264/hevc SW decoders and register them. */
+/** Runtime-detect FFmpeg h264/hevc/vp9 SW decoders and register them. */
 void RegisterBundledVideoSwDecoders();
 
 }  // namespace video

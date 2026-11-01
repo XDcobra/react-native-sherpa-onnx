@@ -63,7 +63,7 @@ FFMPEG=(ffmpeg -y -hide_banner -loglevel error)
   -c:v libx264 -g 15 -pix_fmt yuv420p \
   "$OUT/h264.mkv"
 
-# VP9 WebM (unsupported codec)
+# VP9 WebM
 "${FFMPEG[@]}" -f yuv4mpegpipe -i "$OUT/identity.y4m" \
   -c:v libvpx-vp9 -b:v 50k -pix_fmt yuv420p \
   "$OUT/vp9.webm"

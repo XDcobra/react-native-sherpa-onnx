@@ -155,7 +155,7 @@ export interface ExportVideoFrameOptions {
 }
 
 export type VideoExportContainer = 'mp4' | 'mov' | 'mkv' | 'webm';
-export type VideoExportCodec = 'h264' | 'hevc';
+export type VideoExportCodec = 'h264' | 'hevc' | 'vp9';
 
 export interface ExportVideoOptions {
   codec?: VideoExportCodec;

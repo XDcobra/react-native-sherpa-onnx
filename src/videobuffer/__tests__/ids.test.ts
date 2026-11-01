@@ -292,10 +292,30 @@ describe('videobuffer public API mapping', () => {
     ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: format/);
     await expect(
       exportVideo(OFF, { kind: 'fs', path: '/tmp/out.mp4' }, 'mp4', {
-        codec: 'vp9' as never,
+        codec: 'av1' as never,
       })
     ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: codec/);
+    await expect(
+      exportVideo(OFF, { kind: 'fs', path: '/tmp/out.mp4' }, 'mp4', {
+        codec: 'vp9',
+      })
+    ).rejects.toThrow(/VIDEO_INVALID_ARGUMENT: codec vp9 requires format/);
     expect(rn.__mockNative.exportVideo).not.toHaveBeenCalled();
+  });
+
+  it('allows exportVideo webm + vp9', async () => {
+    rn.__mockNative.exportVideo.mockResolvedValue({
+      outputKind: 'fs',
+      outputPath: '/tmp/out.webm',
+    });
+    const dest = { kind: 'fs' as const, path: '/tmp/out.webm' };
+    await exportVideo(OFF, dest, 'webm', { codec: 'vp9' });
+    expect(rn.__mockNative.exportVideo).toHaveBeenCalledWith(
+      OFF,
+      dest,
+      'webm',
+      expect.objectContaining({ codec: 'vp9' })
+    );
   });
 
   it('rejects inverted export range', async () => {

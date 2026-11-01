@@ -350,6 +350,15 @@ third_party/pdfium_prebuilt/.ios-xc-build/
 third_party/pdfium_prebuilt/ios-build/
 third_party/pdfium_prebuilt/pdfium.xcframework/
 
+# libvpx prebuilt: build output (when building prebuilts locally)
+third_party/libvpx_prebuilt/*
+!third_party/libvpx_prebuilt/README.md
+!third_party/libvpx_prebuilt/build_libvpx.sh
+!third_party/libvpx_prebuilt/build_libvpx_ios.sh
+third_party/libvpx_prebuilt/android/
+third_party/libvpx_prebuilt/ios/
+third_party/libvpx_prebuilt/build/
+
 # opus prebuilt: build output (when building prebuilts locally)
 # ignore everything under opus_prebuilt by default
 third_party/opus_prebuilt/*

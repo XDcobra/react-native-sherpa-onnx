@@ -9,7 +9,7 @@ import android.util.Log
  * Video codec listing for VideoBuffer.
  *
  * [find] stays HW-only (Phase 0 / current decode path). [dumpAll] logs every
- * AVC/HEVC codec when debug is on — evidence for the shared codec layer.
+ * AVC/HEVC/VP9 codec when debug is on — evidence for the shared codec layer.
  */
 internal object VideoCodecCatalog {
   private const val TAG = "SherpaOnnxCodec"
@@ -50,10 +50,10 @@ internal object VideoCodecCatalog {
     return Names(decoder, encoder)
   }
 
-  fun listAvcHevc(): List<Entry> {
+  fun listVideoCodecs(): List<Entry> {
     val out = ArrayList<Entry>()
     val list = MediaCodecList(MediaCodecList.ALL_CODECS)
-    for (mime in arrayOf("video/avc", "video/hevc")) {
+    for (mime in arrayOf("video/avc", "video/hevc", "video/x-vnd.on2.vp9")) {
       for (info in list.codecInfos) {
         if (!info.supportedTypes.any { it.equals(mime, ignoreCase = true) }) continue
         out.add(toEntry(info, mime))
@@ -62,9 +62,9 @@ internal object VideoCodecCatalog {
     return out
   }
 
-  /** Log every AVC/HEVC codec. Safe to call on a background thread. */
+  /** Log every AVC/HEVC/VP9 codec. Safe to call on a background thread. */
   fun dumpAll() {
-    for (e in listAvcHevc()) {
+    for (e in listVideoCodecs()) {
       Log.i(
         TAG,
         "codec.catalog.raw name=${e.name} mime=${e.mime} encoder=${if (e.encoder) 1 else 0} " +

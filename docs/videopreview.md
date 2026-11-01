@@ -373,6 +373,6 @@ Missing or unsupported **audio** does not reject `create` / `play` unless `audio
 | `VIDEO_BUFFER_INVALID_STATE` | Preview command against a live buffer in a state the controller rejects. |
 | `VIDEO_DECODER_UNAVAILABLE` | No usable display decoder for the resolved `decodePolicy`. Do not retry the same policy. See [Decoder budget](#decoder-budget). |
 | `VIDEO_SW_DECODER_DISABLED` | `software` / bundled SW requested but `ffmpeg-vsw` is not present. |
-| `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC, or the display path cannot build format extras (e.g. HEVC/AVC params on iOS). |
+| `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC/VP9, or the display path cannot build format extras (e.g. HEVC/AVC params on iOS). iOS has no VideoToolbox VP9 — display uses bundled `ffmpeg.vp9`. |
 | `VIDEO_FRAME_EVICTED` | Live ring dropped the PTS under the playhead (`positionEvicted`). Raise `ringSeconds` or use `retention: 'session'`. |
 | `VIDEO_MEMORY_BUDGET_EXCEEDED` | Process decoded-frame cap. Unusual for preview alone. See [Decoder budget](#decoder-budget). |

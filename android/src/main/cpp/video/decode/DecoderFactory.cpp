@@ -164,6 +164,7 @@ void RegisterBundledVideoSwDecoders() {
   };
   reg("ffmpeg.h264", "h264", AV_CODEC_ID_H264);
   reg("ffmpeg.hevc", "hevc", AV_CODEC_ID_HEVC);
+  reg("ffmpeg.vp9", "vp9", AV_CODEC_ID_VP9);
 #endif
 }
 

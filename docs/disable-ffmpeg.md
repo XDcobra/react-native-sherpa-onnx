@@ -54,7 +54,8 @@ When FFmpeg is disabled, the following APIs are **built but return an error at r
 | **`createOfflineAudioBufferFromVideo(video)`** | Decodes the container audio track through FFmpeg. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 | **`createLiveAudioBufferFromLiveVideo(live)`** | Live audio tap decode. Rejects with `VIDEO_FFMPEG_DISABLED`. |
 | **`exportVideo(video, output, format, options?)`** | Encodes the clip (HW/SW policy), then muxes with FFmpeg (`mp4`/`mov`/`mkv`/`webm`). Rejects with `VIDEO_FFMPEG_DISABLED`. |
-| **Bundled SW video decode (`ffmpeg.h264` / `ffmpeg.hevc`)** | Only present in the opt-in `ffmpeg-vsw` variant. Disabling FFmpeg also disables that path (`VIDEO_SW_DECODER_DISABLED`). See [codecs.md](./codecs.md). |
+| **Bundled SW video decode (`ffmpeg.h264` / `ffmpeg.hevc`)** | H.264/HEVC SW decode is only in the opt-in `ffmpeg-vsw` variant. Disabling FFmpeg also disables that path (`VIDEO_SW_DECODER_DISABLED`). See [codecs.md](./codecs.md). |
+| **Bundled VP9 (`ffmpeg.vp9`)** | Native VP9 decode is in **default** FFmpeg. VP9 encode (`libvpx-vp9`) is registered when that encoder is present. Disabling FFmpeg disables both. |
 | **`createVideoPreviewPlayer` audio track** | Preview audio uses FFmpeg SW decode. Video still plays; `audioUnavailable` / status `unavailable`. |
 
 The audio helpers above are exposed from **`react-native-sherpa-onnx/audio`**. Video file APIs are from **`react-native-sherpa-onnx/videobuffer`**. Live video buffers fed by native producers (no file demux) keep working. STT, archive extraction, model detection, and general pipeline buffer operations continue to work when FFmpeg is disabled.

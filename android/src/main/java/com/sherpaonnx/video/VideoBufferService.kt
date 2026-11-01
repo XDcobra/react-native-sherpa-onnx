@@ -32,8 +32,12 @@ internal object VideoBufferService : ComponentCallbacks2 {
       val totalRam = memInfo.totalMem.takeIf { it > 0 } ?: (6L * 1024 * 1024 * 1024)
       val debug = 0 != (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)
       VideoBufferNative.nativeInit(cacheDir.absolutePath, totalRam, debug)
-      for (e in VideoCodecCatalog.listAvcHevc()) {
-        val codec = if (e.mime.equals("video/hevc", ignoreCase = true)) "hevc" else "h264"
+      for (e in VideoCodecCatalog.listVideoCodecs()) {
+        val codec = when {
+          e.mime.equals("video/hevc", ignoreCase = true) -> "hevc"
+          e.mime.equals("video/x-vnd.on2.vp9", ignoreCase = true) -> "vp9"
+          else -> "h264"
+        }
         VideoBufferNative.nativeRegisterVideoCodec(
           e.name, codec, e.encoder, e.hardware,
           e.minW, e.minH, e.maxW, e.maxH, e.alignW, e.alignH,

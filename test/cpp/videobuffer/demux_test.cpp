@@ -106,11 +106,13 @@ TEST(FfmpegDemuxer, AudioOnly) {
   EXPECT_EQ(st.errorCode, kErrNoVideoTrack);
 }
 
-TEST(FfmpegDemuxer, Vp9Unsupported) {
+TEST(FfmpegDemuxer, Vp9Opens) {
   FfmpegDemuxer d;
   auto st = d.Open(Fixture("vp9.webm"));
-  ASSERT_FALSE(st.ok);
-  EXPECT_EQ(st.errorCode, kErrCodecUnsupported);
+  ASSERT_TRUE(st.ok) << st.errorMessage;
+  EXPECT_EQ(d.track().codec, VideoCodec::Vp9);
+  EXPECT_GT(d.timeline().frameCount(), 0);
+  EXPECT_GE(d.timeline().ClosestKeyframe(0), 0);
 }
 
 TEST(FfmpegDemuxer, TruncatedCleanError) {

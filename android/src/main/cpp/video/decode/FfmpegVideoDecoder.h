@@ -11,8 +11,7 @@
 namespace sherpa_onnx {
 namespace video {
 
-/** Bundled SW H.264 / HEVC decoder. Registered only when avcodec_find_decoder
- *  finds the codec at runtime (ffmpeg-vsw variant). */
+/** Bundled SW decoder. H.264/HEVC need ffmpeg-vsw; VP9 is in default FFmpeg. */
 class FfmpegVideoDecoder : public DecoderBackend {
  public:
   FfmpegVideoDecoder();

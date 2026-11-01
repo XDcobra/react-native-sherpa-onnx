@@ -51,6 +51,7 @@ jobs:
           echo "ffmpeg=$(git -C third_party/ffmpeg rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "shine=$(git -C third_party/shine rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "opus=$(git -C third_party/opus rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "libvpx=$(git -C third_party/libvpx rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Cache FFmpeg iOS prebuilts
         uses: actions/cache@v6
@@ -61,7 +62,8 @@ jobs:
             third_party/ffmpeg_prebuilt/FFmpeg.xcframework
             third_party/shine_prebuilt/ios
             third_party/opus_prebuilt/ios
-          key: ffmpeg-ios-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ steps.submodules.outputs.opus }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh', 'third_party/shine_prebuilt/build_shine_ios.sh', 'third_party/opus_prebuilt/build_opus_ios.sh') }}
+            third_party/libvpx_prebuilt/ios
+          key: ffmpeg-ios-prebuilt-${{ steps.submodules.outputs.ffmpeg }}-${{ steps.submodules.outputs.shine }}-${{ steps.submodules.outputs.opus }}-${{ steps.submodules.outputs.libvpx }}-${{ hashFiles('third_party/ffmpeg_prebuilt/build_ffmpeg_ios.sh', 'third_party/shine_prebuilt/build_shine_ios.sh', 'third_party/opus_prebuilt/build_opus_ios.sh', 'third_party/libvpx_prebuilt/build_libvpx_ios.sh') }}
 
       - name: Install FFmpeg build dependencies
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -82,6 +84,13 @@ jobs:
           cd third_party/opus_prebuilt
           chmod +x build_opus_ios.sh
           ./build_opus_ios.sh
+
+      - name: Build libvpx (iOS)
+        if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
+        run: |
+          cd third_party/libvpx_prebuilt
+          chmod +x build_libvpx_ios.sh
+          ./build_libvpx_ios.sh
 
       - name: Build FFmpeg XCFramework (iOS)
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
@@ -138,8 +147,11 @@ jobs:
           name: FFmpeg iOS ${{ steps.tag.outputs.release_tag }}
           make_latest: false
           body: |
-            Prebuilt FFmpeg, libshine, and libopus for iOS.
-            - **ffmpeg-ios-framework.zip** – Contains `FFmpeg.xcframework` (device + simulator slices).
+            ## Archive Structure
+            Prebuilt **FFmpeg** (libshine, libopus, libvpx) XCFramework for iOS (device + simulator). Used by audio convert, OfflineAudioBuffer, and VideoBuffer in `react-native-sherpa-onnx`.
+            - **ffmpeg-ios-framework.zip** – Contains `FFmpeg.xcframework` (arm64 device; arm64 + x86_64 simulator). libvpx, libshine, and libopus are statically linked into `libffmpeg.a`.
+
+            Disable with `SHERPA_ONNX_DISABLE_FFMPEG=1` before `pod install`.
           files: ffmpeg-ios-framework.zip
           draft: false
           prerelease: false

@@ -302,6 +302,7 @@ set(SOURCES
     video/decode/DecoderFactory.cpp
     video/encode/EncoderFactory.cpp
     video/encode/FakeEncoder.cpp
+    video/encode/FfmpegVideoEncoder.cpp
     video/encode/VideoExportSession.cpp
     video/decode/DecoderPool.cpp
     video/decode/DecodeSession.cpp

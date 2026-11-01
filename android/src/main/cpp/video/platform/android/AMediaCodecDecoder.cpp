@@ -7,6 +7,7 @@
 
 #include "libyuv/convert.h"
 #include "libyuv/convert_from.h"
+#include "libyuv/planar_functions.h"
 
 #include <media/NdkMediaError.h>
 
@@ -23,24 +24,38 @@ namespace video {
 namespace {
 std::string gHwH264;
 std::string gHwHevc;
+std::string gHwVp9;
 }  // namespace
 
 void AMediaCodecDecoder::SetGlobalHwDecoderName(VideoCodec codec,
                                                 std::string name) {
   if (codec == VideoCodec::Hevc) {
     gHwHevc = std::move(name);
+  } else if (codec == VideoCodec::Vp9) {
+    gHwVp9 = std::move(name);
   } else {
     gHwH264 = std::move(name);
   }
 }
 
 std::string AMediaCodecDecoder::GlobalHwDecoderName(VideoCodec codec) {
-  return codec == VideoCodec::Hevc ? gHwHevc : gHwH264;
+  if (codec == VideoCodec::Hevc) {
+    return gHwHevc;
+  }
+  if (codec == VideoCodec::Vp9) {
+    return gHwVp9;
+  }
+  return gHwH264;
 }
 
 void AMediaCodecDecoder::ApplyCsd(AMediaFormat* fmt, VideoCodec codec,
                                   const std::vector<uint8_t>& config) {
   if (fmt == nullptr || config.empty()) return;
+  if (codec == VideoCodec::Vp9) {
+    AMediaFormat_setBuffer(fmt, "csd-0", config.data(), config.size());
+    VIDEO_LOGI("video.decode csd vp9 raw=%zu", config.size());
+    return;
+  }
   BitstreamUtil::AnnexBCsd csd;
   auto st = BitstreamUtil::MakeAnnexBCsd(codec, config, &csd);
   if (!st.ok || csd.csd0.empty()) {
@@ -70,8 +85,7 @@ Status AMediaCodecDecoder::Configure(const VideoTrackInfo& track) {
     return Status::Fail(kErrDecoderUnavailable, "no HW decoder name");
   }
   track_ = track;
-  const char* mime =
-      track.codec == VideoCodec::Hevc ? "video/hevc" : "video/avc";
+  const char* mime = VideoCodecMime(track.codec);
   AMediaFormat* fmt = AMediaFormat_new();
   AMediaFormat_setString(fmt, AMEDIAFORMAT_KEY_MIME, mime);
   AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, track.codedWidth);
@@ -122,7 +136,10 @@ Status AMediaCodecDecoder::Submit(const EncodedPacket& packet) {
   std::vector<uint8_t> annexb;
   const uint8_t* data = packet.payload.data();
   size_t size = packet.payload.size();
-  if (BitstreamUtil::LooksAvcc(data, size)) {
+  // VP9 is raw (vpcC). LooksAvcc can false-positive on the first 4 bytes
+  // and rewrite the bitstream as Annex-B.
+  if (track_.codec != VideoCodec::Vp9 &&
+      BitstreamUtil::LooksAvcc(data, size)) {
     auto st = BitstreamUtil::AvccToAnnexB(data, size, &annexb);
     if (!st.ok) {
       return st;
@@ -387,44 +404,92 @@ Status AMediaCodecDecoder::CopyImageToFrame(AImage* image, DecodedRawFrame* out,
   const int uvW = (w + 1) / 2;
   const int yPixSafe = yPix > 0 ? yPix : 1;
   const int uPixSafe = uPix > 0 ? uPix : 1;
-  const int64_t yNeed =
-      static_cast<int64_t>(yStride) * (h - 1) +
-      static_cast<int64_t>(w) * yPixSafe;
-  const int64_t uNeed =
-      static_cast<int64_t>(uStride) * std::max(0, uvH - 1) +
-      static_cast<int64_t>(uvW) * uPixSafe;
-  if (yLen < yNeed || uLen < uNeed) {
+  const int vPixSafe = vPix > 0 ? vPix : 1;
+  // Image.Plane / AImage guarantee last-sample inclusive:
+  // rowStride*(planeH-1) + pixelStride*(planeW-1) + 1
+  // MTK NV12 reports exactly that for U (uLen = 18431 @ 256x144, uPix=2).
+  // The old exclusive-end check used pixelStride*planeW and rejected HW
+  // frames on every codec, not just VP9.
+  auto planeMin = [](int stride, int pix, int planeW, int planeH) -> int64_t {
+    if (stride <= 0 || pix <= 0 || planeW <= 0 || planeH <= 0) {
+      return 0;
+    }
+    return static_cast<int64_t>(stride) * (planeH - 1) +
+           static_cast<int64_t>(pix) * (planeW - 1) + 1;
+  };
+  const int64_t yNeed = planeMin(yStride, yPixSafe, w, h);
+  const int64_t uNeed = planeMin(uStride, uPixSafe, uvW, uvH);
+  const int64_t vNeed =
+      (v != nullptr && vStride > 0) ? planeMin(vStride, vPixSafe, uvW, uvH)
+                                    : 0;
+  if (yLen < yNeed || uLen < uNeed || (vNeed > 0 && vLen < vNeed)) {
     VIDEO_LOGW(
         "video.decode amc plane short w=%d h=%d yLen=%d yNeed=%lld uLen=%d "
-        "uNeed=%lld yStride=%d uStride=%d",
+        "uNeed=%lld vLen=%d vNeed=%lld yStride=%d uStride=%d yPix=%d uPix=%d "
+        "vPix=%d",
         w, h, yLen, static_cast<long long>(yNeed), uLen,
-        static_cast<long long>(uNeed), yStride, uStride);
+        static_cast<long long>(uNeed), vLen, static_cast<long long>(vNeed),
+        yStride, uStride, yPixSafe, uPixSafe, vPixSafe);
     return Status::Fail(kErrDecodeFailed, "amc plane size");
+  }
+  if (!loggedUvMinlen_ && uPixSafe >= 2 &&
+      uLen < static_cast<int64_t>(uStride) * std::max(0, uvH - 1) +
+                 static_cast<int64_t>(uvW) * uPixSafe) {
+    loggedUvMinlen_ = true;
+    VIDEO_LOGI(
+        "video.decode amc uv-minlen w=%d h=%d uLen=%d uNeed=%lld uPix=%d "
+        "vLen=%d vPix=%d",
+        w, h, uLen, static_cast<long long>(uNeed), uPixSafe, vLen, vPixSafe);
   }
   const int dstYStride = AlignUp(w);
   const int dstUvStride = AlignUp(w);
-  const int i420Y = AlignUp(w);
-  const int i420U = AlignUp((w + 1) / 2);
-  const size_t i420Bytes =
-      static_cast<size_t>(i420Y) * h +
-      static_cast<size_t>(i420U) * ((h + 1) / 2) * 2;
   const size_t nvBytes =
       static_cast<size_t>(dstYStride) * h +
       static_cast<size_t>(dstUvStride) * ((h + 1) / 2);
-  std::vector<uint8_t> i420(i420Bytes);
-  uint8_t* iy = i420.data();
-  uint8_t* iu = iy + static_cast<size_t>(i420Y) * h;
-  uint8_t* iv = iu + static_cast<size_t>(i420U) * ((h + 1) / 2);
-  libyuv::Android420ToI420(y, yStride, u, uStride, v, vStride, uPix, iy, i420Y,
-                           iu, i420U, iv, i420U, w, h);
   auto st = out->storage.Allocate(nvBytes);
   if (!st.ok) {
     return st;
   }
   uint8_t* dstY = out->storage.data();
   uint8_t* dstUv = dstY + static_cast<size_t>(dstYStride) * h;
-  libyuv::I420ToNV12(iy, i420Y, iu, i420U, iv, i420U, dstY, dstYStride, dstUv,
+  const bool nv12 = uPixSafe == 2 && v != nullptr && v == u + 1 &&
+                    uStride == vStride;
+  const bool nv21 = uPixSafe == 2 && v != nullptr && v == u - 1 &&
+                    uStride == vStride;
+  const bool i420 = uPixSafe == 1 && v != nullptr && vStride > 0;
+  const char* path = "android420";
+  if (nv12) {
+    path = "nv12";
+    libyuv::NV12Copy(y, yStride, u, uStride, dstY, dstYStride, dstUv,
                      dstUvStride, w, h);
+  } else if (nv21) {
+    path = "nv21";
+    libyuv::NV21ToNV12(y, yStride, v, vStride, dstY, dstYStride, dstUv,
+                       dstUvStride, w, h);
+  } else if (i420) {
+    path = "i420";
+    libyuv::I420ToNV12(y, yStride, u, uStride, v, vStride, dstY, dstYStride,
+                       dstUv, dstUvStride, w, h);
+  } else {
+    const int i420Y = AlignUp(w);
+    const int i420U = AlignUp((w + 1) / 2);
+    const size_t i420Bytes =
+        static_cast<size_t>(i420Y) * h +
+        static_cast<size_t>(i420U) * ((h + 1) / 2) * 2;
+    std::vector<uint8_t> i420Buf(i420Bytes);
+    uint8_t* iy = i420Buf.data();
+    uint8_t* iu = iy + static_cast<size_t>(i420Y) * h;
+    uint8_t* iv = iu + static_cast<size_t>(i420U) * ((h + 1) / 2);
+    libyuv::Android420ToI420(y, yStride, u, uStride, v, vStride, uPix, iy,
+                             i420Y, iu, i420U, iv, i420U, w, h);
+    libyuv::I420ToNV12(iy, i420Y, iu, i420U, iv, i420U, dstY, dstYStride,
+                       dstUv, dstUvStride, w, h);
+  }
+  if (!loggedCopyPath_) {
+    loggedCopyPath_ = true;
+    VIDEO_LOGI("video.decode amc copy-path=%s w=%d h=%d uPix=%d", path, w, h,
+               uPixSafe);
+  }
   out->view.y.data = dstY;
   out->view.y.stride = dstYStride;
   out->view.uv.data = dstUv;
@@ -473,6 +538,8 @@ void AMediaCodecDecoder::Close() {
   queuedSinceStart_ = false;
   sawEos_ = false;
   configured_ = false;
+  loggedUvMinlen_ = false;
+  loggedCopyPath_ = false;
 }
 
 }  // namespace video

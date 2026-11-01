@@ -19,6 +19,9 @@ void SampleBufferVideoRenderer::SetLayer(void* layer) { layer_ = layer; }
 Status SampleBufferVideoRenderer::Configure(const VideoTrackInfo& track) {
   Close();
   track_ = track;
+  if (track.codec == VideoCodec::Vp9) {
+    return Status::Fail(kErrDecoderUnavailable, "no VT VP9");
+  }
   const CMVideoCodecType codecType =
       track.codec == VideoCodec::Hevc ? kCMVideoCodecType_HEVC
                                       : kCMVideoCodecType_H264;

@@ -79,4 +79,49 @@ TEST(FfmpegVideoDecode, HevcSkippedUnlessFixturePresent) {
   }
   ASSERT_TRUE(st.ok) << st.errorMessage;
 }
+
+TEST(FfmpegVideoDecode, Vp9DecodesAtLeastOneFrame) {
+  RegisterBundledVideoSwDecoders();
+  const std::string path = Fixture("vp9.webm");
+  if (!Exists(path)) {
+    GTEST_SKIP() << "missing vp9.webm";
+  }
+  auto r = OfflineVideoEntry::OpenFile(path, "/tmp");
+  ASSERT_TRUE(r.ok()) << r.status.errorMessage;
+  auto e = r.value;
+  ASSERT_NE(e->packets(), nullptr);
+  EXPECT_EQ(e->packets()->track().codec, VideoCodec::Vp9);
+  FfmpegVideoDecoder dec;
+  auto st = dec.Configure(e->packets()->track());
+  if (!st.ok && st.errorCode == kErrSwDecoderDisabled) {
+    GTEST_SKIP() << "host libav has no VP9 decoder";
+  }
+  ASSERT_TRUE(st.ok) << st.errorMessage;
+  VideoPacketReader reader(e);
+  ASSERT_TRUE(reader.SeekToKeyframe(0).ok);
+  int frames = 0;
+  int64_t lastPts = -1;
+  for (int i = 0; i < 64; ++i) {
+    auto pkt = reader.Next(0);
+    if (!pkt.ok()) break;
+    ASSERT_TRUE(dec.Submit(pkt.value).ok) << pkt.status.errorMessage;
+    DecodedRawFrame fr;
+    while (dec.Receive(&fr)) {
+      EXPECT_GT(fr.view.width, 0);
+      EXPECT_GT(fr.view.height, 0);
+      EXPECT_NE(fr.view.y.data, nullptr);
+      if (lastPts >= 0) {
+        EXPECT_GE(fr.ptsUs, lastPts);
+      }
+      lastPts = fr.ptsUs;
+      ++frames;
+    }
+  }
+  (void)dec.SignalEnd();
+  DecodedRawFrame fr;
+  while (dec.Receive(&fr)) {
+    ++frames;
+  }
+  EXPECT_GT(frames, 0);
+}
 #endif

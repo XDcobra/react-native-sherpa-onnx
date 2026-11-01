@@ -78,7 +78,7 @@ struct Result {
   bool ok() const { return status.ok; }
 };
 
-enum class VideoCodec { H264, Hevc };
+enum class VideoCodec { H264, Hevc, Vp9 };
 
 enum class AudioCodec : uint32_t {
   Aac = 1,
@@ -309,7 +309,58 @@ inline const char* AudioCodecName(AudioCodec c) {
 };
 
 inline const char* VideoCodecName(VideoCodec c) {
-  return c == VideoCodec::Hevc ? "hevc" : "h264";
+  switch (c) {
+    case VideoCodec::Hevc:
+      return "hevc";
+    case VideoCodec::Vp9:
+      return "vp9";
+    case VideoCodec::H264:
+    default:
+      return "h264";
+  }
+}
+
+inline const char* VideoCodecMime(VideoCodec c) {
+  switch (c) {
+    case VideoCodec::Hevc:
+      return "video/hevc";
+    case VideoCodec::Vp9:
+      return "video/x-vnd.on2.vp9";
+    case VideoCodec::H264:
+    default:
+      return "video/avc";
+  }
+}
+
+inline uint32_t VideoCodecSpoolId(VideoCodec c) {
+  switch (c) {
+    case VideoCodec::Hevc:
+      return 1;
+    case VideoCodec::Vp9:
+      return 2;
+    case VideoCodec::H264:
+    default:
+      return 0;
+  }
+}
+
+inline bool VideoCodecFromName(const std::string& name, VideoCodec* out) {
+  if (out == nullptr) {
+    return false;
+  }
+  if (name == "hevc") {
+    *out = VideoCodec::Hevc;
+    return true;
+  }
+  if (name == "vp9") {
+    *out = VideoCodec::Vp9;
+    return true;
+  }
+  if (name == "h264") {
+    *out = VideoCodec::H264;
+    return true;
+  }
+  return false;
 }
 
 inline ColorMatrix InferColorMatrix(int height, ColorMatrix specified,
