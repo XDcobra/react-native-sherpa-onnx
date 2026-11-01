@@ -82,6 +82,12 @@ jobs:
           esac
           echo "ort_maven_version=${ORT_TAG#${PREFIX}}" >> "$GITHUB_OUTPUT"
 
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Set up Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
