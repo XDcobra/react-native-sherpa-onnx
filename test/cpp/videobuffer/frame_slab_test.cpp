@@ -2,7 +2,9 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -48,6 +50,41 @@ TEST(FrameSlab, MmapAboveThresholdUnlinks) {
   ASSERT_EQ(access(path.c_str(), F_OK), 0);
   slab.Reset();
   EXPECT_NE(access(path.c_str(), F_OK), 0);
+  rmdir(dir.c_str());
+}
+
+TEST(FrameSlab, SeparateMmapFilesDoNotTruncateEachOther) {
+  auto dir = MakeTmpDir();
+  ASSERT_FALSE(dir.empty());
+  FrameSlab a;
+  FrameSlab b;
+  a.SetCacheDir(dir);
+  a.SetMmapKey("buf_a");
+  b.SetCacheDir(dir);
+  b.SetMmapKey("buf_b");
+  a.SetRamThreshold(256);
+  b.SetRamThreshold(256);
+  int ia = -1;
+  int ib = -1;
+  ASSERT_TRUE(a.Allocate(64, 64, VideoPixelFormat::Rgb24, &ia).ok);
+  ASSERT_TRUE(b.Allocate(64, 64, VideoPixelFormat::Rgb24, &ib).ok);
+  EXPECT_NE(a.mmapPath(), b.mmapPath());
+  EXPECT_EQ(access(a.mmapPath().c_str(), F_OK), 0);
+  EXPECT_EQ(access(b.mmapPath().c_str(), F_OK), 0);
+  auto* sa = a.Get(ia);
+  auto* sb = b.Get(ib);
+  ASSERT_NE(sa, nullptr);
+  ASSERT_NE(sb, nullptr);
+  ASSERT_NE(sa->plane[0], nullptr);
+  ASSERT_NE(sb->plane[0], nullptr);
+  ASSERT_GT(sa->bytes, 0);
+  std::memset(sa->plane[0], 0xAB, static_cast<size_t>(sa->bytes));
+  std::memset(sb->plane[0], 0xCD, static_cast<size_t>(sb->bytes));
+  EXPECT_EQ(sa->plane[0][0], static_cast<uint8_t>(0xAB));
+  EXPECT_EQ(sb->plane[0][0], static_cast<uint8_t>(0xCD));
+  EXPECT_EQ(sa->plane[0][sa->bytes - 1], static_cast<uint8_t>(0xAB));
+  a.Reset();
+  b.Reset();
   rmdir(dir.c_str());
 }
 

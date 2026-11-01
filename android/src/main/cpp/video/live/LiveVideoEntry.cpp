@@ -19,7 +19,7 @@ std::shared_ptr<LiveVideoEntry> LiveVideoEntry::Create(
   e->opts_ = opts;
   e->cacheDir_ = cacheDir;
   e->cache_ = std::make_shared<DecodedFrameCache>();
-  e->cache_->SetCacheDir(cacheDir);
+  e->cache_->SetCacheDir(cacheDir, e->id_);
   int64_t ringBytes = opts.ringMaxBytes;
   if (ringBytes <= 0) {
     ringBytes = MemoryBudget::DefaultRingMaxBytes(

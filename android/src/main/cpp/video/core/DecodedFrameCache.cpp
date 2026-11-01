@@ -60,8 +60,12 @@ DecodedFrameCache::~DecodedFrameCache() {
   slab_.Reset();
 }
 
-void DecodedFrameCache::SetCacheDir(const std::string& dir) {
+void DecodedFrameCache::SetCacheDir(const std::string& dir,
+                                    const std::string& slabKey) {
   slab_.SetCacheDir(dir);
+  if (!slabKey.empty()) {
+    slab_.SetMmapKey(slabKey);
+  }
 }
 
 void DecodedFrameCache::SetRamThreshold(int64_t bytes) {
@@ -142,6 +146,9 @@ Status DecodedFrameCache::InsertView(const CacheKey& key,
   if (view.plane[0] == nullptr || view.width <= 0 || view.height <= 0) {
     return Status::Fail(kErrInvalidArgument, "InsertView");
   }
+  if (view.stride[0] < view.width) {
+    return Status::Fail(kErrInvalidArgument, "InsertView stride");
+  }
   int64_t bytes = 0;
   if (view.format == VideoPixelFormat::Nv12) {
     bytes = static_cast<int64_t>(AlignUp(view.width)) * view.height +
@@ -164,8 +171,11 @@ Status DecodedFrameCache::InsertView(const CacheKey& key,
 
   while (!MemoryBudget::Instance().TryReserve(bytes)) {
     if (!EvictOneUnlocked()) {
-      VIDEO_LOGW("video.cache budget exceeded inserting %lld bytes",
-                 static_cast<long long>(bytes));
+      VIDEO_LOGW(
+          "video.cache budget exceeded inserting %lld bytes used=%lld limit=%lld",
+          static_cast<long long>(bytes),
+          static_cast<long long>(MemoryBudget::Instance().usedBytes()),
+          static_cast<long long>(MemoryBudget::Instance().limitBytes()));
       return Status::Fail(kErrMemoryBudget, "decoded cache");
     }
   }

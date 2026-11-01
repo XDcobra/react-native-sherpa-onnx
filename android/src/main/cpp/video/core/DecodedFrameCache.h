@@ -45,7 +45,7 @@ class DecodedFrameCache : public std::enable_shared_from_this<DecodedFrameCache>
   DecodedFrameCache();
   ~DecodedFrameCache();
 
-  void SetCacheDir(const std::string& dir);
+  void SetCacheDir(const std::string& dir, const std::string& slabKey = {});
   void SetRamThreshold(int64_t bytes);
 
   Result<VideoFrameLease> Lookup(const CacheKey& key);
