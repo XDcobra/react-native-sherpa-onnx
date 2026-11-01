@@ -49,6 +49,9 @@ describe('configureCodecs', () => {
     await expect(
       configureCodecs({ video: { decode: 'preferSoftware' as never } })
     ).rejects.toThrow(/CODEC_INVALID_ARGUMENT/);
+    await expect(
+      configureCodecs({ image: { encode: 'preferSoftware' as never } })
+    ).rejects.toThrow(/CODEC_INVALID_ARGUMENT/);
     expect(rn.__mockNative.configureCodecs).not.toHaveBeenCalled();
   });
 
@@ -64,11 +67,12 @@ describe('configureCodecs', () => {
   it('forwards a valid patch', async () => {
     await configureCodecs({
       video: { decode: 'preferHardware', encode: 'hardware' },
+      image: { encode: 'software' },
       budgets: { hwVideoEncode: 1 },
     });
     expect(rn.__mockNative.configureCodecs).toHaveBeenCalledWith({
       video: { decode: 'preferHardware', encode: 'hardware' },
-      image: undefined,
+      image: { encode: 'software' },
       budgets: { hwVideoEncode: 1 },
     });
   });
@@ -84,6 +88,7 @@ describe('getCodecInfo + events', () => {
           display: 'preferHardware',
           encode: 'preferHardware',
           imageDecode: 'preferHardware',
+          imageEncode: 'preferHardware',
         },
         slots: [],
         providers: [],

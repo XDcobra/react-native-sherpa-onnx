@@ -250,8 +250,8 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeConfigureDecoderBudget(
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_video_VideoBufferNative_nativeConfigureCodecs(
     JNIEnv* env, jclass, jstring videoDecode, jstring videoDisplay,
-    jstring videoEncode, jstring imageDecode, jint hwDec, jint hwDisp,
-    jint hwEnc, jint swDec, jint swEnc, jint img) {
+    jstring videoEncode, jstring imageDecode, jstring imageEncode, jint hwDec,
+    jint hwDisp, jint hwEnc, jint swDec, jint swEnc, jint img) {
   const int budgets[6] = {hwDec, hwDisp, hwEnc, swDec, swEnc, img};
   auto toUtf = [&](jstring s) -> std::string {
     if (!s) return {};
@@ -264,10 +264,11 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeConfigureCodecs(
   const std::string vdi = toUtf(videoDisplay);
   const std::string ve = toUtf(videoEncode);
   const std::string imgP = toUtf(imageDecode);
+  const std::string imgE = toUtf(imageEncode);
   auto st = sherpa_onnx::codec::CodecRuntime::Instance().ConfigureFromNative(
       vd.empty() ? nullptr : vd.c_str(), vdi.empty() ? nullptr : vdi.c_str(),
       ve.empty() ? nullptr : ve.c_str(), imgP.empty() ? nullptr : imgP.c_str(),
-      budgets);
+      imgE.empty() ? nullptr : imgE.c_str(), budgets);
   if (hwDec > 0) {
     DecoderPool::Instance().SetMaxSessions(DecoderClass::Cpu, hwDec);
   }

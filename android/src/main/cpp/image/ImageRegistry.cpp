@@ -1,6 +1,7 @@
 #include "ImageRegistry.h"
 
 #include "decode/ImageDecodeBackend.h"
+#include "encode/ImageEncodeBackend.h"
 #include "ImageFileLazyBackend.h"
 #include "PdfLazyBackend.h"
 #include "live/LiveImageEntry.h"
@@ -172,6 +173,8 @@ void ImageRegistry::SetCacheDir(const std::string& cacheDir) {
   cacheDir_ = cacheDir;
   RegisterPortableImageProviders();
   RegisterPlatformImageProviders();
+  RegisterPortableImageEncodeProviders();
+  RegisterPlatformImageEncodeProviders();
 }
 
 std::string ImageRegistry::NewBufferId() {

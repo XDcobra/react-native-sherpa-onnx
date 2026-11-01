@@ -575,6 +575,9 @@ std::string DecodePolicyFromOptions(NSDictionary *options) {
   NSString *formatStr = [(options[@"format"] ?: @"jpeg") lowercaseString];
   int quality = options[@"quality"] != nil ? [options[@"quality"] intValue] : 85;
   int maxSide = options[@"maxSide"] != nil ? [options[@"maxSide"] intValue] : 0;
+  NSString *encodePolicy = [options[@"encodePolicy"] isKindOfClass:[NSString class]]
+                               ? options[@"encodePolicy"]
+                               : nil;
 
   sherpa_onnx::image::ExportFormat format = sherpa_onnx::image::ExportFormat::Jpeg;
   if (!sherpa_onnx::image::ParseExportFormat([formatStr UTF8String], &format)) {
@@ -600,6 +603,9 @@ std::string DecodePolicyFromOptions(NSDictionary *options) {
   opts.format = format;
   opts.quality = quality;
   opts.maxSide = maxSide;
+  if (encodePolicy.length > 0) {
+    opts.encodePolicy = [encodePolicy UTF8String];
+  }
 
   const auto result = sherpa_onnx::image::ExportFrameToFile(
       [bufferId UTF8String], (int)frameIndex, [wh.filePath UTF8String], opts);
@@ -613,7 +619,24 @@ std::string DecodePolicyFromOptions(NSDictionary *options) {
 
   NSString *resultPath = wh.resultPath.length > 0 ? wh.resultPath : wh.filePath;
   [wh cleanup];
-  resolve(@{ @"outputKind" : @"fs", @"outputPath" : resultPath ?: wh.filePath });
+  NSMutableDictionary *out = [@{
+    @"outputKind" : @"fs",
+    @"outputPath" : resultPath ?: wh.filePath,
+  } mutableCopy];
+  if (!result.codecProvider.empty()) {
+    out[@"codecProvider"] =
+        [NSString stringWithUTF8String:result.codecProvider.c_str()];
+  }
+  if (!result.codecTier.empty()) {
+    out[@"codecTier"] = [NSString stringWithUTF8String:result.codecTier.c_str()];
+  }
+  if (!result.codecOrigin.empty()) {
+    out[@"codecOrigin"] =
+        [NSString stringWithUTF8String:result.codecOrigin.c_str()];
+  }
+  NSLog(@"[SherpaOnnx:image] exportFrame format=%@ provider=%@ tier=%@ origin=%@",
+        formatStr, out[@"codecProvider"], out[@"codecTier"], out[@"codecOrigin"]);
+  resolve(out);
 }
 
 - (void)emitLiveImageAppendEvents:(NSString *)bufferId

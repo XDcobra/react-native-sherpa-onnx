@@ -759,6 +759,7 @@ export async function exportVideoFrame(
         format: options?.format ?? 'jpeg',
         quality: options?.quality,
         maxSide: options?.maxSide,
+        encodePolicy: options?.encodePolicy,
       }
     );
   } finally {

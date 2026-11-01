@@ -534,7 +534,7 @@ void BindVideoModule(SherpaOnnx *mod) {
   };
   auto st = sherpa_onnx::codec::CodecRuntime::Instance().ConfigureFromNative(
       cstr(video[@"decode"]), cstr(video[@"display"]), cstr(video[@"encode"]),
-      cstr(image[@"decode"]), b);
+      cstr(image[@"decode"]), cstr(image[@"encode"]), b);
   if (b[0] > 0) {
     sherpa_onnx::video::DecoderPool::Instance().SetMaxSessions(
         sherpa_onnx::video::DecoderClass::Cpu, b[0]);

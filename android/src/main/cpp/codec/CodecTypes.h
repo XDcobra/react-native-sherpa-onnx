@@ -47,6 +47,11 @@ inline constexpr const char* kErrImageSwDecoderUnavailable =
     "ERR_IMAGE_SW_DECODER_UNAVAILABLE";
 inline constexpr const char* kErrImageHwDecoderUnavailable =
     "ERR_IMAGE_HW_DECODER_UNAVAILABLE";
+inline constexpr const char* kErrImageSwEncoderUnavailable =
+    "ERR_IMAGE_SW_ENCODER_UNAVAILABLE";
+inline constexpr const char* kErrImageHwEncoderUnavailable =
+    "ERR_IMAGE_HW_ENCODER_UNAVAILABLE";
+inline constexpr const char* kErrImageWebpDisabled = "ERR_IMAGE_WEBP_DISABLED";
 inline constexpr const char* kErrVideoDecoderUnavailable =
     "VIDEO_DECODER_UNAVAILABLE";
 inline constexpr const char* kErrVideoEncoderUnavailable =
@@ -162,6 +167,7 @@ struct PolicyConfig {
   Policy videoDisplay = Policy::PreferHardware;
   Policy videoEncode = Policy::PreferHardware;
   Policy imageDecode = Policy::PreferHardware;
+  Policy imageEncode = Policy::PreferHardware;
 };
 
 struct SlotSnap {

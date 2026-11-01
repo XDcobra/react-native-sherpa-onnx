@@ -1146,7 +1146,7 @@ export interface Spec extends TurboModule {
   /**
    * Encode one OfflineImageBuffer frame to a FileDestination.
    * `destination` is a serialized FileDestination map (same as saveAudioBufferToFile).
-   * `options`: `{ format?: string, quality?: number, maxSide?: number }`.
+   * `options`: `{ format?: string, quality?: number, maxSide?: number, encodePolicy?: string }`.
    * Returns `{ outputKind, outputPath }` for ResolvedFileRef parsing.
    */
   exportOfflineImageBufferFrame(

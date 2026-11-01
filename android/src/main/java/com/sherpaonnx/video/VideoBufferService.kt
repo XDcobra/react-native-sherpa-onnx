@@ -116,6 +116,7 @@ internal object VideoBufferService : ComponentCallbacks2 {
     videoDisplay: String?,
     videoEncode: String?,
     imageDecode: String?,
+    imageEncode: String?,
     hwDec: Int,
     hwDisp: Int,
     hwEnc: Int,
@@ -124,7 +125,7 @@ internal object VideoBufferService : ComponentCallbacks2 {
     img: Int,
   ): String? =
     VideoBufferNative.nativeConfigureCodecs(
-      videoDecode, videoDisplay, videoEncode, imageDecode,
+      videoDecode, videoDisplay, videoEncode, imageDecode, imageEncode,
       hwDec, hwDisp, hwEnc, swDec, swEnc, img,
     )
 

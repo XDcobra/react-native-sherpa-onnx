@@ -38,7 +38,7 @@ export interface CodecDecision {
 
 export interface ConfigureCodecsOptions {
   video?: { decode?: CodecPolicy; display?: CodecPolicy; encode?: CodecPolicy };
-  image?: { decode?: CodecPolicy };
+  image?: { decode?: CodecPolicy; encode?: CodecPolicy };
   budgets?: Partial<Record<CodecResource, number>>;
 }
 
@@ -46,6 +46,7 @@ export interface CodecInfo {
   ramClass: 'low' | 'mid' | 'high' | 'veryHigh';
   policies: Required<NonNullable<ConfigureCodecsOptions['video']>> & {
     imageDecode: CodecPolicy;
+    imageEncode: CodecPolicy;
   };
   slots: Array<{
     resource: CodecResource;

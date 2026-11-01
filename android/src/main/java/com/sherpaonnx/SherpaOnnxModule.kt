@@ -4049,6 +4049,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         str(video, "display"),
         str(video, "encode"),
         str(image, "decode"),
+        str(image, "encode"),
         budget(budgets, "hwVideoDecode"),
         budget(budgets, "hwVideoDisplay"),
         budget(budgets, "hwVideoEncode"),
@@ -4809,24 +4810,33 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         } else {
           0
         }
+        val encodePolicy =
+          if (options != null && options.hasKey("encodePolicy") && !options.isNull("encodePolicy")) {
+            options.getString("encodePolicy")
+          } else {
+            null
+          }
         val ext = when (format) {
           "png" -> "png"
           "webp" -> "webp"
+          "heic" -> "heic"
           else -> "jpg"
         }
         dest = resolveDestinationForSave(destination, ext)
-        val err = com.sherpaonnx.image.ImageBufferService.exportFrameToPath(
+        val native = com.sherpaonnx.image.ImageBufferService.exportFrameToPath(
           bufferId,
           frameIndex.toInt(),
           dest.outputPath,
           format,
           quality,
           maxSide,
+          encodePolicy,
         )
-        if (err != null) {
+        val ok = native["ok"] as? Boolean ?: false
+        if (!ok) {
           cleanupOutputFile(dest.outputPath)
-          val code = err["errorCode"] as? String ?: "ERR_IMAGE_ENCODE_FAILED"
-          val msg = err["errorMessage"] as? String ?: "encode failed"
+          val code = native["errorCode"] as? String ?: "ERR_IMAGE_ENCODE_FAILED"
+          val msg = native["errorMessage"] as? String ?: "encode failed"
           promise.reject(code, msg)
           return@execute
         }
@@ -4834,6 +4844,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val result = com.facebook.react.bridge.Arguments.createMap().apply {
           putString("outputKind", sanitizeOutputKind(dest))
           putString("outputPath", sanitizeResolvedOutputPath(dest))
+          (native["codecProvider"] as? String)?.let { putString("codecProvider", it) }
+          (native["codecTier"] as? String)?.let { putString("codecTier", it) }
+          (native["codecOrigin"] as? String)?.let { putString("codecOrigin", it) }
         }
         promise.resolve(result)
       } catch (e: com.sherpaonnx.fileio.FileIOException) {

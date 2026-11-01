@@ -6,8 +6,9 @@
  * Live: compressed JPEG/WebP/HEIC ring (`img_live_*`), recording → finished.
  *
  * WebP is opt-in: rebuild with `sherpaOnnxEnableLibwebp=true` (Android) or
- * `SHERPA_ONNX_ENABLE_LIBWEBP=1` (iOS). Default builds reject WebP decode/export
- * with `ERR_IMAGE_WEBP_DISABLED`.
+ * `SHERPA_ONNX_ENABLE_LIBWEBP=1` (iOS). Default builds reject WebP decode and
+ * software WebP export with `ERR_IMAGE_WEBP_DISABLED`. Android API 30+ can
+ * still export WebP via platform encode when libwebp is off.
  */
 
 import {
@@ -728,7 +729,12 @@ export async function exportOfflineImageBufferFrame(
   assertFileDestinationSupportedOnPlatform(output);
 
   const format: ImageExportFormat = options?.format ?? 'jpeg';
-  if (format !== 'jpeg' && format !== 'png' && format !== 'webp') {
+  if (
+    format !== 'jpeg' &&
+    format !== 'png' &&
+    format !== 'webp' &&
+    format !== 'heic'
+  ) {
     throw new Error(
       `${ImageErrorCode.INVALID_ARGUMENT}: unsupported export format: ${String(
         format
@@ -745,6 +751,7 @@ export async function exportOfflineImageBufferFrame(
         format,
         quality: options?.quality ?? 85,
         maxSide: options?.maxSide ?? 0,
+        encodePolicy: options?.encodePolicy,
       }
     );
 

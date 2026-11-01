@@ -97,6 +97,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/image/**/*",
     "android/src/main/cpp/jni/video/**/*",
     "android/src/main/cpp/video/platform/android/**/*",
+    "android/src/main/cpp/image/platform/android/**/*",
     "third_party/libyuv/source/*jpeg*",
     "third_party/libyuv/source/*mjpeg*",
     "third_party/libyuv/source/*_wasm.cc",

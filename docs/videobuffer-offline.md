@@ -387,9 +387,10 @@ Decodes the nearest frame at `ptsUs` and writes it via [fileio](fileio.md). Acce
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `format` | `'jpeg'` | `'jpeg'` \| `'png'` \| `'webp'`. WebP needs libwebp enabled ([imagebuffer-offline.md](imagebuffer-offline.md)). |
-| `quality` | encoder default | JPEG/WebP quality. |
+| `format` | `'jpeg'` | `'jpeg'` \| `'png'` \| `'webp'` \| `'heic'`. WebP/HEIC follow [imagebuffer-offline.md](imagebuffer-offline.md) encode rules. |
+| `quality` | encoder default | JPEG/WebP/HEIC quality. |
 | `maxSide` | no cap | Longest-edge cap before encode. |
+| `encodePolicy` | `preferHardware` | Same cascade as `exportOfflineImageBufferFrame`. |
 
 #### `exportVideo(video, output, format, options?)`
 
@@ -498,7 +499,7 @@ FFmpeg demuxes the container. Pixels use the shared codec layer ([codecs.md](./c
 | AAC, MP3, Opus, Vorbis, FLAC, pcm_s16le, pcm_f32le | `decodable: true` — extract / preview |
 | AC-3 and anything else | extract → `VIDEO_AUDIO_CODEC_UNSUPPORTED`; preview continues muted (`unsupportedCodec`) |
 
-Extract → `OfflineAudioBuffer` float32. Image bridge / `exportVideoFrame`: RGB stills `jpeg` \| `png` \| `webp` (WebP = libwebp opt-in). Clip export: `exportVideo` (HW encode + FFmpeg mux). Internal decode planes: NV12 / Gray8 / RGB24.
+Extract → `OfflineAudioBuffer` float32. Image bridge / `exportVideoFrame`: RGB stills `jpeg` \| `png` \| `webp` \| `heic` (encode policy in [imagebuffer-offline.md](imagebuffer-offline.md)). Clip export: `exportVideo` (HW encode + FFmpeg mux). Internal decode planes: NV12 / Gray8 / RGB24.
 
 Out of scope: AVI, MPEG-TS, FLV, AV1 / VP8 / VP9 decode or encode, bundled SW H.264/HEVC **encoders**, packet-copy remux. Bundled SW **decode** is the opt-in `ffmpeg-vsw` variant.
 
@@ -541,7 +542,7 @@ Canonical TypeScript types: [`src/videobuffer/types.ts`](../src/videobuffer/type
 | `OfflineVideoBufferInfo` | Metadata (`kind: 'offlineVideoBuffer'`, `state: 'immutable'`). |
 | `VideoAudioTrackInfo` | `codec`, `decodable`, `sampleRate`, `channels`, `startMs`, `durationMs`. |
 | `CreateOfflineImageFromVideoOptions` | `sampling`, `fps`, `uniformCount`, `timesUs`, `maxSide`. |
-| `ExportVideoFrameOptions` | `format`, `maxSide`, `quality`. |
+| `ExportVideoFrameOptions` | `format`, `maxSide`, `quality`, `encodePolicy`. |
 | `ExportVideoOptions` | `codec`, `bitrate`, `fromUs`, `toUs`, `maxSide`, `onProgress`, `signal`. |
 | `CreateOfflineAudioFromVideoOptions` | `targetSampleRateHz`, `rangeMs`, `onProgress`, `signal`. |
 | `VideoAudioExtractResult` | `{ audio, mediaStartMs, sourceCodec, sourceSampleRate, sourceChannels }`. |

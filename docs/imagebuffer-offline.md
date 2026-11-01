@@ -28,7 +28,7 @@ Default SDK builds do **not** include libwebp.
 
 Prebuilts: [third_party/libwebp_prebuilt/README.md](../third_party/libwebp_prebuilt/README.md).
 
-Without enable, WebP decode (`createOfflineImageBufferFromFiles` / `FromBase64`) and `exportOfflineImageBufferFrame({ format: 'webp' })` reject with `ERR_IMAGE_WEBP_DISABLED`. JPEG/PNG/BMP/GIF are unchanged. The example app opts in (`sherpaOnnxEnableLibwebp=true` / `SHERPA_ONNX_ENABLE_LIBWEBP=1`).
+Without enable, WebP decode (`createOfflineImageBufferFromFiles` / `FromBase64`) and software WebP export reject with `ERR_IMAGE_WEBP_DISABLED`. JPEG/PNG/BMP/GIF decode are unchanged. On Android API 30+, `preferHardware` / `hardware` can still export WebP via `AndroidBitmap_compress` when libwebp is off. iOS has no platform WebP encoder. The example app opts in (`sherpaOnnxEnableLibwebp=true` / `SHERPA_ONNX_ENABLE_LIBWEBP=1`).
 
 ---
 
@@ -252,9 +252,10 @@ function exportOfflineImageBufferFrame(
   frameIndex: number,
   output: FileDestination,
   options?: {
-    format?: 'jpeg' | 'png' | 'webp'; // default jpeg
-    quality?: number; // 1..100, jpeg/webp
+    format?: 'jpeg' | 'png' | 'webp' | 'heic'; // default jpeg
+    quality?: number; // 1..100, jpeg/webp/heic
     maxSide?: number; // export-only downsample; does not change the buffer
+    encodePolicy?: 'hardware' | 'software' | 'preferHardware';
   }
 ): Promise<ResolvedFileRef>;
 ```
@@ -397,11 +398,14 @@ Sniff is by magic bytes, not extension. Each source becomes **one** packed **RGB
 | WebP | **opt-in libwebp** | Default off → `ERR_IMAGE_WEBP_DISABLED`. First frame. Enable: [Opt-in libwebp](#opt-in-libwebp-default-off). |
 | HEIC / HEIF | platform | Brands `heic` / `heix` / `hevc` / `hevx` / `mif1` / `msf1`. **Android API 30+** `AImageDecoder`; **API 28–29** Kotlin `ImageDecoder`; older → `os-too-old`. `software` + HEIC → `ERR_IMAGE_SW_DECODER_UNAVAILABLE`. **iOS** ImageIO. See [codecs.md](./codecs.md). |
 
-| Export (`exportOfflineImageBufferFrame`) | |
+| Export (`exportOfflineImageBufferFrame`) | Encoder |
 |---|---|
-| `jpeg` / `jpg` | quality 1–100 (default **85**) |
-| `png` | quality ignored |
-| `webp` | same libwebp opt-in; quality 1–100 |
+| `jpeg` / `jpg` | `preferHardware` / `hardware`: Android API **30+** `AndroidBitmap_compress`, iOS ImageIO. Android 24–29 and `software`: stb. `hardware` on API 24–29 → `ERR_IMAGE_HW_ENCODER_UNAVAILABLE` (no Java fallback). Quality 1–100 (default **85**). |
+| `png` | Same availability as JPEG. Quality ignored. |
+| `webp` | If libwebp is linked: `preferHardware` and `software` use **libwebp** (faster). `hardware` uses platform WebP only on Android 30+. If libwebp is off: Android 30+ platform WebP under `preferHardware` / `hardware`; `software` → `ERR_IMAGE_WEBP_DISABLED`. iOS has no platform WebP path. |
+| `heic` | iOS ImageIO only. Android / `software` → `ERR_IMAGE_HW_ENCODER_UNAVAILABLE` / `ERR_IMAGE_SW_ENCODER_UNAVAILABLE`. |
+
+Default encode policy is **`preferHardware`**. Cascade: operation `encodePolicy` > buffer > `configureCodecs({ image: { encode } })` > SDK default. See [codecs.md](./codecs.md).
 
 PDF pages and e-document images are **not** decoded here — [`rasterizePdfPages`](pdf-offline.md) / [`extractDocumentImages`](document-offline.md).
 
@@ -467,7 +471,9 @@ import { ImageErrorCode } from 'react-native-sherpa-onnx/imagebuffer';
 | `ERR_IMAGE_INVALID_ARGUMENT` | Invalid buffer id, empty sources, or bad argument |
 | `ERR_IMAGE_DECODE_FAILED` | Decode / I/O failure while reading an image |
 | `ERR_IMAGE_FORMAT_UNSUPPORTED` | HEIC without platform support |
-| `ERR_IMAGE_WEBP_DISABLED` | WebP used without libwebp opted in at build time |
+| `ERR_IMAGE_WEBP_DISABLED` | Software WebP used without libwebp opted in, or iOS WebP without libwebp |
+| `ERR_IMAGE_HW_ENCODER_UNAVAILABLE` | `hardware` encode with no platform encoder (Android JPEG/PNG/WebP before API 30; HEIC off iOS) |
+| `ERR_IMAGE_SW_ENCODER_UNAVAILABLE` | `software` encode with no bundled encoder (HEIC) |
 | `ERR_IMAGE_BUFFER_NOT_FOUND` | Unknown buffer id or frame |
 | `ERR_IMAGE_CANCELLED` | Create cancelled via `AbortSignal` |
 | `ERR_IMAGE_INTERNAL` | Generic failure |

@@ -545,7 +545,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeDetectFormat(
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_image_ImageBufferNative_nativeExportFrame(
     JNIEnv* env, jclass, jstring jBufferId, jint frameIndex, jstring jOutPath,
-    jstring jFormat, jint quality, jint maxSide) {
+    jstring jFormat, jint quality, jint maxSide, jstring jEncodePolicy) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!map) return nullptr;
@@ -566,6 +566,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeExportFrame(
   opts.format = format;
   opts.quality = quality;
   opts.maxSide = maxSide;
+  opts.encodePolicy = JstringToStd(env, jEncodePolicy);
 
   const auto result = sherpa_onnx::image::ExportFrameToFile(
       bufferId, frameIndex, outPath, opts);
@@ -573,6 +574,21 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeExportFrame(
   if (!result.ok) {
     PutString(env, map, put, "errorCode", result.errorCode);
     PutString(env, map, put, "errorMessage", result.errorMessage);
+  } else {
+    if (!result.codecProvider.empty()) {
+      PutString(env, map, put, "codecProvider", result.codecProvider);
+    }
+    if (!result.codecTier.empty()) {
+      PutString(env, map, put, "codecTier", result.codecTier);
+    }
+    if (!result.codecOrigin.empty()) {
+      PutString(env, map, put, "codecOrigin", result.codecOrigin);
+    }
+    LOGI("[SherpaOnnx:image] exportFrame buffer=%s frame=%d format=%s "
+         "provider=%s tier=%s origin=%s",
+         bufferId.c_str(), frameIndex, formatName.c_str(),
+         result.codecProvider.c_str(), result.codecTier.c_str(),
+         result.codecOrigin.c_str());
   }
   return map;
 }

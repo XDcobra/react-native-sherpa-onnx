@@ -23,15 +23,18 @@ class CodecRuntime {
   /** Null / empty policy strings are left unchanged. Budget 0 = omit. */
   Status ConfigureFromNative(const char* videoDecode, const char* videoDisplay,
                              const char* videoEncode, const char* imageDecode,
-                             const int budgets[6]);
+                             const char* imageEncode, const int budgets[6]);
 
   PolicyConfig policies() const;
   Policy GlobalVideo(Use use) const;
   Policy GlobalImage() const;
+  Policy GlobalImageEncode() const;
   Policy ResolveVideo(Use use, std::optional<Policy> operation,
                       std::optional<Policy> buffer) const;
   Policy ResolveImage(std::optional<Policy> operation,
                       std::optional<Policy> buffer) const;
+  Policy ResolveImageEncode(std::optional<Policy> operation,
+                            std::optional<Policy> buffer) const;
 
   std::string InfoJson() const;
   void ResetForTest();

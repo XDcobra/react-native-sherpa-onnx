@@ -45,6 +45,7 @@ export async function configureCodecs(
   assertPolicy(options?.video?.display, 'video.display');
   assertPolicy(options?.video?.encode, 'video.encode');
   assertPolicy(options?.image?.decode, 'image.decode');
+  assertPolicy(options?.image?.encode, 'image.encode');
   const budgets = options?.budgets;
   if (budgets) {
     for (const key of CODEC_RESOURCES) {

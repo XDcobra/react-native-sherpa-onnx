@@ -14,6 +14,7 @@ internal object VideoBufferNative {
     videoDisplay: String?,
     videoEncode: String?,
     imageDecode: String?,
+    imageEncode: String?,
     hwDec: Int,
     hwDisp: Int,
     hwEnc: Int,

@@ -183,6 +183,15 @@ ResourceClass ResourceFor(const Request& req, Tier tier) {
 
 const char* ErrorCodeFor(const Request& req, Reason reason, Tier attempted) {
   if (req.media == Media::Image) {
+    if (req.dir == Direction::Encode) {
+      if (reason == Reason::Disabled) {
+        return kErrImageWebpDisabled;
+      }
+      if (attempted == Tier::Software) {
+        return kErrImageSwEncoderUnavailable;
+      }
+      return kErrImageHwEncoderUnavailable;
+    }
     if (attempted == Tier::Software || reason == Reason::Disabled) {
       return kErrImageSwDecoderUnavailable;
     }

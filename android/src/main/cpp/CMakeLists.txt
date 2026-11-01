@@ -212,7 +212,9 @@ set(SOURCES
     image/ImageFrameEncoder.cpp
     image/decode/ImageDecoder.cpp
     image/decode/ImageDecodeSelect.cpp
+    image/encode/ImageEncodeSelect.cpp
     image/platform/android/AImageDecoderBackend.cpp
+    image/platform/android/AndroidBitmapEncodeBackend.cpp
     jni/image/sherpa-onnx-imagebuffer-jni.cpp
     jni/video/sherpa-onnx-videobuffer-jni.cpp
     ocr/OcrFactory.cpp

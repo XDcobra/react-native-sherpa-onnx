@@ -4,7 +4,7 @@ Shared HW/SW de/encoding for VideoBuffer and ImageBuffer.
 
 ## Default
 
-Every use (`video.decode`, `video.display`, `video.encode`, `image.decode`) defaults to **`preferHardware`**.
+Every use (`video.decode`, `video.display`, `video.encode`, `image.decode`, `image.encode`) defaults to **`preferHardware`**.
 
 | Policy | Behavior |
 | --- | --- |
@@ -29,7 +29,7 @@ import {
 
 await configureCodecs({
   video: { decode: 'preferHardware', encode: 'hardware' },
-  image: { decode: 'preferHardware' },
+  image: { decode: 'preferHardware', encode: 'preferHardware' },
   budgets: { hwVideoEncode: 1 }, // 1..4, omit = auto from RAM class
 });
 
@@ -41,11 +41,13 @@ const unsub = subscribeCodecEvents((e) => {
 });
 ```
 
-Per-call overrides: `decodePolicy` / `encodePolicy` on `createOfflineVideoBufferFromFile`, `createEmptyLiveVideoBuffer`, `exportVideo`, `createOfflineImageBufferFromVideo`, `createVideoPreviewPlayer`, and image create APIs.
+Per-call overrides: `decodePolicy` / `encodePolicy` on `createOfflineVideoBufferFromFile`, `createEmptyLiveVideoBuffer`, `exportVideo`, `exportOfflineImageBufferFrame`, `exportVideoFrame`, `createOfflineImageBufferFromVideo`, `createVideoPreviewPlayer`, and image create APIs.
+
+Image encode (`exportOfflineImageBufferFrame` / `exportVideoFrame`): JPEG/PNG use platform encode on Android API 30+ (`AndroidBitmap_compress`) and iOS ImageIO. WebP stays on libwebp when that library is linked (`preferHardware` / `software`); platform WebP is only the no-libwebp Android 30+ fallback. HEIC encode is iOS ImageIO only.
 
 ## Errors
 
-New codes: `VIDEO_SW_DECODER_DISABLED`, `VIDEO_SW_ENCODER_DISABLED`, `ERR_IMAGE_SW_DECODER_UNAVAILABLE`, `ERR_IMAGE_HW_DECODER_UNAVAILABLE`, `CODEC_INVALID_ARGUMENT`.
+New codes: `VIDEO_SW_DECODER_DISABLED`, `VIDEO_SW_ENCODER_DISABLED`, `ERR_IMAGE_SW_DECODER_UNAVAILABLE`, `ERR_IMAGE_HW_DECODER_UNAVAILABLE`, `ERR_IMAGE_SW_ENCODER_UNAVAILABLE`, `ERR_IMAGE_HW_ENCODER_UNAVAILABLE`, `CODEC_INVALID_ARGUMENT`.
 
 Existing `VIDEO_DECODER_UNAVAILABLE` / `VIDEO_ENCODER_UNAVAILABLE` / `VIDEO_PREVIEW_DECODER_BUSY` now include `codecReason` (`pool-full`, `not-present`, `os-too-old`, `unsupported-stream`, `configure-failed`, …).
 

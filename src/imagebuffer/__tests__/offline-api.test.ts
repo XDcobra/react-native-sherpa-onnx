@@ -307,9 +307,49 @@ describe('offline ImageBuffer public API', () => {
       bufferId,
       0,
       { kind: 'fs', path: '/tmp/out.jpg' },
-      { format: 'jpeg', quality: 90, maxSide: 0 }
+      { format: 'jpeg', quality: 90, maxSide: 0, encodePolicy: undefined }
     );
     expect(ref).toEqual({ kind: 'fs', path: '/tmp/out.jpg' });
+  });
+
+  it('exportOfflineImageBufferFrame accepts heic and encodePolicy', async () => {
+    mockNative.exportOfflineImageBufferFrame.mockResolvedValue({
+      outputKind: 'fs',
+      outputPath: '/tmp/out.heic',
+      codecProvider: 'ImageIO',
+    });
+
+    const ref = await exportOfflineImageBufferFrame(
+      bufferId,
+      0,
+      { kind: 'fs', path: '/tmp/out.heic' },
+      { format: 'heic', encodePolicy: 'hardware' }
+    );
+
+    expect(mockNative.exportOfflineImageBufferFrame).toHaveBeenCalledWith(
+      bufferId,
+      0,
+      { kind: 'fs', path: '/tmp/out.heic' },
+      {
+        format: 'heic',
+        quality: 85,
+        maxSide: 0,
+        encodePolicy: 'hardware',
+      }
+    );
+    expect(ref).toEqual({ kind: 'fs', path: '/tmp/out.heic' });
+  });
+
+  it('exportOfflineImageBufferFrame rejects unknown format', async () => {
+    await expect(
+      exportOfflineImageBufferFrame(
+        bufferId,
+        0,
+        { kind: 'fs', path: '/tmp/out.gif' },
+        { format: 'gif' as never }
+      )
+    ).rejects.toThrow(/ERR_IMAGE_INVALID_ARGUMENT/);
+    expect(mockNative.exportOfflineImageBufferFrame).not.toHaveBeenCalled();
   });
 
   it('ensureOfflineImageBufferFrame forwards to native and maps frame info', async () => {

@@ -46,6 +46,7 @@ Status CodecRuntime::ConfigureFromNative(const char* videoDecode,
                                          const char* videoDisplay,
                                          const char* videoEncode,
                                          const char* imageDecode,
+                                         const char* imageEncode,
                                          const int budgets[6]) {
   auto apply = [](const char* s, Policy* dest) -> Status {
     if (s == nullptr || s[0] == '\0') return Status::Ok();
@@ -65,6 +66,8 @@ Status CodecRuntime::ConfigureFromNative(const char* videoDecode,
   st = apply(videoEncode, &policies_.videoEncode);
   if (!st.ok) return st;
   st = apply(imageDecode, &policies_.imageDecode);
+  if (!st.ok) return st;
+  st = apply(imageEncode, &policies_.imageEncode);
   if (!st.ok) return st;
   if (budgets) {
     for (int i = 0; i < 6; ++i) {
@@ -94,6 +97,11 @@ Policy CodecRuntime::GlobalImage() const {
   return policies_.imageDecode;
 }
 
+Policy CodecRuntime::GlobalImageEncode() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return policies_.imageEncode;
+}
+
 Policy CodecRuntime::ResolveVideo(Use use, std::optional<Policy> operation,
                                   std::optional<Policy> buffer) const {
   return ResolvePolicy(operation, buffer, GlobalVideo(use));
@@ -102,6 +110,11 @@ Policy CodecRuntime::ResolveVideo(Use use, std::optional<Policy> operation,
 Policy CodecRuntime::ResolveImage(std::optional<Policy> operation,
                                   std::optional<Policy> buffer) const {
   return ResolvePolicy(operation, buffer, GlobalImage());
+}
+
+Policy CodecRuntime::ResolveImageEncode(std::optional<Policy> operation,
+                                        std::optional<Policy> buffer) const {
+  return ResolvePolicy(operation, buffer, GlobalImageEncode());
 }
 
 std::string CodecRuntime::InfoJson() const {
@@ -113,7 +126,8 @@ std::string CodecRuntime::InfoJson() const {
      << "\",\"policies\":{\"decode\":\"" << PolicyName(pol.videoDecode)
      << "\",\"display\":\"" << PolicyName(pol.videoDisplay) << "\",\"encode\":\""
      << PolicyName(pol.videoEncode) << "\",\"imageDecode\":\""
-     << PolicyName(pol.imageDecode) << "\"},\"slots\":[";
+     << PolicyName(pol.imageDecode) << "\",\"imageEncode\":\""
+     << PolicyName(pol.imageEncode) << "\"},\"slots\":[";
   for (size_t i = 0; i < slots.size(); ++i) {
     if (i) os << ",";
     os << "{\"resource\":\"" << ResourceJsName(slots[i].resource)

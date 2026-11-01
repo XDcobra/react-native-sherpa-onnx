@@ -148,9 +148,10 @@ export interface LiveVideoBufferEvent {
 }
 
 export interface ExportVideoFrameOptions {
-  format?: 'jpeg' | 'png' | 'webp';
+  format?: 'jpeg' | 'png' | 'webp' | 'heic';
   maxSide?: number;
   quality?: number;
+  encodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export type VideoExportContainer = 'mp4' | 'mov' | 'mkv' | 'webm';

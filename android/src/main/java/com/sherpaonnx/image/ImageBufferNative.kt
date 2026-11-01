@@ -77,6 +77,7 @@ internal object ImageBufferNative {
     format: String,
     quality: Int,
     maxSide: Int,
+    encodePolicy: String?,
   ): HashMap<String, Any>?
 
   /**

@@ -155,23 +155,20 @@ internal object ImageBufferService {
     format: String,
     quality: Int,
     maxSide: Int,
-  ): Map<String, Any>? {
-    val result = ImageBufferNative.nativeExportFrame(
+    encodePolicy: String? = null,
+  ): Map<String, Any> {
+    return ImageBufferNative.nativeExportFrame(
       bufferId,
       frameIndex,
       outPath,
       format,
       quality,
       maxSide,
-    ) ?: return mapOf(
+      encodePolicy,
+    ) ?: mapOf(
+      "ok" to false,
       "errorCode" to "ERR_IMAGE_INTERNAL",
       "errorMessage" to "nativeExportFrame returned null",
-    )
-    val ok = result["ok"] as? Boolean ?: false
-    if (ok) return null
-    return mapOf(
-      "errorCode" to (result["errorCode"] as? String ?: "ERR_IMAGE_ENCODE_FAILED"),
-      "errorMessage" to (result["errorMessage"] as? String ?: "encode failed"),
     )
   }
 

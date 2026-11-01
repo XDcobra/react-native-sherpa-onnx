@@ -1,6 +1,6 @@
 # Shared HW/SW codec layer — implementation plan
 
-**Status:** Phases 0–5 implemented in tree (2026-10-31). Shared C++ core, Android/iOS providers, opt-in `ffmpeg-vsw`, image backends, public docs. Smoke S0–S5 green on A142P + iOS Simulator: [hw-sw-codec-smoke-a142p-2026-10-31.md](./hw-sw-codec-smoke-a142p-2026-10-31.md). Benches B1–B9 and a real iPhone remain user-run and do not block. Phase 6 optional (not done). Phase 7 skipped (audio still Kotlin).  
+**Status:** Phases 0–6 implemented in tree (2026-10-31). Shared C++ core, Android/iOS providers, opt-in `ffmpeg-vsw`, image decode + encode backends, public docs. Smoke S0–S5 green on A142P + iOS Simulator: [hw-sw-codec-smoke-a142p-2026-10-31.md](./hw-sw-codec-smoke-a142p-2026-10-31.md). Phase 6 encode-compare GO (JPEG) is in tree; device export verification is still user-run. Benches B1–B9 and a real iPhone remain user-run and do not block. Phase 7 skipped (audio still Kotlin).  
 **Branch:** `feat/videobuffer-hw-slot-caps` (from `refactor/refactor-before-release-1-0` @ `d679d5c7`).  
 **Findings:** [hw-sw-codec-findings.md](./hw-sw-codec-findings.md). Read §1, §7 and §8 there first.  
 **Supersedes:** the Cursor plan *HW slot public API* (`hw_slot_public_api_b461b36f`). Its four todos (auto caps, encoder pool, fail-fast + slot events, tests/docs) become Phase 1 here. Its non-goal "no silent SW fallback" still holds: fallback exists only under an explicit `preferHardware` policy and is always reported.
@@ -378,9 +378,20 @@ Tests (host): portable unchanged, libyuv RGBA→RGB byte-order test, plan tests 
 
 Smoke (user, non-blocking): S5.1–S5.4 in §5.1 and benches B7, B8, B9. They are **release** gates (D1): implementation continues without them. If B9 fails (OCR differs), the platform backend gets a debug-first fix (data space, chroma, EXIF). The image default stays `preferHardware`.
 
-### Phase 6 — Image encode tiers (optional, demand-driven)
+### Phase 6 — Image encode tiers — implemented (device verify pending)
 
-`AndroidBitmap_compress` (API 30) and `CGImageDestination` as platform encoders for `exportOfflineImageBufferFrame` / `exportVideoFrame`. Main user value: WebP export without libwebp under `preferHardware`. Gate: encode ≥ 1.5× stb on 8MP, or WebP availability.
+`AndroidBitmap_compress` (API 30, weak-link) and `CGImageDestination` as platform encoders for `exportOfflineImageBufferFrame` / `exportVideoFrame`. Select + catalog, no encode pool. `encodePolicy` on the export APIs; `configureCodecs({ image: { encode } })`.
+
+| Format | `preferHardware` | `hardware` | `software` |
+| --- | --- | --- | --- |
+| JPEG / PNG | Android 30+ `AndroidBitmap`, iOS ImageIO; else stb | same platform, else `ERR_IMAGE_HW_ENCODER_UNAVAILABLE` | stb |
+| WebP + libwebp | **libwebp** (measured faster) | platform Android 30+ only; else HW unavailable | libwebp |
+| WebP, libwebp off | Android 30+ platform; iOS `ERR_IMAGE_WEBP_DISABLED` | same | `ERR_IMAGE_WEBP_DISABLED` |
+| HEIC | iOS ImageIO; else HW unavailable | iOS ImageIO; else HW unavailable | `ERR_IMAGE_SW_ENCODER_UNAVAILABLE` |
+
+No Java `Bitmap.compress` on API 24–29. No Android HEIC encode. No iOS platform WebP (unmeasured).
+
+**Encode-compare 2026-10-31** (8MP 3264×2448, q=85, 3-run median): [A142P](./evidence/a142p-2026-10-31-encode-compare.json) JPEG **7.85×** (stb 504 ms / `Bitmap.compress` 64 ms). [iOS Simulator](./evidence/iphone17pro-2026-10-31-encode-compare.json) JPEG **17.67×** (stb 198 ms / ImageIO 11 ms; sim host CPU). **JPEG gate GO** (≥ 1.5×). Android WebP **0.92×** — keep libwebp for speed; platform WebP only as no-libwebp fallback. iOS HEIC is capability-only (no stb). B1–B9 stay deferred.
 
 ### Phase 7 — Kotlin buffers after their C++ port
 
