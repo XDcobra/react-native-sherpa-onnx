@@ -26,6 +26,7 @@ class AMediaCodecDecoder : public DecoderBackend {
   Status Configure(const VideoTrackInfo& track) override;
   Status Submit(const EncodedPacket& packet) override;
   Status Flush() override;
+  Status SignalEnd() override;
   bool Receive(DecodedRawFrame* out) override;
   bool ReceiveWait(DecodedRawFrame* out, int64_t timeoutUs) override;
   void Close() override;
@@ -40,7 +41,6 @@ class AMediaCodecDecoder : public DecoderBackend {
                        const std::vector<uint8_t>& config);
 
  private:
-  static void OnImageAvailable(void* context, AImageReader* reader);
   Status CopyImageToFrame(AImage* image, DecodedRawFrame* out, int64_t ptsUs);
   void PumpCodec(int64_t timeoutUs);
   void DrainImages();
@@ -50,13 +50,13 @@ class AMediaCodecDecoder : public DecoderBackend {
   AMediaCodec* codec_ = nullptr;
   AImageReader* reader_ = nullptr;
   ANativeWindow* window_ = nullptr;
-  AImageReader_ImageListener listener_{};
   VideoTrackInfo track_;
   std::string allowedName_;
   int submitCount_ = 0;
   int flushCount_ = 0;
   bool configured_ = false;
   bool queuedSinceStart_ = false;
+  bool sawEos_ = false;
   bool reclaimed_ = false;
   std::atomic<uint64_t> imageGen_{0};
   std::mutex outMu_;

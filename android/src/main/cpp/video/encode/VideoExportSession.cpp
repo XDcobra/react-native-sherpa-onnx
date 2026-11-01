@@ -215,9 +215,7 @@ struct AvFmt {
   ~AvFmt() {
     if (fmt) {
       if (header) {
-        VIDEO_LOGI("video.export trailer");
         av_write_trailer(fmt);
-        VIDEO_LOGI("video.export trailer done");
       }
       if (fmt->pb) {
         avio_closep(&fmt->pb);
@@ -388,6 +386,8 @@ Status VideoExportSession::Run(const std::string& bufferId,
   if (!entry->timeline() || entry->timeline()->empty()) {
     return Status::Fail(kErrInvalidArgument, "empty timeline");
   }
+  VIDEO_LOGI("video.export begin format=%s codec=%s buffer=%s", format.c_str(),
+             VideoCodecName(opts.codec), bufferId.c_str());
 #ifndef HAVE_FFMPEG
   (void)opts;
   (void)cancel;
@@ -777,15 +777,12 @@ Status VideoExportSession::Run(const std::string& bufferId,
   // is not holding GraphicBuffers while HWUI redraws the File I/O result.
   it = VideoFrameIterator();
   entry->DropStickySession();
-  VIDEO_LOGI("video.export decoder released format=%s", format.c_str());
 
   if (as && aenc && swr && !pcmPath.empty()) {
-    VIDEO_LOGI("video.export mux audio begin");
     auto ast = MuxAudioFromPcm(av.fmt, as, aenc, swr, pcmPath, pcmRate, cancel);
     if (!ast.ok) {
       return ast;
     }
-    VIDEO_LOGI("video.export mux audio end");
   }
 
   if (progress) {

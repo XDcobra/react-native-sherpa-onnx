@@ -10,6 +10,7 @@
 
 #include <media/NdkMediaError.h>
 
+#include <android/hardware_buffer.h>
 #include <chrono>
 #include <cstring>
 #include <string>
@@ -75,15 +76,24 @@ Status AMediaCodecDecoder::Configure(const VideoTrackInfo& track) {
   AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, track.codedWidth);
   AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, track.codedHeight);
   ApplyCsd(fmt, track.codec, track.codecConfig);
-  media_status_t ms = AImageReader_new(track.codedWidth, track.codedHeight,
-                                       AIMAGE_FORMAT_YUV_420_888, 8, &reader_);
+  // CPU sink: default AImageReader_new allocates GPU+composer usage. This path
+  // only reads via AImage_getPlaneData, so CPU_READ_OFTEN is the consumer flag.
+  constexpr int kMaxImages = 8;
+  media_status_t ms = AMEDIA_ERROR_UNKNOWN;
+  if (__builtin_available(android 26, *)) {
+    ms = AImageReader_newWithUsage(
+        track.codedWidth, track.codedHeight, AIMAGE_FORMAT_YUV_420_888,
+        AHARDWAREBUFFER_USAGE_CPU_READ_OFTEN, kMaxImages, &reader_);
+  } else {
+    ms = AImageReader_new(track.codedWidth, track.codedHeight,
+                          AIMAGE_FORMAT_YUV_420_888, kMaxImages, &reader_);
+  }
   if (ms != AMEDIA_OK || reader_ == nullptr) {
     AMediaFormat_delete(fmt);
     return Status::Fail(kErrDecoderUnavailable, "AImageReader");
   }
-  listener_.context = this;
-  listener_.onImageAvailable = &AMediaCodecDecoder::OnImageAvailable;
-  AImageReader_setImageListener(reader_, &listener_);
+  // Worker drains after each render in PumpCodec. A listener would call
+  // DrainImages on the ImageReader looper and race acquire/PTS assignment.
   AImageReader_getWindow(reader_, &window_);
   codec_ = AMediaCodec_createCodecByName(allowedName_.c_str());
   if (codec_ == nullptr) {
@@ -119,8 +129,14 @@ Status AMediaCodecDecoder::Submit(const EncodedPacket& packet) {
     data = annexb.data();
     size = annexb.size();
   }
+  // Release rendered ImageReader slots first. MediaCodec will not give a new
+  // input while its output port is full (see MediaCodec Executing/Running).
+  PumpCodec(0);
+  DrainImages();
   const ssize_t ix = AMediaCodec_dequeueInputBuffer(codec_, 10000);
   if (ix < 0) {
+    VIDEO_LOGW("video.decode amc input-starved ix=%zd",
+               static_cast<ssize_t>(ix));
     return Status::Fail(kErrDecodeFailed, "input buffer");
   }
   size_t bufSize = 0;
@@ -141,11 +157,38 @@ Status AMediaCodecDecoder::Submit(const EncodedPacket& packet) {
   return Status::Ok();
 }
 
+Status AMediaCodecDecoder::SignalEnd() {
+  if (!configured_ || codec_ == nullptr || sawEos_) {
+    return Status::Ok();
+  }
+  PumpCodec(0);
+  DrainImages();
+  const ssize_t ix = AMediaCodec_dequeueInputBuffer(codec_, 10000);
+  if (ix < 0) {
+    return Status::Fail(kErrDecodeFailed, "eos input");
+  }
+  const media_status_t q = AMediaCodec_queueInputBuffer(
+      codec_, static_cast<size_t>(ix), 0, 0, 0,
+      AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
+  if (q != AMEDIA_OK) {
+    return Status::Fail(kErrDecodeFailed, "eos queue");
+  }
+  sawEos_ = true;
+  VIDEO_LOGI("video.decode amc signal-end");
+  PumpCodec(0);
+  DrainImages();
+  return Status::Ok();
+}
+
 Status AMediaCodecDecoder::Flush() {
   imageGen_.fetch_add(1);
-  if (codec_ && queuedSinceStart_) {
+  DiscardImages();
+  // MediaCodec: after EOS the codec is in End-of-Stream and rejects input
+  // until flush() returns it to Flushed (or stop/start). We use flush.
+  if (codec_ && (queuedSinceStart_ || sawEos_)) {
     AMediaCodec_flush(codec_);
     queuedSinceStart_ = false;
+    sawEos_ = false;
   }
   {
     std::lock_guard<std::mutex> lock(outMu_);
@@ -154,15 +197,6 @@ Status AMediaCodecDecoder::Flush() {
   }
   ++flushCount_;
   return Status::Ok();
-}
-
-void AMediaCodecDecoder::OnImageAvailable(void* context, AImageReader* reader) {
-  (void)reader;
-  auto* self = static_cast<AMediaCodecDecoder*>(context);
-  if (self == nullptr) {
-    return;
-  }
-  self->DrainImages();
 }
 
 void AMediaCodecDecoder::PumpCodec(int64_t timeoutUs) {
@@ -176,14 +210,12 @@ void AMediaCodecDecoder::PumpCodec(int64_t timeoutUs) {
         AMediaCodec_dequeueOutputBuffer(codec_, &info, waitUs);
     if (ix == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED ||
         ix == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
-      VIDEO_LOGI("video.decode amc info ix=%zd spin=%d",
-                 static_cast<ssize_t>(ix), spin);
       waitUs = 0;
       continue;
     }
     if (ix == -1101 || ix == -1100) {
       reclaimed_ = true;
-      VIDEO_LOGI("video.decode amc reclaim ix=%zd", static_cast<ssize_t>(ix));
+      VIDEO_LOGW("video.decode amc reclaim ix=%zd", static_cast<ssize_t>(ix));
       return;
     }
     if (ix < 0) {
@@ -195,16 +227,10 @@ void AMediaCodecDecoder::PumpCodec(int64_t timeoutUs) {
     }
     // Surface/ImageReader mode: render=true delivers the buffer to AImageReader.
     AMediaCodec_releaseOutputBuffer(codec_, static_cast<size_t>(ix), true);
-    VIDEO_LOGI("video.decode amc render ix=%zd ptsUs=%lld flags=%u",
-               static_cast<ssize_t>(ix),
-               static_cast<long long>(info.presentationTimeUs),
-               static_cast<unsigned>(info.flags));
     DrainImages();
     {
       std::unique_lock<std::mutex> lock(outMu_);
       if (pendingPtsUs_.size() > 2) {
-        VIDEO_LOGI("video.decode amc backpressure pending=%zu out=%zu",
-                   pendingPtsUs_.size(), out_.size());
         outCv_.wait_for(lock, std::chrono::milliseconds(50), [this] {
           return pendingPtsUs_.size() <= 2;
         });
@@ -256,8 +282,6 @@ void AMediaCodecDecoder::DrainImages() {
       std::lock_guard<std::mutex> lock(outMu_);
       out_.push_back(std::move(fr));
     }
-    VIDEO_LOGI("video.decode amc image ptsUs=%lld",
-               static_cast<long long>(ptsUs));
     outCv_.notify_one();
   }
 }
@@ -392,7 +416,6 @@ void AMediaCodecDecoder::DiscardImages() {
   if (reader_ == nullptr) {
     return;
   }
-  int n = 0;
   for (;;) {
     AImage* image = nullptr;
     const media_status_t acq = AImageReader_acquireNextImage(reader_, &image);
@@ -400,19 +423,12 @@ void AMediaCodecDecoder::DiscardImages() {
       break;
     }
     AImage_delete(image);
-    ++n;
-  }
-  if (n > 0) {
-    VIDEO_LOGI("video.decode amc discard images=%d", n);
   }
 }
 
 void AMediaCodecDecoder::Close() {
-  VIDEO_LOGI("video.decode amc close begin codec=%d reader=%d", codec_ != nullptr,
-             reader_ != nullptr);
   imageGen_.fetch_add(1);
   if (reader_) {
-    AImageReader_setImageListener(reader_, nullptr);
     DiscardImages();
   }
   if (codec_) {
@@ -432,8 +448,8 @@ void AMediaCodecDecoder::Close() {
     out_.clear();
   }
   queuedSinceStart_ = false;
+  sawEos_ = false;
   configured_ = false;
-  VIDEO_LOGI("video.decode amc close end");
 }
 
 }  // namespace video
