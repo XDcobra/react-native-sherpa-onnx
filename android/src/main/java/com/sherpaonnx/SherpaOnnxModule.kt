@@ -4569,6 +4569,56 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun probeImageFileContainer(source: ReadableMap, promise: Promise) {
+    try {
+      val handle = fileIOHelper.resolveSource(source)
+      try {
+        val bytes = readImageSourceBytes(handle)
+        @Suppress("UNCHECKED_CAST")
+        val raw = com.sherpaonnx.image.ImageBufferNative.nativeProbe(bytes)
+          as? HashMap<String, Any>
+        if (raw == null) {
+          promise.reject("ERR_IMAGE_INTERNAL", "null image probe result")
+          return
+        }
+        val err = raw["errorCode"] as? String
+        if (!err.isNullOrEmpty() && raw["ok"] != true) {
+          promise.reject(err, raw["errorMessage"] as? String ?: err)
+          return
+        }
+        val format = raw["inputFormatName"] as? String ?: ""
+        val codec = raw["codecName"] as? String ?: format
+        if (format.isBlank() || codec.isBlank()) {
+          promise.reject("ERR_IMAGE_FORMAT_UNSUPPORTED", "unknown image format")
+          return
+        }
+        val map = Arguments.createMap()
+        map.putString("inputFormatName", format)
+        map.putString("codecName", codec)
+        map.putInt("codedWidth", (raw["codedWidth"] as? Number)?.toInt() ?: 0)
+        map.putInt("codedHeight", (raw["codedHeight"] as? Number)?.toInt() ?: 0)
+        android.util.Log.i(
+          "SherpaOnnx:image",
+          "probeContainer $format ${map.getInt("codedWidth")}x${map.getInt("codedHeight")}",
+        )
+        promise.resolve(map)
+      } finally {
+        try {
+          handle.close()
+        } catch (_: Exception) {
+        }
+      }
+    } catch (e: com.sherpaonnx.fileio.FileIOException) {
+      android.util.Log.w("SherpaOnnx:image", "probeImageFile fileio: ${e.message}")
+      promise.reject(e.code, e.message, e)
+    } catch (e: Exception) {
+      val msg = e.message ?: "probeImageFileContainer failed"
+      val code =
+        if (msg.startsWith("ERR_")) msg.substringBefore(':').trim() else "ERR_IMAGE_DECODE_FAILED"
+      promise.reject(code, msg, e)
+    }
+  }
+
   override fun createOfflineImageBufferFromFiles(
     sources: ReadableArray,
     options: ReadableMap?,

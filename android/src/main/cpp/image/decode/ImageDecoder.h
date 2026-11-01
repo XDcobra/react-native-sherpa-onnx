@@ -26,6 +26,10 @@ class ImageDecoder {
   /** Sniff magic bytes (does not allocate). */
   static DecodeFormat DetectFormat(const uint8_t* data, size_t size);
 
+  /** Format + coded size from headers. No RGB. HEIC width/height stay 0. */
+  static ImageProbeResult ProbeBytes(const uint8_t* data, size_t size);
+  static ImageProbeResult ProbeFile(const std::string& path);
+
   /**
    * Apply EXIF orientation 1..8 in-place on an RGB8 buffer.
    * Returns the orientation that was applied (1 if none/invalid).

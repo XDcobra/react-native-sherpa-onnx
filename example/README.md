@@ -39,7 +39,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Models**                 | `android/app/src/main/assets/models/<model-id>/` | `ios/sherpa_models/models/<model-id>/` |
 | **Test audio WAVs**        | `android/app/src/main/assets/test_wavs/`         | `ios/sherpa_models/test_wavs/`         |
 | **Codec samples**          | `android/app/src/main/assets/test_codec/`        | `ios/sherpa_models/test_codec/`        |
-| **Test images (OCR)**      | `android/app/src/main/assets/test_images/`       | `ios/sherpa_models/test_images/`       |
+| **Test images (OCR / File I/O)** | `android/app/src/main/assets/test_images/`  | `ios/sherpa_models/test_images/`       |
 | **Test PDFs (text layer)** | `android/app/src/main/assets/test_pdfs/`         | `ios/sherpa_models/test_pdfs/`         |
 | **Test e-docs (Read aloud)** | `android/app/src/main/assets/test_edocs/`      | `ios/sherpa_models/test_edocs/`        |
 | **Test videos (Preview / OCR / File I/O)** | `android/app/src/main/assets/test_videos/`   | `ios/sherpa_models/test_videos/`       |
@@ -191,11 +191,13 @@ This screen runs online punctuation over live text buffers. It shows incremental
 | -------------------------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
 |                                                    |                                                    |                                                    |
 
-This screen validates file and conversion workflows: pick **Audio** or **Video** first, then **Probe**, **Decode**, and **Encode** over `FileSource` / `FileDestination`. Batch-all applies only to the selected media. Video has a `preferHardware` / `hardware` / `software` policy for decode, still export, and clip encode. It is the UI reference for [docs/fileio.md](../docs/fileio.md), [docs/audio-conversion.md](../docs/audio-conversion.md), and [docs/videobuffer-offline.md](../docs/videobuffer-offline.md) (`probeVideoFileDuration` / `probeVideoFileContainer` / `exportVideo`).
+This screen validates file and conversion workflows: pick **Audio**, **Video**, or **Image** first, then **Probe**, **Decode**, and **Encode** over `FileSource` / `FileDestination`. Batch-all applies only to the selected media. Video and Image have a `preferHardware` / `hardware` / `software` policy for decode and encode. It is the UI reference for [docs/fileio.md](../docs/fileio.md), [docs/audio-conversion.md](../docs/audio-conversion.md), [docs/videobuffer-offline.md](../docs/videobuffer-offline.md), and [docs/imagebuffer-offline.md](../docs/imagebuffer-offline.md).
 
 **Audio sandbox (`test_codec/`):** probe (`probeAudioFileDuration` + `probeAudioFileContainer`), decode (`createOfflineAudioBufferFromFile`), encode (`saveAudioAsFile`). Android FileSource: `{ kind: 'app', base: 'apkAsset', path: 'test_codec/sample.<ext>' }`.
 
 **Video sandbox (`test_videos/sample.*`):** 1 s, 256×144. MP4/MOV/MKV/WebM are H.264 (AAC in MP4/MOV, Opus in MKV/WebM). `sample_vp9.webm` is VP9 + Opus. Probe, decode (open + one JPEG frame), encode (`exportVideo` to mp4/mov/mkv/webm with `h264` / `hevc` / `vp9`). Default `webm`+`h264` still writes an H.264 shell; `codec: 'vp9'` writes real VP9 WebM.
+
+**Image sandbox (`test_images/sample.*`):** tiny JPEG / PNG / WebP / HEIC (OCR goldens stay on the OCR screen). Probe is `probeImageFileContainer` (magic + header size, no RGB). Decode is create + `ensureOfflineImageBufferFrame` (HEIC: API 28+ / ImageIO). Encode is `exportOfflineImageBufferFrame` to jpeg/png/webp/heic — HEIC encode is iOS-only.
 
 ## Audio visualization showcase
 

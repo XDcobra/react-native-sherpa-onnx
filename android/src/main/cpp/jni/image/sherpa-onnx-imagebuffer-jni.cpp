@@ -1,6 +1,7 @@
 #include "ImageFrameEncoder.h"
 #include "ImageRegistry.h"
 #include "decode/ImageDecoder.h"
+#include "platform/android/AImageDecoderBackend.h"
 
 #include <android/bitmap.h>
 #include <android/log.h>
@@ -540,6 +541,60 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeDetectFormat(
       reinterpret_cast<const uint8_t*>(bytes), static_cast<size_t>(len));
   env->ReleaseByteArrayElements(jBytes, bytes, JNI_ABORT);
   return env->NewStringUTF(sherpa_onnx::image::DecodeFormatName(fmt));
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_image_ImageBufferNative_nativeProbe(
+    JNIEnv* env, jclass, jbyteArray jBytes) {
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  if (!map) return nullptr;
+  if (!jBytes) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    PutString(env, map, put, "errorCode", "ERR_IMAGE_DECODE_FAILED");
+    PutString(env, map, put, "errorMessage", "empty image bytes");
+    return map;
+  }
+  const jsize len = env->GetArrayLength(jBytes);
+  jbyte* bytes = env->GetByteArrayElements(jBytes, nullptr);
+  if (!bytes || len <= 0) {
+    if (bytes) {
+      env->ReleaseByteArrayElements(jBytes, bytes, JNI_ABORT);
+    }
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    PutString(env, map, put, "errorCode", "ERR_IMAGE_DECODE_FAILED");
+    PutString(env, map, put, "errorMessage", "empty image bytes");
+    return map;
+  }
+  const auto* data = reinterpret_cast<const uint8_t*>(bytes);
+  auto probe = sherpa_onnx::image::ImageDecoder::ProbeBytes(
+      data, static_cast<size_t>(len));
+  if (probe.ok && probe.format == sherpa_onnx::image::DecodeFormat::Heic &&
+      (probe.codedWidth <= 0 || probe.codedHeight <= 0)) {
+    int w = 0;
+    int h = 0;
+    if (sherpa_onnx::image::AImageDecoderBackend::ProbeHeader(
+            data, static_cast<size_t>(len), &w, &h)) {
+      probe.codedWidth = w;
+      probe.codedHeight = h;
+    }
+  }
+  env->ReleaseByteArrayElements(jBytes, bytes, JNI_ABORT);
+  if (!probe.ok) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    PutString(env, map, put, "errorCode", probe.errorCode);
+    PutString(env, map, put, "errorMessage", probe.errorMessage);
+    return map;
+  }
+  const char* name = sherpa_onnx::image::DecodeFormatName(probe.format);
+  PutBool(env, map, put, "ok", JNI_TRUE);
+  PutString(env, map, put, "inputFormatName", name);
+  PutString(env, map, put, "codecName", name);
+  PutInt(env, map, put, "codedWidth", probe.codedWidth);
+  PutInt(env, map, put, "codedHeight", probe.codedHeight);
+  LOGI("image.probe format=%s %dx%d", name, probe.codedWidth,
+       probe.codedHeight);
+  return map;
 }
 
 JNIEXPORT jobject JNICALL

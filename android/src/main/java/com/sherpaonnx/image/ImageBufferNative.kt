@@ -65,6 +65,9 @@ internal object ImageBufferNative {
   @JvmStatic external fun nativeRelease(bufferId: String): Boolean
   @JvmStatic external fun nativeDetectFormat(bytes: ByteArray): String
 
+  /** Header-only sniff. Returns `ok`, `inputFormatName`, `codecName`, `codedWidth`, `codedHeight`. */
+  @JvmStatic external fun nativeProbe(bytes: ByteArray): HashMap<String, Any>?
+
   /**
    * Encode one frame to an absolute filesystem path.
    * Returns map with `ok`, and on failure `errorCode` / `errorMessage`.

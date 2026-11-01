@@ -167,5 +167,15 @@ struct DecodeResult {
   std::string codecOrigin;
 };
 
+/** Header-only sniff. No RGB. HEIC size is 0 unless a platform fill-in runs. */
+struct ImageProbeResult {
+  bool ok = false;
+  std::string errorCode;
+  std::string errorMessage;
+  DecodeFormat format = DecodeFormat::Unknown;
+  int codedWidth = 0;
+  int codedHeight = 0;
+};
+
 }  // namespace image
 }  // namespace sherpa_onnx

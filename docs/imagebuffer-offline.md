@@ -171,6 +171,25 @@ const offline = await createOfflineImageBufferFromBase64([jpegBase64, webpBase64
 
 Same options as create-from-files.
 
+### Probe
+
+#### `probeImageFileContainer(source)`
+
+```ts
+function probeImageFileContainer(
+  source: FileSource
+): Promise<ImageFileContainerProbe | null>;
+```
+
+Magic-byte sniff plus header size. No ImageBuffer, no RGB. Bad `FileSource` throws `ERR_IMAGE_INVALID_ARGUMENT`. Unreadable or unknown bytes return `null`.
+
+```ts
+const probe = await probeImageFileContainer({ kind: 'fs', path: '/tmp/a.jpg' });
+// { inputFormatName: 'jpeg', codecName: 'jpeg', codedWidth: 64, codedHeight: 48 }
+```
+
+`codedWidth` / `codedHeight` are header values (before `maxSide` and JPEG EXIF swap). HEIC may report `0×0` when only the brand is visible. WebP is reported even if libwebp is off.
+
 ### Inspect / release
 
 #### `getOfflineImageBufferInfo(buffer)`
@@ -447,6 +466,7 @@ import type {
   OfflineImageBufferHandle,
   OfflineImageFrameInfo,
   CreateOfflineImageBufferOptions,
+  ImageFileContainerProbe,
   ImageProgressEvent,
   ImageStorageKind, // 'ram' | 'mmap'
   LiveImageBufferInfo,

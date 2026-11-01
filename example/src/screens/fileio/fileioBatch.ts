@@ -2,6 +2,7 @@ import type { AudioOutputFormat } from 'react-native-sherpa-onnx/audio';
 import type { CodecPolicy } from 'react-native-sherpa-onnx/codec';
 import type { FileDestination } from 'react-native-sherpa-onnx/fileio';
 import type { VideoExportContainer } from 'react-native-sherpa-onnx/videobuffer';
+import type { ImageExportFormat } from 'react-native-sherpa-onnx/imagebuffer';
 
 import {
   type AudioSourceChoice,
@@ -11,11 +12,13 @@ import {
   fileioSampleMedia,
   runFileioCopy,
   runFileioDecode,
+  runFileioImageEncode,
   runFileioProbe,
   runFileioVideoEncode,
 } from './fileioActions';
 import {
   listAllAudioSampleSelections,
+  listAllImageSampleSelections,
   listAllVideoSampleSelections,
   listAutomaticInputChannelIds,
   listFileioInputChannels,
@@ -45,6 +48,7 @@ export type FileioBatchParams = {
   audioSource: AudioSourceChoice;
   outputFormat: AudioOutputFormat;
   videoOutputFormat: VideoExportContainer;
+  imageOutputFormat: ImageExportFormat;
   codecPolicy: CodecPolicy;
 };
 
@@ -62,6 +66,9 @@ function sampleTitle(selection: FileioSampleSelection): string {
   if (selection.kind === 'video') {
     return `Video ${selection.format.toUpperCase()}`;
   }
+  if (selection.kind === 'image') {
+    return `Image ${selection.format.toUpperCase()}`;
+  }
   return selection.format.toUpperCase();
 }
 
@@ -73,12 +80,14 @@ async function runOne(
     audioSource: AudioSourceChoice;
     outputFormat: AudioOutputFormat;
     videoOutputFormat: VideoExportContainer;
+    imageOutputFormat: ImageExportFormat;
     sample: FileioSampleSelection;
     codecPolicy: CodecPolicy;
   }
 ): Promise<{ status: FileioBatchLineStatus; summary: string }> {
+  const media = fileioSampleMedia(encode.sample);
   if (operation === 'probe') {
-    const result = await runFileioProbe(input);
+    const result = await runFileioProbe(input, media);
     if (result.status === 'success') {
       return {
         status: 'success',
@@ -89,10 +98,14 @@ async function runOne(
   }
 
   if (operation === 'decode') {
-    const result = await runFileioDecode(input, {
-      decodePolicy: encode.codecPolicy,
-      encodePolicy: encode.codecPolicy,
-    });
+    const result = await runFileioDecode(
+      input,
+      {
+        decodePolicy: encode.codecPolicy,
+        encodePolicy: encode.codecPolicy,
+      },
+      media
+    );
     if (result.status === 'success') {
       return {
         status: 'success',
@@ -102,7 +115,33 @@ async function runOne(
     return { status: 'error', summary: result.message };
   }
 
-  if (fileioSampleMedia(encode.sample) === 'video') {
+  if (media === 'image') {
+    const copyResult = await runFileioImageEncode({
+      destinationKind: encode.destinationKind,
+      inputSource: input.fileSource,
+      inputLabel: input.label,
+      outputFormat: encode.imageOutputFormat,
+      decodePolicy: encode.codecPolicy,
+      encodePolicy: encode.codecPolicy,
+    });
+    if (copyResult.status === 'canceled') {
+      return {
+        status: 'canceled',
+        summary: 'Encode canceled (picker/dialog).',
+      };
+    }
+    if (copyResult.status === 'success') {
+      return {
+        status: 'success',
+        summary: `encode ${copyResult.encodeElapsedMs.toFixed(
+          copyResult.encodeElapsedMs >= 10 ? 1 : 2
+        )} ms`,
+      };
+    }
+    return { status: 'error', summary: copyResult.message };
+  }
+
+  if (media === 'video') {
     const copyResult = await runFileioVideoEncode({
       destinationKind: encode.destinationKind,
       inputSource: input.fileSource,
@@ -153,6 +192,7 @@ async function runOne(
 export function buildFileioBatchMatrix(params: {
   batchAllAudioSamples: boolean;
   batchAllVideoSamples: boolean;
+  batchAllImageSamples: boolean;
   batchAllChannels: boolean;
   currentSample: FileioSampleSelection;
   currentChannelId: FileioInputChannelId;
@@ -167,7 +207,14 @@ export function buildFileioBatchMatrix(params: {
   if (params.batchAllVideoSamples) {
     samples.push(...listAllVideoSampleSelections());
   }
-  if (!params.batchAllAudioSamples && !params.batchAllVideoSamples) {
+  if (params.batchAllImageSamples) {
+    samples.push(...listAllImageSampleSelections());
+  }
+  if (
+    !params.batchAllAudioSamples &&
+    !params.batchAllVideoSamples &&
+    !params.batchAllImageSamples
+  ) {
     samples.push(params.currentSample);
   }
   const channelIds = params.batchAllChannels
@@ -180,6 +227,7 @@ export function buildFileioBatchMatrix(params: {
 export function describeFileioActiveInputSummary(params: {
   batchAllAudioSamples: boolean;
   batchAllVideoSamples: boolean;
+  batchAllImageSamples: boolean;
   batchAllChannels: boolean;
   currentSample: FileioSampleSelection;
   currentChannelId: FileioInputChannelId;
@@ -190,7 +238,10 @@ export function describeFileioActiveInputSummary(params: {
 
   const sampleNames = samples.map((s) => sampleTitle(s)).join(', ');
   const channelNames = channelIds.map((id) => channelTitle(id)).join(', ');
-  const allSamples = params.batchAllAudioSamples || params.batchAllVideoSamples;
+  const allSamples =
+    params.batchAllAudioSamples ||
+    params.batchAllVideoSamples ||
+    params.batchAllImageSamples;
 
   let label: string;
   if (allSamples && params.batchAllChannels) {
@@ -208,6 +259,7 @@ export function describeFileioActiveInputSummary(params: {
   const familyBits = [
     params.batchAllAudioSamples ? 'all audio' : null,
     params.batchAllVideoSamples ? 'all video' : null,
+    params.batchAllImageSamples ? 'all image' : null,
   ].filter(Boolean);
 
   const detailLines = [
@@ -274,6 +326,7 @@ export async function runFileioBatch(
           audioSource: params.audioSource,
           outputFormat: params.outputFormat,
           videoOutputFormat: params.videoOutputFormat,
+          imageOutputFormat: params.imageOutputFormat,
           sample: selection,
           codecPolicy: params.codecPolicy,
         });

@@ -3,6 +3,7 @@ import {
   pick,
   isErrorWithCode,
   errorCodes,
+  types,
 } from '@react-native-documents/picker';
 import { DocumentDirectoryPath, mkdir } from '@dr.pogodin/react-native-fs';
 import { copyFile } from 'react-native-sherpa-onnx/fileio';
@@ -21,11 +22,26 @@ import {
   type VideoCodecSampleFormat,
 } from '../../videoConfig';
 import {
+  IMAGE_CODEC_ASSET_ENTRIES,
+  TEST_IMAGE_CODEC_FILES,
+  type ImageCodecSampleFormat,
+} from '../../imageConfig';
+import {
   fileSourceFromBundledPath,
   resolveAudioFileDisplayName,
   toFileSource,
 } from '../../utils/fileSourceFromUri';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
+
+const FILEIO_INPUT_PICKER_TYPES: string[] = [
+  ...DECODABLE_AUDIO_PICKER_TYPES,
+  types.images,
+  'image/heic',
+  'image/heif',
+  'image/webp',
+  'image/bmp',
+  'image/gif',
+];
 
 /** How the active sample is exposed as a {@link FileSource}. */
 export type FileioInputChannelId =
@@ -44,12 +60,19 @@ export type FileioInputChannelId =
 export type FileioSampleSelection =
   | { kind: 'codec'; format: CodecAssetFormat }
   | { kind: 'legacy' }
-  | { kind: 'video'; format: VideoCodecSampleFormat };
+  | { kind: 'video'; format: VideoCodecSampleFormat }
+  | { kind: 'image'; format: ImageCodecSampleFormat };
 
 export function fileioSampleMedia(
   selection: FileioSampleSelection
-): 'audio' | 'video' {
-  return selection.kind === 'video' ? 'video' : 'audio';
+): 'audio' | 'video' | 'image' {
+  if (selection.kind === 'video') {
+    return 'video';
+  }
+  if (selection.kind === 'image') {
+    return 'image';
+  }
+  return 'audio';
 }
 
 export type FileioInputSource = {
@@ -94,6 +117,12 @@ function sampleLabel(selection: FileioSampleSelection): string {
         ?.label ?? selection.format.toUpperCase()
     );
   }
+  if (selection.kind === 'image') {
+    return (
+      IMAGE_CODEC_ASSET_ENTRIES.find((e) => e.format === selection.format)
+        ?.label ?? selection.format.toUpperCase()
+    );
+  }
   return (
     CODEC_ASSET_ENTRIES.find((e) => e.format === selection.format)?.label ??
     selection.format.toUpperCase()
@@ -106,6 +135,9 @@ function sampleBundledPath(selection: FileioSampleSelection): string {
   }
   if (selection.kind === 'video') {
     return TEST_VIDEO_CODEC_FILES[selection.format];
+  }
+  if (selection.kind === 'image') {
+    return TEST_IMAGE_CODEC_FILES[selection.format];
   }
   return TEST_CODEC_FILES[selection.format];
 }
@@ -139,8 +171,21 @@ export function listAllVideoSampleSelections(): FileioSampleSelection[] {
   );
 }
 
+export function listAllImageSampleSelections(): FileioSampleSelection[] {
+  return IMAGE_CODEC_ASSET_ENTRIES.map(
+    (entry): FileioSampleSelection => ({
+      kind: 'image',
+      format: entry.format,
+    })
+  );
+}
+
 export function listAllSampleSelections(): FileioSampleSelection[] {
-  return [...listAllAudioSampleSelections(), ...listAllVideoSampleSelections()];
+  return [
+    ...listAllAudioSampleSelections(),
+    ...listAllVideoSampleSelections(),
+    ...listAllImageSampleSelections(),
+  ];
 }
 
 /** Automatic FileSource channels included in batch runs (excludes Pick channels). */
@@ -160,7 +205,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       title: 'app / apkAsset',
       platform: 'android',
       hint: isAndroid
-        ? 'APK assets/ (test_codec / test_videos sample.*) — default on Android'
+        ? 'APK assets/ (test_codec / test_videos / test_images sample.*) — default on Android'
         : 'Android-only',
       automatic: true,
       supported: isAndroid,
@@ -171,7 +216,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       title: 'app / appBundle',
       platform: 'ios',
       hint: isIos
-        ? 'Main bundle Resources (test_codec / test_videos sample.*) — default on iOS'
+        ? 'Main bundle Resources (test_codec / test_videos / test_images sample.*) — default on iOS'
         : 'iOS-only',
       automatic: true,
       supported: isIos,
@@ -232,7 +277,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       id: 'contentUri',
       title: 'contentUri',
       platform: 'android',
-      hint: 'SAF document URI — pick any audio or video file (Android)',
+      hint: 'SAF document URI — pick audio, video, or image (Android)',
       automatic: false,
       supported: isAndroid,
       unsupportedReason: 'contentUri input is Android-only',
@@ -241,7 +286,7 @@ export function listFileioInputChannels(): FileioInputChannelMeta[] {
       id: 'securityScoped',
       title: 'securityScoped',
       platform: 'ios',
-      hint: 'Security-scoped URL — pick any audio or video file (iOS)',
+      hint: 'Security-scoped URL — pick audio, video, or image (iOS)',
       automatic: false,
       supported: isIos,
       unsupportedReason: 'securityScoped input is iOS-only',
@@ -376,7 +421,7 @@ export async function pickFileioInputForChannel(
   try {
     const picked = await pick({
       mode: 'open',
-      type: DECODABLE_AUDIO_PICKER_TYPES,
+      type: FILEIO_INPUT_PICKER_TYPES,
       requestLongTermAccess: channelId === 'securityScoped',
     });
     const file = picked[0];
