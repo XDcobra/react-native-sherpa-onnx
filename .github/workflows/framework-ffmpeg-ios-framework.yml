@@ -148,7 +148,7 @@ jobs:
           make_latest: false
           body: |
             ## Archive Structure
-            Prebuilt **FFmpeg** XCFramework for iOS (device + simulator). Used by audio convert, OfflineAudioBuffer, and VideoBuffer in `react-native-sherpa-onnx`.
+            Prebuilt **FFmpeg** (libshine, libopus, libvpx) XCFramework for iOS (device + simulator). Used by audio convert, OfflineAudioBuffer, and VideoBuffer in `react-native-sherpa-onnx`.
             - **ffmpeg-ios-framework.zip** – Contains `FFmpeg.xcframework` (arm64 device; arm64 + x86_64 simulator). libvpx, libshine, and libopus are statically linked into `libffmpeg.a`.
 
             Disable with `SHERPA_ONNX_DISABLE_FFMPEG=1` before `pod install`.

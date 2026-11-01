@@ -148,7 +148,7 @@ jobs:
           make_latest: false
           body: |
             ## Archive Structure
-            Prebuilt **FFmpeg** (video-SW) XCFramework for iOS (device + simulator). Opt-in H.264/HEVC software decoders (`VIDEO_SW_DECODERS=1`) plus the default audio / VP9 set. Used by VideoBuffer software decode fallback in `react-native-sherpa-onnx`.
+            Prebuilt **FFmpeg** (video-SW; libshine, libopus, libvpx) XCFramework for iOS (device + simulator). Opt-in H.264/HEVC software decoders (`VIDEO_SW_DECODERS=1`) plus the default audio / VP9 set. Used by VideoBuffer software decode fallback in `react-native-sherpa-onnx`.
             - **ffmpeg-vsw-ios-framework.zip** – Contains `FFmpeg.xcframework` (arm64 device; arm64 + x86_64 simulator). libvpx, libshine, and libopus are statically linked into `libffmpeg.a`.
 
             Enable with `SHERPA_ONNX_ENABLE_VIDEO_SW_DECODERS=1` before `pod install`. H.264/HEVC patents are separate from the LGPL-2.1 license. Default `ffmpeg-ios-framework.zip` has no bundled H.264/HEVC software decoders.

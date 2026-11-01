@@ -175,7 +175,7 @@ jobs:
           make_latest: false
           body: |
             ## Archive Structure
-            Prebuilt **FFmpeg** (video-SW) for Android (arm64-v8a, armeabi-v7a, x86, x86_64). Opt-in H.264/HEVC software decoders (`VIDEO_SW_DECODERS=1`) plus the default audio / VP9 set. Used by VideoBuffer software decode fallback in `react-native-sherpa-onnx`.
+            Prebuilt **FFmpeg** (video-SW; libshine, libopus, libvpx) for Android (arm64-v8a, armeabi-v7a, x86, x86_64). Opt-in H.264/HEVC software decoders (`VIDEO_SW_DECODERS=1`) plus the default audio / VP9 set. Used by VideoBuffer software decode fallback in `react-native-sherpa-onnx`.
             - **ffmpeg-vsw-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (`libavcodec.so`, `libavformat.so`, `libavutil.so`, `libswresample.so`, `libavfilter.so`, `libshine.so`, `libopus.so`) and `include/` (C headers under `libavcodec/`, `libavformat/`, …). libvpx is statically linked into `libavcodec.so`.
             - **ffmpeg-vsw-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:ffmpeg-vsw`.
 

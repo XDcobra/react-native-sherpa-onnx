@@ -177,7 +177,7 @@ jobs:
           make_latest: false
           body: |
             ## Archive Structure
-            Prebuilt **FFmpeg** for Android (arm64-v8a, armeabi-v7a, x86, x86_64). Used by audio convert, OfflineAudioBuffer, and VideoBuffer in `react-native-sherpa-onnx`.
+            Prebuilt **FFmpeg** (libshine, libopus, libvpx) for Android (arm64-v8a, armeabi-v7a, x86, x86_64). Used by audio convert, OfflineAudioBuffer, and VideoBuffer in `react-native-sherpa-onnx`.
             - **ffmpeg-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (`libavcodec.so`, `libavformat.so`, `libavutil.so`, `libswresample.so`, `libavfilter.so`, `libshine.so`, `libopus.so`) and `include/` (C headers under `libavcodec/`, `libavformat/`, …). libvpx is statically linked into `libavcodec.so`.
             - **ffmpeg-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:ffmpeg`.
 
