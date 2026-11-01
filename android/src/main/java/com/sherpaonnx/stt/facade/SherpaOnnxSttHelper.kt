@@ -264,7 +264,9 @@ internal class SherpaOnnxSttHelper(
     } else ""
     initHandler.post {
       try {
+        Log.i(logTag, "[SherpaOnnx:init] stt Create start")
         inst.recognizer = OfflineRecognizer(config = config)
+        Log.i(logTag, "[SherpaOnnx:init] stt Create ok")
         val resultMap = Arguments.createMap()
         resultMap.putBoolean("success", true)
         resultMap.putString("modelType", modelTypeStr)
@@ -283,7 +285,7 @@ internal class SherpaOnnxSttHelper(
         promise.resolve(resultMap)
       } catch (e: Exception) {
         val errorMsg = "Exception creating recognizer: ${e.message ?: e.javaClass.simpleName}"
-        Log.e(logTag, errorMsg, e)
+        Log.e(logTag, "[SherpaOnnx:init] stt Create branch=reject $errorMsg", e)
         promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
       }
     }

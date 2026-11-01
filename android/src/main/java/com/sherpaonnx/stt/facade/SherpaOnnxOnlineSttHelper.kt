@@ -193,11 +193,13 @@ internal class SherpaOnnxOnlineSttHelper(
         )
       }
 
+      Log.i(logTag, "[SherpaOnnx:init] online-stt Create start")
       val recognizer = OnlineRecognizer(assetManager = null, config = config)
+      Log.i(logTag, "[SherpaOnnx:init] online-stt Create ok")
       instances[instanceId] = OnlineSttInstance(recognizer = recognizer, config = config)
       promise.resolve(Arguments.createMap().apply { putBoolean("success", true) })
     } catch (e: Exception) {
-      Log.e(logTag, "initializeOnlineStt failed: ${e.message}", e)
+      Log.e(logTag, "[SherpaOnnx:init] online-stt Create branch=reject ${e.message}", e)
       promise.reject(SttErrorCodes.INIT_FAILED, "Online STT init failed: ${e.message}", e)
     }
   }

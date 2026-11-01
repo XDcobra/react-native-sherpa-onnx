@@ -74,7 +74,7 @@ internal class TtsInitializationService(
           initializeTtsAuto(instanceId, parsed, promise)
         }
       } catch (e: Exception) {
-        Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to initialize TTS: ${e.message}", e)
+        Log.e("SherpaOnnxTts", "[SherpaOnnx:init] tts Create branch=reject ${e.message}", e)
         rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to initialize TTS: ${e.message}", e)
       }
     }
@@ -221,9 +221,11 @@ internal class TtsInitializationService(
         Log.i("SherpaOnnxTts", "Zipvoice init: availMem=${memInfo.availMem / (1024 * 1024)} MB (after load)")
       }
       try {
+        Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts zipvoice Create start")
         inst.tts = OfflineTts(config = config)
+        Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts zipvoice Create ok")
       } catch (e: Exception) {
-        Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: Failed to create Zipvoice OfflineTts: ${e.message}", e)
+        Log.e("SherpaOnnxTts", "[SherpaOnnx:init] tts zipvoice Create branch=reject ${e.message}", e)
         rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine: ${e.message}", e)
         return
       }
@@ -237,7 +239,9 @@ internal class TtsInitializationService(
         parsed.provider,
         parsed.kokoroLang
       )
+      Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts Create start modelType=$modelTypeStr")
       inst.tts = OfflineTts(config = config)
+      Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts Create ok")
       sampleRate = inst.tts!!.sampleRate()
       numSpeakers = inst.tts!!.numSpeakers()
     }
