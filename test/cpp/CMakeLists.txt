@@ -923,6 +923,7 @@ set(VIDEOBUFFER_CORE_SOURCES
   "${VIDEO_CPP_ROOT}/decode/ThinningPlanner.cpp"
   "${VIDEO_CPP_ROOT}/encode/EncoderFactory.cpp"
   "${VIDEO_CPP_ROOT}/encode/FakeEncoder.cpp"
+  "${VIDEO_CPP_ROOT}/encode/FfmpegVideoEncoder.cpp"
   "${VIDEO_CPP_ROOT}/encode/VideoExportSession.cpp"
   "${VIDEO_CPP_ROOT}/VideoEntry.cpp"
   "${VIDEO_CPP_ROOT}/OfflineVideoEntry.cpp"

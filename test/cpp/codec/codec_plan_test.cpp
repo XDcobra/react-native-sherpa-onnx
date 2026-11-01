@@ -168,6 +168,30 @@ TEST_F(CodecPlanTest, ResolveCascade) {
             Policy::PreferHardware);
 }
 
+TEST_F(CodecPlanTest, Vp9SoftwareEncodeUsesBundledLibvpx) {
+  CodecCatalog cat;
+  Provider enc = Make("ffmpeg.vp9", Tier::Software, Origin::Bundled, "vp9", 7680,
+                      4320);
+  enc.dir = Direction::Encode;
+  cat.Register(enc);
+  Request r = Req(Policy::Software, "vp9", 1280, 720, Use::Export);
+  r.dir = Direction::Encode;
+  auto plan = MakePlan(r, cat);
+  ASSERT_EQ(StepNames(plan), (std::vector<std::string>{"ffmpeg.vp9"}));
+}
+
+TEST_F(CodecPlanTest, Vp9HardwareWithoutCapsIsEmpty) {
+  CodecCatalog cat;
+  Provider enc = Make("ffmpeg.vp9", Tier::Software, Origin::Bundled, "vp9", 7680,
+                      4320);
+  enc.dir = Direction::Encode;
+  cat.Register(enc);
+  Request r = Req(Policy::Hardware, "vp9", 1280, 720, Use::Export);
+  r.dir = Direction::Encode;
+  auto plan = MakePlan(r, cat);
+  EXPECT_TRUE(plan.steps.empty());
+}
+
 TEST_F(CodecPlanTest, ImageHeicApi26NoSteps) {
   CodecCatalog img;
   Provider plat;

@@ -249,4 +249,51 @@ INSTANTIATE_TEST_SUITE_P(
       return info.param.format;
     });
 
+TEST_F(ExportSessionTest, Vp9RequiresWebmOrMkv) {
+  auto e = MakeClip();
+  ASSERT_NE(e, nullptr);
+  VideoExportOptions opts;
+  opts.codec = VideoCodec::Vp9;
+  auto st = VideoExportSession::Run(e->id(), "/tmp/out.mp4", "mp4", opts,
+                                    nullptr, nullptr);
+  EXPECT_FALSE(st.ok);
+  EXPECT_EQ(st.errorCode, kErrInvalidArgument);
+  VideoRegistry::Instance().Release(e->id());
+}
+
+TEST_F(ExportSessionTest, WebmVp9ReopensAsImport) {
+  RegisterBundledVideoSwEncoders();
+  auto e = MakeClip();
+  ASSERT_NE(e, nullptr);
+  const std::string path =
+      std::string(::testing::TempDir()) + "sherpa_export_vp9.webm";
+  unlink(path.c_str());
+  VideoExportOptions opts;
+  opts.codec = VideoCodec::Vp9;
+  opts.bitrate = 200000;
+  opts.encodePolicy = sherpa_onnx::codec::Policy::Software;
+  auto st =
+      VideoExportSession::Run(e->id(), path, "webm", opts, nullptr, nullptr);
+  if (!st.ok && (st.errorCode == kErrSwEncoderDisabled ||
+                 st.errorCode == kErrEncoderUnavailable)) {
+    VideoRegistry::Instance().Release(e->id());
+    GTEST_SKIP() << "host libav has no libvpx_vp9: " << st.errorMessage;
+  }
+  ASSERT_TRUE(st.ok) << st.errorCode << " " << st.errorMessage;
+
+  ProbeContainer(path, "webm", AV_CODEC_ID_VP9, FakeDecoderBackend::kDefaultWidth,
+                 FakeDecoderBackend::kDefaultHeight);
+
+  FfmpegDemuxer demux;
+  const int prevLog = av_log_get_level();
+  av_log_set_level(AV_LOG_QUIET);
+  auto open = demux.Open(path);
+  av_log_set_level(prevLog);
+  ASSERT_TRUE(open.ok) << open.errorCode << " " << open.errorMessage;
+  EXPECT_EQ(demux.track().codec, VideoCodec::Vp9);
+
+  unlink(path.c_str());
+  VideoRegistry::Instance().Release(e->id());
+}
+
 #endif

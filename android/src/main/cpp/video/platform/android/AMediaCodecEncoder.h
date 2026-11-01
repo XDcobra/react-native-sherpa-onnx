@@ -37,7 +37,6 @@ class AMediaCodecEncoder : public EncoderBackend {
   bool sawEos_ = false;
   int fps_ = 30;
   std::vector<uint8_t> codecConfig_;
-  std::vector<uint8_t> packed_;
 };
 
 }  // namespace video

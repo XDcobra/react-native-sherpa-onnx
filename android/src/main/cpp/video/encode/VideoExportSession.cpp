@@ -192,17 +192,32 @@ Status PacketToAvcc(EncodedPacket* pkt) {
   return Status::Ok();
 }
 
-const char* MuxerName(const std::string& format) {
+const char* MuxerName(const std::string& format, VideoCodec codec) {
   if (format == "mp4") {
     return "mp4";
   }
   if (format == "mov") {
     return av_guess_format("mov", nullptr, nullptr) != nullptr ? "mov" : nullptr;
   }
+  if (format == "webm" && codec == VideoCodec::Vp9) {
+    return "webm";
+  }
   if (format == "mkv" || format == "webm") {
     return "matroska";
   }
   return nullptr;
+}
+
+AVCodecID AvCodecIdFor(VideoCodec codec) {
+  switch (codec) {
+    case VideoCodec::Hevc:
+      return AV_CODEC_ID_HEVC;
+    case VideoCodec::Vp9:
+      return AV_CODEC_ID_VP9;
+    case VideoCodec::H264:
+    default:
+      return AV_CODEC_ID_H264;
+  }
 }
 
 bool FormatWantsAac(const std::string& format) {
@@ -226,10 +241,13 @@ struct AvFmt {
 };
 
 Status WriteVideoPacket(AVFormatContext* fmt, AVStream* vs,
-                        EncodedPacket pkt, int64_t durationUs) {
-  auto st = PacketToAvcc(&pkt);
-  if (!st.ok) {
-    return st;
+                        EncodedPacket pkt, int64_t durationUs,
+                        VideoCodec codec) {
+  if (codec != VideoCodec::Vp9) {
+    auto st = PacketToAvcc(&pkt);
+    if (!st.ok) {
+      return st;
+    }
   }
   AVPacket* avpkt = av_packet_alloc();
   if (!avpkt) {
@@ -375,6 +393,10 @@ Status VideoExportSession::Run(const std::string& bufferId,
   if (format != "mp4" && format != "mov" && format != "mkv" &&
       format != "webm") {
     return Status::Fail(kErrInvalidArgument, "export format");
+  }
+  if (opts.codec == VideoCodec::Vp9 && format != "webm" && format != "mkv") {
+    return Status::Fail(kErrInvalidArgument,
+                        "codec vp9 requires format webm or mkv");
   }
   auto entry = VideoRegistry::Instance().Get(bufferId);
   if (!entry) {
@@ -549,7 +571,9 @@ Status VideoExportSession::Run(const std::string& bufferId,
     return Status::Fail(kErrEncodeFailed, "encoder produced no config");
   }
 
-  const char* muxer = MuxerName(format);
+  const char* muxer = MuxerName(format, opts.codec);
+  VIDEO_LOGI("video.export muxer=%s format=%s codec=%s", muxer ? muxer : "null",
+             format.c_str(), VideoCodecName(opts.codec));
   if (muxer == nullptr) {
     encoder->Close();
     if (format == "mov") {
@@ -573,8 +597,7 @@ Status VideoExportSession::Run(const std::string& bufferId,
   }
   vs->time_base = AVRational{1, 1000000};
   vs->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
-  vs->codecpar->codec_id =
-      opts.codec == VideoCodec::Hevc ? AV_CODEC_ID_HEVC : AV_CODEC_ID_H264;
+  vs->codecpar->codec_id = AvCodecIdFor(opts.codec);
   vs->codecpar->width = outW;
   vs->codecpar->height = outH;
   vs->codecpar->format = AV_PIX_FMT_YUV420P;
@@ -721,7 +744,8 @@ Status VideoExportSession::Run(const std::string& bufferId,
   av.header = true;
 
   for (auto& pkt : pending) {
-    auto st = WriteVideoPacket(av.fmt, vs, std::move(pkt), frameDurUs);
+    auto st =
+        WriteVideoPacket(av.fmt, vs, std::move(pkt), frameDurUs, opts.codec);
     if (!st.ok) {
       encoder->Close();
       return st;
@@ -748,7 +772,8 @@ Status VideoExportSession::Run(const std::string& bufferId,
     }
     for (auto& pkt : pkts) {
       const int64_t pts = pkt.ptsUs;
-      auto wr = WriteVideoPacket(av.fmt, vs, std::move(pkt), frameDurUs);
+      auto wr = WriteVideoPacket(av.fmt, vs, std::move(pkt), frameDurUs,
+                                opts.codec);
       if (!wr.ok) {
         encoder->Close();
         return wr;
@@ -768,7 +793,8 @@ Status VideoExportSession::Run(const std::string& bufferId,
   }
   for (auto& pkt : flushed) {
     const int64_t pts = pkt.ptsUs;
-    auto wr = WriteVideoPacket(av.fmt, vs, std::move(pkt), frameDurUs);
+    auto wr =
+        WriteVideoPacket(av.fmt, vs, std::move(pkt), frameDurUs, opts.codec);
     if (!wr.ok) {
       return wr;
     }
@@ -790,8 +816,8 @@ Status VideoExportSession::Run(const std::string& bufferId,
   if (progress) {
     progress(100, toUs);
   }
-  VIDEO_LOGI("video.export ok format=%s codec=%s %dx%d path=%s", format.c_str(),
-             opts.codec == VideoCodec::Hevc ? "hevc" : "h264", outW, outH,
+  VIDEO_LOGI("video.export ok format=%s muxer=%s codec=%s %dx%d path=%s",
+             format.c_str(), muxer, VideoCodecName(opts.codec), outW, outH,
              outPath.c_str());
   return Status::Ok();
 #endif

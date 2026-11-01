@@ -4,8 +4,9 @@
 
 #include "VideoLog.h"
 
+#include "libyuv/planar_functions.h"
+
 #include <algorithm>
-#include <cstring>
 #include <string>
 
 namespace sherpa_onnx {
@@ -14,6 +15,7 @@ namespace video {
 namespace {
 std::string gEncH264;
 std::string gEncHevc;
+std::string gEncVp9;
 
 int FpsFromTrack(const VideoTrackInfo& track) {
   if (track.nominalFps.num > 0 && track.nominalFps.den > 0) {
@@ -24,35 +26,27 @@ int FpsFromTrack(const VideoTrackInfo& track) {
   return 30;
 }
 
-void PackNv12(const Nv12View& nv12, std::vector<uint8_t>* packed) {
+size_t PackedNv12Bytes(int w, int h) {
+  return static_cast<size_t>(w) * static_cast<size_t>(h) +
+         static_cast<size_t>(w) * static_cast<size_t>((h + 1) / 2);
+}
+
+bool PackNv12Into(const Nv12View& nv12, uint8_t* dst, size_t cap) {
   const int w = nv12.width;
   const int h = nv12.height;
-  if (nv12.y.data == nullptr || nv12.uv.data == nullptr || w <= 0 || h <= 0 ||
-      nv12.y.stride < w || nv12.uv.stride < w) {
-    packed->clear();
-    return;
+  if (dst == nullptr || nv12.y.data == nullptr || nv12.uv.data == nullptr ||
+      w <= 0 || h <= 0 || nv12.y.stride < w || nv12.uv.stride < w) {
+    return false;
+  }
+  const size_t need = PackedNv12Bytes(w, h);
+  if (cap < need) {
+    return false;
   }
   const size_t yBytes = static_cast<size_t>(w) * static_cast<size_t>(h);
-  const size_t uvBytes = static_cast<size_t>(w) * static_cast<size_t>((h + 1) / 2);
-  packed->resize(yBytes + uvBytes);
-  if (nv12.y.stride == w && nv12.uv.stride == w) {
-    std::memcpy(packed->data(), nv12.y.data, yBytes);
-    std::memcpy(packed->data() + yBytes, nv12.uv.data, uvBytes);
-    return;
-  }
-  for (int row = 0; row < h; ++row) {
-    std::memcpy(packed->data() + static_cast<size_t>(row) * static_cast<size_t>(w),
-                nv12.y.data + static_cast<size_t>(row) * static_cast<size_t>(nv12.y.stride),
-                static_cast<size_t>(w));
-  }
-  const int uvH = (h + 1) / 2;
-  uint8_t* uvDst = packed->data() + yBytes;
-  for (int row = 0; row < uvH; ++row) {
-    std::memcpy(uvDst + static_cast<size_t>(row) * static_cast<size_t>(w),
-                nv12.uv.data +
-                    static_cast<size_t>(row) * static_cast<size_t>(nv12.uv.stride),
-                static_cast<size_t>(w));
-  }
+  libyuv::CopyPlane(nv12.y.data, nv12.y.stride, dst, w, w, h);
+  libyuv::CopyPlane(nv12.uv.data, nv12.uv.stride, dst + yBytes, w, w,
+                    (h + 1) / 2);
+  return true;
 }
 
 }  // namespace
@@ -61,13 +55,21 @@ void AMediaCodecEncoder::SetGlobalHwEncoderName(VideoCodec codec,
                                                 std::string name) {
   if (codec == VideoCodec::Hevc) {
     gEncHevc = std::move(name);
+  } else if (codec == VideoCodec::Vp9) {
+    gEncVp9 = std::move(name);
   } else {
     gEncH264 = std::move(name);
   }
 }
 
 std::string AMediaCodecEncoder::GlobalHwEncoderName(VideoCodec codec) {
-  return codec == VideoCodec::Hevc ? gEncHevc : gEncH264;
+  if (codec == VideoCodec::Hevc) {
+    return gEncHevc;
+  }
+  if (codec == VideoCodec::Vp9) {
+    return gEncVp9;
+  }
+  return gEncH264;
 }
 
 AMediaCodecEncoder::AMediaCodecEncoder() = default;
@@ -85,8 +87,7 @@ Status AMediaCodecEncoder::Configure(const VideoTrackInfo& track, int bitrate) {
     return Status::Fail(kErrInvalidArgument, "encoder size");
   }
   fps_ = FpsFromTrack(track);
-  const char* mime =
-      track.codec == VideoCodec::Hevc ? "video/hevc" : "video/avc";
+  const char* mime = VideoCodecMime(track.codec);
   AMediaFormat* fmt = AMediaFormat_new();
   AMediaFormat_setString(fmt, AMEDIAFORMAT_KEY_MIME, mime);
   AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, track.codedWidth);
@@ -179,13 +180,13 @@ Status AMediaCodecEncoder::Encode(const RawFrame& frame,
     return Status::Fail(kErrEncoderUnavailable, "encoder");
   }
   if (frame.nv12.width <= 0 || frame.nv12.height <= 0 ||
-      frame.nv12.y.data == nullptr || frame.nv12.uv.data == nullptr) {
+      frame.nv12.y.data == nullptr || frame.nv12.uv.data == nullptr ||
+      frame.nv12.y.stride < frame.nv12.width ||
+      frame.nv12.uv.stride < frame.nv12.width) {
     return Status::Fail(kErrInvalidArgument, "enc nv12");
   }
-  PackNv12(frame.nv12, &packed_);
-  if (packed_.empty()) {
-    return Status::Fail(kErrInvalidArgument, "enc nv12 pack");
-  }
+  const size_t need =
+      PackedNv12Bytes(frame.nv12.width, frame.nv12.height);
   ssize_t ix = AMediaCodec_dequeueInputBuffer(codec_, 10000);
   if (ix < 0) {
     auto drain = DrainOutputs(out, 0, false);
@@ -199,12 +200,11 @@ Status AMediaCodecEncoder::Encode(const RawFrame& frame,
   }
   size_t cap = 0;
   uint8_t* buf = AMediaCodec_getInputBuffer(codec_, static_cast<size_t>(ix), &cap);
-  if (buf == nullptr || cap < packed_.size()) {
+  if (buf == nullptr || !PackNv12Into(frame.nv12, buf, cap)) {
     return Status::Fail(kErrEncodeFailed, "enc size");
   }
-  std::memcpy(buf, packed_.data(), packed_.size());
   media_status_t q = AMediaCodec_queueInputBuffer(
-      codec_, static_cast<size_t>(ix), 0, packed_.size(),
+      codec_, static_cast<size_t>(ix), 0, need,
       static_cast<uint64_t>(frame.ptsUs), 0);
   if (q != AMEDIA_OK) {
     return Status::Fail(kErrEncodeFailed, "enc queue");
@@ -245,7 +245,6 @@ void AMediaCodecEncoder::Close() {
   configured_ = false;
   sawEos_ = false;
   codecConfig_.clear();
-  packed_.clear();
 }
 
 }  // namespace video
