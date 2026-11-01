@@ -269,7 +269,7 @@ const probe = await probeVideoFileContainer({ kind: 'fs', path: '/tmp/clip.webm'
 // probe ≈ { inputFormatName: 'matroska,webm', codecName: 'vp9', codedWidth: 16, codedHeight: 16 }
 ```
 
-Content sniff only (extension is not used as a demuxer hint). Compare `inputFormatName` / `codecName` to a filename extension **in your app** — the SDK does not. Unsupported codecs such as VP9 still return metadata here; `createOfflineVideoBufferFromFile` would reject `VIDEO_CODEC_UNSUPPORTED`.
+Content sniff only (extension is not used as a demuxer hint). Compare `inputFormatName` / `codecName` to a filename extension **in your app** — the SDK does not. VP9 WebM reports `codecName: 'vp9'` here and **opens** as a normal buffer. Other codecs (VP8, AV1, …) still return metadata here; `createOfflineVideoBufferFromFile` rejects them with `VIDEO_CODEC_UNSUPPORTED`.
 
 | Field | Meaning |
 | --- | --- |
@@ -415,8 +415,8 @@ HW-transcodes the clip (decode NV12 → MediaCodec / VideoToolbox → FFmpeg mux
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `format` | required | `'mp4'` \| `'mov'` \| `'mkv'` \| `'webm'`. WebM here is H.264/HEVC in a Matroska/WebM shell (not VP9). |
-| `codec` | `'h264'` | `'h264'` \| `'hevc'`. |
+| `format` | required | `'mp4'` \| `'mov'` \| `'mkv'` \| `'webm'`. Default `codec: 'h264'` still writes H.264/HEVC in a Matroska/WebM shell. Real VP9 WebM is `format: 'webm'` + `codec: 'vp9'`. |
+| `codec` | `'h264'` | `'h264'` \| `'hevc'` \| `'vp9'`. `'vp9'` only with `'webm'` or `'mkv'`. |
 | `bitrate` | `2_000_000` | Video encoder bitrate (bits/s). |
 | `fromUs` / `toUs` | seekable start / end | Inclusive range on the video timeline (µs). `toUs` must be `> fromUs` when both are set. |
 | `maxSide` | no cap (`0`) | Longest-edge cap before encode. |
@@ -491,9 +491,9 @@ FFmpeg demuxes the container. Pixels use the shared codec layer ([codecs.md](./c
 | | Import | Export (`exportVideo`) |
 | --- | --- | --- |
 | **Containers** | MP4 / MOV / M4V / 3GP (`mov`); MKV / WebM (`matroska`) | `'mp4'` \| `'mov'` \| `'mkv'` \| `'webm'` |
-| **Video codecs** | **H.264**, **HEVC** | `'h264'` (default) \| `'hevc'` (MediaCodec / VideoToolbox) |
+| **Video codecs** | **H.264**, **HEVC**, **VP9** | `'h264'` (default) \| `'hevc'` \| `'vp9'` (MediaCodec if present, else bundled `libvpx-vp9`) |
 | **Audio** | AAC, MP3, Opus, Vorbis, FLAC, pcm_s16le, pcm_f32le (`decodable: true`) | mp4/mov → AAC; mkv/webm → Opus. No track → video-only |
-| **Else** | Other video codecs → `VIDEO_CODEC_UNSUPPORTED`. WebM+VP9 still rejected. No video stream → `VIDEO_NO_VIDEO_TRACK`; other containers → `VIDEO_CONTAINER_UNSUPPORTED` | VP8/VP9/AV1 encode is out of scope. WebM export is H.264/HEVC in a Matroska/WebM shell, not VP9 WebM. `'mov'` needs the `mov` muxer in the FFmpeg prebuilt (pin ≥ 8.1.3-1); missing muxer → `VIDEO_ENCODE_FAILED`. |
+| **Else** | Other video codecs (VP8, AV1, …) → `VIDEO_CODEC_UNSUPPORTED`. No video stream → `VIDEO_NO_VIDEO_TRACK`; other containers → `VIDEO_CONTAINER_UNSUPPORTED` | `codec: 'vp9'` requires `webm`/`mkv`. Default `webm`+`h264` stays an H.264 Matroska/WebM shell. `'mov'` needs the `mov` muxer in the FFmpeg prebuilt (pin ≥ 8.1.3-1); missing muxer → `VIDEO_ENCODE_FAILED`. |
 
 | Audio in container | |
 | --- | --- |
@@ -502,7 +502,7 @@ FFmpeg demuxes the container. Pixels use the shared codec layer ([codecs.md](./c
 
 Extract → `OfflineAudioBuffer` float32. Image bridge / `exportVideoFrame`: RGB stills `jpeg` \| `png` \| `webp` \| `heic` (encode policy in [imagebuffer-offline.md](imagebuffer-offline.md)). Clip export: `exportVideo` (HW encode + FFmpeg mux). Internal decode planes: NV12 / Gray8 / RGB24.
 
-Out of scope: AVI, MPEG-TS, FLV, AV1 / VP8 / VP9 decode or encode, bundled SW H.264/HEVC **encoders**, packet-copy remux. Bundled SW **decode** is the opt-in `ffmpeg-vsw` variant.
+Out of scope: AVI, MPEG-TS, FLV, AV1 / VP8 decode or encode, bundled SW H.264/HEVC **encoders**, packet-copy remux. Bundled SW H.264/HEVC **decode** is the opt-in `ffmpeg-vsw` variant. VP9 SW decode (`ffmpeg.vp9`) is in **default** FFmpeg; VP9 SW encode (`libvpx-vp9`) is registered when that encoder is present.
 
 ## JS Events
 
@@ -662,7 +662,7 @@ Thrown / rejected as `VIDEO_…` (`Error` message `VIDEO_…: …`, native rejec
 | `VIDEO_CONTAINER_UNSUPPORTED` | Container not in the v1 set. |
 | `VIDEO_NO_VIDEO_TRACK` | Audio-only file. |
 | `VIDEO_NO_AUDIO_TRACK` | Extract audio but the clip has no audio. |
-| `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC, or no usable decoder/encoder for the resolved policy. |
+| `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC/VP9, or no usable decoder/encoder for the resolved policy. |
 | `VIDEO_ENCODER_BUSY` | Encode slot full. See [Budgets](#budgets). |
 | `VIDEO_ENCODER_UNAVAILABLE` | No usable encoder for the requested `codec` / policy. See [Budgets](#budgets). |
 | `VIDEO_ENCODE_FAILED` | Encode or mux error during `exportVideo`. |

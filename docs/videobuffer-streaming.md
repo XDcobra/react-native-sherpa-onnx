@@ -29,7 +29,7 @@ For immutable file-backed clips, see [Pipeline video buffers — offline](videob
 
 | Containers (file ingest) | Video codecs (v1) | Rejects |
 | --- | --- | --- |
-| MP4, MOV, M4V, 3GP, MKV, WebM | H.264, HEVC | Same as offline: `VIDEO_CODEC_UNSUPPORTED` / `VIDEO_NO_VIDEO_TRACK` / `VIDEO_CONTAINER_UNSUPPORTED`. |
+| MP4, MOV, M4V, 3GP, MKV, WebM | H.264, HEVC, VP9 | Same as offline: `VIDEO_CODEC_UNSUPPORTED` / `VIDEO_NO_VIDEO_TRACK` / `VIDEO_CONTAINER_UNSUPPORTED`. |
 
 ---
 
@@ -522,7 +522,7 @@ Thrown / rejected as `VIDEO_…`.
 | `VIDEO_CONTAINER_UNSUPPORTED` | Ingest container not in the v1 set. |
 | `VIDEO_NO_VIDEO_TRACK` | Ingest file has no video. |
 | `VIDEO_NO_AUDIO_TRACK` | Live audio tap but no audio packets. |
-| `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC. |
+| `VIDEO_CODEC_UNSUPPORTED` | Video codec not H.264/HEVC/VP9. |
 | `VIDEO_AUDIO_CODEC_UNSUPPORTED` | Tap/extract codec not in the SDK FFmpeg build. |
 | `VIDEO_FRAME_EVICTED` | Decode of a PTS that left the ring (and was not spooled). Raise `ringSeconds` or use `retention: 'session'` / `maxSeconds`. |
 | `VIDEO_SPOOL_IO` | Spool read/write failed (`retention` session/path/maxSeconds). |
