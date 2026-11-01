@@ -128,6 +128,20 @@ export async function createSpeakerEmbeddingManager(
       );
       return Array.isArray(result.names) ? result.names : [];
     },
+    async getEmbedding(name: string): Promise<Float32Array | null> {
+      guard();
+      if (name.length === 0) {
+        throw new Error('SPEAKER_EMBEDDING_MANAGER_ERROR: name is empty');
+      }
+      const result = await SherpaOnnx.speakerEmbeddingManagerGetEmbedding(
+        managerId,
+        name
+      );
+      if (result.embedding == null) {
+        return null;
+      }
+      return new Float32Array(result.embedding);
+    },
     async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
