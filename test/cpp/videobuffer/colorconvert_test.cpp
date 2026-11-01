@@ -225,6 +225,35 @@ TEST(ColorConvert, MirrorHorizontal) {
   EXPECT_EQ(view.plane[0][7], 10);
 }
 
+TEST(ColorConvert, Rotate90Nv12SwapsDims) {
+  auto img = MakeNv12(32, 16, 200, 90, 160);
+  AlignedBuffer storage;
+  VideoFrameView view;
+  VideoTransform t;
+  t.rotationDegrees = 90;
+  auto st = ColorConvert::Convert(img.view(), VideoPixelFormat::Nv12, t, 0,
+                                  false, &storage, &view);
+  ASSERT_TRUE(st.ok) << st.errorMessage;
+  EXPECT_EQ(view.width, 16);
+  EXPECT_EQ(view.height, 32);
+  ASSERT_NE(view.plane[1], nullptr);
+}
+
+TEST(ColorConvert, MirrorHorizontalNv12) {
+  auto img = MakeNv12(8, 4, 0, 128, 128);
+  img.y[0] = 10;
+  img.y[7] = 250;
+  AlignedBuffer storage;
+  VideoFrameView view;
+  VideoTransform t;
+  t.mirrorHorizontal = true;
+  auto st = ColorConvert::Convert(img.view(), VideoPixelFormat::Nv12, t, 0,
+                                  false, &storage, &view);
+  ASSERT_TRUE(st.ok) << st.errorMessage;
+  EXPECT_EQ(view.plane[0][0], 250);
+  EXPECT_EQ(view.plane[0][7], 10);
+}
+
 TEST(ColorConvert, ScaleMaxSide) {
   auto img = MakeNv12(64, 32, 80, 128, 128);
   AlignedBuffer storage;
