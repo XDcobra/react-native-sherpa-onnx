@@ -17,6 +17,7 @@ jest.mock('../../NativeSherpaOnnx', () => ({
     speakerEmbeddingManagerContains: jest.fn(),
     speakerEmbeddingManagerNumSpeakers: jest.fn(),
     speakerEmbeddingManagerAllSpeakerNames: jest.fn(),
+    speakerEmbeddingManagerGetEmbedding: jest.fn(),
   },
 }));
 
@@ -74,6 +75,7 @@ describe('createSpeakerIdentification', () => {
     speakerEmbeddingManagerContains: jest.Mock;
     speakerEmbeddingManagerNumSpeakers: jest.Mock;
     speakerEmbeddingManagerAllSpeakerNames: jest.Mock;
+    speakerEmbeddingManagerGetEmbedding: jest.Mock;
   };
 
   const segs = segmentbuffer as unknown as {
@@ -131,6 +133,9 @@ describe('createSpeakerIdentification', () => {
     native.speakerEmbeddingManagerNumSpeakers.mockResolvedValue(1);
     native.speakerEmbeddingManagerAllSpeakerNames.mockResolvedValue({
       names: ['alice'],
+    });
+    native.speakerEmbeddingManagerGetEmbedding.mockResolvedValue({
+      embedding: emb,
     });
 
     segs.createLiveSegmentBuffer.mockResolvedValue({
@@ -1280,7 +1285,7 @@ describe('createSpeakerIdentification', () => {
     expect(onLabeled).not.toHaveBeenCalled();
   });
 
-  it('exportEnrollments / importEnrollments round-trip restores speakers', async () => {
+  it('exportEnrollments reads native GetEmbedding as one averaged row', async () => {
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
@@ -1294,10 +1299,17 @@ describe('createSpeakerIdentification', () => {
       speakers: [
         {
           name: 'alice',
-          embeddings: [emb, emb],
+          embeddings: [emb],
         },
       ],
     });
+    expect(native.speakerEmbeddingManagerAllSpeakerNames).toHaveBeenCalledWith(
+      sid.managerId
+    );
+    expect(native.speakerEmbeddingManagerGetEmbedding).toHaveBeenCalledWith(
+      sid.managerId,
+      'alice'
+    );
 
     await sid.destroy();
 
@@ -1313,13 +1325,50 @@ describe('createSpeakerIdentification', () => {
     expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledWith(
       sid2.managerId,
       'alice',
-      [...emb, ...emb],
-      2
+      emb,
+      1
     );
 
     const reexported = await sid2.exportEnrollments();
     expect(reexported.speakers).toEqual(bundle.speakers);
     expect(reexported.modelKey).toBe(bundle.modelKey);
+  });
+
+  it('importEnrollments accepts multi-clip rows; re-export is one averaged row', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    const incoming = {
+      version: 1 as const,
+      dim: 4,
+      speakers: [{ name: 'alice', embeddings: [emb, emb] }],
+    };
+
+    await expect(sid.importEnrollments(incoming)).resolves.toEqual({
+      imported: 1,
+      skipped: 0,
+    });
+    expect(native.speakerEmbeddingManagerAdd).toHaveBeenCalledWith(
+      sid.managerId,
+      'alice',
+      [...emb, ...emb],
+      2
+    );
+
+    const reexported = await sid.exportEnrollments();
+    expect(reexported.speakers).toEqual([{ name: 'alice', embeddings: [emb] }]);
+  });
+
+  it('exportEnrollments rejects a listed speaker without a native embedding', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+    });
+    native.speakerEmbeddingManagerGetEmbedding.mockResolvedValue({
+      embedding: null,
+    });
+    await expect(sid.exportEnrollments()).rejects.toThrow(
+      /SID_ENROLL_INVALID_RESULT/
+    );
   });
 
   it('importEnrollments rejects name collision unless replaceExisting', async () => {
@@ -1377,7 +1426,7 @@ describe('createSpeakerIdentification', () => {
     ).rejects.toThrow(/SID_ENROLLMENT_MODEL_MISMATCH/);
   });
 
-  it('removeSpeaker drops the enrollment mirror entry', async () => {
+  it('removeSpeaker drops the speaker from native export', async () => {
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
     });
@@ -1389,6 +1438,9 @@ describe('createSpeakerIdentification', () => {
     );
 
     await expect(sid.removeSpeaker('alice')).resolves.toBe(true);
+    native.speakerEmbeddingManagerAllSpeakerNames.mockResolvedValue({
+      names: [],
+    });
     await expect(sid.exportEnrollments()).resolves.toEqual(
       expect.objectContaining({ speakers: [] })
     );

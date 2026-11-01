@@ -13,6 +13,7 @@ jest.mock('../../NativeSherpaOnnx', () => ({
     speakerEmbeddingManagerContains: jest.fn(),
     speakerEmbeddingManagerNumSpeakers: jest.fn(),
     speakerEmbeddingManagerAllSpeakerNames: jest.fn(),
+    speakerEmbeddingManagerGetEmbedding: jest.fn(),
     startSpeakerIdentificationOfflineLivePipeline: jest.fn(),
     stopStreamingPipeline: jest.fn(),
     flushStreamingPipeline: jest.fn(),

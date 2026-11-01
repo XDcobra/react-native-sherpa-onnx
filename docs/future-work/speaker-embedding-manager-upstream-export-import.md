@@ -1,95 +1,65 @@
-# Speaker embedding manager: upstream export / import (future work)
+# Speaker embedding manager: upstream export / import
 
-**Status:** Upstream **GetEmbedding** implemented locally (branch `add-speaker-embedding-manager-get-embedding` in external `sherpa-onnx` clone; uncommitted pending review; PR draft present — not pushed). SDK still ships a **JS enrollment mirror** until upstream merges and we bridge C-API.  
+**Status:** **Done** for readout. sherpa-onnx **2.0.1** ships `GetEmbedding` + `DestroyEmbedding` on the C-API. The SDK bridges that through `SpeakerEmbeddingManager.getEmbedding(name)` and SID `exportEnrollments` (JS enrollment mirror removed).  
 **Scope:** Named-speaker persistence for SID (`SpeakerEmbeddingManager` in sherpa-onnx).  
-**Motivation:** Export enrollments without keeping a parallel JS copy of embedding vectors.
+**Motivation:** Export enrollments from the native store without a parallel JS copy of embedding vectors.
 
-**Related (today):**
+**Related:**
 
-- [speaker-identification-offline.md](../speaker-identification-offline.md) — `exportEnrollments` / `importEnrollments` (JS mirror)
+- [speaker-identification-offline.md](../speaker-identification-offline.md) — `exportEnrollments` / `importEnrollments` (native readout)
 - [speaker-embedding-foundation.md](../internal/speaker-embedding/speaker-embedding-foundation.md) — persistence outside the extractor
 - Upstream C++: `third_party/sherpa-onnx/sherpa-onnx/csrc/speaker-embedding-manager.{h,cc}`
-- Upstream cxx-API: `SpeakerEmbeddingManager` in `c-api/cxx-api.h` — **GetEmbedding** pending upstream merge
+- Upstream C-API / cxx-API: `SherpaOnnxSpeakerEmbeddingManagerGetEmbedding` in `c-api/c-api.h` (2.0.1)
 
 ---
 
-## 1. Problem statement
-
-sherpa-onnx’s `SpeakerEmbeddingManager` stores L2-normalized embedding rows keyed by speaker name. Historically the public C++ / JNI / Kotlin / cxx surfaces exposed **write + match only**:
-
-| Available | Missing (historical) | Now (local upstream branch) |
-| --- | --- | --- |
-| `Add` / `Remove` / `Contains` / `NumSpeakers` / `GetAllSpeakers` | `GetEmbedding(name)` | **Added** (C++ / C-API / cxx) |
-| `Search` / `Verify` / `Score` / `GetBestMatches` (upstream; not all bridged) | — | — |
-
-After `Add`, older pins cannot read vectors back. Cross-session SID therefore keeps a **JS mirror** of the embeddings passed into `manager.add` and serializes that as `SpeakerEnrollmentBundle`. That works for enrollments done through SID, but:
-
-1. Speakers added only via low-level / native paths are **invisible** to `exportEnrollments`.
-2. Every enroll copies floats into JS heap for the lifetime of the SID instance.
-3. Import still round-trips embeddings through TurboModule `add` rather than a native load.
-
----
-
-## 2. What the SDK ships today (baseline)
+## 1. What the SDK ships
 
 ```ts
-const bundle = await sid.exportEnrollments(); // from JS mirror
+const bundle = await sid.exportEnrollments(); // listSpeakers + getEmbedding
 await sid.importEnrollments(bundle, { replaceExisting?: boolean });
 ```
 
 - Bundle: `{ version: 1, dim, modelKey?, speakers: { name, embeddings: number[][] }[] }`
+- Native export is **one** averaged, L2-normalized row per name: `embeddings: [averagedRow]`
+- Import still calls `manager.add`. Older bundles with multiple clip rows remain valid (native averages)
 - App owns file / key-value storage — SDK does not write enrollment files
 - `dim` / optional `modelKey` guards prevent loading into the wrong extractor
+- A listed name without a readable vector rejects with `SID_ENROLL_INVALID_RESULT` (no silent drop)
 
-This should remain supported even if upstream gains native export; the mirror can become a cache or fall back.
+Low-level apps can also call `SpeakerEmbeddingManager.getEmbedding(name)` → `Float32Array | null`.
 
 ---
 
-## 3. Upstream possibilities
-
-Prefer **small, composable** C++ APIs over a single opaque binary blob tied to one app format.
-
-### 3.1 Export — `GetEmbedding` (minimum useful) — **in progress upstream**
+## 2. Upstream API (2.0.1)
 
 ```text
-bool GetEmbedding(const std::string &name, float *out /* length == Dim() */) const;
+const float *SherpaOnnxSpeakerEmbeddingManagerGetEmbedding(p, name);
+void SherpaOnnxSpeakerEmbeddingManagerDestroyEmbedding(v);
 ```
 
-Returns the **stored** (averaged, L2-normalized) row for `name`, or false if missing. C-API mirrors extractor embedding ownership (`GetEmbedding` + `DestroyEmbedding`); also exposes `Dim()`.
+Returns the **stored** (averaged, L2-normalized) row for `name`, or `NULL` if missing. Ownership matches extractor embeddings (`Get` + `Destroy`).
 
-**Why this is enough for export:** SID can rebuild a portable JSON bundle by `GetAllSpeakers` + `GetEmbedding` per name, without a JS enroll mirror and without inventing a file format in C++.
-
-**Propagate through:** C-API → cxx-API → (later) Kotlin/JNI → our TurboModule → SID `exportEnrollments` prefers native readout when available.
-
-### 3.2 Import
-
-Import can stay “`Add` per speaker” with the existing JSON bundle (`dim` / optional `modelKey` checks).
+SID rebuilds the portable JSON bundle by `GetAllSpeakers` + `GetEmbedding` per name.
 
 ---
 
-## 4. SDK follow-up (after upstream merge)
+## 3. Remaining (not this change)
 
-1. Bridge `GetEmbedding` (Android C-API helper + iOS wrapper + TurboModule).
-2. Change `exportEnrollments` to prefer native readout; drop or thin the JS mirror once proven.
-3. Optionally expose `SpeakerEmbeddingManager.getEmbedding(name)` for advanced apps.
-4. **Do not** remove the versioned JSON bundle contract without a migration — apps already persist `SpeakerEnrollmentBundle`.
-
----
-
-## 5. Out of scope for this note
-
+- Optional native Save / Load blob (not needed; JSON bundle stays the app contract)
+- Kotlin bindings in upstream sherpa-onnx itself (we stay on C-API, same as the rest of the manager)
 - Changing cosine search / verify semantics
 - Storing diarization cluster indices in the named-speaker manager
-- Audio-clip archives as the primary enrollment format (re-enroll remains an app choice)
-- Shipping a fork-only GetEmbedding without an upstream PR path (prefer contribute upstream)
+- Audio-clip archives as the primary enrollment format
+- Bumping `SpeakerEnrollmentBundle.version` (v1 still holds)
 
 ---
 
-## 6. Acceptance sketch (when implementing)
+## 4. Acceptance
 
-- [x] Upstream changes (local, uncommitted): `GetEmbedding` (+ C-API Dim / Destroy) + tests in sherpa-onnx
-- [ ] Review → commit → push / open upstream PR (manual)
-- [ ] Kotlin bindings for the getter (cxx done in same PR; Kotlin later if desired)
-- [ ] RN bridge + unit test: enroll → destroy mirror deliberately → export still returns correct vectors via native
-- [ ] `importEnrollments` unchanged or still validated against `dim` / `modelKey`
-- [ ] Docs: offline persistence section notes native export path
+- [x] Upstream `GetEmbedding` (+ C-API Dim / Destroy) in sherpa-onnx 2.0.1
+- [x] RN C-API Core + Wrapper + Android JNI + iOS bridge + TurboModule
+- [x] `SpeakerEmbeddingManager.getEmbedding(name)`
+- [x] SID `exportEnrollments` via native readout; JS enrollment mirror removed
+- [x] `importEnrollments` still `add`s N rows; `dim` / `modelKey` validated
+- [x] Docs: offline persistence section notes native export path

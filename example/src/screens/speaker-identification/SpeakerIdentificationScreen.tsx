@@ -1205,7 +1205,7 @@ export default function SpeakerIdentificationScreen() {
         throw new Error(
           exportSpeakerFilter === EXPORT_SPEAKER_ALL
             ? 'No enrolled speakers to export.'
-            : `Speaker '${exportSpeakerFilter}' is not in the enrollment mirror.`
+            : `Speaker '${exportSpeakerFilter}' is not enrolled.`
         );
       }
       setEnrollmentJson(JSON.stringify(bundle, null, 2));
@@ -1238,7 +1238,7 @@ export default function SpeakerIdentificationScreen() {
         throw new Error(
           exportSpeakerFilter === EXPORT_SPEAKER_ALL
             ? 'No enrolled speakers to export.'
-            : `Speaker '${exportSpeakerFilter}' is not in the enrollment mirror.`
+            : `Speaker '${exportSpeakerFilter}' is not enrolled.`
         );
       }
       const json = JSON.stringify(bundle, null, 2);

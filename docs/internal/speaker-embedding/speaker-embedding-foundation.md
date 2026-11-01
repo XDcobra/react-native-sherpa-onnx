@@ -56,7 +56,7 @@ flowchart TB
 | Piece | Responsibility | Diarization-ready rule |
 |-------|----------------|------------------------|
 | **`SpeakerEmbeddingEngine`** | Load model, `dim`, `destroy()`, extract | Single engine instance shareable across SID + diarization init |
-| **`SpeakerEmbeddingManager`** | `add`, `remove`, `search`, `verify`, `contains`, `numSpeakers` | **Not** used for cluster IDs — only named enrollment |
+| **`SpeakerEmbeddingManager`** | `add`, `remove`, `search`, `verify`, `contains`, `numSpeakers`, `listSpeakers`, `getEmbedding` | **Not** used for cluster IDs — only named enrollment |
 | **`extractFromOfflineAudio(buffer, range?)`** | Buffer-first input (SDK convention) | Diarization segments map to the same helper |
 | **`detectSpeakerEmbeddingModel`** | Preflight detect | Also re-exported from SID for DX parity |
 | **`speakerEmbeddingNativeBridge`** | TurboModule surface | Diarization reuses the same bridge layer |
@@ -79,7 +79,7 @@ engine.exportEnrollments / importEnrollments
 engine.destroy(): Promise<void>
 ```
 
-**Persistence:** Thin SID helpers `exportEnrollments` / `importEnrollments` return/accept a versioned embeddings JSON bundle (`SpeakerEnrollmentBundle`). The SDK does not write files — the app stores the object. Export is fed by a JS enrollment mirror (native manager cannot read embeddings back). Diarization does not need persistence.
+**Persistence:** Thin SID helpers `exportEnrollments` / `importEnrollments` return/accept a versioned embeddings JSON bundle (`SpeakerEnrollmentBundle`). The SDK does not write files — the app stores the object. Export reads the native manager (`listSpeakers` + `getEmbedding`); each speaker is one averaged row. Import still calls `manager.add` (N clip rows remain valid). Diarization does not need persistence.
 
 **Live SID:** Offline embedding weights + mandatory speech segmentation + per-utterance extract/search in a native `OfflineLivePipelineWorker`. Public handle matches other live overloads — see [live-overload.md §11](../live-overload.md#11-speaker-identification-live-overload-native-worker).
 
@@ -190,7 +190,6 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 
 - True streaming diarization (no upstream API)
 - Spoken Language Identification
-- Native embedding dump / Upstream `GetEmbedding` (SID export uses a JS mirror) — tracked in [speaker-embedding-manager-upstream-export-import.md](../../future-work/speaker-embedding-manager-upstream-export-import.md)
 - Optional embedding JSI (deferred; only if low-level extract profiles hot)
 
 ---
@@ -213,7 +212,7 @@ Rule unchanged: Android inference uses `com.k2fsa.sherpa.onnx` Kotlin classes; i
 - [Discussion #113 — Speaker Identification request](https://github.com/XDcobra/react-native-sherpa-onnx/discussions/113)
 - [speaker-identification-offline.md](../../speaker-identification-offline.md)
 - [speaker-identification-live.md](../../speaker-identification-live.md)
-- [speaker-embedding-manager-upstream-export-import.md](../../future-work/speaker-embedding-manager-upstream-export-import.md) — upstream `GetEmbedding` / optional Save·Load
+- [speaker-embedding-manager-upstream-export-import.md](../../future-work/speaker-embedding-manager-upstream-export-import.md) — `GetEmbedding` (sherpa-onnx 2.0.1) + native SID export
 - [speaker-embedding-sharing-verification.md](./speaker-embedding-sharing-verification.md) — device logcat sharing check
 - [diarization-offline.md](../../diarization-offline.md) — offline batch (shipped)
 - [diarization-named-timeline.md](../../diarization-named-timeline.md) — SID × diarization named timeline

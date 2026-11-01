@@ -91,46 +91,6 @@ function resolveThreshold(
   return typeof t === 'number' && Number.isFinite(t) ? t : DEFAULT_THRESHOLD;
 }
 
-function cloneEmbeddings(embeddings: Float32Array[]): Float32Array[] {
-  return embeddings.map((embedding) => new Float32Array(embedding));
-}
-
-function unflattenEmbeddings(flat: number[], dim: number): Float32Array[] {
-  if (!(dim > 0)) {
-    throw new Error('unflattenEmbeddings requires dim > 0');
-  }
-  if (!Array.isArray(flat) || flat.length === 0 || flat.length % dim !== 0) {
-    throw new Error(
-      `SID_ENROLL_INVALID_RESULT: embeddings length ${
-        Array.isArray(flat) ? flat.length : -1
-      } must be a positive multiple of dim ${dim}`
-    );
-  }
-  const count = flat.length / dim;
-  const out: Float32Array[] = [];
-  for (let i = 0; i < count; i++) {
-    const embedding = new Float32Array(dim);
-    const offset = i * dim;
-    for (let j = 0; j < dim; j++) {
-      const value = flat[offset + j]!;
-      if (typeof value !== 'number' || !Number.isFinite(value)) {
-        throw new Error(
-          `SID_ENROLL_INVALID_RESULT: embeddings[${
-            offset + j
-          }] must be a finite number`
-        );
-      }
-      embedding[j] = value;
-    }
-    out.push(embedding);
-  }
-  return out;
-}
-
-function embeddingsToNumberArrays(embeddings: Float32Array[]): number[][] {
-  return embeddings.map((embedding) => Array.from(embedding));
-}
-
 function numberArraysToEmbeddings(
   arrays: number[][],
   dim: number
@@ -308,9 +268,6 @@ export async function createSpeakerIdentification(
   const engine = await createSpeakerEmbeddingEngine(options);
   const manager = await createSpeakerEmbeddingManager(engine.dim);
 
-  /** JS mirror of vectors passed to `manager.add` (native cannot read embeddings back). */
-  const enrollmentMirror = new Map<string, Float32Array[]>();
-
   let destroyed = false;
   const guard = () => {
     if (destroyed) {
@@ -318,10 +275,6 @@ export async function createSpeakerIdentification(
         `Speaker identification instance ${engine.instanceId} has been destroyed; cannot call methods on it.`
       );
     }
-  };
-
-  const rememberEnrollment = (name: string, embeddings: Float32Array[]) => {
-    enrollmentMirror.set(name, cloneEmbeddings(embeddings));
   };
 
   return {
@@ -368,10 +321,6 @@ export async function createSpeakerIdentification(
           `Failed to enroll speaker '${trimmed}' (name may already exist)`
         );
       }
-      rememberEnrollment(
-        trimmed,
-        unflattenEmbeddings(result.embeddings ?? [], engine.dim)
-      );
     },
     async enrollOfflineSegments(
       nameOrNames: string | string[],
@@ -445,10 +394,6 @@ export async function createSpeakerIdentification(
             `Failed to enroll speaker '${speakerName}' (name may already exist)`
           );
         }
-        rememberEnrollment(
-          speakerName,
-          unflattenEmbeddings(result.embeddings ?? [], engine.dim)
-        );
       }
     },
     async identify(
@@ -701,12 +646,7 @@ export async function createSpeakerIdentification(
     },
     async removeSpeaker(name: string): Promise<boolean> {
       guard();
-      const trimmed = name.trim();
-      const ok = await manager.remove(trimmed);
-      if (ok) {
-        enrollmentMirror.delete(trimmed);
-      }
-      return ok;
+      return manager.remove(name.trim());
     },
     async listSpeakers(): Promise<string[]> {
       guard();
@@ -722,12 +662,20 @@ export async function createSpeakerIdentification(
     },
     async exportEnrollments(): Promise<SpeakerEnrollmentBundle> {
       guard();
-      const speakers = Array.from(enrollmentMirror.entries()).map(
-        ([name, embeddings]) => ({
+      const names = await manager.listSpeakers();
+      const speakers: SpeakerEnrollmentBundle['speakers'] = [];
+      for (const name of names) {
+        const embedding = await manager.getEmbedding(name);
+        if (embedding == null || embedding.length !== manager.dim) {
+          throw new Error(
+            `SID_ENROLL_INVALID_RESULT: missing embedding for speaker '${name}'`
+          );
+        }
+        speakers.push({
           name,
-          embeddings: embeddingsToNumberArrays(embeddings),
-        })
-      );
+          embeddings: [Array.from(embedding)],
+        });
+      }
       return {
         version: ENROLLMENT_BUNDLE_VERSION,
         dim: manager.dim,
@@ -770,10 +718,7 @@ export async function createSpeakerIdentification(
         );
 
         if (replaceExisting) {
-          const removed = await manager.remove(trimmed);
-          if (removed) {
-            enrollmentMirror.delete(trimmed);
-          }
+          await manager.remove(trimmed);
         }
 
         const ok = await manager.add(trimmed, embeddings);
@@ -782,7 +727,6 @@ export async function createSpeakerIdentification(
             `Failed to import speaker '${trimmed}' (name may already exist)`
           );
         }
-        rememberEnrollment(trimmed, embeddings);
         imported += 1;
       }
 
@@ -791,7 +735,6 @@ export async function createSpeakerIdentification(
     async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
-      enrollmentMirror.clear();
       await manager.destroy();
       await engine.destroy();
     },
