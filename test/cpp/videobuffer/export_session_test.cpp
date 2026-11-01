@@ -38,6 +38,8 @@ class ExportSessionTest : public ::testing::Test {
     RegisterEncoderFactory([]() {
       return std::unique_ptr<EncoderBackend>(new FakeEncoder());
     });
+    RegisterFakeDecoderProvidersForTest();
+    RegisterFakeEncoderProvidersForTest();
     DecoderPool::Instance().CloseAll();
     DecoderPool::Instance().SetMaxSessions(DecoderClass::Cpu, 1);
     DecoderPool::Instance().SetMaxSessions(DecoderClass::Display, 1);

@@ -50,8 +50,9 @@ void RegisterFakeDecoderProviders() {
 void RegisterDecoderFactory(DecoderFactory factory) {
   std::lock_guard<std::mutex> lock(gMu);
   gFactory = std::move(factory);
-  RegisterFakeDecoderProviders();
 }
+
+void RegisterFakeDecoderProvidersForTest() { RegisterFakeDecoderProviders(); }
 
 DecoderFactory GetDecoderFactory() {
   std::lock_guard<std::mutex> lock(gMu);

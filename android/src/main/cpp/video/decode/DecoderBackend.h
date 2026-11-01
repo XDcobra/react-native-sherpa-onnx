@@ -50,6 +50,8 @@ using DecoderFactory = std::function<std::unique_ptr<DecoderBackend>()>;
 void RegisterDecoderFactory(DecoderFactory factory);
 DecoderFactory GetDecoderFactory();
 void ResetDecoderFactoryForTest();
+/** Host tests only. Device init must not advertise this catalog row. */
+void RegisterFakeDecoderProvidersForTest();
 
 /** Register a platform MediaCodec / VT / fake provider into the codec catalog. */
 void RegisterNamedVideoCodec(const char* name, const char* codec, bool encoder,

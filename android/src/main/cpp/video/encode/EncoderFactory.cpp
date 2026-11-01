@@ -43,8 +43,9 @@ void RegisterFakeEncoderProviders() {
 void RegisterEncoderFactory(EncoderFactory factory) {
   std::lock_guard<std::mutex> lock(gMu);
   gFactory = std::move(factory);
-  RegisterFakeEncoderProviders();
 }
+
+void RegisterFakeEncoderProvidersForTest() { RegisterFakeEncoderProviders(); }
 
 EncoderFactory GetEncoderFactory() {
   std::lock_guard<std::mutex> lock(gMu);
