@@ -109,6 +109,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD & ODR](./docs/model-delivery-pad-odr.md)
 - ✅ Acceleration & diagnostics: [Execution providers](./docs/execution-providers.md) · [Native diagnostics](./docs/native-diagnostics.md) · [Memory planning](./docs/memory-and-models.md)
 - ✅ Build optimization: [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md) · opt-in [PDFium](./docs/pdf-offline.md) · [libwebp](./docs/imagebuffer-offline.md)
+- ✅ Codec policies (HW / SW / preferHardware): [Codecs](./docs/codecs.md)
 
 ### Input & output formats
 
@@ -508,7 +509,7 @@ The SDK exposes a public API for native VideoBuffer playback (`react-native-sher
 <table>
 <tr>
 <td align="center" width="33%"></td>
-<td align="center" width="33%"><img src="./docs/images/example/video_preview_1.png" alt="Video preview player" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/videobuffer-videopreview.png" alt="Video preview player" width="180" /></td>
 <td align="center" width="33%"></td>
 </tr>
 <tr>

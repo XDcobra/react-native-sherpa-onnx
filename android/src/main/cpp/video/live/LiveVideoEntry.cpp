@@ -2,6 +2,7 @@
 
 #include "VideoLog.h"
 #include "VideoRegistry.h"
+#include "codec/CodecTypes.h"
 #include "core/MemoryBudget.h"
 #include "core/Uuid.h"
 
@@ -18,7 +19,7 @@ std::shared_ptr<LiveVideoEntry> LiveVideoEntry::Create(
   e->opts_ = opts;
   e->cacheDir_ = cacheDir;
   e->cache_ = std::make_shared<DecodedFrameCache>();
-  e->cache_->SetCacheDir(cacheDir);
+  e->cache_->SetCacheDir(cacheDir, e->id_);
   int64_t ringBytes = opts.ringMaxBytes;
   if (ringBytes <= 0) {
     ringBytes = MemoryBudget::DefaultRingMaxBytes(
@@ -141,6 +142,9 @@ VideoBufferInfo LiveVideoEntry::Info() const {
     i.audioRange.startUs = audioTimeline_.startUs();
     i.audioRange.endUs = audioTimeline_.endUs();
     i.audioPacketsWritten = audioTimeline_.size();
+  }
+  if (!lastDecision_.provider.empty()) {
+    i.decoderJson = sherpa_onnx::codec::DecisionToJson(lastDecision_);
   }
   return i;
 }

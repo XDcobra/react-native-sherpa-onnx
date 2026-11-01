@@ -105,7 +105,20 @@ VideoFrameIterator::VideoFrameIterator(std::shared_ptr<VideoEntry> entry,
 
 Result<VideoFrameLease> VideoFrameIterator::Next() {
   Result<VideoFrameLease> r;
-  if (done() || entry_ == nullptr || session_ == nullptr) {
+  if (entry_ == nullptr) {
+    r.status = Status::Fail(kErrFrameOutOfRange, "iterator done");
+    return r;
+  }
+  if (session_ == nullptr) {
+    r.status = entry_->lastStickyError().ok
+                   ? Status::Fail(kErrDecoderUnavailable, "session")
+                   : entry_->lastStickyError();
+    VIDEO_LOGE("video.iterate no-session code=%s msg=%s reason=%s",
+               r.status.errorCode.c_str(), r.status.errorMessage.c_str(),
+               r.status.codecReason.c_str());
+    return r;
+  }
+  if (done()) {
     r.status = Status::Fail(kErrFrameOutOfRange, "iterator done");
     return r;
   }
@@ -124,7 +137,13 @@ Result<VideoFrameLease> VideoFrameIterator::Next() {
   fr.packed = req_.packed;
   const int flushesBefore = session_->flushCount();
   auto lease = session_->SeekAndAcquire(fr);
-  if (session_->flushCount() > flushesBefore) {
+  if (!lease.ok() && entry_->TryMidstreamSoftwareFallback()) {
+    session_ = entry_->StickySession();
+    if (session_) {
+      lease = session_->SeekAndAcquire(fr);
+    }
+  }
+  if (session_ && session_->flushCount() > flushesBefore) {
     ++seekCount_;
   } else if (index_ == 1) {
     ++seekCount_;
@@ -148,10 +167,19 @@ Result<VideoFrameLease> VideoFrameAccess::Acquire(const std::string& bufferId,
   }
   auto sess = e->StickySession();
   if (!sess) {
-    r.status = Status::Fail(kErrDecoderUnavailable, "session");
+    r.status = e->lastStickyError().ok
+                   ? Status::Fail(kErrDecoderUnavailable, "session")
+                   : e->lastStickyError();
     return r;
   }
-  return sess->SeekAndAcquire(req);
+  auto lease = sess->SeekAndAcquire(req);
+  if (!lease.ok() && e->TryMidstreamSoftwareFallback()) {
+    sess = e->StickySession();
+    if (sess) {
+      lease = sess->SeekAndAcquire(req);
+    }
+  }
+  return lease;
 }
 
 Result<VideoFrameIterator> VideoFrameAccess::Iterate(

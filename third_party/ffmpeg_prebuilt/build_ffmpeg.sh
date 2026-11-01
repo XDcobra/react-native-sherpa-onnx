@@ -46,7 +46,14 @@ if [ ! -d "$FFMPEG_SRC" ] || [ ! -f "$FFMPEG_SRC/configure" ]; then
 fi
 
 # Minimal audio-only: decoders/demuxers for common formats.
+# VIDEO_SW_DECODERS=1 adds bundled H.264/HEVC software video decoders (ffmpeg-vsw).
 # --prefix, --extra-cflags, --extra-ldflags are set per ABI below (so not duplicated here).
+DECODERS="aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus"
+PARSERS="aac,mpegaudio,vorbis,flac,opus"
+if [ "${VIDEO_SW_DECODERS:-0}" = "1" ]; then
+    DECODERS="${DECODERS},h264,hevc"
+    PARSERS="${PARSERS},h264,hevc"
+fi
 COMMON_CONFIGURE=(
     --enable-shared
     --disable-static
@@ -56,11 +63,11 @@ COMMON_CONFIGURE=(
     --disable-avdevice
     --disable-swscale
     --disable-everything
-    --enable-decoder=aac,mp3,vorbis,flac,pcm_s16le,pcm_f32le,pcm_s32le,pcm_u8,opus
+    --enable-decoder=${DECODERS}
     --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
     --enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska
     --enable-encoder=pcm_s16le,flac,libshine,aac,alac,libopus
-    --enable-parser=aac,mpegaudio,vorbis,flac,opus
+    --enable-parser=${PARSERS}
     --enable-protocol=file
     --enable-swresample
     --enable-avcodec

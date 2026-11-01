@@ -5,12 +5,15 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 
 #include "VideoEntry.h"
+#include "codec/CodecArbiter.h"
+#include "codec/CodecTypes.h"
 #include "decode/DecoderPool.h"
 #include "preview/AudioFeeder.h"
 #include "preview/PlaybackClock.h"
@@ -30,6 +33,7 @@ struct PreviewPlayerOptions {
   ControllerConfig controller;
   AudioDecision audioDecision = AudioDecision::Track;
   std::string codecName;
+  std::optional<sherpa_onnx::codec::Policy> decodePolicy;
   float volume = 1.f;
   bool muted = false;
   int progressIntervalMs = 250;
@@ -118,6 +122,8 @@ class PreviewPlayer {
   int64_t lastEmittedPosMs_ = -1;
 #ifdef __ANDROID__
   double refreshHz_ = 60.0;
+  sherpa_onnx::codec::Lease displayLease_;
+  sherpa_onnx::codec::Decision displayDecision_;
 #endif
 };
 

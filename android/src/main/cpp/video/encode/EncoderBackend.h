@@ -31,6 +31,15 @@ using EncoderFactory = std::function<std::unique_ptr<EncoderBackend>()>;
 void RegisterEncoderFactory(EncoderFactory factory);
 EncoderFactory GetEncoderFactory();
 void ResetEncoderFactoryForTest();
+/** Host tests only. Device init must not advertise this catalog row. */
+void RegisterFakeEncoderProvidersForTest();
+
+std::unique_ptr<EncoderBackend> OpenEncoderForProvider(
+    const std::string& providerName);
+
+using NamedEncoderOpener =
+    std::function<std::unique_ptr<EncoderBackend>(const std::string&)>;
+void SetNamedEncoderOpener(NamedEncoderOpener opener);
 
 }  // namespace video
 }  // namespace sherpa_onnx

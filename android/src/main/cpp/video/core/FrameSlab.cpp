@@ -2,6 +2,7 @@
 
 #include "VideoLog.h"
 #include "core/FileIo.h"
+#include "core/Uuid.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -31,6 +32,8 @@ int64_t PackedBytes(int w, int h, int bpp, int* stride) {
 FrameSlab::~FrameSlab() { Reset(); }
 
 void FrameSlab::SetCacheDir(std::string dir) { cacheDir_ = std::move(dir); }
+
+void FrameSlab::SetMmapKey(std::string key) { mmapKey_ = std::move(key); }
 
 void FrameSlab::SetRamThreshold(int64_t bytes) { ramThreshold_ = bytes; }
 
@@ -70,9 +73,24 @@ Status FrameSlab::MapFileSlot(int64_t offset, int64_t bytes, SlabSlot* slot) {
     return Status::Fail(kErrSpoolIo, "FrameSlab cache dir unset");
   }
   if (mmapFd_ < 0) {
-    mmapPath_ = cacheDir_ + "/vid_slab_tmp.bin";
+    std::string stem = mmapKey_;
+    for (char& c : stem) {
+      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')) {
+        c = '_';
+      }
+    }
+    if (stem.empty()) {
+      stem = UuidV4();
+    }
+    mmapPath_ = cacheDir_ + "/vid_slab_" + stem + ".bin";
     mmapFd_ = DefaultFileIo().Open(mmapPath_.c_str(),
-                                   O_RDWR | O_CREAT | O_TRUNC, 0600);
+                                   O_RDWR | O_CREAT | O_EXCL, 0600);
+    if (mmapFd_ < 0) {
+      mmapPath_ = cacheDir_ + "/vid_slab_" + stem + "_" + UuidV4() + ".bin";
+      mmapFd_ = DefaultFileIo().Open(mmapPath_.c_str(),
+                                     O_RDWR | O_CREAT | O_EXCL, 0600);
+    }
     if (mmapFd_ < 0) {
       return Status::Fail(kErrSpoolIo, "open slab mmap");
     }

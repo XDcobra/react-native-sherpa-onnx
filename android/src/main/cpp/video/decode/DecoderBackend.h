@@ -23,6 +23,11 @@ class DecoderBackend {
   virtual Status Configure(const VideoTrackInfo& track) = 0;
   virtual Status Submit(const EncodedPacket& packet) = 0;
   virtual Status Flush() = 0;
+  /**
+   * Push EOS so delayed SW decoders (ffmpeg FF_THREAD_FRAME) emit held frames.
+   * Must not discard already-queued output. Default: no-op.
+   */
+  virtual Status SignalEnd() { return Status::Ok(); }
   /** Pop one decoded frame; returns false if the output queue is empty. */
   virtual bool Receive(DecodedRawFrame* out) = 0;
   /**
@@ -37,6 +42,7 @@ class DecoderBackend {
   virtual void Close() = 0;
   virtual int submitCount() const = 0;
   virtual int flushCount() const = 0;
+  virtual bool IsReclaimed() const { return false; }
 };
 
 using DecoderFactory = std::function<std::unique_ptr<DecoderBackend>()>;
@@ -44,6 +50,26 @@ using DecoderFactory = std::function<std::unique_ptr<DecoderBackend>()>;
 void RegisterDecoderFactory(DecoderFactory factory);
 DecoderFactory GetDecoderFactory();
 void ResetDecoderFactoryForTest();
+/** Host tests only. Device init must not advertise this catalog row. */
+void RegisterFakeDecoderProvidersForTest();
+
+/** Register a platform MediaCodec / VT / fake provider into the codec catalog. */
+void RegisterNamedVideoCodec(const char* name, const char* codec, bool encoder,
+                             bool hardware, int minW, int minH, int maxW,
+                             int maxH, int alignW, int alignH,
+                             int64_t maxBlocks, int blockW, int blockH,
+                             int maxInstances, double fps1080Low);
+
+/** Open a decoder for a catalog provider (fake / ffmpeg / MediaCodec / VT). */
+std::unique_ptr<DecoderBackend> OpenDecoderForProvider(
+    const std::string& providerName);
+
+using NamedDecoderOpener =
+    std::function<std::unique_ptr<DecoderBackend>(const std::string&)>;
+void SetNamedDecoderOpener(NamedDecoderOpener opener);
+
+/** Runtime-detect FFmpeg h264/hevc SW decoders and register them. */
+void RegisterBundledVideoSwDecoders();
 
 }  // namespace video
 }  // namespace sherpa_onnx

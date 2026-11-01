@@ -23,6 +23,10 @@ class DecodeSession {
 
   void SetGenerationSource(std::function<uint64_t()> fn);
   void SetTrack(const VideoTrackInfo& track) { track_ = track; }
+  void MarkConfigured() { configured_ = true; }
+  bool IsReclaimed() const {
+    return decoder_ && decoder_->IsReclaimed();
+  }
 
   Result<VideoFrameLease> SeekAndAcquire(const FrameRequest& req);
 
@@ -38,6 +42,7 @@ class DecodeSession {
   Status DecodeThrough(int64_t targetPres, bool cacheAlongWay);
   Status DrainToCache(bool cacheAlongWay, int64_t targetPres);
   Status DrainUntilCached(int64_t targetPres, bool cacheAlongWay);
+  Status TrySubmitLookahead();
   Status InsertDecoded(const DecodedRawFrame& raw, bool cacheAlongWay,
                        int64_t targetPres);
   int64_t PresentationOf(const DecodedRawFrame& raw) const;

@@ -242,7 +242,8 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeInit(
 
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromFiles(
-    JNIEnv* env, jclass, jobjectArray jPaths, jint maxSide, jint hotFrames) {
+    JNIEnv* env, jclass, jobjectArray jPaths, jint maxSide, jint hotFrames,
+    jstring jDecodePolicy) {
   jmethodID put = nullptr;
   jobject errMap = NewHashMap(env, &put);
   if (!jPaths) {
@@ -264,6 +265,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromFiles(
   sherpa_onnx::image::DecodeOptions opts;
   opts.maxSide = maxSide;
   opts.hotFrames = hotFrames;
+  opts.decodePolicy = JstringToStd(env, jDecodePolicy);
   auto result =
       sherpa_onnx::image::ImageRegistry::Instance().CreateFromFiles(paths, opts);
   if (!result.ok) {
@@ -281,7 +283,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromFiles(
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromBytesList(
     JNIEnv* env, jclass, jobjectArray jBlobs, jint maxSide, jint hotFrames,
-    jboolean fileOrigin) {
+    jboolean fileOrigin, jstring jDecodePolicy) {
   jmethodID put = nullptr;
   jobject errMap = NewHashMap(env, &put);
   if (!jBlobs) {
@@ -314,6 +316,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFromBytesList(
   sherpa_onnx::image::DecodeOptions opts;
   opts.maxSide = maxSide;
   opts.hotFrames = hotFrames;
+  opts.decodePolicy = JstringToStd(env, jDecodePolicy);
   const auto pathType =
       fileOrigin ? sherpa_onnx::image::ImageThresholdPathType::FileOrigin
                  : sherpa_onnx::image::ImageThresholdPathType::HeapOrigin;
@@ -509,6 +512,11 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeGetFrameInfo(
     PutLong(env, map, put, "sourcePtsUs", info.sourcePtsUs);
     PutLong(env, map, put, "sourceFrameIndex", info.sourceFrameIndex);
   }
+  if (!info.decoderProvider.empty()) {
+    PutString(env, map, put, "decoderProvider", info.decoderProvider);
+    PutString(env, map, put, "decoderTier", info.decoderTier);
+    PutString(env, map, put, "decoderOrigin", info.decoderOrigin);
+  }
   return map;
 }
 
@@ -537,7 +545,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeDetectFormat(
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_image_ImageBufferNative_nativeExportFrame(
     JNIEnv* env, jclass, jstring jBufferId, jint frameIndex, jstring jOutPath,
-    jstring jFormat, jint quality, jint maxSide) {
+    jstring jFormat, jint quality, jint maxSide, jstring jEncodePolicy) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!map) return nullptr;
@@ -558,6 +566,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeExportFrame(
   opts.format = format;
   opts.quality = quality;
   opts.maxSide = maxSide;
+  opts.encodePolicy = JstringToStd(env, jEncodePolicy);
 
   const auto result = sherpa_onnx::image::ExportFrameToFile(
       bufferId, frameIndex, outPath, opts);
@@ -565,6 +574,21 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeExportFrame(
   if (!result.ok) {
     PutString(env, map, put, "errorCode", result.errorCode);
     PutString(env, map, put, "errorMessage", result.errorMessage);
+  } else {
+    if (!result.codecProvider.empty()) {
+      PutString(env, map, put, "codecProvider", result.codecProvider);
+    }
+    if (!result.codecTier.empty()) {
+      PutString(env, map, put, "codecTier", result.codecTier);
+    }
+    if (!result.codecOrigin.empty()) {
+      PutString(env, map, put, "codecOrigin", result.codecOrigin);
+    }
+    LOGI("[SherpaOnnx:image] exportFrame buffer=%s frame=%d format=%s "
+         "provider=%s tier=%s origin=%s",
+         bufferId.c_str(), frameIndex, formatName.c_str(),
+         result.codecProvider.c_str(), result.codecTier.c_str(),
+         result.codecOrigin.c_str());
   }
   return map;
 }
@@ -606,6 +630,11 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeEnsureFrame(
               ensured.info.sourceVideoBufferId);
     PutLong(env, map, put, "sourcePtsUs", ensured.info.sourcePtsUs);
     PutLong(env, map, put, "sourceFrameIndex", ensured.info.sourceFrameIndex);
+  }
+  if (!ensured.info.decoderProvider.empty()) {
+    PutString(env, map, put, "decoderProvider", ensured.info.decoderProvider);
+    PutString(env, map, put, "decoderTier", ensured.info.decoderTier);
+    PutString(env, map, put, "decoderOrigin", ensured.info.decoderOrigin);
   }
   return map;
 }

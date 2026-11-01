@@ -20,7 +20,7 @@ Result<std::shared_ptr<OfflineVideoEntry>> OfflineVideoEntry::OpenFile(
   e->kind_ = VideoKind::Offline;
   e->openBytesRead_ = demux->bytesReadDuringOpen();
   e->cache_ = std::make_shared<DecodedFrameCache>();
-  e->cache_->SetCacheDir(cacheDir);
+  e->cache_->SetCacheDir(cacheDir, e->id_);
   e->source_ = std::move(demux);
   r.value = std::move(e);
   VIDEO_LOGI("video.demux offline %s", r.value->id().c_str());
@@ -33,7 +33,7 @@ std::shared_ptr<OfflineVideoEntry> OfflineVideoEntry::AdoptPackets(
   e->id_ = "vid_off_" + UuidV4();
   e->kind_ = VideoKind::Offline;
   e->cache_ = std::make_shared<DecodedFrameCache>();
-  e->cache_->SetCacheDir(cacheDir);
+  e->cache_->SetCacheDir(cacheDir, e->id_);
   e->source_ = std::move(source);
   return e;
 }
@@ -61,6 +61,7 @@ VideoBufferInfo OfflineVideoEntry::Info() const {
       i.audioRange.endUs = tl->endUs();
     }
   }
+  FillCodecInfo(&i);
   return i;
 }
 

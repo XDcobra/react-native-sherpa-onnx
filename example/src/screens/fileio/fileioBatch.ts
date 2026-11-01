@@ -1,4 +1,5 @@
 import type { AudioOutputFormat } from 'react-native-sherpa-onnx/audio';
+import type { CodecPolicy } from 'react-native-sherpa-onnx/codec';
 import type { FileDestination } from 'react-native-sherpa-onnx/fileio';
 import type { VideoExportContainer } from 'react-native-sherpa-onnx/videobuffer';
 
@@ -44,6 +45,7 @@ export type FileioBatchParams = {
   audioSource: AudioSourceChoice;
   outputFormat: AudioOutputFormat;
   videoOutputFormat: VideoExportContainer;
+  codecPolicy: CodecPolicy;
 };
 
 function channelTitle(channelId: FileioInputChannelId): string {
@@ -72,6 +74,7 @@ async function runOne(
     outputFormat: AudioOutputFormat;
     videoOutputFormat: VideoExportContainer;
     sample: FileioSampleSelection;
+    codecPolicy: CodecPolicy;
   }
 ): Promise<{ status: FileioBatchLineStatus; summary: string }> {
   if (operation === 'probe') {
@@ -86,7 +89,10 @@ async function runOne(
   }
 
   if (operation === 'decode') {
-    const result = await runFileioDecode(input);
+    const result = await runFileioDecode(input, {
+      decodePolicy: encode.codecPolicy,
+      encodePolicy: encode.codecPolicy,
+    });
     if (result.status === 'success') {
       return {
         status: 'success',
@@ -102,6 +108,8 @@ async function runOne(
       inputSource: input.fileSource,
       inputLabel: input.label,
       outputFormat: encode.videoOutputFormat,
+      decodePolicy: encode.codecPolicy,
+      encodePolicy: encode.codecPolicy,
     });
     if (copyResult.status === 'canceled') {
       return {
@@ -110,8 +118,12 @@ async function runOne(
       };
     }
     if (copyResult.status === 'success') {
-      const firstLine = copyResult.detail.split('\n')[0] ?? copyResult.detail;
-      return { status: 'success', summary: firstLine };
+      return {
+        status: 'success',
+        summary: `encode ${copyResult.encodeElapsedMs.toFixed(
+          copyResult.encodeElapsedMs >= 10 ? 1 : 2
+        )} ms`,
+      };
     }
     return { status: 'error', summary: copyResult.message };
   }
@@ -128,8 +140,12 @@ async function runOne(
     return { status: 'canceled', summary: 'Encode canceled (picker/dialog).' };
   }
   if (copyResult.status === 'success') {
-    const firstLine = copyResult.detail.split('\n')[0] ?? copyResult.detail;
-    return { status: 'success', summary: firstLine };
+    return {
+      status: 'success',
+      summary: `encode ${copyResult.encodeElapsedMs.toFixed(
+        copyResult.encodeElapsedMs >= 10 ? 1 : 2
+      )} ms`,
+    };
   }
   return { status: 'error', summary: copyResult.message };
 }
@@ -259,6 +275,7 @@ export async function runFileioBatch(
           outputFormat: params.outputFormat,
           videoOutputFormat: params.videoOutputFormat,
           sample: selection,
+          codecPolicy: params.codecPolicy,
         });
         lines.push({
           sampleLabel: sLabel,

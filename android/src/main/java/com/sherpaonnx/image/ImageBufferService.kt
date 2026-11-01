@@ -155,23 +155,20 @@ internal object ImageBufferService {
     format: String,
     quality: Int,
     maxSide: Int,
-  ): Map<String, Any>? {
-    val result = ImageBufferNative.nativeExportFrame(
+    encodePolicy: String? = null,
+  ): Map<String, Any> {
+    return ImageBufferNative.nativeExportFrame(
       bufferId,
       frameIndex,
       outPath,
       format,
       quality,
       maxSide,
-    ) ?: return mapOf(
+      encodePolicy,
+    ) ?: mapOf(
+      "ok" to false,
       "errorCode" to "ERR_IMAGE_INTERNAL",
       "errorMessage" to "nativeExportFrame returned null",
-    )
-    val ok = result["ok"] as? Boolean ?: false
-    if (ok) return null
-    return mapOf(
-      "errorCode" to (result["errorCode"] as? String ?: "ERR_IMAGE_ENCODE_FAILED"),
-      "errorMessage" to (result["errorMessage"] as? String ?: "encode failed"),
     )
   }
 
@@ -189,6 +186,7 @@ internal object ImageBufferService {
     maxSide: Int = DEFAULT_MAX_SIDE,
     hotFrames: Int = 0,
     operationId: String? = null,
+    decodePolicy: String? = null,
     onProgress: ((done: Int, total: Int, phase: String) -> Unit)? = null,
   ): Map<String, Any> {
     ensureInitialized(context)
@@ -210,6 +208,7 @@ internal object ImageBufferService {
         paths.toTypedArray(),
         maxSide,
         hotFrames,
+        decodePolicy,
       ) ?: throw RuntimeException("ERR_IMAGE_DECODE_FAILED: nativeCreateFromFiles null")
       if (result["ok"] == false) {
         val code = result["errorCode"] as? String ?: "ERR_IMAGE_DECODE_FAILED"
@@ -231,6 +230,7 @@ internal object ImageBufferService {
     operationId: String? = null,
     fileOrigin: Boolean = false,
     hotFrames: Int = 0,
+    decodePolicy: String? = null,
     onProgress: ((done: Int, total: Int, phase: String) -> Unit)? = null,
   ): Map<String, Any> {
     ensureInitialized(context)
@@ -256,6 +256,7 @@ internal object ImageBufferService {
         maxSide,
         hotFrames,
         fileOrigin,
+        decodePolicy,
       ) ?: throw RuntimeException("ERR_IMAGE_DECODE_FAILED: nativeCreateFromBytesList null")
       if (result["ok"] == false) {
         val code = result["errorCode"] as? String ?: "ERR_IMAGE_DECODE_FAILED"

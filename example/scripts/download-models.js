@@ -58,8 +58,8 @@ const manualHint =
     ensureDir(outputDir);
     ensureDir(cacheDir);
 
-    if (!Array.isArray(config.models) || config.models.length === 0) {
-      throw new Error('Model config is empty.');
+    if (!Array.isArray(config.models)) {
+      throw new Error('Model config is missing a models array.');
     }
 
     const wantedIds = new Set(
@@ -67,8 +67,14 @@ const manualHint =
     );
     const managedIds = collectManagedModelIds(outputDir, cacheDir);
 
-    for (const entry of config.models) {
-      await ensureModel(entry);
+    if (config.models.length === 0) {
+      console.log(
+        '[SherpaOnnx] Model config is empty; skipping download (prune only).'
+      );
+    } else {
+      for (const entry of config.models) {
+        await ensureModel(entry);
+      }
     }
 
     pruneUnlistedModels(outputDir, wantedIds, {

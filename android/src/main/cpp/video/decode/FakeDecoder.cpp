@@ -121,15 +121,34 @@ Status FakeDecoderBackend::Submit(const EncodedPacket& packet) {
     hasRef_ = true;
   }
   ++submitCount_;
-  return Emit(pl.presentationIndex, packet.ptsUs, pl.width, pl.height);
+  delayed_.push_back({pl.presentationIndex, packet.ptsUs, pl.width, pl.height});
+  return DrainDelayed();
+}
+
+Status FakeDecoderBackend::DrainDelayed() {
+  while (static_cast<int>(delayed_.size()) > emitDelay_) {
+    const DelayedPacket next = delayed_.front();
+    delayed_.pop_front();
+    auto st = Emit(next.presentationIndex, next.ptsUs, next.width, next.height);
+    if (!st.ok) {
+      return st;
+    }
+  }
+  return Status::Ok();
 }
 
 Status FakeDecoderBackend::Flush() {
   started_ = false;
   hasRef_ = false;
+  delayed_.clear();
   out_.clear();
   ++flushCount_;
   return Status::Ok();
+}
+
+Status FakeDecoderBackend::SignalEnd() {
+  emitDelay_ = 0;
+  return DrainDelayed();
 }
 
 bool FakeDecoderBackend::Receive(DecodedRawFrame* out) {
@@ -145,6 +164,7 @@ void FakeDecoderBackend::Close() {
   configured_ = false;
   started_ = false;
   hasRef_ = false;
+  delayed_.clear();
   out_.clear();
 }
 

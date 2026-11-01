@@ -9,8 +9,12 @@ namespace video {
 
 class VideoToolboxEncoder : public EncoderBackend {
  public:
+  enum class Mode { Hardware, Software };
+
   VideoToolboxEncoder();
+  explicit VideoToolboxEncoder(Mode mode);
   ~VideoToolboxEncoder() override;
+  Mode mode() const { return mode_; }
   Status Configure(const VideoTrackInfo& track, int bitrate) override;
   Status Encode(const RawFrame& frame, std::vector<EncodedPacket>* out) override;
   Status Flush(std::vector<EncodedPacket>* out) override;
@@ -20,6 +24,7 @@ class VideoToolboxEncoder : public EncoderBackend {
  private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
+  Mode mode_ = Mode::Hardware;
 };
 
 }  // namespace video

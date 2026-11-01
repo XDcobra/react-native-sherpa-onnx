@@ -1,0 +1,1594 @@
+{
+  "schema": "codec-smoke-v1",
+  "device": {
+    "platform": "ios",
+    "osVersion": "26.3.1"
+  },
+  "updatedAt": "2026-10-31T07:53:36.798Z",
+  "paths": [
+    "/Users/felix/Library/Developer/CoreSimulator/Devices/5AA4921C-010A-48AA-ACE5-7E5AEF43D48D/data/Containers/Data/Application/07568017-ED52-4075-9A2A-89ED03E89982/Documents/codec-smoke-results.json"
+  ],
+  "cases": {
+    "S0.1": {
+      "id": "S0.1",
+      "title": "Dump Android catalog",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:52:49.471Z",
+      "finishedAt": "2026-10-31T07:52:49.471Z",
+      "durationMs": 0,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "Non-empty provider catalog + slots",
+      "note": "skip: android-only"
+    },
+    "S0.2": {
+      "id": "S0.2",
+      "title": "Dump iOS catalog after create+export",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:52:49.568Z",
+      "finishedAt": "2026-10-31T07:52:49.783Z",
+      "durationMs": 215,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "vt.hw / vt.sw rows present after first use",
+      "note": "vt rows=8",
+      "actual": {
+        "export": {
+          "kind": "fs",
+          "path": "/Users/felix/Library/Developer/CoreSimulator/Devices/5AA4921C-010A-48AA-ACE5-7E5AEF43D48D/data/Containers/Data/Application/07568017-ED52-4075-9A2A-89ED03E89982/Library/Caches/codec-smoke/1793433169623-oyw2m2.mp4"
+        },
+        "catalog": {
+          "ramClass": "veryHigh",
+          "policies": {
+            "decode": "preferHardware",
+            "display": "preferHardware",
+            "encode": "preferHardware",
+            "imageDecode": "preferHardware"
+          },
+          "slots": [
+            {
+              "resource": "hwVideoDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "hwVideoDisplay",
+              "max": 1,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "hwVideoEncode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "swVideoDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "swVideoEncode",
+              "max": 1,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "platformImageDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            }
+          ],
+          "providers": [
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "ffmpeg.h264",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "ffmpeg.hevc",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": false,
+              "reason": "not-present",
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": false,
+              "reason": "not-present",
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            }
+          ]
+        },
+        "video": {
+          "bufferId": "vid_off_626536fc-6817-4043-8f94-9888ead1ead2",
+          "kind": "offlineVideoBuffer",
+          "state": "immutable",
+          "frameCount": 15,
+          "seekableStartUs": 0,
+          "seekableEndUs": 999999,
+          "audio": {
+            "codec": "aac",
+            "decodable": true,
+            "sampleRate": 48000,
+            "channels": 1,
+            "startMs": -21.333,
+            "durationMs": 1002.666
+          },
+          "decoder": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw",
+            "fallbackFrom": {
+              "code": "VIDEO_DECODER_UNAVAILABLE",
+              "reason": "configure-failed"
+            },
+            "attempts": [
+              {
+                "provider": "vt.hw",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "not-present",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              },
+              {
+                "provider": "fake",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "configure-failed",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              }
+            ]
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "fallback",
+          "owner": "vid_off_626536fc-6817-4043-8f94-9888ead1ead2",
+          "use": "cpu",
+          "decision": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw",
+            "fallbackFrom": {
+              "code": "VIDEO_DECODER_UNAVAILABLE",
+              "reason": "configure-failed"
+            },
+            "attempts": [
+              {
+                "provider": "vt.hw",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "not-present",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              },
+              {
+                "provider": "fake",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "configure-failed",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              }
+            ]
+          }
+        },
+        {
+          "type": "slotFreed",
+          "resource": "swVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoEncode",
+          "max": 2,
+          "inUse": 0
+        }
+      ]
+    },
+    "S1.1": {
+      "id": "S1.1",
+      "title": "HW encode pool = 1, two parallel exports",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:52:49.821Z",
+      "finishedAt": "2026-10-31T07:52:49.953Z",
+      "durationMs": 132,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "One export succeeds; the other pool-full or waits",
+      "note": "one hit pool-full / codec reject",
+      "actual": [
+        {
+          "ok": true,
+          "value": {
+            "kind": "fs",
+            "path": "/Users/felix/Library/Developer/CoreSimulator/Devices/5AA4921C-010A-48AA-ACE5-7E5AEF43D48D/data/Containers/Data/Application/07568017-ED52-4075-9A2A-89ED03E89982/Library/Caches/codec-smoke/1793433169846-vhdrbu.mp4"
+          }
+        },
+        {
+          "ok": false,
+          "error": {
+            "code": "VIDEO_ENCODER_UNAVAILABLE",
+            "message": "pool-full"
+          }
+        }
+      ],
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "fallback",
+          "owner": "vid_off_9a4f077c-6279-4d62-8991-4c4eefce272c",
+          "use": "cpu",
+          "decision": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw",
+            "fallbackFrom": {
+              "code": "VIDEO_DECODER_UNAVAILABLE",
+              "reason": "configure-failed"
+            },
+            "attempts": [
+              {
+                "provider": "vt.hw",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "not-present",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              },
+              {
+                "provider": "fake",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "configure-failed",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              }
+            ]
+          }
+        },
+        {
+          "type": "slotFreed",
+          "resource": "swVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoEncode",
+          "max": 1,
+          "inUse": 0
+        }
+      ]
+    },
+    "S1.2": {
+      "id": "S1.2",
+      "title": "getCodecInfo after first export",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:52:49.991Z",
+      "finishedAt": "2026-10-31T07:52:50.251Z",
+      "durationMs": 260,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "Decoder decision + occupied encode slot",
+      "actual": {
+        "export": {
+          "kind": "fs",
+          "path": "/Users/felix/Library/Developer/CoreSimulator/Devices/5AA4921C-010A-48AA-ACE5-7E5AEF43D48D/data/Containers/Data/Application/07568017-ED52-4075-9A2A-89ED03E89982/Library/Caches/codec-smoke/1793433170012-ddt59q.mp4"
+        },
+        "catalog": {
+          "ramClass": "veryHigh",
+          "policies": {
+            "decode": "preferHardware",
+            "display": "preferHardware",
+            "encode": "preferHardware",
+            "imageDecode": "preferHardware"
+          },
+          "slots": [
+            {
+              "resource": "hwVideoDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "hwVideoDisplay",
+              "max": 1,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "hwVideoEncode",
+              "max": 1,
+              "inUse": 0,
+              "source": "override"
+            },
+            {
+              "resource": "swVideoDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "swVideoEncode",
+              "max": 1,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "platformImageDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            }
+          ],
+          "providers": [
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "ffmpeg.h264",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "ffmpeg.hevc",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": false,
+              "reason": "not-present",
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": false,
+              "reason": "not-present",
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            }
+          ]
+        },
+        "video": {
+          "bufferId": "vid_off_09d7a946-11d7-4c4e-b39e-ffe9a21b394e",
+          "kind": "offlineVideoBuffer",
+          "state": "immutable",
+          "frameCount": 15,
+          "seekableStartUs": 0,
+          "seekableEndUs": 999999,
+          "audio": {
+            "codec": "aac",
+            "decodable": true,
+            "sampleRate": 48000,
+            "channels": 1,
+            "startMs": -21.333,
+            "durationMs": 1002.666
+          },
+          "decoder": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw",
+            "fallbackFrom": {
+              "code": "VIDEO_DECODER_UNAVAILABLE",
+              "reason": "configure-failed"
+            },
+            "attempts": [
+              {
+                "provider": "vt.hw",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "not-present",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              },
+              {
+                "provider": "fake",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "configure-failed",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              }
+            ]
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "fallback",
+          "owner": "vid_off_09d7a946-11d7-4c4e-b39e-ffe9a21b394e",
+          "use": "cpu",
+          "decision": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw",
+            "fallbackFrom": {
+              "code": "VIDEO_DECODER_UNAVAILABLE",
+              "reason": "configure-failed"
+            },
+            "attempts": [
+              {
+                "provider": "vt.hw",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "not-present",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              },
+              {
+                "provider": "fake",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "configure-failed",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              }
+            ]
+          }
+        },
+        {
+          "type": "slotFreed",
+          "resource": "swVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoEncode",
+          "max": 1,
+          "inUse": 0
+        }
+      ]
+    },
+    "S2.1": {
+      "id": "S2.1",
+      "title": "Android SW decode 1080p H.264",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:52:50.290Z",
+      "finishedAt": "2026-10-31T07:52:50.290Z",
+      "durationMs": 0,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "c2.android.avc.decoder or OMX google AVC",
+      "note": "skip: android-only"
+    },
+    "S2.2": {
+      "id": "S2.2",
+      "title": "Android SW 4K HEVC (no ffmpeg-vsw)",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:52:50.352Z",
+      "finishedAt": "2026-10-31T07:52:50.352Z",
+      "durationMs": 0,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "VIDEO_SW_DECODER_DISABLED, or ffmpeg.hevc if vsw on",
+      "note": "skip: android-only"
+    },
+    "S2.3": {
+      "id": "S2.3",
+      "title": "Two HW previews, display budget 1",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:52:50.415Z",
+      "finishedAt": "2026-10-31T07:52:50.415Z",
+      "durationMs": 0,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "Second preview pool-full or software fallback",
+      "note": "skip: android-only"
+    },
+    "S2.4": {
+      "id": "S2.4",
+      "title": "Android SW encode 720p",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:52:50.478Z",
+      "finishedAt": "2026-10-31T07:52:50.478Z",
+      "durationMs": 0,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "c2.android.avc.encoder or google AVC encoder",
+      "note": "skip: android-only"
+    },
+    "S2.5": {
+      "id": "S2.5",
+      "title": "Android SW encode 1080p rejected",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:52:50.542Z",
+      "finishedAt": "2026-10-31T07:52:50.542Z",
+      "durationMs": 0,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "VIDEO_SW_ENCODER_DISABLED or unsupported-stream",
+      "note": "skip: android-only"
+    },
+    "S2.6": {
+      "id": "S2.6",
+      "title": "Abort mid-export (sticky recreate)",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:52:50.606Z",
+      "finishedAt": "2026-10-31T07:52:50.606Z",
+      "durationMs": 0,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "Second run still preferHardware / sticky decoder",
+      "note": "skip: android-only"
+    },
+    "S2.7": {
+      "id": "S2.7",
+      "title": "Default vs hardware policy same file",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:52:50.672Z",
+      "finishedAt": "2026-10-31T07:52:50.672Z",
+      "durationMs": 0,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "Same HW provider when HW is available",
+      "note": "skip: android-only"
+    },
+    "S3.1": {
+      "id": "S3.1",
+      "title": "iOS VT software decode",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:52:50.737Z",
+      "finishedAt": "2026-10-31T07:52:50.806Z",
+      "durationMs": 69,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "vt.sw (kVTVideoDecoderSpecification_EnableLowLatencyRateDistortion)",
+      "note": "provider=vt.sw",
+      "actual": {
+        "videoInfo": {
+          "bufferId": "vid_off_a51043eb-48ed-4bc0-9675-4c147b435020",
+          "kind": "offlineVideoBuffer",
+          "state": "immutable",
+          "frameCount": 15,
+          "seekableStartUs": 0,
+          "seekableEndUs": 999999,
+          "audio": {
+            "codec": "aac",
+            "decodable": true,
+            "sampleRate": 48000,
+            "channels": 1,
+            "startMs": -21.333,
+            "durationMs": 1002.666
+          },
+          "decoder": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw"
+          }
+        },
+        "image": {
+          "imageBufferId": "img_off_aea0468a-68d2-49e9-b5be-7d9eba8e5cb7",
+          "frameCount": 1
+        },
+        "frame": {
+          "index": 0,
+          "width": 1920,
+          "height": 1080,
+          "byteSize": 6220800,
+          "storageKind": "ram",
+          "source": {
+            "videoBufferId": "vid_off_a51043eb-48ed-4bc0-9675-4c147b435020",
+            "ptsUs": 0,
+            "frameIndex": 0
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "swVideoDecode",
+          "max": 2,
+          "inUse": 0
+        }
+      ]
+    },
+    "S3.2": {
+      "id": "S3.2",
+      "title": "iOS two HW exports + HW preview",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:52:50.846Z",
+      "finishedAt": "2026-10-31T07:52:51.005Z",
+      "durationMs": 159,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "All three get a decision; no crash",
+      "actual": {
+        "exports": [
+          {
+            "code": "VIDEO_DECODER_UNAVAILABLE",
+            "message": "configure-failed"
+          },
+          {
+            "code": "VIDEO_ENCODER_UNAVAILABLE",
+            "message": "pool-full"
+          }
+        ],
+        "preview": {
+          "playerId": "vprev_788d0339-19ee-4eda-9b70-033b204c9e9d",
+          "bufferId": "vid_off_e7859c1f-3978-484d-b2c4-5f845bce7c1d",
+          "bufferKind": "offlineVideoBuffer",
+          "state": "ready",
+          "positionMs": 0,
+          "durationMs": 999,
+          "seekableRange": {
+            "startMs": 0,
+            "endMs": 999
+          },
+          "liveEdgeMs": null,
+          "atLiveEdge": false,
+          "playbackRate": 1,
+          "videoAttached": false,
+          "audio": {
+            "status": "playing",
+            "channels": 1,
+            "codec": "aac",
+            "sampleRate": 48000
+          },
+          "stats": {
+            "framesRendered": 0,
+            "framesDropped": 0,
+            "audioUnderruns": 0,
+            "avOffsetMs": 0
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoEncode",
+          "max": 1,
+          "inUse": 0
+        }
+      ]
+    },
+    "S3.3": {
+      "id": "S3.3",
+      "title": "iOS background during export",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:52:51.043Z",
+      "finishedAt": "2026-10-31T07:53:36.072Z",
+      "durationMs": 45029,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "invalid-session or completed; no hang",
+      "note": "no background within 45s; export outcome still recorded",
+      "actual": {
+        "appState": "timeout",
+        "export": {
+          "ok": true,
+          "out": {
+            "kind": "fs",
+            "path": "/Users/felix/Library/Developer/CoreSimulator/Devices/5AA4921C-010A-48AA-ACE5-7E5AEF43D48D/data/Containers/Data/Application/07568017-ED52-4075-9A2A-89ED03E89982/Library/Caches/codec-smoke/1793433171064-xx6wco.mp4"
+          }
+        },
+        "video": {
+          "bufferId": "vid_off_976fc163-d36f-4107-a7b2-61512fb1efbf",
+          "kind": "offlineVideoBuffer",
+          "state": "immutable",
+          "frameCount": 15,
+          "seekableStartUs": 0,
+          "seekableEndUs": 999999,
+          "audio": {
+            "codec": "aac",
+            "decodable": true,
+            "sampleRate": 48000,
+            "channels": 1,
+            "startMs": -21.333,
+            "durationMs": 1002.666
+          },
+          "decoder": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw",
+            "fallbackFrom": {
+              "code": "VIDEO_DECODER_UNAVAILABLE",
+              "reason": "configure-failed"
+            },
+            "attempts": [
+              {
+                "provider": "vt.hw",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "not-present",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              },
+              {
+                "provider": "fake",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "configure-failed",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              }
+            ]
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "fallback",
+          "owner": "vid_off_976fc163-d36f-4107-a7b2-61512fb1efbf",
+          "use": "cpu",
+          "decision": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw",
+            "fallbackFrom": {
+              "code": "VIDEO_DECODER_UNAVAILABLE",
+              "reason": "configure-failed"
+            },
+            "attempts": [
+              {
+                "provider": "vt.hw",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "not-present",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              },
+              {
+                "provider": "fake",
+                "tier": "hardware",
+                "origin": "platform",
+                "reason": "configure-failed",
+                "code": "VIDEO_DECODER_UNAVAILABLE"
+              }
+            ]
+          }
+        },
+        {
+          "type": "slotFreed",
+          "resource": "swVideoDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "slotFreed",
+          "resource": "hwVideoEncode",
+          "max": 1,
+          "inUse": 0
+        }
+      ]
+    },
+    "S4.1": {
+      "id": "S4.1",
+      "title": "ffmpeg-vsw 4K HEVC software",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:53:36.138Z",
+      "finishedAt": "2026-10-31T07:53:36.345Z",
+      "durationMs": 207,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "ffmpeg.hevc if vsw built; else VIDEO_SW_DECODER_DISABLED",
+      "note": "iOS platform SW vt.sw; ffmpeg remains catalog fallback",
+      "actual": {
+        "videoInfo": {
+          "bufferId": "vid_off_3ad9168c-1232-4112-8f33-3371d3ecf6e5",
+          "kind": "offlineVideoBuffer",
+          "state": "immutable",
+          "frameCount": 4,
+          "seekableStartUs": -333333,
+          "seekableEndUs": 333334,
+          "audio": null,
+          "decoder": {
+            "tier": "software",
+            "origin": "platform",
+            "provider": "vt.sw"
+          }
+        },
+        "image": {
+          "imageBufferId": "img_off_3c314556-28f1-4dd7-9a6f-c1599b61153c",
+          "frameCount": 1
+        },
+        "frame": {
+          "index": 0,
+          "width": 3840,
+          "height": 2160,
+          "byteSize": 24883200,
+          "storageKind": "ram",
+          "source": {
+            "videoBufferId": "vid_off_3ad9168c-1232-4112-8f33-3371d3ecf6e5",
+            "ptsUs": 0,
+            "frameIndex": 2
+          }
+        }
+      },
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "swVideoDecode",
+          "max": 2,
+          "inUse": 0
+        }
+      ]
+    },
+    "S4.2": {
+      "id": "S4.2",
+      "title": "SW 4K with default build (vsw off)",
+      "verdict": "skip",
+      "startedAt": "2026-10-31T07:53:36.382Z",
+      "finishedAt": "2026-10-31T07:53:36.403Z",
+      "durationMs": 21,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "VIDEO_SW_DECODER_DISABLED when flag off",
+      "note": "ffmpeg-vsw is on; S4.2 is the off-flag case",
+      "actual": {
+        "catalog": {
+          "ramClass": "veryHigh",
+          "policies": {
+            "decode": "preferHardware",
+            "display": "preferHardware",
+            "encode": "preferHardware",
+            "imageDecode": "preferHardware"
+          },
+          "slots": [
+            {
+              "resource": "hwVideoDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "hwVideoDisplay",
+              "max": 1,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "hwVideoEncode",
+              "max": 1,
+              "inUse": 0,
+              "source": "override"
+            },
+            {
+              "resource": "swVideoDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "swVideoEncode",
+              "max": 1,
+              "inUse": 0,
+              "source": "auto"
+            },
+            {
+              "resource": "platformImageDecode",
+              "max": 2,
+              "inUse": 0,
+              "source": "auto"
+            }
+          ],
+          "providers": [
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "ffmpeg.h264",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "ffmpeg.hevc",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "fake",
+              "available": true,
+              "maxWidth": 7680,
+              "maxHeight": 4320
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": false,
+              "reason": "not-present",
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "h264",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": false,
+              "reason": "not-present",
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "decode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "vt.hw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "video",
+              "direction": "encode",
+              "codec": "hevc",
+              "tier": "software",
+              "origin": "platform",
+              "provider": "vt.sw",
+              "available": true,
+              "maxWidth": 8192,
+              "maxHeight": 8192
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "jpeg",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "stb",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "png",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "stb",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "webp",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "stb",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "gif",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "stb",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "bmp",
+              "tier": "software",
+              "origin": "bundled",
+              "provider": "stb",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "jpeg",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "ImageIO",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "png",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "ImageIO",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "webp",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "ImageIO",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "gif",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "ImageIO",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "bmp",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "ImageIO",
+              "available": true
+            },
+            {
+              "media": "image",
+              "direction": "decode",
+              "codec": "heic",
+              "tier": "hardware",
+              "origin": "platform",
+              "provider": "ImageIO",
+              "available": true
+            }
+          ]
+        }
+      },
+      "events": []
+    },
+    "S5.1": {
+      "id": "S5.1",
+      "title": "JPEG default platform decode",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:53:36.450Z",
+      "finishedAt": "2026-10-31T07:53:36.511Z",
+      "durationMs": 61,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "AImageDecoder / ImageIO / ImageDecoder.java",
+      "note": "decoder=ImageIO 800x600",
+      "actual": [
+        {
+          "index": 0,
+          "width": 800,
+          "height": 600,
+          "byteSize": 1440000,
+          "storageKind": "ram",
+          "decoder": {
+            "provider": "ImageIO",
+            "tier": "hardware",
+            "origin": "platform"
+          }
+        }
+      ],
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "platformImageDecode",
+          "max": 2,
+          "inUse": 0
+        }
+      ]
+    },
+    "S5.2": {
+      "id": "S5.2",
+      "title": "JPEG + HEIC mixed create",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:53:36.548Z",
+      "finishedAt": "2026-10-31T07:53:36.625Z",
+      "durationMs": 77,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "Both frames decode; HEIC may differ in provider",
+      "note": "0:ImageIO 800x600 1:ImageIO 800x600",
+      "actual": [
+        {
+          "index": 0,
+          "width": 800,
+          "height": 600,
+          "byteSize": 1440000,
+          "storageKind": "ram",
+          "decoder": {
+            "provider": "ImageIO",
+            "tier": "hardware",
+            "origin": "platform"
+          }
+        },
+        {
+          "index": 1,
+          "width": 800,
+          "height": 600,
+          "byteSize": 1440000,
+          "storageKind": "ram",
+          "decoder": {
+            "provider": "ImageIO",
+            "tier": "hardware",
+            "origin": "platform"
+          }
+        }
+      ],
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "platformImageDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "slotFreed",
+          "resource": "platformImageDecode",
+          "max": 2,
+          "inUse": 0
+        }
+      ]
+    },
+    "S5.3": {
+      "id": "S5.3",
+      "title": "HEIC-only create",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:53:36.663Z",
+      "finishedAt": "2026-10-31T07:53:36.706Z",
+      "durationMs": 43,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "Platform HEIC or documented SW fallback",
+      "note": "decoder=ImageIO 800x600",
+      "actual": [
+        {
+          "index": 0,
+          "width": 800,
+          "height": 600,
+          "byteSize": 1440000,
+          "storageKind": "ram",
+          "decoder": {
+            "provider": "ImageIO",
+            "tier": "hardware",
+            "origin": "platform"
+          }
+        }
+      ],
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "platformImageDecode",
+          "max": 2,
+          "inUse": 0
+        }
+      ]
+    },
+    "S5.4": {
+      "id": "S5.4",
+      "title": "HEIC + JPEG maxSide + EXIF-6",
+      "verdict": "pass",
+      "startedAt": "2026-10-31T07:53:36.744Z",
+      "finishedAt": "2026-10-31T07:53:36.779Z",
+      "durationMs": 35,
+      "platform": "ios",
+      "osVersion": "26.3.1",
+      "expected": "Downscaled; EXIF-6 JPEG upright (240×320 → 256 cap)",
+      "note": "heic=256x192 jpegExif6=192x256 (upright ≈ 192x256)",
+      "actual": [
+        {
+          "index": 0,
+          "width": 256,
+          "height": 192,
+          "byteSize": 147456,
+          "storageKind": "ram",
+          "decoder": {
+            "provider": "ImageIO",
+            "tier": "hardware",
+            "origin": "platform"
+          }
+        },
+        {
+          "index": 1,
+          "width": 192,
+          "height": 256,
+          "byteSize": 147456,
+          "storageKind": "ram",
+          "decoder": {
+            "provider": "ImageIO",
+            "tier": "hardware",
+            "origin": "platform"
+          }
+        }
+      ],
+      "events": [
+        {
+          "type": "slotFreed",
+          "resource": "platformImageDecode",
+          "max": 2,
+          "inUse": 0
+        },
+        {
+          "type": "slotFreed",
+          "resource": "platformImageDecode",
+          "max": 2,
+          "inUse": 0
+        }
+      ]
+    }
+  }
+}

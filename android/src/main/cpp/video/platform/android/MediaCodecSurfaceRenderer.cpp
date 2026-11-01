@@ -32,9 +32,11 @@ Status MediaCodecSurfaceRenderer::EnsureCodec() {
   if (window_ == nullptr) {
     return Status::Fail(kErrPreviewRenderFailed, "no surface");
   }
-  allowedName_ = AMediaCodecDecoder::GlobalHwDecoderName(track_.codec);
   if (allowedName_.empty()) {
-    return Status::Fail(kErrDecoderUnavailable, "no HW decoder name");
+    allowedName_ = AMediaCodecDecoder::GlobalHwDecoderName(track_.codec);
+  }
+  if (allowedName_.empty()) {
+    return Status::Fail(kErrDecoderUnavailable, "no decoder name");
   }
   const char* mime =
       track_.codec == VideoCodec::Hevc ? "video/hevc" : "video/avc";

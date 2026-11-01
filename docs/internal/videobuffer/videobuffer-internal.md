@@ -49,7 +49,7 @@ Retention:
 - Pinned frame leases survive LRU eviction and `Release()` until the last lease drops.
 - Display matrix rot90 maps to transform **270** (clockwise display).
 - Color convert goes only through libyuv (`ColorConvert`). libyuv RGB24 is BGR; wrappers account for that.
-- HW decode/encode only: Android `AMediaCodec` + `AImageReader` YUV_420_888; iOS `VideoToolbox`. Software `c2.android.*` / `OMX.google.*` are excluded.
+- Decode/encode is tiered via `android/src/main/cpp/codec/` (default `preferHardware`): platform HW, platform SW, then opt-in bundled FFmpeg (`ffmpeg.h264` / `ffmpeg.hevc`). See [hw-sw-codec-implementation-plan.md](../codec/hw-sw-codec-implementation-plan.md).
 
 ## Ids and cache
 

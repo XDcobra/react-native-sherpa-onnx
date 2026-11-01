@@ -144,6 +144,7 @@ export class VideoPreviewError extends Error {
 }
 
 export interface VideoPreviewPlayerOptions {
+  decodePolicy?: import('../codec/types').CodecPolicy;
   audio?: VideoPreviewAudioOption;
   startAtMs?: number;
   live?: {

@@ -47,6 +47,11 @@ export interface OfflineImageFrameInfo {
     ptsUs: number;
     frameIndex: number;
   };
+  decoder?: {
+    provider: string;
+    tier: import('../codec/types').CodecTier;
+    origin: import('../codec/types').CodecOrigin;
+  };
 }
 
 /** Branded handle for an offline image buffer. */
@@ -86,6 +91,7 @@ export interface CreateOfflineImageBufferOptions {
    * `done`/`total` count sources; `phase` is e.g. `decode` or `done`.
    */
   onProgress?: (event: ImageProgressEvent) => void;
+  decodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 /** Progress event for offline image create (public; no operationId). */
@@ -180,20 +186,24 @@ export const ImageErrorCode = {
   INVALID_STATE: 'ERR_IMAGE_INVALID_STATE',
   FRAME_EVICTED: 'ERR_IMAGE_FRAME_EVICTED',
   ENCODE_FAILED: 'ERR_IMAGE_ENCODE_FAILED',
+  HW_ENCODER_UNAVAILABLE: 'ERR_IMAGE_HW_ENCODER_UNAVAILABLE',
+  SW_ENCODER_UNAVAILABLE: 'ERR_IMAGE_SW_ENCODER_UNAVAILABLE',
   CANCELLED: 'ERR_IMAGE_CANCELLED',
   INTERNAL: 'ERR_IMAGE_INTERNAL',
 } as const;
 
 /** Encode formats for {@link exportOfflineImageBufferFrame}. */
-export type ImageExportFormat = 'jpeg' | 'png' | 'webp';
+export type ImageExportFormat = 'jpeg' | 'png' | 'webp' | 'heic';
 
 export interface ExportOfflineImageBufferFrameOptions {
   /** Default `jpeg`. */
   format?: ImageExportFormat;
-  /** JPEG/WebP quality 1..100 (default 85). Ignored for PNG. */
+  /** JPEG/WebP/HEIC quality 1..100 (default 85). Ignored for PNG. */
   quality?: number;
   /** Downscale longest edge on export only; does not mutate the buffer. */
   maxSide?: number;
+  /** Per-call override. Cascade: operation > buffer > configureCodecs > preferHardware. */
+  encodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export type ImageFrameResizeMode = 'contain' | 'cover' | 'stretch';

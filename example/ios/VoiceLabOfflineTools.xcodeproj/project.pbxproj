@@ -11,9 +11,9 @@
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		761780F12CA45674006654EE /* CpuInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 761780F02CA45674006654EE /* CpuInfo.m */; };
-		C4E91B2F8D4A6B9C1E03D5A8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4E91B2F8D4A6B9C1E03D5A7 /* SceneDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		9137F2A3F43A8A962C9C7A7D /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		C4E91B2F8D4A6B9C1E03D5A8 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4E91B2F8D4A6B9C1E03D5A7 /* SceneDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,8 +26,8 @@
 		5DCACB8F33CDC322A6C60F78 /* libPods-VoiceLabOfflineTools.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-VoiceLabOfflineTools.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = VoiceLabOfflineTools/AppDelegate.swift; sourceTree = "<group>"; };
 		761780F02CA45674006654EE /* CpuInfo.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = CpuInfo.m; path = VoiceLabOfflineTools/CpuInfo.m; sourceTree = "<group>"; };
-		C4E91B2F8D4A6B9C1E03D5A7 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SceneDelegate.swift; path = VoiceLabOfflineTools/SceneDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = VoiceLabOfflineTools/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		C4E91B2F8D4A6B9C1E03D5A7 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SceneDelegate.swift; path = VoiceLabOfflineTools/SceneDelegate.swift; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 

@@ -48,6 +48,9 @@ function mapFrameInfo(raw: {
   sourceVideoBufferId?: string;
   sourcePtsUs?: number;
   sourceFrameIndex?: number;
+  decoderProvider?: string;
+  decoderTier?: string;
+  decoderOrigin?: string;
 }): OfflineImageFrameInfo {
   const frame: OfflineImageFrameInfo = {
     index: raw.index,
@@ -91,6 +94,19 @@ function mapFrameInfo(raw: {
         raw.sourceFrameIndex != null && Number.isFinite(raw.sourceFrameIndex)
           ? Math.trunc(raw.sourceFrameIndex)
           : 0,
+    };
+  }
+  if (
+    typeof raw.decoderProvider === 'string' &&
+    raw.decoderProvider.length > 0
+  ) {
+    frame.decoder = {
+      provider: raw.decoderProvider,
+      tier:
+        raw.decoderTier === 'hardware' || raw.decoderTier === 'software'
+          ? raw.decoderTier
+          : 'unknown',
+      origin: raw.decoderOrigin === 'bundled' ? 'bundled' : 'platform',
     };
   }
   return frame;

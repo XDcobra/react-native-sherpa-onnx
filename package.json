@@ -160,6 +160,11 @@
       "types": "./lib/typescript/src/videobuffer/index.d.ts",
       "default": "./lib/module/videobuffer/index.js"
     },
+    "./codec": {
+      "source": "./src/codec/index.ts",
+      "types": "./lib/typescript/src/codec/index.d.ts",
+      "default": "./lib/module/codec/index.js"
+    },
     "./videopreview": {
       "source": "./src/videopreview/index.ts",
       "types": "./lib/typescript/src/videopreview/index.d.ts",

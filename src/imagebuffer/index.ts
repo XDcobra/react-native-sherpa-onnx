@@ -6,8 +6,9 @@
  * Live: compressed JPEG/WebP/HEIC ring (`img_live_*`), recording → finished.
  *
  * WebP is opt-in: rebuild with `sherpaOnnxEnableLibwebp=true` (Android) or
- * `SHERPA_ONNX_ENABLE_LIBWEBP=1` (iOS). Default builds reject WebP decode/export
- * with `ERR_IMAGE_WEBP_DISABLED`.
+ * `SHERPA_ONNX_ENABLE_LIBWEBP=1` (iOS). Default builds reject WebP decode and
+ * software WebP export with `ERR_IMAGE_WEBP_DISABLED`. Android API 30+ can
+ * still export WebP via platform encode when libwebp is off.
  */
 
 import {
@@ -208,6 +209,9 @@ function mapFrameInfo(raw: {
   sourceVideoBufferId?: string;
   sourcePtsUs?: number;
   sourceFrameIndex?: number;
+  decoderProvider?: string;
+  decoderTier?: string;
+  decoderOrigin?: string;
 }): OfflineImageFrameInfo {
   const frame: OfflineImageFrameInfo = {
     index: raw.index,
@@ -253,6 +257,19 @@ function mapFrameInfo(raw: {
           : 0,
     };
   }
+  if (
+    typeof raw.decoderProvider === 'string' &&
+    raw.decoderProvider.length > 0
+  ) {
+    frame.decoder = {
+      provider: raw.decoderProvider,
+      tier:
+        raw.decoderTier === 'hardware' || raw.decoderTier === 'software'
+          ? raw.decoderTier
+          : 'unknown',
+      origin: raw.decoderOrigin === 'bundled' ? 'bundled' : 'platform',
+    };
+  }
   return frame;
 }
 
@@ -268,7 +285,12 @@ function cancelledError(): Error {
 
 /** Wire onProgress / AbortSignal; returns native `{ maxSide?, hotFrames?, operationId }` plus cleanup. */
 function beginCreateProgressCancel(options?: CreateOfflineImageBufferOptions): {
-  nativeOptions: { maxSide?: number; hotFrames?: number; operationId: string };
+  nativeOptions: {
+    maxSide?: number;
+    hotFrames?: number;
+    operationId: string;
+    decodePolicy?: string;
+  };
   cleanup: () => void;
 } {
   const operationId = `img_create_${Date.now()}_${++opIdCounter}`;
@@ -276,6 +298,7 @@ function beginCreateProgressCancel(options?: CreateOfflineImageBufferOptions): {
     maxSide?: number;
     hotFrames?: number;
     operationId: string;
+    decodePolicy?: string;
   } = {
     operationId,
   };
@@ -284,6 +307,9 @@ function beginCreateProgressCancel(options?: CreateOfflineImageBufferOptions): {
   }
   if (options?.hotFrames !== undefined) {
     nativeOptions.hotFrames = options.hotFrames;
+  }
+  if (options?.decodePolicy !== undefined) {
+    nativeOptions.decodePolicy = options.decodePolicy;
   }
 
   let progressSubscription: NativeSubscription | null = null;
@@ -703,7 +729,12 @@ export async function exportOfflineImageBufferFrame(
   assertFileDestinationSupportedOnPlatform(output);
 
   const format: ImageExportFormat = options?.format ?? 'jpeg';
-  if (format !== 'jpeg' && format !== 'png' && format !== 'webp') {
+  if (
+    format !== 'jpeg' &&
+    format !== 'png' &&
+    format !== 'webp' &&
+    format !== 'heic'
+  ) {
     throw new Error(
       `${ImageErrorCode.INVALID_ARGUMENT}: unsupported export format: ${String(
         format
@@ -720,6 +751,7 @@ export async function exportOfflineImageBufferFrame(
         format,
         quality: options?.quality ?? 85,
         maxSide: options?.maxSide ?? 0,
+        encodePolicy: options?.encodePolicy,
       }
     );
 

@@ -8,7 +8,11 @@
 
 #include "ImageFrameEncoder.h"
 #include "ImageRegistry.h"
+#include "codec/CodecCatalog.h"
+#include "codec/CodecTypes.h"
+#include "decode/ImageDecodeBackend.h"
 #include "decode/ImageDecoder.h"
+#include "ImageIODecodeBackend.h"
 
 #include <mutex>
 #include <string>
@@ -61,6 +65,26 @@ void EnsureImageRegistryInit() {
     uint64_t ram = [[NSProcessInfo processInfo] physicalMemory];
     reg.ConfigureThreshold(ImageThresholdPlatform::Ios, ram);
     reg.SweepOrphanedTempFiles();
+    {
+      using sherpa_onnx::codec::CodecCatalog;
+      using sherpa_onnx::codec::Direction;
+      using sherpa_onnx::codec::Media;
+      using sherpa_onnx::codec::Origin;
+      using sherpa_onnx::codec::Provider;
+      using sherpa_onnx::codec::Tier;
+      for (const char *codec : {"jpeg", "png", "webp", "gif", "bmp", "heic"}) {
+        Provider p;
+        p.media = Media::Image;
+        p.dir = Direction::Decode;
+        p.codec = codec;
+        p.tier = Tier::Hardware;
+        p.origin = Origin::Platform;
+        p.name = "ImageIO";
+        p.rank = 0;
+        CodecCatalog::Instance().Register(std::move(p));
+      }
+      CodecCatalog::Instance().SetRank("stb", 1);
+    }
     ImageDecoder::SetPlatformHeicDecoder(
         [](const uint8_t *data, size_t size, const DecodeOptions &opts) {
           sherpa_onnx::image::DecodeResult r;
@@ -133,6 +157,14 @@ NSDictionary *FrameInfoDict(const sherpa_onnx::image::ImageFrameInfo &info) {
         [NSString stringWithUTF8String:info.sourceVideoBufferId.c_str()] ?: @"";
     dict[@"sourcePtsUs"] = @(info.sourcePtsUs);
     dict[@"sourceFrameIndex"] = @(info.sourceFrameIndex);
+  }
+  if (!info.decoderProvider.empty()) {
+    dict[@"decoderProvider"] =
+        [NSString stringWithUTF8String:info.decoderProvider.c_str()] ?: @"";
+    dict[@"decoderTier"] =
+        [NSString stringWithUTF8String:info.decoderTier.c_str()] ?: @"";
+    dict[@"decoderOrigin"] =
+        [NSString stringWithUTF8String:info.decoderOrigin.c_str()] ?: @"";
   }
   return dict;
 }
@@ -273,6 +305,14 @@ int HotFramesFromOptions(NSDictionary *options) {
   return 0;
 }
 
+std::string DecodePolicyFromOptions(NSDictionary *options) {
+  id raw = options[@"decodePolicy"];
+  if ([raw isKindOfClass:[NSString class]]) {
+    return [(NSString *)raw UTF8String];
+  }
+  return {};
+}
+
 }  // namespace
 
 @implementation SherpaOnnx (ImageBuffer)
@@ -359,6 +399,7 @@ int HotFramesFromOptions(NSDictionary *options) {
   DecodeOptions opts;
   opts.maxSide = maxSide;
   opts.hotFrames = hotFrames;
+  opts.decodePolicy = DecodePolicyFromOptions(options);
   ImageRegistry::CreateResult created;
   if (allFiles && paths.size() == static_cast<size_t>(total)) {
     created = ImageRegistry::Instance().CreateFromFiles(paths, opts);
@@ -446,6 +487,7 @@ int HotFramesFromOptions(NSDictionary *options) {
   DecodeOptions opts;
   opts.maxSide = maxSide;
   opts.hotFrames = hotFrames;
+  opts.decodePolicy = DecodePolicyFromOptions(options);
   auto created = ImageRegistry::Instance().CreateFromBytesList(
       blobs, opts, ImageThresholdPathType::HeapOrigin);
   if (!created.ok) {
@@ -533,6 +575,9 @@ int HotFramesFromOptions(NSDictionary *options) {
   NSString *formatStr = [(options[@"format"] ?: @"jpeg") lowercaseString];
   int quality = options[@"quality"] != nil ? [options[@"quality"] intValue] : 85;
   int maxSide = options[@"maxSide"] != nil ? [options[@"maxSide"] intValue] : 0;
+  NSString *encodePolicy = [options[@"encodePolicy"] isKindOfClass:[NSString class]]
+                               ? options[@"encodePolicy"]
+                               : nil;
 
   sherpa_onnx::image::ExportFormat format = sherpa_onnx::image::ExportFormat::Jpeg;
   if (!sherpa_onnx::image::ParseExportFormat([formatStr UTF8String], &format)) {
@@ -558,6 +603,9 @@ int HotFramesFromOptions(NSDictionary *options) {
   opts.format = format;
   opts.quality = quality;
   opts.maxSide = maxSide;
+  if (encodePolicy.length > 0) {
+    opts.encodePolicy = [encodePolicy UTF8String];
+  }
 
   const auto result = sherpa_onnx::image::ExportFrameToFile(
       [bufferId UTF8String], (int)frameIndex, [wh.filePath UTF8String], opts);
@@ -571,7 +619,24 @@ int HotFramesFromOptions(NSDictionary *options) {
 
   NSString *resultPath = wh.resultPath.length > 0 ? wh.resultPath : wh.filePath;
   [wh cleanup];
-  resolve(@{ @"outputKind" : @"fs", @"outputPath" : resultPath ?: wh.filePath });
+  NSMutableDictionary *out = [@{
+    @"outputKind" : @"fs",
+    @"outputPath" : resultPath ?: wh.filePath,
+  } mutableCopy];
+  if (!result.codecProvider.empty()) {
+    out[@"codecProvider"] =
+        [NSString stringWithUTF8String:result.codecProvider.c_str()];
+  }
+  if (!result.codecTier.empty()) {
+    out[@"codecTier"] = [NSString stringWithUTF8String:result.codecTier.c_str()];
+  }
+  if (!result.codecOrigin.empty()) {
+    out[@"codecOrigin"] =
+        [NSString stringWithUTF8String:result.codecOrigin.c_str()];
+  }
+  NSLog(@"[SherpaOnnx:image] exportFrame format=%@ provider=%@ tier=%@ origin=%@",
+        formatStr, out[@"codecProvider"], out[@"codecTier"], out[@"codecOrigin"]);
+  resolve(out);
 }
 
 - (void)emitLiveImageAppendEvents:(NSString *)bufferId

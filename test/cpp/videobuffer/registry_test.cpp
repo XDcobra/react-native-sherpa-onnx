@@ -1,5 +1,6 @@
 #include "VideoFrameAccess.h"
 #include "VideoRegistry.h"
+#include "codec/CodecTypes.h"
 #include "core/MemoryBudget.h"
 #include "decode/DecoderPool.h"
 #include "synth.h"
@@ -69,4 +70,19 @@ TEST_F(RegistryTest, AppendAfterFinishRejected) {
   EXPECT_FALSE(st.ok);
   EXPECT_EQ(st.errorCode, kErrInvalidState);
   VideoRegistry::Instance().Release(live->id());
+}
+
+TEST_F(RegistryTest, MidstreamSoftwareFallbackOnceUnderPreferHardware) {
+  auto src = std::make_unique<MemoryPacketSource>();
+  FillIpp(src.get(), 15, 15, false);
+  auto e = VideoRegistry::Instance().CreateOfflineFromPackets(std::move(src));
+  ASSERT_NE(e, nullptr);
+  e->SetDecodePolicy(sherpa_onnx::codec::Policy::Hardware);
+  EXPECT_FALSE(e->TryMidstreamSoftwareFallback());
+  e->SetDecodePolicy(sherpa_onnx::codec::Policy::PreferHardware);
+  EXPECT_TRUE(e->TryMidstreamSoftwareFallback());
+  ASSERT_TRUE(e->decodePolicy().has_value());
+  EXPECT_EQ(*e->decodePolicy(), sherpa_onnx::codec::Policy::Software);
+  EXPECT_FALSE(e->TryMidstreamSoftwareFallback());
+  EXPECT_TRUE(VideoRegistry::Instance().Release(e->id()));
 }

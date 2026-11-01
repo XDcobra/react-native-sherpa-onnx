@@ -1,8 +1,10 @@
 #include "ImageFileLazyBackend.h"
 
+#include "decode/ImageDecodeBackend.h"
 #include "decode/ImageDecoder.h"
 
 #include <fstream>
+#include <mutex>
 
 namespace sherpa_onnx {
 namespace image {
@@ -70,20 +72,35 @@ bool ImageFileLazyBackend::DecodeFrame(int index, RgbFrame* out,
   }
 
   decode_count_.fetch_add(1);
-  const DecodeFormat format = ImageDecoder::DetectFormat(data, size);
-  DecodeResult decoded;
-  if (format == DecodeFormat::Heic) {
-    decoded = ImageDecoder::DecodeHeicBytes(data, size, opts_);
-  } else {
-    decoded = ImageDecoder::DecodeBytes(data, size, opts_);
-  }
+  DecodeResult decoded = DecodeWithPolicy(data, size, opts_, "img");
   if (!decoded.ok) {
     return fail(decoded.errorCode.empty() ? "ERR_IMAGE_DECODE_FAILED"
                                           : decoded.errorCode.c_str(),
                 decoded.errorMessage);
   }
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    lastProvider_ = decoded.codecProvider;
+    lastTier_ = decoded.codecTier;
+    lastOrigin_ = decoded.codecOrigin;
+  }
   *out = std::move(decoded.frame);
   return true;
+}
+
+std::string ImageFileLazyBackend::lastProvider() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return lastProvider_;
+}
+
+std::string ImageFileLazyBackend::lastTier() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return lastTier_;
+}
+
+std::string ImageFileLazyBackend::lastOrigin() const {
+  std::lock_guard<std::mutex> lock(mu_);
+  return lastOrigin_;
 }
 
 }  // namespace image

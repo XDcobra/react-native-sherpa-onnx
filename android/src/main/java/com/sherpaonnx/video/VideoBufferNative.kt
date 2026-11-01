@@ -9,6 +9,40 @@ internal object VideoBufferNative {
 
   external fun nativeConfigureDecoderBudget(cpu: Int, display: Int)
 
+  external fun nativeConfigureCodecs(
+    videoDecode: String?,
+    videoDisplay: String?,
+    videoEncode: String?,
+    imageDecode: String?,
+    imageEncode: String?,
+    hwDec: Int,
+    hwDisp: Int,
+    hwEnc: Int,
+    swDec: Int,
+    swEnc: Int,
+    img: Int,
+  ): String?
+
+  external fun nativeGetCodecInfo(): String?
+
+  external fun nativeRegisterVideoCodec(
+    name: String,
+    codec: String,
+    encoder: Boolean,
+    hardware: Boolean,
+    minW: Int,
+    minH: Int,
+    maxW: Int,
+    maxH: Int,
+    alignW: Int,
+    alignH: Int,
+    maxBlocks: Long,
+    blockW: Int,
+    blockH: Int,
+    maxInstances: Int,
+    fps1080: Double,
+  )
+
   external fun nativeSetHwCodecs(
     h264Decoder: String?,
     hevcDecoder: String?,
@@ -84,7 +118,12 @@ internal object VideoBufferNative {
     maxSide: Int,
     cancelFlagAddr: Long,
     progress: Any?,
+    decodePolicy: String?,
+    encodePolicy: String?,
+    includeAudio: Boolean,
   ): HashMap<String, Any>?
+
+  external fun nativeSetDecodePolicy(bufferId: String, policy: String?)
 
   external fun nativeProbeVideoFile(path: String): HashMap<String, Any>?
 }

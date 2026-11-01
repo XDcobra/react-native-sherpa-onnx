@@ -36,6 +36,7 @@ class FrameSlab {
   FrameSlab& operator=(const FrameSlab&) = delete;
 
   void SetCacheDir(std::string dir);
+  void SetMmapKey(std::string key);
   void SetRamThreshold(int64_t bytes);
   int64_t ramThreshold() const { return ramThreshold_; }
 
@@ -58,6 +59,7 @@ class FrameSlab {
   mutable std::mutex mu_;
   std::vector<std::unique_ptr<SlabSlot>> slots_;
   std::string cacheDir_;
+  std::string mmapKey_;
   std::string mmapPath_;
   int mmapFd_ = -1;
   int64_t mmapFileSize_ = 0;

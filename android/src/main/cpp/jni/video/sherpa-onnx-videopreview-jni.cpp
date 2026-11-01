@@ -1,5 +1,6 @@
 #include "VideoLog.h"
 #include "VideoRegistry.h"
+#include "codec/CodecTypes.h"
 #include "preview/PreviewPlayer.h"
 
 #ifdef __ANDROID__
@@ -183,6 +184,21 @@ Java_com_sherpaonnx_video_preview_VideoPreviewNative_nativeCreate(
       opt.find("\"pauseOnBackground\":false") == std::string::npos;
   popts.muted = opt.find("\"muted\":true") != std::string::npos;
   popts.progressIntervalMs = ParseProgressIntervalMs(opt);
+  {
+    const auto pos = opt.find("\"decodePolicy\"");
+    if (pos != std::string::npos) {
+      if (opt.find("software", pos) != std::string::npos &&
+          opt.find("software", pos) < pos + 40) {
+        popts.decodePolicy = sherpa_onnx::codec::Policy::Software;
+      } else if (opt.find("preferHardware", pos) != std::string::npos &&
+                 opt.find("preferHardware", pos) < pos + 48) {
+        popts.decodePolicy = sherpa_onnx::codec::Policy::PreferHardware;
+      } else if (opt.find("hardware", pos) != std::string::npos &&
+                 opt.find("hardware", pos) < pos + 40) {
+        popts.decodePolicy = sherpa_onnx::codec::Policy::Hardware;
+      }
+    }
+  }
   if (info.audio) {
     popts.codecName = info.audio->codecName.empty()
                           ? sherpa_onnx::video::AudioCodecName(info.audio->codec)

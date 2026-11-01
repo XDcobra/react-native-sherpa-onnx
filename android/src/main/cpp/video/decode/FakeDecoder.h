@@ -23,15 +23,26 @@ class FakeDecoderBackend : public DecoderBackend {
   Status Configure(const VideoTrackInfo& track) override;
   Status Submit(const EncodedPacket& packet) override;
   Status Flush() override;
+  Status SignalEnd() override;
   bool Receive(DecodedRawFrame* out) override;
   void Close() override;
   int submitCount() const override { return submitCount_; }
   int flushCount() const override { return flushCount_; }
   /** HW decoders only set ptsUs. Tests the DecodeSession PTS→index map. */
   void setOmitPresentationIndex(bool omit) { omitPresentationIndex_ = omit; }
+  /** Hold this many packets before emitting (ffmpeg FF_THREAD_FRAME delay). */
+  void setEmitDelay(int packets) { emitDelay_ = packets < 0 ? 0 : packets; }
 
  private:
   Status Emit(int64_t presentationIndex, int64_t ptsUs, int width, int height);
+  Status DrainDelayed();
+
+  struct DelayedPacket {
+    int64_t presentationIndex = 0;
+    int64_t ptsUs = 0;
+    int width = 0;
+    int height = 0;
+  };
 
   VideoTrackInfo track_;
   bool configured_ = false;
@@ -39,8 +50,10 @@ class FakeDecoderBackend : public DecoderBackend {
   bool hasRef_ = false;
   int submitCount_ = 0;
   int flushCount_ = 0;
+  int emitDelay_ = 0;
   bool omitPresentationIndex_ = false;
   std::deque<DecodedRawFrame> out_;
+  std::deque<DelayedPacket> delayed_;
 };
 
 }  // namespace video

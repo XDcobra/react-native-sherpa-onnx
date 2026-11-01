@@ -84,5 +84,7 @@ TEST_F(ExportFixture, ParseExportFormat) {
   EXPECT_EQ(f, ExportFormat::Png);
   EXPECT_TRUE(ParseExportFormat("webp", &f));
   EXPECT_EQ(f, ExportFormat::Webp);
+  EXPECT_TRUE(ParseExportFormat("heic", &f));
+  EXPECT_EQ(f, ExportFormat::Heic);
   EXPECT_FALSE(ParseExportFormat("gif", &f));
 }

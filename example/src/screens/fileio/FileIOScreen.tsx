@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import type { AudioOutputFormat } from 'react-native-sherpa-onnx/audio';
+import type { CodecPolicy } from 'react-native-sherpa-onnx/codec';
 import type { FileDestination } from 'react-native-sherpa-onnx/fileio';
 import type { VideoExportContainer } from 'react-native-sherpa-onnx/videobuffer';
 import { CODEC_ASSET_ENTRIES, type CodecAssetFormat } from '../../audioConfig';
@@ -90,6 +91,17 @@ const OPERATIONS: { id: FileioOperation; label: string }[] = [
   { id: 'encode', label: 'Encode' },
 ];
 
+const MEDIA_MODES: { id: 'audio' | 'video'; label: string }[] = [
+  { id: 'audio', label: 'Audio' },
+  { id: 'video', label: 'Video' },
+];
+
+const CODEC_POLICIES: { id: CodecPolicy; label: string }[] = [
+  { id: 'preferHardware', label: 'preferHW' },
+  { id: 'hardware', label: 'hardware' },
+  { id: 'software', label: 'software' },
+];
+
 function formatLabel(format: string): string {
   return format.toUpperCase();
 }
@@ -121,6 +133,8 @@ export default function FileIOScreen() {
   const [videoFormatMenuOpen, setVideoFormatMenuOpen] = useState(false);
 
   const [operation, setOperation] = useState<FileioOperation>('probe');
+  const [mediaMode, setMediaMode] = useState<'audio' | 'video'>('audio');
+  const [codecPolicy, setCodecPolicy] = useState<CodecPolicy>('preferHardware');
   const [sample, setSample] = useState<FileioSampleSelection>({
     kind: 'codec',
     format: 'wav',
@@ -150,7 +164,7 @@ export default function FileIOScreen() {
 
   const [busy, setBusy] = useState(false);
   const [resultText, setResultText] = useState(
-    'Choose an audio or video sample and FileSource channel, then run Probe, Decode, or Encode.'
+    'Choose Audio or Video, a sample and FileSource channel, then run Probe, Decode, or Encode.'
   );
 
   const showResult = useCallback((text: string) => {
@@ -235,6 +249,27 @@ export default function FileIOScreen() {
     setSample({ kind: 'video', format });
   }, []);
 
+  const selectMediaMode = useCallback(
+    (mode: 'audio' | 'video') => {
+      if (mode === mediaMode) {
+        return;
+      }
+      setMediaMode(mode);
+      if (mode === 'audio') {
+        setBatchAllVideoSamples(false);
+        if (fileioSampleMedia(sample) === 'video') {
+          setSample({ kind: 'codec', format: 'wav' });
+        }
+      } else {
+        setBatchAllAudioSamples(false);
+        if (fileioSampleMedia(sample) !== 'video') {
+          setSample({ kind: 'video', format: 'mp4' });
+        }
+      }
+    },
+    [mediaMode, sample]
+  );
+
   const selectInputChannel = useCallback(
     (id: FileioInputChannelId) => {
       setInputChannel(id);
@@ -288,8 +323,10 @@ export default function FileIOScreen() {
     try {
       if (isBatch) {
         const { samples, channelIds } = buildFileioBatchMatrix({
-          batchAllAudioSamples,
-          batchAllVideoSamples,
+          batchAllAudioSamples:
+            mediaMode === 'audio' ? batchAllAudioSamples : false,
+          batchAllVideoSamples:
+            mediaMode === 'video' ? batchAllVideoSamples : false,
           batchAllChannels,
           currentSample: sample,
           currentChannelId: inputChannel,
@@ -303,14 +340,9 @@ export default function FileIOScreen() {
           audioSource,
           outputFormat,
           videoOutputFormat,
+          codecPolicy,
         });
         showResult(text);
-        if (operation === 'encode') {
-          Alert.alert(
-            'Batch encode finished',
-            'See Result for per-item status.'
-          );
-        }
         return;
       }
 
@@ -325,7 +357,10 @@ export default function FileIOScreen() {
       }
 
       if (operation === 'decode') {
-        const result = await runFileioDecode(inputSource!);
+        const result = await runFileioDecode(inputSource!, {
+          decodePolicy: codecPolicy,
+          encodePolicy: codecPolicy,
+        });
         if (result.status === 'success') {
           showResult(result.detail);
         } else {
@@ -335,12 +370,14 @@ export default function FileIOScreen() {
       }
 
       const copyResult =
-        fileioSampleMedia(sample) === 'video'
+        mediaMode === 'video'
           ? await runFileioVideoEncode({
               destinationKind,
               inputSource: inputSource!.fileSource,
               inputLabel: inputSource!.label,
               outputFormat: videoOutputFormat,
+              decodePolicy: codecPolicy,
+              encodePolicy: codecPolicy,
             })
           : await runFileioCopy({
               destinationKind,
@@ -356,11 +393,9 @@ export default function FileIOScreen() {
       }
       if (copyResult.status === 'success') {
         showResult(copyResult.detail);
-        Alert.alert('Encode complete', copyResult.detail);
         return;
       }
       showResult(`Error\n\n${copyResult.message}`);
-      Alert.alert('Encode failed', copyResult.message);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       showResult(`Error\n\n${message}`);
@@ -385,23 +420,26 @@ export default function FileIOScreen() {
     audioSource,
     outputFormat,
     videoOutputFormat,
+    mediaMode,
+    codecPolicy,
   ]);
 
   const batchAllSamples = batchAllAudioSamples || batchAllVideoSamples;
   const isBatch = batchAllSamples || batchAllChannels;
-  const currentIsVideo = fileioSampleMedia(sample) === 'video';
-  const encodingAudio =
-    operation === 'encode' && (batchAllAudioSamples || !currentIsVideo);
-  const encodingVideo =
-    operation === 'encode' && (batchAllVideoSamples || currentIsVideo);
+  const encodingAudio = operation === 'encode' && mediaMode === 'audio';
+  const encodingVideo = operation === 'encode' && mediaMode === 'video';
+  const batchAllSamplesForMode =
+    mediaMode === 'audio' ? batchAllAudioSamples : batchAllVideoSamples;
 
   const activeInputBatchSummary = useMemo(() => {
     if (!isBatch) {
       return null;
     }
     return describeFileioActiveInputSummary({
-      batchAllAudioSamples,
-      batchAllVideoSamples,
+      batchAllAudioSamples:
+        mediaMode === 'audio' ? batchAllAudioSamples : false,
+      batchAllVideoSamples:
+        mediaMode === 'video' ? batchAllVideoSamples : false,
       batchAllChannels,
       currentSample: sample,
       currentChannelId: inputChannel,
@@ -415,6 +453,7 @@ export default function FileIOScreen() {
     sample,
     inputChannel,
     operation,
+    mediaMode,
   ]);
 
   const primaryDisabled =
@@ -453,136 +492,204 @@ export default function FileIOScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.section}>
+          <Text style={styles.sectionLabel}>Media</Text>
+          <Text style={styles.sectionHint}>
+            Audio and video stay on separate paths. FileSource, Probe / Decode /
+            Encode, and batch-all stay the same for the selected media.
+          </Text>
+          <View style={styles.segmented}>
+            {MEDIA_MODES.map((mode) => {
+              const active = mediaMode === mode.id;
+              return (
+                <Pressable
+                  key={mode.id}
+                  style={[styles.segment, active && styles.segmentActive]}
+                  onPress={() => selectMediaMode(mode.id)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                >
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      active && styles.segmentTextActive,
+                    ]}
+                  >
+                    {mode.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionLabel}>Sample file</Text>
           <Text style={styles.sectionHint}>
-            Audio chips use bundled test_codec files. Video chips use 1 s 144p
-            H.264 clips under test_videos/. Both batch switches can be on.
+            {mediaMode === 'audio'
+              ? 'Bundled test_codec files (+ Legacy WAV).'
+              : '1 s 144p H.264 clips under test_videos/.'}
           </Text>
           <View style={styles.batchToggleRow}>
             <View style={styles.batchToggleTextCol}>
-              <Text style={styles.batchToggleLabel}>Run all audio samples</Text>
+              <Text style={styles.batchToggleLabel}>
+                {mediaMode === 'audio'
+                  ? 'Run all audio samples'
+                  : 'Run all video samples'}
+              </Text>
               <Text style={styles.batchToggleHint}>
-                On Run: every audio format chip (+ Legacy)
+                {mediaMode === 'audio'
+                  ? 'On Run: every audio format chip (+ Legacy)'
+                  : 'On Run: MP4, MOV, MKV, WebM'}
               </Text>
             </View>
             <Switch
-              value={batchAllAudioSamples}
-              onValueChange={setBatchAllAudioSamples}
-              accessibilityLabel="Run all audio samples on Run"
+              value={batchAllSamplesForMode}
+              onValueChange={
+                mediaMode === 'audio'
+                  ? setBatchAllAudioSamples
+                  : setBatchAllVideoSamples
+              }
+              accessibilityLabel={
+                mediaMode === 'audio'
+                  ? 'Run all audio samples on Run'
+                  : 'Run all video samples on Run'
+              }
             />
           </View>
-          <View
-            style={[
-              styles.chipRow,
-              batchAllAudioSamples && styles.selectionGroupDisabled,
-            ]}
-            pointerEvents={batchAllAudioSamples ? 'none' : 'auto'}
-          >
-            {CODEC_ASSET_ENTRIES.map((entry) => {
-              const active =
-                sample.kind === 'codec' && sample.format === entry.format;
-              return (
-                <Pressable
-                  key={entry.format}
-                  style={[
-                    styles.chip,
-                    active && styles.chipActive,
-                    batchAllAudioSamples && styles.chipDisabled,
-                  ]}
-                  onPress={() => selectCodecSample(entry.format)}
-                  disabled={batchAllAudioSamples}
-                  accessibilityRole="button"
-                  accessibilityState={{
-                    selected: active,
-                    disabled: batchAllAudioSamples,
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.chipText,
-                      active && styles.chipTextActive,
-                      batchAllAudioSamples && styles.chipTextDisabled,
-                    ]}
-                  >
-                    {entry.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            <Pressable
+          {mediaMode === 'audio' ? (
+            <View
               style={[
-                styles.chip,
-                sample.kind === 'legacy' && styles.chipActive,
-                batchAllAudioSamples && styles.chipDisabled,
+                styles.chipRow,
+                batchAllAudioSamples && styles.selectionGroupDisabled,
               ]}
-              onPress={selectLegacySample}
-              disabled={batchAllAudioSamples}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: batchAllAudioSamples }}
+              pointerEvents={batchAllAudioSamples ? 'none' : 'auto'}
             >
-              <Text
-                style={[
-                  styles.chipText,
-                  sample.kind === 'legacy' && styles.chipTextActive,
-                  batchAllAudioSamples && styles.chipTextDisabled,
-                ]}
-              >
-                Legacy
-              </Text>
-            </Pressable>
-          </View>
-          <View style={styles.batchToggleRow}>
-            <View style={styles.batchToggleTextCol}>
-              <Text style={styles.batchToggleLabel}>Run all video samples</Text>
-              <Text style={styles.batchToggleHint}>
-                On Run: MP4, MOV, MKV, WebM (1 s 144p H.264)
-              </Text>
-            </View>
-            <Switch
-              value={batchAllVideoSamples}
-              onValueChange={setBatchAllVideoSamples}
-              accessibilityLabel="Run all video samples on Run"
-            />
-          </View>
-          <View
-            style={[
-              styles.chipRow,
-              batchAllVideoSamples && styles.selectionGroupDisabled,
-            ]}
-            pointerEvents={batchAllVideoSamples ? 'none' : 'auto'}
-          >
-            {VIDEO_CODEC_ASSET_ENTRIES.map((entry) => {
-              const active =
-                sample.kind === 'video' && sample.format === entry.format;
-              return (
-                <Pressable
-                  key={entry.format}
-                  style={[
-                    styles.chip,
-                    active && styles.chipActive,
-                    batchAllVideoSamples && styles.chipDisabled,
-                  ]}
-                  onPress={() => selectVideoSample(entry.format)}
-                  disabled={batchAllVideoSamples}
-                  accessibilityRole="button"
-                  accessibilityState={{
-                    selected: active,
-                    disabled: batchAllVideoSamples,
-                  }}
-                >
-                  <Text
+              {CODEC_ASSET_ENTRIES.map((entry) => {
+                const active =
+                  sample.kind === 'codec' && sample.format === entry.format;
+                return (
+                  <Pressable
+                    key={entry.format}
                     style={[
-                      styles.chipText,
-                      active && styles.chipTextActive,
-                      batchAllVideoSamples && styles.chipTextDisabled,
+                      styles.chip,
+                      active && styles.chipActive,
+                      batchAllAudioSamples && styles.chipDisabled,
                     ]}
+                    onPress={() => selectCodecSample(entry.format)}
+                    disabled={batchAllAudioSamples}
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      selected: active,
+                      disabled: batchAllAudioSamples,
+                    }}
                   >
-                    {entry.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+                    <Text
+                      style={[
+                        styles.chipText,
+                        active && styles.chipTextActive,
+                        batchAllAudioSamples && styles.chipTextDisabled,
+                      ]}
+                    >
+                      {entry.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+              <Pressable
+                style={[
+                  styles.chip,
+                  sample.kind === 'legacy' && styles.chipActive,
+                  batchAllAudioSamples && styles.chipDisabled,
+                ]}
+                onPress={selectLegacySample}
+                disabled={batchAllAudioSamples}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: batchAllAudioSamples }}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    sample.kind === 'legacy' && styles.chipTextActive,
+                    batchAllAudioSamples && styles.chipTextDisabled,
+                  ]}
+                >
+                  Legacy
+                </Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.chipRow,
+                batchAllVideoSamples && styles.selectionGroupDisabled,
+              ]}
+              pointerEvents={batchAllVideoSamples ? 'none' : 'auto'}
+            >
+              {VIDEO_CODEC_ASSET_ENTRIES.map((entry) => {
+                const active =
+                  sample.kind === 'video' && sample.format === entry.format;
+                return (
+                  <Pressable
+                    key={entry.format}
+                    style={[
+                      styles.chip,
+                      active && styles.chipActive,
+                      batchAllVideoSamples && styles.chipDisabled,
+                    ]}
+                    onPress={() => selectVideoSample(entry.format)}
+                    disabled={batchAllVideoSamples}
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      selected: active,
+                      disabled: batchAllVideoSamples,
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.chipText,
+                        active && styles.chipTextActive,
+                        batchAllVideoSamples && styles.chipTextDisabled,
+                      ]}
+                    >
+                      {entry.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+          {mediaMode === 'video' && (
+            <View style={styles.nestedControl}>
+              <Text style={styles.nestedLabel}>Codec policy</Text>
+              <Text style={styles.nestedHint}>
+                Video decode, still export, and clip encode. Default
+                preferHardware.
+              </Text>
+              <View style={styles.segmented}>
+                {CODEC_POLICIES.map((pol) => {
+                  const active = codecPolicy === pol.id;
+                  return (
+                    <Pressable
+                      key={pol.id}
+                      style={[styles.segment, active && styles.segmentActive]}
+                      onPress={() => setCodecPolicy(pol.id)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: active }}
+                    >
+                      <Text
+                        style={[
+                          styles.segmentText,
+                          active && styles.segmentTextActive,
+                        ]}
+                      >
+                        {pol.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+          )}
         </View>
 
         <View style={styles.section}>
@@ -928,7 +1035,7 @@ export default function FileIOScreen() {
                       {formatLabel(videoOutputFormat)}
                     </Text>
                     <Text style={styles.dropdownHint}>
-                      HW encode via exportVideo (H.264)
+                      exportVideo (H.264), policy {codecPolicy}
                     </Text>
                   </View>
                   <Ionicons name="chevron-down" size={20} color="#007AFF" />
@@ -1237,6 +1344,26 @@ const styles = StyleSheet.create({
   },
   chipTextDisabled: {
     color: '#8E8E93',
+  },
+  nestedControl: {
+    marginTop: 4,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#E5E5EA',
+  },
+  nestedLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#8E8E93',
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  nestedHint: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginBottom: 10,
+    lineHeight: 18,
   },
   channelRow: {
     flexDirection: 'row',

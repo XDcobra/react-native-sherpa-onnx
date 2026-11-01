@@ -1,5 +1,6 @@
 #include "LiveImageEntry.h"
 
+#include "../decode/ImageDecodeBackend.h"
 #include "../decode/ImageDecoder.h"
 
 #include <algorithm>
@@ -139,16 +140,9 @@ LiveImageEntry::Status LiveImageEntry::MaterializeLocked(int64_t index,
     return s;
   }
 
-  const DecodeFormat format =
-      ImageDecoder::DetectFormat(src->bytes.data(), src->bytes.size());
-  DecodeResult decoded;
-  if (format == DecodeFormat::Heic) {
-    decoded = ImageDecoder::DecodeHeicBytes(src->bytes.data(), src->bytes.size(),
-                                            opts_.decode);
-  } else {
-    decoded = ImageDecoder::DecodeBytes(src->bytes.data(), src->bytes.size(),
-                                        opts_.decode);
-  }
+  DecodeResult decoded =
+      DecodeWithPolicy(src->bytes.data(), src->bytes.size(), opts_.decode,
+                       id_);
   decode_count_.fetch_add(1);
   if (!decoded.ok) {
     s.errorCode = decoded.errorCode.empty() ? "ERR_IMAGE_DECODE_FAILED"
@@ -167,6 +161,9 @@ LiveImageEntry::Status LiveImageEntry::MaterializeLocked(int64_t index,
     out->height = hot.frame.height;
     out->byteSize = static_cast<int64_t>(hot.frame.byteSize());
     out->storageKind = ImageStorageKind::Ram;
+    out->decoderProvider = decoded.codecProvider;
+    out->decoderTier = decoded.codecTier;
+    out->decoderOrigin = decoded.codecOrigin;
   }
   hot_[index] = std::move(hot);
   while (static_cast<int>(hot_.size()) > hot_limit_) {

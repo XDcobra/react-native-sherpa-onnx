@@ -121,6 +121,30 @@ Status DecodeSession::DrainToCache(bool cacheAlongWay, int64_t targetPres) {
   return Status::Ok();
 }
 
+Status DecodeSession::TrySubmitLookahead() {
+  if (source_ == nullptr || timeline_ == nullptr || decoder_ == nullptr) {
+    return Status::Fail(kErrInvalidArgument, "lookahead");
+  }
+  const int64_t n = timeline_->frameCount();
+  const int64_t next = lastDecodeIndex_ + 1;
+  if (next < 0 || next >= n) {
+    return Status::Fail(kErrFrameOutOfRange, "lookahead eof");
+  }
+  EncodedPacket pkt;
+  auto st = source_->ReadPacket(next, &pkt);
+  if (!st.ok) {
+    return st;
+  }
+  st = decoder_->Submit(pkt);
+  if (!st.ok) {
+    return st;
+  }
+  lastDecodeIndex_ = next;
+  VIDEO_LOGI("video.decode lookahead dec=%lld submits=%d",
+             static_cast<long long>(next), decoder_->submitCount());
+  return Status::Ok();
+}
+
 Status DecodeSession::DrainUntilCached(int64_t targetPres, bool cacheAlongWay) {
   auto st = DrainToCache(cacheAlongWay, targetPres);
   if (!st.ok) {
@@ -131,6 +155,10 @@ Status DecodeSession::DrainUntilCached(int64_t targetPres, bool cacheAlongWay) {
   }
   constexpr int64_t kOutputWaitUs = 20000;
   constexpr int kOutputWaitTries = 100;
+  // ffmpeg FF_THREAD_FRAME (up to 4 threads) emits nothing after one packet.
+  constexpr int kMaxLookahead = 8;
+  int lookaheads = 0;
+  bool signaledEnd = false;
   VIDEO_LOGI(
       "video.decode wait-output target=%lld submits=%d cached=%d",
       static_cast<long long>(targetPres),
@@ -152,12 +180,41 @@ Status DecodeSession::DrainUntilCached(int64_t targetPres, bool cacheAlongWay) {
                  static_cast<long long>(targetPres), i + 1);
       return Status::Ok();
     }
+    if (lookaheads < kMaxLookahead) {
+      auto look = TrySubmitLookahead();
+      if (look.ok) {
+        ++lookaheads;
+        st = DrainToCache(cacheAlongWay, targetPres);
+        if (!st.ok) {
+          return st;
+        }
+        continue;
+      }
+      if (look.errorCode != kErrFrameOutOfRange) {
+        return look;
+      }
+      if (!signaledEnd) {
+        VIDEO_LOGI("video.decode signal-end target=%lld submits=%d",
+                   static_cast<long long>(targetPres),
+                   decoder_ ? decoder_->submitCount() : 0);
+        st = decoder_->SignalEnd();
+        if (!st.ok) {
+          return st;
+        }
+        signaledEnd = true;
+        st = DrainToCache(cacheAlongWay, targetPres);
+        if (!st.ok) {
+          return st;
+        }
+      }
+    }
   }
   VIDEO_LOGW(
-      "video.decode wait-output timeout target=%lld cached=%d submits=%d",
+      "video.decode wait-output timeout target=%lld cached=%d submits=%d "
+      "lookaheads=%d",
       static_cast<long long>(targetPres),
       cache_ ? cache_->cachedCount() : 0,
-      decoder_ ? decoder_->submitCount() : 0);
+      decoder_ ? decoder_->submitCount() : 0, lookaheads);
   return Status::Fail(kErrDecodeFailed, "decoder produced no target frame");
 }
 
@@ -270,10 +327,13 @@ Result<VideoFrameLease> DecodeSession::SeekAndAcquire(const FrameRequest& req) {
   const int64_t keyPres = timeline_->KeyframeAtOrBefore(pres);
   const int64_t keyDec = timeline_->DecodeIndexOf(keyPres);
   const int64_t targetDec = timeline_->DecodeIndexOf(pres);
-  const bool sameGopForward =
-      lastDecodeIndex_ >= keyDec && lastDecodeIndex_ < targetDec &&
-      lastKeyframePres_ == keyPres;
-  if (!sameGopForward) {
+  // Lookahead can leave lastDecodeIndex_ past this presentation target.
+  // That is still the same GOP — DecodeThrough then only drains. Requiring
+  // lastDecodeIndex_ < targetDec forced a Flush+resubmit every frame and
+  // starved SW MediaCodec input (MOV/MKV "input buffer").
+  const bool sameGop =
+      lastDecodeIndex_ >= keyDec && lastKeyframePres_ == keyPres;
+  if (!sameGop) {
     VIDEO_LOGI("video.decode seek mode=%d target=%lld key=%lld",
                static_cast<int>(req.mode), static_cast<long long>(pres),
                static_cast<long long>(keyPres));

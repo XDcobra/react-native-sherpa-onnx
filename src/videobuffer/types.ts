@@ -27,6 +27,7 @@ export interface OfflineVideoBufferInfo {
   seekableStartUs?: number;
   seekableEndUs?: number;
   audio: VideoAudioTrackInfo | null;
+  decoder?: import('../codec/types').CodecDecision;
 }
 
 export interface LiveVideoBufferInfo {
@@ -41,6 +42,7 @@ export interface LiveVideoBufferInfo {
   seekableStartUs?: number;
   seekableEndUs?: number;
   audio: VideoAudioTrackInfo | null;
+  decoder?: import('../codec/types').CodecDecision;
 }
 
 export type PipelineVideoBufferInfo =
@@ -109,11 +111,16 @@ export type VideoRetention =
 export interface CreateEmptyLiveVideoBufferOptions {
   ringSeconds?: number;
   retention?: VideoRetention;
+  decodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export interface IngestFileToLiveOptions {
   pacing?: 'realtime' | 'asFast';
   includeAudio?: boolean;
+}
+
+export interface CreateOfflineVideoBufferFromFileOptions {
+  decodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export interface CreateOfflineImageFromVideoOptions {
@@ -122,6 +129,7 @@ export interface CreateOfflineImageFromVideoOptions {
   uniformCount?: number;
   timesUs?: number[];
   maxSide?: number;
+  decodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export type LiveVideoBufferEventType =
@@ -140,9 +148,10 @@ export interface LiveVideoBufferEvent {
 }
 
 export interface ExportVideoFrameOptions {
-  format?: 'jpeg' | 'png' | 'webp';
+  format?: 'jpeg' | 'png' | 'webp' | 'heic';
   maxSide?: number;
   quality?: number;
+  encodePolicy?: import('../codec/types').CodecPolicy;
 }
 
 export type VideoExportContainer = 'mp4' | 'mov' | 'mkv' | 'webm';
@@ -154,17 +163,16 @@ export interface ExportVideoOptions {
   fromUs?: number;
   toUs?: number;
   maxSide?: number;
+  decodePolicy?: import('../codec/types').CodecPolicy;
+  encodePolicy?: import('../codec/types').CodecPolicy;
+  /** Default true. False writes a video-only file. */
+  includeAudio?: boolean;
   onProgress?: (e: { percent: number; encodedUs: number }) => void;
   signal?: AbortSignal;
 }
 
-export interface VideoDecoderBudget {
-  cpu?: number;
-  display?: number;
-}
-
 export interface ConfigureVideoBufferOptions {
-  decoderBudget?: VideoDecoderBudget;
+  /** @deprecated Use configureCodecs({ budgets }) from react-native-sherpa-onnx/codec. */
 }
 
 export type VideoFileDurationProbe = {

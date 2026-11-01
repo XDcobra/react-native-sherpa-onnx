@@ -1,21 +1,12 @@
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#define STBI_WRITE_NO_STDIO
-#include "decode/vendor/stb_image_write.h"
-
 #include "ImageFrameEncoder.h"
 
 #include "ImageRegistry.h"
 #include "decode/ImageDecoder.h"
+#include "encode/ImageEncodeBackend.h"
 
 #include <algorithm>
 #include <cctype>
-#include <cstdio>
 #include <cstring>
-#include <fstream>
-
-#if defined(HAVE_LIBWEBP)
-#include <webp/encode.h>
-#endif
 
 namespace sherpa_onnx {
 namespace image {
@@ -30,46 +21,11 @@ ExportResult Fail(const char* code, const std::string& message) {
   return r;
 }
 
-ExportResult Ok() {
-  ExportResult r;
-  r.ok = true;
-  return r;
-}
-
 std::string ToLower(std::string s) {
   for (char& c : s) {
     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   }
   return s;
-}
-
-int ClampQuality(int q) {
-  if (q < 1) return 1;
-  if (q > 100) return 100;
-  return q;
-}
-
-bool WriteBytesToFile(const std::string& path, const uint8_t* data, size_t size) {
-  if (!data || size == 0) return false;
-  std::ofstream out(path, std::ios::binary | std::ios::trunc);
-  if (!out) return false;
-  out.write(reinterpret_cast<const char*>(data),
-            static_cast<std::streamsize>(size));
-  return static_cast<bool>(out);
-}
-
-/** Streams stb write chunks straight to disk (no full encoded buffer). */
-struct StbStreamCtx {
-  std::ofstream* out = nullptr;
-  bool ok = true;
-};
-
-void StbStreamCallback(void* context, void* data, int size) {
-  auto* ctx = static_cast<StbStreamCtx*>(context);
-  if (!ctx || !ctx->out || !ctx->ok || !data || size <= 0) return;
-  ctx->out->write(reinterpret_cast<const char*>(data),
-                  static_cast<std::streamsize>(size));
-  if (!*ctx->out) ctx->ok = false;
 }
 
 }  // namespace
@@ -89,7 +45,25 @@ bool ParseExportFormat(const std::string& name, ExportFormat* out) {
     *out = ExportFormat::Webp;
     return true;
   }
+  if (n == "heic" || n == "heif") {
+    *out = ExportFormat::Heic;
+    return true;
+  }
   return false;
+}
+
+const char* ExportFormatName(ExportFormat format) {
+  switch (format) {
+    case ExportFormat::Jpeg:
+      return "jpeg";
+    case ExportFormat::Png:
+      return "png";
+    case ExportFormat::Webp:
+      return "webp";
+    case ExportFormat::Heic:
+      return "heic";
+  }
+  return "jpeg";
 }
 
 bool CopyFrameRgb(const std::string& bufferId, int frameIndex, int maxSide,
@@ -151,73 +125,7 @@ void FillArgb8888FromRgb(const uint8_t* rgb, int width, int height,
 ExportResult EncodeRgbBytesToFile(const uint8_t* rgb, int width, int height,
                                   const std::string& outPath,
                                   const ExportOptions& opts) {
-  if (!rgb || width <= 0 || height <= 0) {
-    return Fail("ERR_IMAGE_INVALID_ARGUMENT", "invalid RGB frame");
-  }
-  if (outPath.empty()) {
-    return Fail("ERR_IMAGE_INVALID_ARGUMENT", "empty output path");
-  }
-
-  const int quality = ClampQuality(opts.quality);
-  const int stride = width * 3;
-
-  switch (opts.format) {
-    case ExportFormat::Jpeg: {
-      std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
-      if (!out) {
-        return Fail("ERR_IMAGE_ENCODE_FAILED", "failed to open JPEG file");
-      }
-      StbStreamCtx ctx;
-      ctx.out = &out;
-      const int ok = stbi_write_jpg_to_func(StbStreamCallback, &ctx, width,
-                                           height, 3, rgb, quality);
-      if (!ok || !ctx.ok || !out) {
-        out.close();
-        std::remove(outPath.c_str());
-        return Fail("ERR_IMAGE_ENCODE_FAILED", "JPEG encode failed");
-      }
-      return Ok();
-    }
-    case ExportFormat::Png: {
-      std::ofstream out(outPath, std::ios::binary | std::ios::trunc);
-      if (!out) {
-        return Fail("ERR_IMAGE_ENCODE_FAILED", "failed to open PNG file");
-      }
-      StbStreamCtx ctx;
-      ctx.out = &out;
-      const int ok = stbi_write_png_to_func(StbStreamCallback, &ctx, width,
-                                           height, 3, rgb, stride);
-      if (!ok || !ctx.ok || !out) {
-        out.close();
-        std::remove(outPath.c_str());
-        return Fail("ERR_IMAGE_ENCODE_FAILED", "PNG encode failed");
-      }
-      return Ok();
-    }
-    case ExportFormat::Webp: {
-#if defined(HAVE_LIBWEBP)
-      // libwebp returns one contiguous buffer; no chunked file API in our path.
-      uint8_t* encoded = nullptr;
-      const size_t encodedSize = WebPEncodeRGB(
-          rgb, width, height, stride, static_cast<float>(quality), &encoded);
-      if (encodedSize == 0 || !encoded) {
-        return Fail("ERR_IMAGE_ENCODE_FAILED", "WebP encode failed");
-      }
-      const bool written = WriteBytesToFile(outPath, encoded, encodedSize);
-      WebPFree(encoded);
-      if (!written) {
-        return Fail("ERR_IMAGE_ENCODE_FAILED", "failed to write WebP file");
-      }
-      return Ok();
-#else
-      return Fail("ERR_IMAGE_WEBP_DISABLED",
-                  "libwebp is not linked. Rebuild with sherpaOnnxEnableLibwebp=true "
-                  "(Android) or SHERPA_ONNX_ENABLE_LIBWEBP=1 (iOS) and ensure libwebp "
-                  "prebuilts resolve.");
-#endif
-    }
-  }
-  return Fail("ERR_IMAGE_INVALID_ARGUMENT", "unknown export format");
+  return EncodeRgbBytesWithPolicy(rgb, width, height, outPath, opts);
 }
 
 ExportResult EncodeRgbFrameToFile(const RgbFrame& frame,

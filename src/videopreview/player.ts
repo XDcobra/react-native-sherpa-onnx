@@ -303,6 +303,7 @@ export async function createVideoPreviewPlayer(
       loop: options?.loop ?? false,
       pauseOnBackground: options?.pauseOnBackground ?? true,
       progressIntervalMs: options?.progressIntervalMs ?? 250,
+      decodePolicy: options?.decodePolicy,
     })) as Record<string, unknown>;
     if (raw.errorCode) {
       throw new VideoPreviewError(

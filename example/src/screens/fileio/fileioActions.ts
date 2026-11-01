@@ -31,6 +31,7 @@ import {
   ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import type { CodecPolicy } from 'react-native-sherpa-onnx/codec';
 import {
   createOfflineVideoBufferFromFile,
   exportVideo,
@@ -98,7 +99,12 @@ export type FileioCopyInput = {
 };
 
 export type FileioCopyResult =
-  | { status: 'success'; resolved: ResolvedFileRef; detail: string }
+  | {
+      status: 'success';
+      resolved: ResolvedFileRef;
+      encodeElapsedMs: number;
+      detail: string;
+    }
   | { status: 'canceled' }
   | { status: 'error'; message: string };
 
@@ -123,6 +129,7 @@ export type FileioDecodeResult =
       bufferId: string;
       durationMs?: number;
       durationUs?: number;
+      decodeElapsedMs: number;
       detail: string;
       summary: string;
     }
@@ -133,10 +140,21 @@ export type FileioVideoEncodeInput = {
   inputSource: FileSource;
   inputLabel: string;
   outputFormat: VideoExportContainer;
+  decodePolicy?: CodecPolicy;
+  encodePolicy?: CodecPolicy;
+};
+
+export type FileioDecodeOptions = {
+  decodePolicy?: CodecPolicy;
+  encodePolicy?: CodecPolicy;
 };
 
 const FS_EXPORT_DIR = `${DocumentDirectoryPath}/SherpaOnnxFileIO/exports`;
 const APP_EXPORT_RELATIVE = 'SherpaOnnxFileIO/exports';
+
+function formatElapsedMs(ms: number): string {
+  return `${ms.toFixed(ms >= 10 ? 1 : 2)} ms`;
+}
 
 function isPickCanceled(err: unknown): boolean {
   if (isErrorWithCode(err) && err.code === errorCodes.OPERATION_CANCELED) {
@@ -406,7 +424,7 @@ async function saveViaStagingAndSaveDocuments(
   input: PreparedInput['input'],
   format: AudioOutputFormat,
   outputSampleRateHz: number
-): Promise<ResolvedFileRef> {
+): Promise<{ resolved: ResolvedFileRef; encodeElapsedMs: number }> {
   const stagingRel = `fileio-staging/fileio-temp-${Date.now()}.${format}`;
   const stagingDest: FileDestination = {
     kind: 'app',
@@ -416,7 +434,9 @@ async function saveViaStagingAndSaveDocuments(
   const saveOptions =
     outputSampleRateHz > 0 ? { outputSampleRateHz } : undefined;
 
+  const encodeStartedAt = performance.now();
   const staged = await saveAudioAsFile(input, stagingDest, format, saveOptions);
+  const encodeElapsedMs = performance.now() - encodeStartedAt;
   if (staged.kind !== 'fs') {
     throw new Error(
       'Expected a filesystem path from app cache staging; got content URI.'
@@ -443,9 +463,10 @@ async function saveViaStagingAndSaveDocuments(
     if (!uri) {
       throw new Error('Save dialog did not return a target URI.');
     }
-    return uri.startsWith('content://')
+    const resolved: ResolvedFileRef = uri.startsWith('content://')
       ? { kind: 'contentUri', uri }
       : { kind: 'fs', path: decodeURI(uri.replace(/^file:\/\//, '')) };
+    return { resolved, encodeElapsedMs };
   } finally {
     await unlink(fsPath).catch(() => {});
   }
@@ -566,13 +587,16 @@ export async function runFileioProbe(
 async function runAudioDecode(
   input: FileioInputSource
 ): Promise<FileioDecodeResult> {
+  const startedAt = performance.now();
   const ref = await createOfflineAudioBufferFromFile(input.fileSource, {
     forceMono: true,
   });
+  const decodeElapsedMs = performance.now() - startedAt;
   const { info, bufferId } = ref;
   await releasePipelineAudioBuffer(bufferId).catch(() => {});
   const detail = [
     'Media: audio',
+    `decode: ${formatElapsedMs(decodeElapsedMs)}`,
     `bufferId: ${String(bufferId)}`,
     `sampleRate: ${info.sampleRate} Hz`,
     `channels: ${info.channelCount}`,
@@ -587,15 +611,22 @@ async function runAudioDecode(
     media: 'audio',
     bufferId: String(bufferId),
     durationMs: info.durationMs,
+    decodeElapsedMs,
     detail,
-    summary: `${info.durationMs.toFixed(0)} ms, ${info.sampleRate} Hz`,
+    summary: `decode ${formatElapsedMs(
+      decodeElapsedMs
+    )}, ${info.durationMs.toFixed(0)} ms audio, ${info.sampleRate} Hz`,
   };
 }
 
 async function runVideoDecode(
-  input: FileioInputSource
+  input: FileioInputSource,
+  options?: FileioDecodeOptions
 ): Promise<FileioDecodeResult> {
-  const video = await createOfflineVideoBufferFromFile(input.fileSource);
+  const startedAt = performance.now();
+  const video = await createOfflineVideoBufferFromFile(input.fileSource, {
+    decodePolicy: options?.decodePolicy,
+  });
   const frameRel = `SherpaOnnxFileIO/decode-frame-${Date.now()}.jpg`;
   try {
     const ptsUs = video.info.seekableStartUs ?? 0;
@@ -603,8 +634,13 @@ async function runVideoDecode(
       video,
       ptsUs,
       { kind: 'app', base: 'cache', path: frameRel },
-      { format: 'jpeg', maxSide: 256 }
+      {
+        format: 'jpeg',
+        maxSide: 256,
+        encodePolicy: options?.encodePolicy,
+      }
     );
+    const decodeElapsedMs = performance.now() - startedAt;
     if (still.kind === 'fs') {
       await unlink(still.path).catch(() => {});
     }
@@ -612,6 +648,7 @@ async function runVideoDecode(
       (video.info.seekableEndUs ?? 0) - (video.info.seekableStartUs ?? 0);
     const detail = [
       'Media: video',
+      `decode: ${formatElapsedMs(decodeElapsedMs)}`,
       `bufferId: ${String(video.bufferId)}`,
       `kind: ${video.info.kind}`,
       `frames: ${video.info.frameCount}`,
@@ -620,6 +657,8 @@ async function runVideoDecode(
       } µs`,
       `audio: ${video.info.audio?.codec ?? 'none'}`,
       `decoded frame at ${ptsUs} µs (jpeg, discarded)`,
+      `decodePolicy: ${options?.decodePolicy ?? 'preferHardware'}`,
+      `encodePolicy: ${options?.encodePolicy ?? 'preferHardware'}`,
       `Input: ${input.label}`,
       describeFileSource(input.fileSource),
     ].join('\n');
@@ -629,8 +668,11 @@ async function runVideoDecode(
       bufferId: String(video.bufferId),
       durationUs,
       durationMs: durationUs / 1000,
+      decodeElapsedMs,
       detail,
-      summary: `${video.info.frameCount} frames, frame@${ptsUs}µs`,
+      summary: `decode ${formatElapsedMs(decodeElapsedMs)}, ${
+        video.info.frameCount
+      } frames`,
     };
   } finally {
     await releaseVideoBuffer(video).catch(() => {});
@@ -638,17 +680,18 @@ async function runVideoDecode(
 }
 
 export async function runFileioDecode(
-  input: FileioInputSource
+  input: FileioInputSource,
+  options?: FileioDecodeOptions
 ): Promise<FileioDecodeResult> {
   try {
     if (isVideoBundledPath(input.bundledPath)) {
-      return await runVideoDecode(input);
+      return await runVideoDecode(input, options);
     }
     if (input.bundledPath) {
       return await runAudioDecode(input);
     }
     try {
-      return await runVideoDecode(input);
+      return await runVideoDecode(input, options);
     } catch {
       return await runAudioDecode(input);
     }
@@ -675,7 +718,19 @@ export async function runFileioCopy(
       input.inputSource
     );
 
-    let resolved: ResolvedFileRef;
+    let resolved: ResolvedFileRef | undefined;
+    let encodeElapsedMs = 0;
+
+    const encodeToDest = async (dest: FileDestination) => {
+      const startedAt = performance.now();
+      resolved = await saveAudioAsFile(
+        prepared!.input,
+        dest,
+        input.outputFormat,
+        saveOptions
+      );
+      encodeElapsedMs = performance.now() - startedAt;
+    };
 
     switch (input.destinationKind) {
       case 'fs':
@@ -684,12 +739,7 @@ export async function runFileioCopy(
           input.destinationKind,
           exportFilename(input.outputFormat)
         );
-        resolved = await saveAudioAsFile(
-          prepared.input,
-          dest,
-          input.outputFormat,
-          saveOptions
-        );
+        await encodeToDest(dest);
         break;
       }
       case 'contentTree': {
@@ -697,45 +747,39 @@ export async function runFileioCopy(
           exportFilename(input.outputFormat),
           mimeTypeForFormat(input.outputFormat)
         );
-        resolved = await saveAudioAsFile(
-          prepared.input,
-          dest,
-          input.outputFormat,
-          saveOptions
-        );
+        await encodeToDest(dest);
         break;
       }
       case 'contentUri': {
         if (Platform.OS === 'ios') {
-          resolved = await saveAudioAsFile(
-            prepared.input,
-            { kind: 'contentUri', uri: 'content://unsupported-on-ios' },
-            input.outputFormat,
-            saveOptions
-          );
+          await encodeToDest({
+            kind: 'contentUri',
+            uri: 'content://unsupported-on-ios',
+          });
           break;
         }
-        resolved = await saveViaStagingAndSaveDocuments(
+        const staged = await saveViaStagingAndSaveDocuments(
           prepared.input,
           input.outputFormat,
           outputSampleRateHz
         );
+        resolved = staged.resolved;
+        encodeElapsedMs = staged.encodeElapsedMs;
         break;
       }
       case 'securityScoped': {
         const dest = await pickSecurityScopedDestination();
-        resolved = await saveAudioAsFile(
-          prepared.input,
-          dest,
-          input.outputFormat,
-          saveOptions
-        );
+        await encodeToDest(dest);
         break;
       }
     }
 
+    if (!resolved) {
+      throw new Error('encode produced no destination');
+    }
     const location = formatResolvedLocation(resolved);
     const detail = [
+      `encode: ${formatElapsedMs(encodeElapsedMs)}`,
       `Output: ${location}`,
       `Format: ${input.outputFormat}`,
       outputSampleRateHz > 0
@@ -746,7 +790,7 @@ export async function runFileioCopy(
       describeFileSource(input.inputSource),
     ].join('\n');
 
-    return { status: 'success', resolved, detail };
+    return { status: 'success', resolved, encodeElapsedMs, detail };
   } catch (e) {
     if (isPickCanceled(e)) {
       return { status: 'canceled' };
@@ -771,7 +815,9 @@ export async function runFileioVideoEncode(
   const filename = exportFilename(input.outputFormat, 'fileio-video');
   const mime = mimeTypeForVideoFormat(input.outputFormat);
   try {
-    video = await createOfflineVideoBufferFromFile(input.inputSource);
+    video = await createOfflineVideoBufferFromFile(input.inputSource, {
+      decodePolicy: input.decodePolicy,
+    });
 
     let dest: FileDestination;
     switch (input.destinationKind) {
@@ -792,7 +838,12 @@ export async function runFileioVideoEncode(
           base: 'cache',
           path: `SherpaOnnxFileIO/staging/${filename}`,
         };
-        const staged = await exportVideo(video, dest, input.outputFormat);
+        const encodeStartedAt = performance.now();
+        const staged = await exportVideo(video, dest, input.outputFormat, {
+          decodePolicy: input.decodePolicy,
+          encodePolicy: input.encodePolicy,
+        });
+        const encodeElapsedMs = performance.now() - encodeStartedAt;
         if (staged.kind !== 'fs') {
           throw new Error(
             'Expected a filesystem path from app cache staging; got content URI.'
@@ -823,10 +874,14 @@ export async function runFileioVideoEncode(
           return {
             status: 'success',
             resolved,
+            encodeElapsedMs,
             detail: [
+              `encode: ${formatElapsedMs(encodeElapsedMs)}`,
               `Output: ${formatResolvedLocation(resolved)}`,
               `Format: ${input.outputFormat}`,
               'Video encode: exportVideo (H.264)',
+              `decodePolicy: ${input.decodePolicy ?? 'preferHardware'}`,
+              `encodePolicy: ${input.encodePolicy ?? 'preferHardware'}`,
               `File input: ${input.inputLabel}`,
               describeFileSource(input.inputSource),
             ].join('\n'),
@@ -840,14 +895,23 @@ export async function runFileioVideoEncode(
         break;
     }
 
-    const resolved = await exportVideo(video, dest, input.outputFormat);
+    const encodeStartedAt = performance.now();
+    const resolved = await exportVideo(video, dest, input.outputFormat, {
+      decodePolicy: input.decodePolicy,
+      encodePolicy: input.encodePolicy,
+    });
+    const encodeElapsedMs = performance.now() - encodeStartedAt;
     return {
       status: 'success',
       resolved,
+      encodeElapsedMs,
       detail: [
+        `encode: ${formatElapsedMs(encodeElapsedMs)}`,
         `Output: ${formatResolvedLocation(resolved)}`,
         `Format: ${input.outputFormat}`,
         'Video encode: exportVideo (H.264)',
+        `decodePolicy: ${input.decodePolicy ?? 'preferHardware'}`,
+        `encodePolicy: ${input.encodePolicy ?? 'preferHardware'}`,
         `File input: ${input.inputLabel}`,
         describeFileSource(input.inputSource),
       ].join('\n'),

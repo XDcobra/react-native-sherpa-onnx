@@ -61,16 +61,28 @@ void DecodeCallback(void* refcon, void* /*sourceFrameRefCon*/, OSStatus status,
 
 }  // namespace
 
-VideoToolboxDecoder::VideoToolboxDecoder() = default;
+VideoToolboxDecoder::VideoToolboxDecoder() : VideoToolboxDecoder(Mode::Hardware) {}
+VideoToolboxDecoder::VideoToolboxDecoder(Mode mode) : mode_(mode) {}
 VideoToolboxDecoder::~VideoToolboxDecoder() { Close(); }
 
 Status VideoToolboxDecoder::Configure(const VideoTrackInfo& track) {
   Close();
   track_ = track;
-  if (!VTIsHardwareDecodeSupported(track.codec == VideoCodec::Hevc
-                                       ? kCMVideoCodecType_HEVC
-                                       : kCMVideoCodecType_H264)) {
-    return Status::Fail(kErrDecoderUnavailable, "VT hardware not supported");
+  const CMVideoCodecType codecType = track.codec == VideoCodec::Hevc
+                                         ? kCMVideoCodecType_HEVC
+                                         : kCMVideoCodecType_H264;
+  if (mode_ == Mode::Hardware &&
+      !VTIsHardwareDecodeSupported(codecType)) {
+    if (@available(iOS 17.0, *)) {
+      return Status::Fail(kErrDecoderUnavailable, "VT hardware not supported");
+    }
+    // iOS < 17: hardware provider is legacy create, reported unknown.
+  }
+  if (mode_ == Mode::Software) {
+    if (@available(iOS 17.0, *)) {
+    } else {
+      return Status::Fail(kErrSwDecoderDisabled, "os-too-old");
+    }
   }
   std::vector<std::vector<uint8_t>> sps, pps, vps;
   OSStatus err = noErr;
@@ -119,9 +131,26 @@ Status VideoToolboxDecoder::Configure(const VideoTrackInfo& track) {
       CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &pix);
   CFDictionarySetValue(attrs, kCVPixelBufferPixelFormatTypeKey, pixNum);
   CFRelease(pixNum);
+  CFMutableDictionaryRef spec = CFDictionaryCreateMutable(
+      kCFAllocatorDefault, 1, &kCFTypeDictionaryKeyCallBacks,
+      &kCFTypeDictionaryValueCallBacks);
+#if defined(__IPHONE_17_0)
+  if (@available(iOS 17.0, *)) {
+    if (mode_ == Mode::Hardware) {
+      CFDictionarySetValue(
+          spec, kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder,
+          kCFBooleanTrue);
+    } else {
+      CFDictionarySetValue(
+          spec, kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder,
+          kCFBooleanFalse);
+    }
+  }
+#endif
   VTDecompressionSessionRef session = nullptr;
-  err = VTDecompressionSessionCreate(kCFAllocatorDefault, fmt, nullptr, attrs,
+  err = VTDecompressionSessionCreate(kCFAllocatorDefault, fmt, spec, attrs,
                                      &cb, &session);
+  CFRelease(spec);
   CFRelease(attrs);
   if (err != noErr || session == nullptr) {
     CFRelease(fmt);
@@ -131,6 +160,21 @@ Status VideoToolboxDecoder::Configure(const VideoTrackInfo& track) {
   session_ = session;
   configured_ = true;
   VIDEO_LOGI("video.decode vt %s", VideoCodecName(track.codec));
+#if defined(__IPHONE_17_0)
+  if (@available(iOS 17.0, *)) {
+    CFTypeRef used = nullptr;
+    const OSStatus pst = VTSessionCopyProperty(
+        session, kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
+        kCFAllocatorDefault, &used);
+    int hw = -1;
+    if (pst == noErr && used != nullptr) {
+      hw = (used == kCFBooleanTrue) ? 1 : 0;
+      CFRelease(used);
+    }
+    VIDEO_LOGI("codec.vt decode hw=%d", hw);
+    usedHardware_ = hw == 1;
+  }
+#endif
   return Status::Ok();
 }
 
@@ -162,6 +206,9 @@ Status VideoToolboxDecoder::Submit(const EncodedPacket& packet) {
   err = VTDecompressionSessionDecodeFrame((VTDecompressionSessionRef)session_,
                                           sample, flags, nullptr, nullptr);
   CFRelease(sample);
+  if (err == kVTInvalidSessionErr) {
+    return Status::Fail("invalid-session", "vt session");
+  }
   if (err != noErr) {
     return Status::Fail(kErrDecodeFailed, "decode");
   }

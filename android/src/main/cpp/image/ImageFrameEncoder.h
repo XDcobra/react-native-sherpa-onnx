@@ -12,24 +12,32 @@ enum class ExportFormat {
   Jpeg,
   Png,
   Webp,
+  Heic,
 };
 
 struct ExportOptions {
   ExportFormat format = ExportFormat::Jpeg;
-  /** JPEG/WebP quality 1..100 (clamped). Ignored for PNG. */
+  /** JPEG/WebP/HEIC quality 1..100 (clamped). Ignored for PNG. */
   int quality = 85;
   /** Display/export downsample; <= 0 keeps full frame size. */
   int maxSide = 0;
+  /** Empty = resolve from configureCodecs / SDK default. */
+  std::string encodePolicy;
 };
 
 struct ExportResult {
   bool ok = false;
   std::string errorCode;
   std::string errorMessage;
+  std::string codecProvider;
+  std::string codecTier;
+  std::string codecOrigin;
 };
 
-/** Parse "jpeg"|"jpg"|"png"|"webp" (case-insensitive). Returns false if unknown. */
+/** Parse "jpeg"|"jpg"|"png"|"webp"|"heic"|"heif" (case-insensitive). */
 bool ParseExportFormat(const std::string& name, ExportFormat* out);
+
+const char* ExportFormatName(ExportFormat format);
 
 /**
  * Copy one frame from the registry (optional maxSide) into [out].
