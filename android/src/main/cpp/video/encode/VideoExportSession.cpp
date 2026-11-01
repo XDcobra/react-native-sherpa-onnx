@@ -386,8 +386,9 @@ Status VideoExportSession::Run(const std::string& bufferId,
   if (!entry->timeline() || entry->timeline()->empty()) {
     return Status::Fail(kErrInvalidArgument, "empty timeline");
   }
-  VIDEO_LOGI("video.export begin format=%s codec=%s buffer=%s", format.c_str(),
-             VideoCodecName(opts.codec), bufferId.c_str());
+  VIDEO_LOGI("video.export begin format=%s codec=%s buffer=%s includeAudio=%d",
+             format.c_str(), VideoCodecName(opts.codec), bufferId.c_str(),
+             opts.includeAudio ? 1 : 0);
 #ifndef HAVE_FFMPEG
   (void)opts;
   (void)cancel;
@@ -593,7 +594,8 @@ Status VideoExportSession::Run(const std::string& bufferId,
     vs->codecpar->extradata_size = static_cast<int>(extradata.size());
   }
 
-  const bool wantAudio = entry->audioTrack() != nullptr &&
+  const bool wantAudio = opts.includeAudio &&
+                         entry->audioTrack() != nullptr &&
                          entry->audioTrack()->decodable &&
                          entry->audioTimeline() != nullptr &&
                          !entry->audioTimeline()->empty();

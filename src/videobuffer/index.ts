@@ -735,6 +735,7 @@ export async function exportVideo(
         operationId,
         decodePolicy: options?.decodePolicy,
         encodePolicy: options?.encodePolicy,
+        includeAudio: options?.includeAudio ?? true,
       }
     );
     if (__DEV__) {

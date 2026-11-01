@@ -4308,6 +4308,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       } else {
         null
       }
+    val includeAudio =
+      options == null || !options.hasKey("includeAudio") || options.isNull("includeAudio") ||
+        options.getBoolean("includeAudio")
     val dest: ResolvedDestination
     try {
       dest = resolveDestinationForSave(destination, ext)
@@ -4347,6 +4350,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           progressCallback,
           decodePolicy,
           encodePolicy,
+          includeAudio,
         ) as? HashMap<String, Any>
         if (raw == null) {
           cleanupOutputFile(dest.outputPath)

@@ -120,6 +120,7 @@ internal object VideoBufferNative {
     progress: Any?,
     decodePolicy: String?,
     encodePolicy: String?,
+    includeAudio: Boolean,
   ): HashMap<String, Any>?
 
   external fun nativeSetDecodePolicy(bufferId: String, policy: String?)

@@ -19,6 +19,7 @@ struct VideoExportOptions {
   int64_t fromUs = 0;
   int64_t toUs = -1;
   int maxSide = 0;
+  bool includeAudio = true;
   std::optional<sherpa_onnx::codec::Policy> decodePolicy;
   std::optional<sherpa_onnx::codec::Policy> encodePolicy;
   sherpa_onnx::codec::Decision decoderDecision;

@@ -165,6 +165,8 @@ export interface ExportVideoOptions {
   maxSide?: number;
   decodePolicy?: import('../codec/types').CodecPolicy;
   encodePolicy?: import('../codec/types').CodecPolicy;
+  /** Default true. False writes a video-only file. */
+  includeAudio?: boolean;
   onProgress?: (e: { percent: number; encodedUs: number }) => void;
   signal?: AbortSignal;
 }

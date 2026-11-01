@@ -157,10 +157,11 @@ internal object VideoBufferService : ComponentCallbacks2 {
     progress: Any?,
     decodePolicy: String? = null,
     encodePolicy: String? = null,
+    includeAudio: Boolean = true,
   ): Map<String, Any>? =
     VideoBufferNative.nativeExportVideo(
       bufferId, outPath, format, codec, bitrate, fromUs, toUs, maxSide,
-      cancelFlagAddr, progress, decodePolicy, encodePolicy,
+      cancelFlagAddr, progress, decodePolicy, encodePolicy, includeAudio,
     )
 
   fun probeVideoFile(path: String): Map<String, Any>? =

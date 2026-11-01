@@ -827,6 +827,9 @@ void BindVideoModule(SherpaOnnx *mod) {
   opts.maxSide = maxSide;
   opts.decodePolicy = PolicyFromDict(options, @"decodePolicy");
   opts.encodePolicy = PolicyFromDict(options, @"encodePolicy");
+  if (options[@"includeAudio"] != nil) {
+    opts.includeAudio = [options[@"includeAudio"] boolValue];
+  }
   __weak SherpaOnnx *weakSelf = self;
   NSString *opIdNs = operationId;
   dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{

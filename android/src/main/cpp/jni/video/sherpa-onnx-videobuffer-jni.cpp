@@ -651,7 +651,7 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
     JNIEnv* env, jclass, jstring jId, jstring jOutPath, jstring jFormat,
     jstring jCodec, jint bitrate, jlong fromUs, jlong toUs, jint maxSide,
     jlong cancelAddr, jobject progress, jstring jDecodePolicy,
-    jstring jEncodePolicy) {
+    jstring jEncodePolicy, jboolean includeAudio) {
   using sherpa_onnx::video::VideoCodec;
   using sherpa_onnx::video::VideoExportOptions;
   using sherpa_onnx::video::VideoExportSession;
@@ -664,6 +664,7 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeExportVideo(
   opts.fromUs = fromUs;
   opts.toUs = toUs;
   opts.maxSide = maxSide;
+  opts.includeAudio = includeAudio == JNI_TRUE;
   opts.decodePolicy =
       sherpa_onnx::codec::ParsePolicy(JstringToStd(env, jDecodePolicy));
   opts.encodePolicy =
