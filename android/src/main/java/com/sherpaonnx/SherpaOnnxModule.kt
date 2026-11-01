@@ -3402,10 +3402,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun createOfflineTextBufferFromText(text: String, options: ReadableMap?, promise: Promise) {
     try {
-      if (text.isEmpty()) {
-        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INVALID_ARGUMENT, "text must not be empty")
-        return
-      }
       val lang = options?.getString("lang") ?: ""
       val emotion = options?.getString("emotion") ?: ""
       val event = options?.getString("event") ?: ""

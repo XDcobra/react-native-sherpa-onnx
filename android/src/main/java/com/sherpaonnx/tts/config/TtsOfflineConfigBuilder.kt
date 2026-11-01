@@ -38,7 +38,6 @@ internal object TtsOfflineConfigBuilder {
           model = path(paths, "ttsModel"),
           lexicon = path(paths, "lexicon"),
           tokens = path(paths, "tokens"),
-          dataDir = path(paths, "dataDir"),
           noiseScale = ns,
           noiseScaleW = nsw,
           lengthScale = ls
@@ -53,7 +52,6 @@ internal object TtsOfflineConfigBuilder {
           vocoder = path(paths, "vocoder"),
           lexicon = path(paths, "lexicon"),
           tokens = path(paths, "tokens"),
-          dataDir = path(paths, "dataDir"),
           noiseScale = ns,
           lengthScale = ls
         ),
@@ -66,7 +64,6 @@ internal object TtsOfflineConfigBuilder {
           model = path(paths, "ttsModel"),
           voices = path(paths, "voices"),
           tokens = path(paths, "tokens"),
-          dataDir = path(paths, "dataDir"),
           lexicon = path(paths, "lexicon"),
           lang = kokoroLang.orEmpty(),
           lengthScale = ls
@@ -80,7 +77,7 @@ internal object TtsOfflineConfigBuilder {
           model = path(paths, "ttsModel"),
           voices = path(paths, "voices"),
           tokens = path(paths, "tokens"),
-          dataDir = path(paths, "dataDir"),
+          lexicon = path(paths, "lexicon"),
           lengthScale = ls
         ),
         numThreads = numThreads,
@@ -107,7 +104,6 @@ internal object TtsOfflineConfigBuilder {
           encoder = path(paths, "encoder"),
           decoder = path(paths, "decoder"),
           vocoder = path(paths, "vocoder"),
-          dataDir = path(paths, "dataDir"),
           lexicon = path(paths, "lexicon")
         ),
         numThreads = numThreads,
@@ -136,7 +132,6 @@ internal object TtsOfflineConfigBuilder {
               vocoder = path(paths, "vocoder"),
               lexicon = path(paths, "lexicon"),
               tokens = path(paths, "tokens"),
-              dataDir = path(paths, "dataDir"),
               noiseScale = ns,
               lengthScale = ls
             ),
@@ -150,7 +145,6 @@ internal object TtsOfflineConfigBuilder {
               model = path(paths, "ttsModel"),
               voices = path(paths, "voices"),
               tokens = path(paths, "tokens"),
-              dataDir = path(paths, "dataDir"),
               lexicon = path(paths, "lexicon"),
               lang = kokoroLang.orEmpty(),
               lengthScale = ls
@@ -165,7 +159,6 @@ internal object TtsOfflineConfigBuilder {
               model = path(paths, "ttsModel"),
               lexicon = path(paths, "lexicon"),
               tokens = path(paths, "tokens"),
-              dataDir = path(paths, "dataDir"),
               noiseScale = ns,
               noiseScaleW = nsw,
               lengthScale = ls

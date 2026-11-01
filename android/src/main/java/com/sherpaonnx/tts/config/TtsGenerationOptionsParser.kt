@@ -2,6 +2,7 @@ package com.sherpaonnx.tts.config
 
 import android.util.Log
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.sherpaonnx.tts.core.TtsEngineInstance
@@ -74,7 +75,33 @@ internal object TtsGenerationOptionsParser {
     return false
   }
 
-  /** Non-clone GenerationConfig when numSteps and/or extra/lang are present. */
+  fun parsePhonemeCodepoints(options: ReadableMap?): Array<IntArray>? {
+    val outer = readNestedArray(options, "phonemeCodepoints") ?: return null
+    if (outer.size() == 0) return null
+    return Array(outer.size()) { i ->
+      val inner = outer.getArray(i) ?: return@Array intArrayOf()
+      IntArray(inner.size()) { j -> inner.getDouble(j).toInt() }
+    }
+  }
+
+  fun parseTokens(options: ReadableMap?): Array<Array<String>>? {
+    val outer = readNestedArray(options, "tokens") ?: return null
+    if (outer.size() == 0) return null
+    return Array(outer.size()) { i ->
+      val inner = outer.getArray(i) ?: return@Array emptyArray()
+      Array(inner.size()) { j -> inner.getString(j).orEmpty() }
+    }
+  }
+
+  fun hasPhonemeInput(options: ReadableMap?): Boolean =
+    parsePhonemeCodepoints(options) != null || parseTokens(options) != null
+
+  private fun readNestedArray(options: ReadableMap?, key: String): ReadableArray? {
+    if (options == null || !options.hasKey(key) || options.isNull(key)) return null
+    return options.getArray(key)
+  }
+
+  /** Non-clone GenerationConfig when numSteps, extra/lang, and/or phonemes are present. */
   fun buildNonCloneGenerationConfig(
     options: ReadableMap?,
     sid: Int,
@@ -87,12 +114,16 @@ internal object TtsGenerationOptionsParser {
         sid = sid,
         numSteps = getNumSteps(options),
         extra = extraMap,
+        phonemeCodepoints = parsePhonemeCodepoints(options),
+        tokens = parseTokens(options),
       )
     } else {
       GenerationConfig(
         speed = speed,
         sid = sid,
         extra = extraMap,
+        phonemeCodepoints = parsePhonemeCodepoints(options),
+        tokens = parseTokens(options),
       )
     }
   }

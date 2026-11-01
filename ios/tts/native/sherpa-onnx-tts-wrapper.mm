@@ -48,6 +48,25 @@ TtsModelKind ParseTtsModelTypeFromString(const std::string& modelType) {
     return TtsModelKind::kUnknown;
 }
 
+bool HasPhonemeOrTokenInput(const std::optional<VoiceCloneOptions>& cloning) {
+    return cloning.has_value() &&
+        (!cloning->phoneme_codepoints.empty() || !cloning->tokens.empty());
+}
+
+void ApplyPhonemesToGc(
+    sherpa_onnx::cxx::GenerationConfig& gc,
+    const VoiceCloneOptions& vo
+) {
+    gc.phoneme_codepoints = vo.phoneme_codepoints;
+    gc.tokens = vo.tokens;
+}
+
+bool ShouldRejectEmptyText(const std::string& text, bool allowEmpty) {
+    if (!text.empty() || allowEmpty) return false;
+    LOGE("TTS: Input text is empty");
+    return true;
+}
+
 }  // namespace
 
 class TtsWrapper::Impl {
@@ -126,7 +145,6 @@ TtsInitializeResult TtsWrapper::initialize(
             case TtsModelKind::kVits:
                 config.model.vits.model = detect.paths.ttsModel;
                 config.model.vits.tokens = detect.paths.tokens;
-                config.model.vits.data_dir = detect.paths.dataDir;
                 if (!detect.paths.lexicon.empty()) {
                     config.model.vits.lexicon = detect.paths.lexicon;
                 }
@@ -144,7 +162,9 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.matcha.acoustic_model = detect.paths.acousticModel;
                 config.model.matcha.vocoder = detect.paths.vocoder;
                 config.model.matcha.tokens = detect.paths.tokens;
-                config.model.matcha.data_dir = detect.paths.dataDir;
+                if (!detect.paths.lexicon.empty()) {
+                    config.model.matcha.lexicon = detect.paths.lexicon;
+                }
                 if (noiseScale.has_value()) {
                     config.model.matcha.noise_scale = *noiseScale;
                 }
@@ -155,7 +175,6 @@ TtsInitializeResult TtsWrapper::initialize(
             case TtsModelKind::kKokoro:
                 config.model.kokoro.model = detect.paths.ttsModel;
                 config.model.kokoro.tokens = detect.paths.tokens;
-                config.model.kokoro.data_dir = detect.paths.dataDir;
                 config.model.kokoro.voices = detect.paths.voices;
                 if (!detect.paths.lexicon.empty()) {
                     config.model.kokoro.lexicon = detect.paths.lexicon;
@@ -170,8 +189,10 @@ TtsInitializeResult TtsWrapper::initialize(
             case TtsModelKind::kKitten:
                 config.model.kitten.model = detect.paths.ttsModel;
                 config.model.kitten.tokens = detect.paths.tokens;
-                config.model.kitten.data_dir = detect.paths.dataDir;
                 config.model.kitten.voices = detect.paths.voices;
+                if (!detect.paths.lexicon.empty()) {
+                    config.model.kitten.lexicon = detect.paths.lexicon;
+                }
                 if (lengthScale.has_value()) {
                     config.model.kitten.length_scale = *lengthScale;
                 }
@@ -181,7 +202,6 @@ TtsInitializeResult TtsWrapper::initialize(
                 config.model.zipvoice.decoder = detect.paths.decoder;
                 config.model.zipvoice.vocoder = detect.paths.vocoder;
                 config.model.zipvoice.tokens = detect.paths.tokens;
-                config.model.zipvoice.data_dir = detect.paths.dataDir;
                 if (!detect.paths.lexicon.empty()) {
                     config.model.zipvoice.lexicon = detect.paths.lexicon;
                 }
@@ -213,19 +233,6 @@ TtsInitializeResult TtsWrapper::initialize(
                 return result;
         }
 
-        // Prevent hard native aborts from sherpa-onnx when phonemization data is missing.
-        // Some VITS models require either espeak-ng-data or a lexicon. If both are missing,
-        // fail gracefully so JS/UI can display a recoverable error instead of crashing.
-        if (detect.selectedKind == TtsModelKind::kVits &&
-            detect.paths.dataDir.empty() &&
-            detect.paths.lexicon.empty()) {
-            result.error =
-                "TTS VITS init blocked: missing both espeak-ng-data and lexicon. "
-                "Please add espeak-ng-data to the model folder or provide a lexicon.";
-            LOGE("%s", result.error.c_str());
-            return result;
-        }
-
         if (ruleFsts.has_value() && !ruleFsts->empty()) {
             config.rule_fsts = *ruleFsts;
         }
@@ -239,28 +246,13 @@ TtsInitializeResult TtsWrapper::initialize(
             config.silence_scale = *silenceScale;
         }
 
-        // Log paths passed to sherpa-onnx C++ API to diagnose /usr/share/espeak-ng-data fallback.
-        LOGI("TTS: modelDir=%s", modelDir.c_str());
-        switch (detect.selectedKind) {
-            case TtsModelKind::kVits:
-                LOGI("TTS: vits data_dir=%s (empty=%d)", detect.paths.dataDir.empty() ? "(empty)" : detect.paths.dataDir.c_str(), (int)detect.paths.dataDir.empty());
-                break;
-            case TtsModelKind::kMatcha:
-                LOGI("TTS: matcha data_dir=%s (empty=%d)", detect.paths.dataDir.empty() ? "(empty)" : detect.paths.dataDir.c_str(), (int)detect.paths.dataDir.empty());
-                break;
-            case TtsModelKind::kKokoro:
-            case TtsModelKind::kKitten:
-            case TtsModelKind::kZipvoice:
-                LOGI("TTS: data_dir=%s (empty=%d)", detect.paths.dataDir.empty() ? "(empty)" : detect.paths.dataDir.c_str(), (int)detect.paths.dataDir.empty());
-                break;
-            default:
-                break;
-        }
+        LOGI("TTS: modelDir=%s lexicon=%s", modelDir.c_str(),
+             detect.paths.lexicon.empty() ? "(empty)" : detect.paths.lexicon.c_str());
         LOGI("TTS: Creating OfflineTts instance...");
         pImpl->tts = sherpa_onnx::cxx::OfflineTts::Create(config);
 
         if (!pImpl->tts.has_value()) {
-            result.error = "TTS: Failed to create OfflineTts instance (e.g. missing espeak-ng data or invalid model)";
+            result.error = "TTS: Failed to create OfflineTts instance (invalid model or missing files)";
             LOGE("%s", result.error.c_str());
             return result;
         }
@@ -335,7 +327,6 @@ TtsInitializeResult TtsWrapper::initializeCustom(
             case TtsModelKind::kVits:
                 config.model.vits.model = paths.ttsModel;
                 config.model.vits.tokens = paths.tokens;
-                config.model.vits.data_dir = paths.dataDir;
                 if (!paths.lexicon.empty()) {
                     config.model.vits.lexicon = paths.lexicon;
                 }
@@ -353,7 +344,6 @@ TtsInitializeResult TtsWrapper::initializeCustom(
                 config.model.matcha.acoustic_model = paths.acousticModel;
                 config.model.matcha.vocoder = paths.vocoder;
                 config.model.matcha.tokens = paths.tokens;
-                config.model.matcha.data_dir = paths.dataDir;
                 if (!paths.lexicon.empty()) {
                     config.model.matcha.lexicon = paths.lexicon;
                 }
@@ -367,7 +357,6 @@ TtsInitializeResult TtsWrapper::initializeCustom(
             case TtsModelKind::kKokoro:
                 config.model.kokoro.model = paths.ttsModel;
                 config.model.kokoro.tokens = paths.tokens;
-                config.model.kokoro.data_dir = paths.dataDir;
                 config.model.kokoro.voices = paths.voices;
                 if (!paths.lexicon.empty()) {
                     config.model.kokoro.lexicon = paths.lexicon;
@@ -382,8 +371,10 @@ TtsInitializeResult TtsWrapper::initializeCustom(
             case TtsModelKind::kKitten:
                 config.model.kitten.model = paths.ttsModel;
                 config.model.kitten.tokens = paths.tokens;
-                config.model.kitten.data_dir = paths.dataDir;
                 config.model.kitten.voices = paths.voices;
+                if (!paths.lexicon.empty()) {
+                    config.model.kitten.lexicon = paths.lexicon;
+                }
                 if (lengthScale.has_value()) {
                     config.model.kitten.length_scale = *lengthScale;
                 }
@@ -393,7 +384,6 @@ TtsInitializeResult TtsWrapper::initializeCustom(
                 config.model.zipvoice.decoder = paths.decoder;
                 config.model.zipvoice.vocoder = paths.vocoder;
                 config.model.zipvoice.tokens = paths.tokens;
-                config.model.zipvoice.data_dir = paths.dataDir;
                 if (!paths.lexicon.empty()) {
                     config.model.zipvoice.lexicon = paths.lexicon;
                 }
@@ -424,16 +414,6 @@ TtsInitializeResult TtsWrapper::initializeCustom(
                 return result;
         }
 
-        if (selectedKind == TtsModelKind::kVits &&
-            paths.dataDir.empty() &&
-            paths.lexicon.empty()) {
-            result.error =
-                "TTS VITS init blocked: missing both espeak-ng-data and lexicon. "
-                "Please add espeak-ng-data to the model folder or provide a lexicon.";
-            LOGE("%s", result.error.c_str());
-            return result;
-        }
-
         if (ruleFsts.has_value() && !ruleFsts->empty()) {
             config.rule_fsts = *ruleFsts;
         }
@@ -451,7 +431,7 @@ TtsInitializeResult TtsWrapper::initializeCustom(
         pImpl->tts = sherpa_onnx::cxx::OfflineTts::Create(config);
 
         if (!pImpl->tts.has_value()) {
-            result.error = "TTS: Failed to create OfflineTts instance (e.g. missing espeak-ng data or invalid model)";
+            result.error = "TTS: Failed to create OfflineTts instance (invalid model or missing files)";
             LOGE("%s", result.error.c_str());
             return result;
         }
@@ -569,7 +549,8 @@ TtsWrapper::AudioResult TtsWrapper::generate(
 ) {
     if (cloning.has_value() &&
         (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0) &&
-        (!cloning->extra.empty() || cloning->apply_num_steps)) {
+        (!cloning->extra.empty() || cloning->apply_num_steps ||
+         !cloning->phoneme_codepoints.empty() || !cloning->tokens.empty())) {
         AudioResult result;
         result.sampleRate = 0;
 
@@ -578,8 +559,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
             return result;
         }
 
-        if (text.empty()) {
-            LOGE("TTS: Input text is empty");
+        if (ShouldRejectEmptyText(text, HasPhonemeOrTokenInput(cloning))) {
             return result;
         }
 
@@ -593,6 +573,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
             if (!cloning->extra.empty()) {
                 gc.extra = cloning->extra;
             }
+            ApplyPhonemesToGc(gc, *cloning);
             auto audio = pImpl->tts.value().Generate(text, gc);
             result.samples = std::move(audio.samples);
             result.sampleRate = audio.sample_rate;
@@ -619,8 +600,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         return result;
     }
 
-    if (text.empty()) {
-        LOGE("TTS: Input text is empty");
+    if (ShouldRejectEmptyText(text, HasPhonemeOrTokenInput(cloning))) {
         return result;
     }
 
@@ -634,6 +614,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         gc.reference_text = cloning->reference_text;
         gc.num_steps = cloning->num_steps;
         gc.extra = cloning->extra;
+        ApplyPhonemesToGc(gc, *cloning);
 
         auto audio = pImpl->tts.value().Generate(text, gc);
         result.samples = std::move(audio.samples);
@@ -753,8 +734,46 @@ bool TtsWrapper::generateStream(
 ) {
     if (cloning.has_value() &&
         (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0) &&
-        cloning->apply_num_steps) {
-        return generateStream(text, sid, speed, callback, cloning->num_steps);
+        (cloning->apply_num_steps || !cloning->phoneme_codepoints.empty() ||
+         !cloning->tokens.empty() || !cloning->extra.empty())) {
+        if (!pImpl->initialized || !pImpl->tts.has_value()) {
+            LOGE("TTS: Not initialized. Call initialize() first.");
+            return false;
+        }
+        if (ShouldRejectEmptyText(text, HasPhonemeOrTokenInput(cloning))) {
+            return false;
+        }
+        try {
+            auto callbackCopy = callback;
+            auto shim = [](const float *samples, int32_t numSamples, float progress, void *arg) -> int32_t {
+                auto *cb = reinterpret_cast<TtsStreamCallback*>(arg);
+                if (!cb || !(*cb)) return 0;
+                return (*cb)(samples, numSamples, progress);
+            };
+            sherpa_onnx::cxx::GenerationConfig gc;
+            gc.speed = speed;
+            gc.sid = sid;
+            if (cloning->apply_num_steps) {
+                gc.num_steps = cloning->num_steps;
+            }
+            if (!cloning->extra.empty()) {
+                gc.extra = cloning->extra;
+            }
+            ApplyPhonemesToGc(gc, *cloning);
+            pImpl->tts.value().Generate(
+                text,
+                gc,
+                callbackCopy ? shim : nullptr,
+                callbackCopy ? &callbackCopy : nullptr
+            );
+            return true;
+        } catch (const std::exception& e) {
+            LOGE("TTS: Exception during streaming generation (extra/phonemes): %s", e.what());
+            return false;
+        } catch (...) {
+            LOGE("TTS: Unknown exception during streaming generation (extra/phonemes)");
+            return false;
+        }
     }
 
     if (!cloning.has_value() || cloning->reference_audio.empty() ||
@@ -767,8 +786,7 @@ bool TtsWrapper::generateStream(
         return false;
     }
 
-    if (text.empty()) {
-        LOGE("TTS: Input text is empty");
+    if (ShouldRejectEmptyText(text, HasPhonemeOrTokenInput(cloning))) {
         return false;
     }
 
@@ -789,6 +807,7 @@ bool TtsWrapper::generateStream(
         gc.reference_text = cloning->reference_text;
         gc.num_steps = cloning->num_steps;
         gc.extra = cloning->extra;
+        ApplyPhonemesToGc(gc, *cloning);
 
         pImpl->tts.value().Generate(
             text,

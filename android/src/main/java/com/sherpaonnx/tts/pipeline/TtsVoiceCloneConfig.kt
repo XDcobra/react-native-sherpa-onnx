@@ -10,4 +10,6 @@ internal data class TtsVoiceCloneConfig(
   val referenceText: String,
   val silenceScale: Float,
   val numSteps: Int,
+  val phonemeCodepoints: Array<IntArray>? = null,
+  val tokens: Array<Array<String>>? = null,
 )

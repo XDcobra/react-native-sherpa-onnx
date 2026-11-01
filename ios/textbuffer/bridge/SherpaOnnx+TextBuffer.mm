@@ -565,8 +565,8 @@ static std::string txt_generateId(const char *prefix) {
                                  reject:(RCTPromiseRejectBlock)reject
 {
     @try {
-        if (text == nil || [text length] == 0) {
-            reject(kTxtErrInvalidArgument, @"text must not be empty", nil);
+        if (text == nil) {
+            reject(kTxtErrInvalidArgument, @"text is required", nil);
             return;
         }
         std::string bufferId = txt_generateId("txt_off");

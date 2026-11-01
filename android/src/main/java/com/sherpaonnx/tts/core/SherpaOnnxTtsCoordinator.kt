@@ -179,6 +179,8 @@ internal class SherpaOnnxTtsCoordinator(
           referenceText = options.getString("referenceText") ?: "",
           silenceScale = TtsGenerationOptionsParser.getSilenceScale(options),
           numSteps = TtsGenerationOptionsParser.getNumSteps(options),
+          phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
+          tokens = TtsGenerationOptionsParser.parseTokens(options),
         )
       }
 
@@ -212,6 +214,8 @@ internal class SherpaOnnxTtsCoordinator(
         defaultSpeed = defaultSpeed,
         defaultLang = defaultLang,
         defaultNumSteps = defaultNumSteps,
+        defaultPhonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
+        defaultTokens = TtsGenerationOptionsParser.parseTokens(options),
         voiceClone = voiceCloneConfig,
       )
 

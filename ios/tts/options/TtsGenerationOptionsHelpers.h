@@ -8,6 +8,8 @@
 
 #include "native/sherpa-onnx-tts-wrapper.h"
 #include <optional>
+#include <string>
+#include <vector>
 
 NSString *TtsModelKindToNSString(sherpaonnx::TtsModelKind kind);
 
@@ -37,6 +39,17 @@ BOOL TtsModelKindSupportsNumSteps(sherpaonnx::TtsModelKind kind);
 BOOL TtsModelKindRequiresVoiceCloneForNumSteps(sherpaonnx::TtsModelKind kind);
 
 /**
- * Build VoiceCloneOptions for non-clone GenerationConfig (runtime `lang` / `extra` and/or `numSteps`).
+ * Build VoiceCloneOptions for non-clone GenerationConfig (runtime `lang` / `extra`,
+ * `numSteps`, and/or `phonemeCodepoints` / `tokens`).
  */
 std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictionary *options);
+
+BOOL NSDictionaryHasPhonemeInput(NSDictionary *options);
+
+void ApplyPhonemeInputFromNSDictionary(
+    NSDictionary *options,
+    sherpaonnx::VoiceCloneOptions *out
+);
+
+std::vector<std::vector<int32_t>> PhonemeCodepointsFromId(id value);
+std::vector<std::vector<std::string>> TokensFromId(id value);

@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 const int32_t kDefaultVoiceCloneNumSteps = 5;
 
@@ -46,6 +47,65 @@ BOOL TtsModelKindRequiresVoiceCloneForNumSteps(sherpaonnx::TtsModelKind kind) {
     return kind == K::kZipvoice || kind == K::kPocket;
 }
 
+std::vector<std::vector<int32_t>> PhonemeCodepointsFromId(id value) {
+    std::vector<std::vector<int32_t>> out;
+    if (![value isKindOfClass:[NSArray class]]) return out;
+    NSArray *outer = (NSArray *)value;
+    out.reserve([outer count]);
+    for (id sentence in outer) {
+        std::vector<int32_t> inner;
+        if ([sentence isKindOfClass:[NSArray class]]) {
+            NSArray *codes = (NSArray *)sentence;
+            inner.reserve([codes count]);
+            for (id n in codes) {
+                if ([n isKindOfClass:[NSNumber class]]) {
+                    inner.push_back(static_cast<int32_t>([(NSNumber *)n longValue]));
+                }
+            }
+        }
+        out.push_back(std::move(inner));
+    }
+    return out;
+}
+
+std::vector<std::vector<std::string>> TokensFromId(id value) {
+    std::vector<std::vector<std::string>> out;
+    if (![value isKindOfClass:[NSArray class]]) return out;
+    NSArray *outer = (NSArray *)value;
+    out.reserve([outer count]);
+    for (id sentence in outer) {
+        std::vector<std::string> inner;
+        if ([sentence isKindOfClass:[NSArray class]]) {
+            NSArray *toks = (NSArray *)sentence;
+            inner.reserve([toks count]);
+            for (id t in toks) {
+                if ([t isKindOfClass:[NSString class]]) {
+                    inner.emplace_back([(NSString *)t UTF8String] ?: "");
+                }
+            }
+        }
+        out.push_back(std::move(inner));
+    }
+    return out;
+}
+
+BOOL NSDictionaryHasPhonemeInput(NSDictionary *options) {
+    if (options == nil) return NO;
+    id phonemes = options[@"phonemeCodepoints"];
+    if ([phonemes isKindOfClass:[NSArray class]] && [(NSArray *)phonemes count] > 0) return YES;
+    id tokens = options[@"tokens"];
+    return [tokens isKindOfClass:[NSArray class]] && [(NSArray *)tokens count] > 0;
+}
+
+void ApplyPhonemeInputFromNSDictionary(
+    NSDictionary *options,
+    sherpaonnx::VoiceCloneOptions *out
+) {
+    if (options == nil || out == nullptr) return;
+    out->phoneme_codepoints = PhonemeCodepointsFromId(options[@"phonemeCodepoints"]);
+    out->tokens = TokensFromId(options[@"tokens"]);
+}
+
 std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictionary *options) {
     if (options == nil) return std::nullopt;
     std::unordered_map<std::string, std::string> extra;
@@ -64,7 +124,8 @@ std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictio
         extra["lang"] = std::string([lang UTF8String]);
     }
     const BOOL hasNumSteps = NSDictionaryHasNumSteps(options);
-    if (extra.empty() && !hasNumSteps) return std::nullopt;
+    const BOOL hasPhonemes = NSDictionaryHasPhonemeInput(options);
+    if (extra.empty() && !hasNumSteps && !hasPhonemes) return std::nullopt;
 
     sherpaonnx::VoiceCloneOptions vo;
     vo.extra = std::move(extra);
@@ -72,6 +133,7 @@ std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictio
         vo.apply_num_steps = true;
         vo.num_steps = NumStepsFromNSDictionary(options, kDefaultVoiceCloneNumSteps);
     }
+    ApplyPhonemeInputFromNSDictionary(options, &vo);
     return vo;
 }
 
@@ -100,6 +162,7 @@ std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
     if (options[@"silenceScale"] != nil) {
         vo.silence_scale = static_cast<float>([options[@"silenceScale"] doubleValue]);
     }
+    ApplyPhonemeInputFromNSDictionary(options, &vo);
     id extra = options[@"extra"];
     if ([extra isKindOfClass:[NSDictionary class]]) {
         NSDictionary *ex = (NSDictionary *)extra;

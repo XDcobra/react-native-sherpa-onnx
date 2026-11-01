@@ -50,8 +50,10 @@ internal class TtsBatchGenerationService(
         return
       }
       if (!textEntry.populated || textEntry.text.isEmpty()) {
-        promise.reject("TTS_TEXT_BUFFER_EMPTY", "Text buffer is empty or not populated: $textInBufferId")
-        return
+        if (!TtsGenerationOptionsParser.hasPhonemeInput(options)) {
+          promise.reject("TTS_TEXT_BUFFER_EMPTY", "Text buffer is empty or not populated: $textInBufferId")
+          return
+        }
       }
 
       // 3. Resolve output audio buffer
@@ -143,7 +145,9 @@ internal class TtsBatchGenerationService(
             referenceSampleRate = refSampleRate,
             referenceText = refText,
             numSteps = numSteps,
-            extra = TtsGenerationOptionsParser.buildExtraMap(options)
+            extra = TtsGenerationOptionsParser.buildExtraMap(options),
+            phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
+            tokens = TtsGenerationOptionsParser.parseTokens(options),
           )
           tts.generateWithConfig(text, config)
         } else if (inst.isPocket) {
@@ -151,6 +155,7 @@ internal class TtsBatchGenerationService(
           return
         } else if (
           TtsGenerationOptionsParser.hasNumSteps(options) ||
+          TtsGenerationOptionsParser.hasPhonemeInput(options) ||
           !TtsGenerationOptionsParser.buildExtraMap(options).isNullOrEmpty()
         ) {
           tts.generateWithConfig(

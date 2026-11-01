@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 class TtsOfflineLivePipelineWorker : public OfflineLivePipelineWorker {
 public:
@@ -19,7 +20,9 @@ public:
     float defaultSpeed,
     std::optional<sherpaonnx::VoiceCloneOptions> voiceClone,
     std::optional<std::string> defaultLang = std::nullopt,
-    std::optional<int32_t> defaultNumSteps = std::nullopt
+    std::optional<int32_t> defaultNumSteps = std::nullopt,
+    std::vector<std::vector<int32_t>> defaultPhonemeCodepoints = {},
+    std::vector<std::vector<std::string>> defaultTokens = {}
   );
 
 protected:
@@ -33,4 +36,6 @@ private:
   std::optional<sherpaonnx::VoiceCloneOptions> voiceClone_;
   std::optional<std::string> defaultLang_;
   std::optional<int32_t> defaultNumSteps_;
+  std::vector<std::vector<int32_t>> defaultPhonemeCodepoints_;
+  std::vector<std::vector<std::string>> defaultTokens_;
 };
