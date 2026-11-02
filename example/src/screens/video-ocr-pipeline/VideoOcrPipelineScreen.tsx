@@ -8,11 +8,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  createOfflineAudioBufferFromVideo,
   createOfflineImageBufferFromVideo,
   createOfflineVideoBufferFromFile,
   releaseVideoBuffer,
   type OfflineVideoBufferRef,
 } from 'react-native-sherpa-onnx/videobuffer';
+import {
+  releasePipelineAudioBuffer,
+  type OfflineAudioBufferRef,
+} from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createVideoPreviewPlayer,
   type VideoPreviewAudioUnavailableEvent,
@@ -33,6 +38,10 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 import type { OcrProgress } from 'react-native-sherpa-onnx/ocr';
 import { ExampleVideoPreviewPlayer } from '../../components/ExampleVideoPreviewPlayer';
+import {
+  PipelineOfflineAudioResultCard,
+  type PipelineOfflineAudioResultCardHandle,
+} from '../../components/PipelineOfflineAudioResultCard';
 import { OfflineImageBufferFramePager } from '../../components/OfflineImageBufferFramePager';
 import { OcrModelInitPanel } from '../../components/OcrModelInitPanel';
 import {
@@ -59,6 +68,57 @@ type ExtractedImages = {
   frameCount: number;
 };
 
+type ImageExtractProgress = {
+  percent: number;
+  completed: number;
+  total: number;
+  ptsUs: number;
+};
+
+type AudioExtractProgress = {
+  percent: number;
+  decodedMs: number;
+};
+
+function isCancelledMessage(message: string): boolean {
+  return message.includes('CANCELLED') || message.includes('cancelled');
+}
+
+function ExtractProgressBox({
+  visible,
+  label,
+  percent,
+  detail,
+}: {
+  visible: boolean;
+  label: string;
+  percent: number | null;
+  detail: string | null;
+}) {
+  if (!visible) {
+    return null;
+  }
+  const clamped = percent == null ? null : Math.max(0, Math.min(100, percent));
+  return (
+    <View style={styles.progressBox}>
+      <View style={styles.progressHeader}>
+        <Text style={styles.progressLabel} numberOfLines={2}>
+          {label}
+          {detail ? ` · ${detail}` : ''}
+        </Text>
+        {clamped != null ? (
+          <Text style={styles.progressPercent}>{Math.round(clamped)}%</Text>
+        ) : null}
+      </View>
+      {clamped != null ? (
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${clamped}%` }]} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 export default function VideoOcrPipelineScreen() {
   const ocr = useOcrModelInit();
   const [buffer, setBuffer] = useState<OfflineVideoBufferRef | null>(null);
@@ -72,7 +132,21 @@ export default function VideoOcrPipelineScreen() {
   );
   const [extractBusy, setExtractBusy] = useState(false);
   const [extractError, setExtractError] = useState<string | null>(null);
+  const [extractProgress, setExtractProgress] =
+    useState<ImageExtractProgress | null>(null);
   const [images, setImages] = useState<ExtractedImages | null>(null);
+  const [audioBusy, setAudioBusy] = useState(false);
+  const [audioError, setAudioError] = useState<string | null>(null);
+  const [audioProgress, setAudioProgress] =
+    useState<AudioExtractProgress | null>(null);
+  const [extractedAudio, setExtractedAudio] =
+    useState<OfflineAudioBufferRef | null>(null);
+  const [audioMeta, setAudioMeta] = useState<{
+    mediaStartMs: number;
+    sourceCodec: string;
+    sourceSampleRate: number;
+    sourceChannels: number;
+  } | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrRunError, setOcrRunError] = useState<string | null>(null);
   const [ocrText, setOcrText] = useState('');
@@ -80,8 +154,12 @@ export default function VideoOcrPipelineScreen() {
   const [spanCount, setSpanCount] = useState(0);
 
   const imagesRef = useRef<ExtractedImages | null>(null);
+  const audioRef = useRef<OfflineAudioBufferRef | null>(null);
   const ocrTextBufRef = useRef<OfflineTextBufferRef | null>(null);
   const ocrAbortRef = useRef<AbortController | null>(null);
+  const extractAbortRef = useRef<AbortController | null>(null);
+  const audioAbortRef = useRef<AbortController | null>(null);
+  const audioCardRef = useRef<PipelineOfflineAudioResultCardHandle>(null);
   const ocrProgressBoxRef = useRef<OcrProgressBoxHandle>(null);
 
   const onError = useCallback((error: VideoPreviewError) => {
@@ -119,6 +197,17 @@ export default function VideoOcrPipelineScreen() {
     }
   }, []);
 
+  const releaseAudio = useCallback(async () => {
+    const current = audioRef.current;
+    audioRef.current = null;
+    await audioCardRef.current?.stop();
+    setExtractedAudio(null);
+    setAudioMeta(null);
+    if (current) {
+      await releasePipelineAudioBuffer(current).catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     let playerLocal: VideoPreviewPlayer | null = null;
@@ -126,6 +215,8 @@ export default function VideoOcrPipelineScreen() {
 
     const releaseAll = async () => {
       ocrAbortRef.current?.abort();
+      extractAbortRef.current?.abort();
+      audioAbortRef.current?.abort();
       if (playerLocal) {
         const currentPlayer = playerLocal;
         playerLocal = null;
@@ -190,18 +281,29 @@ export default function VideoOcrPipelineScreen() {
       void (async () => {
         await releaseOcrTextBuf();
         await releaseImages();
+        await releaseAudio();
         await releaseAll();
       })();
     };
-  }, [onAudioUnavailable, onError, releaseImages, releaseOcrTextBuf]);
+  }, [
+    onAudioUnavailable,
+    onError,
+    releaseAudio,
+    releaseImages,
+    releaseOcrTextBuf,
+  ]);
 
   const handleExtract = useCallback(async () => {
     if (!buffer) {
       setExtractError('Video buffer is not ready.');
       return;
     }
+    extractAbortRef.current?.abort();
+    const controller = new AbortController();
+    extractAbortRef.current = controller;
     setExtractBusy(true);
     setExtractError(null);
+    setExtractProgress({ percent: 0, completed: 0, total: 0, ptsUs: 0 });
     setOcrRunError(null);
     await releaseOcrTextBuf();
     await releaseImages();
@@ -210,7 +312,13 @@ export default function VideoOcrPipelineScreen() {
       if (__DEV__) {
         console.log('[VideoOcrPipeline] extract', options);
       }
-      const result = await createOfflineImageBufferFromVideo(buffer, options);
+      const result = await createOfflineImageBufferFromVideo(buffer, {
+        ...options,
+        signal: controller.signal,
+        onProgress: (e) => {
+          setExtractProgress(e);
+        },
+      });
       const next: ExtractedImages = {
         imageBufferId: result.imageBufferId as OfflineImageBufferHandle,
         frameCount: result.frameCount,
@@ -219,11 +327,70 @@ export default function VideoOcrPipelineScreen() {
       setImages(next);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setExtractError(message);
+      setExtractError(
+        isCancelledMessage(message)
+          ? 'Extract cancelled (VIDEO_CANCELLED).'
+          : message
+      );
     } finally {
+      extractAbortRef.current = null;
       setExtractBusy(false);
+      setExtractProgress(null);
     }
   }, [buffer, releaseImages, releaseOcrTextBuf, sampling]);
+
+  const handleExtractAudio = useCallback(async () => {
+    if (!buffer) {
+      setAudioError('Video buffer is not ready.');
+      return;
+    }
+    audioAbortRef.current?.abort();
+    const controller = new AbortController();
+    audioAbortRef.current = controller;
+    setAudioBusy(true);
+    setAudioError(null);
+    setAudioProgress({ percent: 0, decodedMs: 0 });
+    await releaseAudio();
+    try {
+      if (__DEV__) {
+        console.log('[VideoOcrPipeline] extract audio 16 kHz');
+      }
+      const result = await createOfflineAudioBufferFromVideo(buffer, {
+        targetSampleRateHz: 16000,
+        signal: controller.signal,
+        onProgress: (e) => {
+          if (__DEV__) {
+            console.log(
+              '[VideoOcrPipeline] extract audio progress',
+              e.percent,
+              'decodedMs=',
+              e.decodedMs
+            );
+          }
+          setAudioProgress(e);
+        },
+      });
+      audioRef.current = result.audio;
+      setExtractedAudio(result.audio);
+      setAudioMeta({
+        mediaStartMs: result.mediaStartMs,
+        sourceCodec: result.sourceCodec,
+        sourceSampleRate: result.sourceSampleRate,
+        sourceChannels: result.sourceChannels,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setAudioError(
+        isCancelledMessage(message)
+          ? 'Audio extract cancelled (VIDEO_CANCELLED).'
+          : message
+      );
+    } finally {
+      audioAbortRef.current = null;
+      setAudioBusy(false);
+      setAudioProgress(null);
+    }
+  }, [buffer, releaseAudio]);
 
   const handleRecognize = useCallback(async () => {
     const engine = ocr.engineRef.current;
@@ -261,7 +428,7 @@ export default function VideoOcrPipelineScreen() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await releaseOcrTextBuf();
-      if (msg.includes('CANCELLED') || msg.includes('cancelled')) {
+      if (isCancelledMessage(msg)) {
         setOcrRunError('Recognize cancelled (OCR_CANCELLED).');
       } else {
         setOcrRunError(msg);
@@ -292,8 +459,9 @@ export default function VideoOcrPipelineScreen() {
     [buffer, images, ocr.isEngineInitialized, ocrText.length, spanCount]
   );
 
+  const nativeBusy = extractBusy || audioBusy || ocrBusy;
   const recognizeReady =
-    ocr.isEngineInitialized && images != null && !ocrBusy && !extractBusy;
+    ocr.isEngineInitialized && images != null && !nativeBusy;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -353,29 +521,124 @@ export default function VideoOcrPipelineScreen() {
           <VideoFrameSamplingControls
             value={sampling}
             onChange={setSampling}
-            disabled={extractBusy || buffer == null}
+            disabled={nativeBusy || buffer == null}
           />
-          <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              (extractBusy || buffer == null) && styles.primaryButtonDisabled,
-            ]}
-            onPress={() => {
-              handleExtract().catch(() => {});
-            }}
-            disabled={extractBusy || buffer == null}
-            activeOpacity={0.7}
-          >
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                styles.actionButtonFlex,
+                (nativeBusy || buffer == null) && styles.primaryButtonDisabled,
+              ]}
+              onPress={() => {
+                handleExtract().catch(() => {});
+              }}
+              disabled={nativeBusy || buffer == null}
+              activeOpacity={0.7}
+            >
+              {extractBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  createOfflineImageBufferFromVideo
+                </Text>
+              )}
+            </TouchableOpacity>
             {extractBusy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                createOfflineImageBufferFromVideo
-              </Text>
-            )}
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.secondaryButton, styles.actionButtonFlex]}
+                onPress={() => {
+                  extractAbortRef.current?.abort();
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <ExtractProgressBox
+            visible={extractBusy}
+            label="Copying RGB frames"
+            percent={extractProgress?.percent ?? 0}
+            detail={
+              extractProgress && extractProgress.total > 0
+                ? `${extractProgress.completed}/${extractProgress.total} · pts ${extractProgress.ptsUs} µs`
+                : extractProgress
+                ? 'waiting for first frame'
+                : null
+            }
+          />
           {extractError ? (
             <Text style={styles.errorText}>{extractError}</Text>
+          ) : null}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>2.1 Extract audio (optional)</Text>
+          <Text style={styles.sectionHint}>
+            createOfflineAudioBufferFromVideo at 16 kHz (STT default). Same clip
+            as the preview above. Not required for OCR.
+          </Text>
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                styles.actionButtonFlex,
+                (nativeBusy || buffer == null) && styles.primaryButtonDisabled,
+              ]}
+              onPress={() => {
+                handleExtractAudio().catch(() => {});
+              }}
+              disabled={nativeBusy || buffer == null}
+              activeOpacity={0.7}
+            >
+              {audioBusy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  createOfflineAudioBufferFromVideo
+                </Text>
+              )}
+            </TouchableOpacity>
+            {audioBusy ? (
+              <TouchableOpacity
+                style={[styles.secondaryButton, styles.actionButtonFlex]}
+                onPress={() => {
+                  audioAbortRef.current?.abort();
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <ExtractProgressBox
+            visible={audioBusy}
+            label="Decoding clip audio"
+            percent={audioProgress?.percent ?? 0}
+            detail={
+              audioProgress
+                ? `${Math.round(audioProgress.decodedMs)} ms decoded`
+                : null
+            }
+          />
+          {audioError ? (
+            <Text style={styles.errorText}>{audioError}</Text>
+          ) : null}
+          {extractedAudio && audioMeta ? (
+            <PipelineOfflineAudioResultCard
+              ref={audioCardRef}
+              bufferId={extractedAudio.bufferId}
+              sourceLabel={`${audioMeta.sourceCodec} ${
+                audioMeta.sourceSampleRate
+              } Hz × ${audioMeta.sourceChannels} → ${
+                extractedAudio.info.sampleRate
+              } Hz · mediaStart ${audioMeta.mediaStartMs.toFixed(1)} ms`}
+              sampleRate={extractedAudio.info.sampleRate}
+              durationMs={extractedAudio.info.durationMs}
+              onDismiss={() => {
+                releaseAudio().catch(() => {});
+              }}
+              disabled={audioBusy}
+            />
           ) : null}
         </View>
 
@@ -399,7 +662,7 @@ export default function VideoOcrPipelineScreen() {
           <OcrModelInitPanel
             ocr={ocr}
             title="4. OCR model"
-            disabled={ocrBusy || extractBusy}
+            disabled={nativeBusy}
             showScatteredTest={false}
           />
         ) : null}
