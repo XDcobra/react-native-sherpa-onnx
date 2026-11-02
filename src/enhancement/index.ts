@@ -7,7 +7,11 @@ import {
 } from '../model-languages';
 import { ModelCategory, type QuantizationPreference } from '../download/types';
 import { normalizeQuantization } from '../types/modelDetect';
-import { isDetectionSource } from './types';
+import {
+  isDetectionSource,
+  resolveEnhancementEngineModelType,
+  voiceSampleFromInitOptions,
+} from './types';
 import {
   releasePipelineAudioBuffer,
   resolvePipelineAudioBufferId,
@@ -19,6 +23,7 @@ import type {
   EnhancementDetectResult,
   EnhancementEngine,
   EnhancementInitializeOptions,
+  EnhancementEngineForInit,
   EnhanceOptions,
   EnhancementResult,
 } from './types';
@@ -38,6 +43,7 @@ import {
   getSegmentationEngineInfo,
 } from '../segment';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
+import { applyVoiceSampleAfterCreate } from './applyVoiceSampleAfterCreate';
 import { buildEnhancementInitBridgeOptions } from './enhancementNativeBridge';
 
 let enhancementInstanceCounter = 0;
@@ -225,8 +231,25 @@ export async function detectEnhancementModel(
     rawRows: readPublicLanguageRows(raw.languages),
   });
   const quantization = normalizeQuantization(raw.quantization);
-  const modelFilePath =
-    typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
+  const paths: {
+    model?: string;
+    enrollModel?: string;
+    chunkModel?: string;
+  } = {};
+  const rawPaths = raw.paths;
+  if (rawPaths != null) {
+    const modelFilePath =
+      typeof rawPaths.model === 'string' ? rawPaths.model.trim() : '';
+    const enrollModel =
+      typeof rawPaths.enrollModel === 'string'
+        ? rawPaths.enrollModel.trim()
+        : '';
+    const chunkModel =
+      typeof rawPaths.chunkModel === 'string' ? rawPaths.chunkModel.trim() : '';
+    if (modelFilePath.length > 0) paths.model = modelFilePath;
+    if (enrollModel.length > 0) paths.enrollModel = enrollModel;
+    if (chunkModel.length > 0) paths.chunkModel = chunkModel;
+  }
   const isStreaming = raw.isStreaming === true;
   return {
     success: raw.success,
@@ -239,18 +262,21 @@ export async function detectEnhancementModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
-    ...(modelFilePath.length > 0 ? { paths: { model: modelFilePath } } : {}),
+    ...(Object.keys(paths).length > 0 ? { paths } : {}),
   };
 }
 
 /**
  * Create an offline speech-enhancement engine. Call `destroy()` when finished.
- * @throws {Error} `ENHANCEMENT_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * Optional `voiceSample` is applied after Create via `setVoiceSample` when
+ * `modelType` is `'voxlock'`. Failure unloads the instance and rethrows.
+ * Returns `EnhancementEngineOf<T>` when `modelType` is a concrete family.
+ * @throws {Error} `ENHANCEMENT_INVALID_ARGUMENT` — custom model paths are incomplete or invalid, or `voiceSample` is too short.
  * @throws {Error} Native init failed (`Enhancement initialization failed` / `ENHANCEMENT_INIT_ERROR`).
  */
-export async function createEnhancement(
-  options: EnhancementInitializeOptions
-): Promise<EnhancementEngine> {
+export async function createEnhancement<O extends EnhancementInitializeOptions>(
+  options: O
+): Promise<EnhancementEngineForInit<O>> {
   const instanceId = `enhancement_${++enhancementInstanceCounter}`;
   const bridgeOptions = await buildEnhancementInitBridgeOptions(options);
   const init = await SherpaOnnx.initializeEnhancement(
@@ -267,6 +293,14 @@ export async function createEnhancement(
     );
   }
 
+  await applyVoiceSampleAfterCreate({
+    instanceId,
+    voiceSample: voiceSampleFromInitOptions(options),
+    unload: () => SherpaOnnx.unloadEnhancement(instanceId),
+  });
+
+  const modelType = resolveEnhancementEngineModelType(options, init.modelType);
+
   let destroyed = false;
   const guard = () => {
     if (destroyed) {
@@ -279,6 +313,9 @@ export async function createEnhancement(
   return {
     get instanceId() {
       return instanceId;
+    },
+    get modelType() {
+      return modelType;
     },
     enhance: (async (
       audioIn: OfflineAudioBufferIdSource | LiveAudioBufferIdSource,
@@ -361,17 +398,30 @@ export async function createEnhancement(
       guard();
       return SherpaOnnx.getEnhancementSampleRate(instanceId);
     },
+    ...(modelType === 'voxlock'
+      ? {
+          async setVoiceSample(
+            buffer: OfflineAudioBufferIdSource
+          ): Promise<void> {
+            guard();
+            const bufferId = resolvePipelineAudioBufferId(buffer);
+            await SherpaOnnx.enhancementSetVoiceSample(instanceId, bufferId);
+          },
+        }
+      : {}),
     async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
       await SherpaOnnx.unloadEnhancement(instanceId);
     },
-  };
+  } as EnhancementEngineForInit<O>;
 }
 
 export { createStreamingEnhancement } from './streaming';
 export type {
   StreamingEnhancementEngine,
+  StreamingEnhancementEngineOf,
+  StreamingEnhancementEngineForInit,
   StreamingEnhancementInitializeOptions,
   StreamingEnhancementEnhanceOptions,
   EnhancementPipelineHandle,
@@ -382,10 +432,16 @@ export type {
   EnhancementConcreteModelType,
   EnhancementInitOptionsShared,
   EnhancementAutoInitializeOptions,
+  EnhancementAutoInitializeOptionsAuto,
+  EnhancementAutoInitializeOptionsGtcrn,
+  EnhancementAutoInitializeOptionsDpdfnet,
+  EnhancementAutoInitializeOptionsVoxlock,
   EnhancementCustomInitializeOptions,
   EnhancementInitializeOptions,
   EnhancementDetectResult,
   EnhancementEngine,
+  EnhancementEngineOf,
+  EnhancementEngineForInit,
   EnhanceOptions,
   EnhancementResult,
   EnhanceSegmentationConfig,
@@ -395,6 +451,15 @@ export {
   resolveEnhancementCustomConfigPaths,
   EnhancementErrorCode,
   type EnhancementCustomConfig,
+  type EnhancementCustomConfigByModelType,
   type EnhancementCustomPathKey,
+  type GtcrnCustomConfig,
+  type DpdfnetCustomConfig,
+  type GtcrnDpdfnetCustomConfig,
+  type VoxLockCustomConfig,
 } from './customConfig';
-export { ENHANCEMENT_MODEL_TYPES } from './types';
+export {
+  ENHANCEMENT_MODEL_TYPES,
+  isEnhancementConcreteModelType,
+  isEnhancementModelType,
+} from './types';

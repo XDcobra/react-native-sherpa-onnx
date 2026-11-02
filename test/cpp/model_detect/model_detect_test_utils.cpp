@@ -210,6 +210,7 @@ EnhancementModelKind EnhancementKindFromString(const std::string& modelType) {
     std::string t = ToLower(Trim(modelType));
     if (t == "gtcrn") return EnhancementModelKind::kGtcrn;
     if (t == "dpdfnet") return EnhancementModelKind::kDpdfNet;
+    if (t == "voxlock") return EnhancementModelKind::kVoxLock;
     return EnhancementModelKind::kUnknown;
 }
 
@@ -219,6 +220,8 @@ std::string EnhancementKindToString(EnhancementModelKind kind) {
             return "gtcrn";
         case EnhancementModelKind::kDpdfNet:
             return "dpdfnet";
+        case EnhancementModelKind::kVoxLock:
+            return "voxlock";
         default:
             return "unknown";
     }

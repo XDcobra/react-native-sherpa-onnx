@@ -1,6 +1,6 @@
 #import "../../SherpaOnnx.h"
 
-#include "../sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
 #include "../core/EnhancementBridgeUtils.h"
 
@@ -266,6 +266,7 @@ EnhancementInitScalars ParseEnhancementInitScalars(
 
     resolve(@{
       @"success": @YES,
+      @"modelType": [NSString stringWithUTF8String:result.modelType.c_str()] ?: @"unknown",
       @"sampleRate": @(result.sampleRate),
       @"frameShiftInSamples": @(result.frameShiftInSamples)
     });

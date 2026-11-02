@@ -60,6 +60,30 @@ describe('detectEnhancementModel', () => {
     expect(result.paths).toBeUndefined();
   });
 
+  it('maps non-empty native VoxLock paths into the result', async () => {
+    (SherpaOnnx.detectEnhancementModel as jest.Mock).mockResolvedValue({
+      success: true,
+      isStreaming: true,
+      modelType: 'voxlock',
+      detectedModels: [{ type: 'voxlock', modelDir: '/models/voxlock' }],
+      paths: {
+        enrollModel: '/models/voxlock/voxlock_enroll.onnx',
+        chunkModel: '/models/voxlock/voxlock_chunk.onnx',
+      },
+    });
+
+    const result = await detectEnhancementModel({
+      kind: 'fs',
+      path: '/models/voxlock',
+    });
+
+    expect(result.paths).toEqual({
+      enrollModel: '/models/voxlock/voxlock_enroll.onnx',
+      chunkModel: '/models/voxlock/voxlock_chunk.onnx',
+    });
+    expect(result.modelType).toBe('voxlock');
+  });
+
   it('forwards quantization option to native detectEnhancementModel', async () => {
     (SherpaOnnx.detectEnhancementModel as jest.Mock).mockResolvedValue({
       success: true,

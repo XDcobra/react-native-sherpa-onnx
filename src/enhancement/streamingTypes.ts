@@ -1,7 +1,9 @@
 import type {
   EnhanceSegmentationConfig,
+  EnhancementConcreteModelType,
   EnhancementInitializeOptions,
 } from './types';
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
 
 export type StreamingEnhancementInitializeOptions =
@@ -11,12 +13,9 @@ export interface StreamingEnhancementEnhanceOptions {
   segmentation?: EnhanceSegmentationConfig;
 }
 
-/**
- * Online denoiser from `createStreamingEnhancement`. Audio is produced only via
- * `enhance` into a `LiveAudioBuffer` (native worker); read results from the output buffer.
- */
-export interface StreamingEnhancementEngine {
+type StreamingEnhancementEngineCore<F extends EnhancementConcreteModelType> = {
   readonly instanceId: string;
+  readonly modelType: F;
   getSampleRate(): Promise<number>;
   getFrameShiftInSamples(): Promise<number>;
   destroy(): Promise<void>;
@@ -35,7 +34,33 @@ export interface StreamingEnhancementEngine {
     outputBufferId: string,
     options?: StreamingEnhancementEnhanceOptions
   ): Promise<EnhancementPipelineHandle>;
-}
+};
+
+export type StreamingEnhancementEngineOf<
+  F extends EnhancementConcreteModelType
+> = StreamingEnhancementEngineCore<F> &
+  (F extends 'voxlock'
+    ? {
+        /**
+         * Lock a VoxLock online engine to a specific voice from an offline PCM buffer.
+         * Same contract as `EnhancementEngine.setVoiceSample`.
+         */
+        setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void>;
+      }
+    : { setVoiceSample?: never });
+
+/** A real union so `engine.modelType === 'voxlock'` narrows. */
+export type StreamingEnhancementEngine = {
+  [F in EnhancementConcreteModelType]: StreamingEnhancementEngineOf<F>;
+}[EnhancementConcreteModelType];
+
+export type StreamingEnhancementEngineForInit<
+  O extends StreamingEnhancementInitializeOptions
+> = O extends { modelType: infer T }
+  ? T extends EnhancementConcreteModelType
+    ? StreamingEnhancementEngineOf<T>
+    : StreamingEnhancementEngine
+  : StreamingEnhancementEngine;
 
 /** Pipeline handle returned by `StreamingEnhancementEngine.enhance()` — same controls as `StreamingPipelineHandle` plus the online denoiser `instanceId`. */
 export interface EnhancementPipelineHandle extends StreamingPipelineHandle {

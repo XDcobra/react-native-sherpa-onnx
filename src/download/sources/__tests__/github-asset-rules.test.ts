@@ -44,8 +44,8 @@ describe('github-asset-rules — Separation', () => {
   });
 });
 
-describe('github-asset-rules — Enhancement contrast', () => {
-  it('allows only ONNX for Enhancement', () => {
+describe('github-asset-rules — Enhancement', () => {
+  it('accepts ONNX files and VoxLock archives', () => {
     expect(
       isAssetSupportedForCategory(
         ModelCategory.Enhancement,
@@ -56,10 +56,17 @@ describe('github-asset-rules — Enhancement contrast', () => {
     expect(
       isAssetSupportedForCategory(
         ModelCategory.Enhancement,
-        'model.tar.bz2',
+        'sherpa-onnx-voxlock.tar.bz2',
         'tar.bz2'
       )
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      isAssetSupportedForCategory(
+        ModelCategory.Enhancement,
+        'sherpa-onnx-voxlock-int8.tar.bz2',
+        'tar.bz2'
+      )
+    ).toBe(true);
   });
 });
 

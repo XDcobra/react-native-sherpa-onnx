@@ -90,7 +90,8 @@ inline const char* DetectionSourceToLiteral(DetectionSource s) {
 enum class EnhancementModelKind {
     kUnknown,
     kGtcrn,
-    kDpdfNet
+    kDpdfNet,
+    kVoxLock
 };
 
 /** Offline=CT-Transformer (ct_transformer); online=CNN-BiLSTM (cnn_bilstm + bpe.vocab) per sherpa-onnx. */
@@ -352,6 +353,8 @@ struct TtsModelPaths {
 
 struct EnhancementModelPaths {
     std::string model;
+    std::string enrollModel;
+    std::string chunkModel;
 };
 
 struct SeparationModelPaths {

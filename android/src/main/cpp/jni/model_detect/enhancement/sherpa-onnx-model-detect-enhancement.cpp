@@ -20,6 +20,7 @@ using sherpaonnx::enhancement::online_guard::RunOnlineCompatibilityGuard;
 sherpaonnx::EnhancementModelKind ParseEnhancementModelType(const std::string& modelType) {
     if (modelType == "gtcrn") return sherpaonnx::EnhancementModelKind::kGtcrn;
     if (modelType == "dpdfnet") return sherpaonnx::EnhancementModelKind::kDpdfNet;
+    if (modelType == "voxlock") return sherpaonnx::EnhancementModelKind::kVoxLock;
     return sherpaonnx::EnhancementModelKind::kUnknown;
 }
 
@@ -29,6 +30,8 @@ const char* EnhancementKindToTag(sherpaonnx::EnhancementModelKind kind) {
             return "gtcrn";
         case sherpaonnx::EnhancementModelKind::kDpdfNet:
             return "dpdfnet";
+        case sherpaonnx::EnhancementModelKind::kVoxLock:
+            return "voxlock";
         default:
             return "unknown";
     }
@@ -62,6 +65,9 @@ std::vector<sherpaonnx::EnhancementModelKind> GetKindsFromDirNameEnhancement(
     }
     if (lower.find("dpdfnet") != std::string::npos || lower.find("dpcrn") != std::string::npos) {
         add(sherpaonnx::EnhancementModelKind::kDpdfNet);
+    }
+    if (lower.find("voxlock") != std::string::npos) {
+        add(sherpaonnx::EnhancementModelKind::kVoxLock);
     }
     return out;
 }
@@ -118,6 +124,11 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
         FindOnnxByAnyToken(files, {"gtcrn"}, quantization);
     std::string dpdfnetModel =
         FindOnnxByAnyToken(files, {"dpdfnet"}, quantization);
+    std::string enrollModel =
+        FindOnnxByAnyToken(files, {"voxlock_enroll", "enroll"}, quantization);
+    std::string chunkModel =
+        FindOnnxByAnyToken(files, {"voxlock_chunk", "chunk"}, quantization);
+    const bool hasVoxLockPair = !enrollModel.empty() && !chunkModel.empty();
 
     std::string genericModel =
         FindOnnxByAnyToken(files, {"model"}, quantization);
@@ -141,6 +152,9 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
     if (!dpdfnetModel.empty()) {
         result.detectedModels.push_back({"dpdfnet", modelDir});
     }
+    if (hasVoxLockPair || !enrollModel.empty() || !chunkModel.empty()) {
+        result.detectedModels.push_back({"voxlock", modelDir});
+    }
 
     sherpaonnx::EnhancementModelKind selected = sherpaonnx::EnhancementModelKind::kUnknown;
     if (requestedModelType == "auto") {
@@ -149,6 +163,11 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
         bool selectedFromDir = false;
         if (!nameKinds.empty()) {
             for (const auto kind : nameKinds) {
+                if (kind == sherpaonnx::EnhancementModelKind::kVoxLock && hasVoxLockPair) {
+                    selected = kind;
+                    selectedFromDir = true;
+                    break;
+                }
                 if (kind == sherpaonnx::EnhancementModelKind::kGtcrn && (!gtcrnModel.empty() || !genericModel.empty())) {
                     selected = kind;
                     if (gtcrnModel.empty()) gtcrnModel = genericModel;
@@ -170,6 +189,9 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
             AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
         } else if (!dpdfnetModel.empty()) {
             selected = sherpaonnx::EnhancementModelKind::kDpdfNet;
+            AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
+        } else if (hasVoxLockPair) {
+            selected = sherpaonnx::EnhancementModelKind::kVoxLock;
             AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFallbackOrder);
         } else if (!genericModel.empty()) {
             selected = sherpaonnx::EnhancementModelKind::kGtcrn;
@@ -198,6 +220,10 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
             break;
         case sherpaonnx::EnhancementModelKind::kDpdfNet:
             result.paths.model = dpdfnetModel;
+            break;
+        case sherpaonnx::EnhancementModelKind::kVoxLock:
+            result.paths.enrollModel = enrollModel;
+            result.paths.chunkModel = chunkModel;
             break;
         default:
             result.error = "Enhancement: no compatible model type detected in " +
@@ -233,10 +259,15 @@ sherpaonnx::EnhancementDetectResult DetectEnhancementModelFromFiles(
         }
     }
 
-    if ((result.quantization.empty() || result.quantization == "unknown") && !result.paths.model.empty()) {
-        std::string fileQuant = sherpaonnx::DeriveQuantization(sherpaonnx::model_detect::BaseName(result.paths.model));
-        if (fileQuant != "unknown") {
-            result.quantization = fileQuant;
+    if ((result.quantization.empty() || result.quantization == "unknown")) {
+        const std::string quantSource =
+            !result.paths.chunkModel.empty() ? result.paths.chunkModel : result.paths.model;
+        if (!quantSource.empty()) {
+            std::string fileQuant = sherpaonnx::DeriveQuantization(
+                sherpaonnx::model_detect::BaseName(quantSource));
+            if (fileQuant != "unknown") {
+                result.quantization = fileQuant;
+            }
         }
     }
 

@@ -4,7 +4,14 @@
  * Shared by Live Pipeline Showcase and similar flows.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from 'react';
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
@@ -31,14 +38,25 @@ export type PipelineOfflineAudioResultCardProps = {
   disabled?: boolean;
 };
 
-export function PipelineOfflineAudioResultCard({
-  bufferId,
-  sourceLabel,
-  sampleRate,
-  durationMs,
-  onDismiss,
-  disabled = false,
-}: PipelineOfflineAudioResultCardProps) {
+export type PipelineOfflineAudioResultCardHandle = {
+  /** Stop PCM playback without unmounting the card. */
+  stop: () => Promise<void>;
+};
+
+export const PipelineOfflineAudioResultCard = forwardRef<
+  PipelineOfflineAudioResultCardHandle,
+  PipelineOfflineAudioResultCardProps
+>(function PipelineOfflineAudioResultCard(
+  {
+    bufferId,
+    sourceLabel,
+    sampleRate,
+    durationMs,
+    onDismiss,
+    disabled = false,
+  },
+  ref
+) {
   const [playing, setPlaying] = useState(false);
   const playerRef = useRef<PcmPlayer | null>(null);
   const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
@@ -72,6 +90,14 @@ export function PipelineOfflineAudioResultCard({
     setPlaying(false);
     await p.destroy().catch(() => {});
   }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      stop: stopPlayer,
+    }),
+    [stopPlayer]
+  );
 
   const handleTogglePlayback = useCallback(async () => {
     if (playerRef.current) {
@@ -178,7 +204,7 @@ export function PipelineOfflineAudioResultCard({
       </View>
     </View>
   );
-}
+});
 
 const localStyles = StyleSheet.create({
   bufferMetaLine: { marginTop: 4 },

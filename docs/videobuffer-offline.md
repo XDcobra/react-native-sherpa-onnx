@@ -365,6 +365,8 @@ Release with `releaseOfflineImageBuffer` from `react-native-sherpa-onnx/imagebuf
 | Field | Default | Meaning |
 | --- | --- | --- |
 | `maxSide` | no cap (`0`) | Longest edge of the RGB copy; use to bound OCR / RAM. |
+| `onProgress` | — | `{ percent, completed, total, ptsUs }`. |
+| `signal` | — | Abort → `VIDEO_CANCELLED`. |
 
 #### `exportVideoFrame(video, ptsUs, destination, options?)`
 
@@ -508,16 +510,23 @@ Out of scope: AVI, MPEG-TS, FLV, AV1 / VP8 decode or encode, bundled SW H.264/HE
 
 Offline video buffers have **no subscribe API**. Opening a file (`createOfflineVideoBufferFromFile`), sampling frames (`createOfflineImageBufferFromVideo` / `exportVideoFrame`), and clip export (`exportVideo`) are one-shot native calls.
 
-Create-time callbacks exist on **audio extract** and **clip export**:
+Create-time callbacks exist on **image sampling**, **audio extract**, and **clip export**:
 
 | Callback / control | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
+| `onProgress` | `{ percent, completed, total, ptsUs }` | during `createOfflineImageBufferFromVideo` | Native channel `decodeProgress`, filtered by `operationId`. `completed`/`total` are selected presentation frames copied; `ptsUs` is the last copied frame. Empty window emits `{ percent: 100, completed: 0, total: 0, ptsUs: 0 }` once. |
 | `onProgress` | `{ percent, decodedMs }` | during `createOfflineAudioBufferFromVideo` | Native channel `decodeProgress`, filtered by `operationId`. `decodedMs` is audio time decoded, not video PTS. |
 | `onProgress` | `{ percent, encodedUs }` | during `exportVideo` | Same native channel `decodeProgress`. `encodedUs` is last encoded video PTS. |
 | `signal` | `AbortSignal` | caller aborts | rejects with `VIDEO_CANCELLED` |
 
 ```ts
 const controller = new AbortController();
+const images = await createOfflineImageBufferFromVideo(video, {
+  sampling: 'fps',
+  fps: 2,
+  onProgress: (e) => console.log(e.percent, e.completed, e.total, e.ptsUs),
+  signal: controller.signal,
+});
 const { audio } = await createOfflineAudioBufferFromVideo(video, {
   targetSampleRateHz: 16000,
   onProgress: (e) => console.log(e.percent, e.decodedMs),
@@ -542,7 +551,7 @@ Canonical TypeScript types: [`src/videobuffer/types.ts`](../src/videobuffer/type
 | `PipelineVideoBufferIdSource` | Offline **or** live (recording / finished). |
 | `OfflineVideoBufferInfo` | Metadata (`kind: 'offlineVideoBuffer'`, `state: 'immutable'`). |
 | `VideoAudioTrackInfo` | `codec`, `decodable`, `sampleRate`, `channels`, `startMs`, `durationMs`. |
-| `CreateOfflineImageFromVideoOptions` | `sampling`, `fps`, `uniformCount`, `timesUs`, `maxSide`. |
+| `CreateOfflineImageFromVideoOptions` | `sampling`, `fps`, `uniformCount`, `timesUs`, `maxSide`, `onProgress`, `signal`. |
 | `ExportVideoFrameOptions` | `format`, `maxSide`, `quality`, `encodePolicy`. |
 | `ExportVideoOptions` | `codec`, `bitrate`, `fromUs`, `toUs`, `maxSide`, `onProgress`, `signal`. |
 | `CreateOfflineAudioFromVideoOptions` | `targetSampleRateHz`, `rangeMs`, `onProgress`, `signal`. |
@@ -674,7 +683,7 @@ Thrown / rejected as `VIDEO_…` (`Error` message `VIDEO_…: …`, native rejec
 | `VIDEO_AUDIO_DECODE_FAILED` | Audio extract produced no PCM in range / decode error. |
 | `VIDEO_FRAME_OUT_OF_RANGE` | `ptsUs` / `timesUs` outside the clip. |
 | `VIDEO_FILE_CORRUPT` | Demux/index failed. |
-| `VIDEO_CANCELLED` | `signal` aborted audio extract or `exportVideo`. |
+| `VIDEO_CANCELLED` | `signal` aborted image-from-video, audio extract, or `exportVideo`. |
 | `VIDEO_MEMORY_BUDGET_EXCEEDED` | Decode/RGB copy exceeded the process decoded-frame cap. See [Budgets](#budgets). |
 
 Preview-only codes (`VIDEO_PREVIEW_…`) are documented in [videopreview.md](videopreview.md).

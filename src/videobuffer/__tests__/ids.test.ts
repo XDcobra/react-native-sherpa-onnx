@@ -53,6 +53,7 @@ import {
   configureVideoBuffer,
   createEmptyLiveVideoBuffer,
   createOfflineAudioBufferFromVideo,
+  createOfflineImageBufferFromVideo,
   createOfflineVideoBufferFromFile,
   exportVideo,
   finalizeLiveVideoBuffer,
@@ -130,6 +131,8 @@ describe('videobuffer public API mapping', () => {
       ingestFileToLiveVideoBuffer: jest.Mock;
       finalizeLiveVideoBuffer: jest.Mock;
       createOfflineAudioBufferFromVideo: jest.Mock;
+      createOfflineImageBufferFromVideo: jest.Mock;
+      cancelDecode: jest.Mock;
       configureVideoBuffer: jest.Mock;
       configureCodecs: jest.Mock;
       exportVideo: jest.Mock;
@@ -392,6 +395,55 @@ describe('videobuffer public API mapping', () => {
         maxSide: 0,
       })
     );
+  });
+
+  it('wires operationId and maps image-from-video progress', async () => {
+    rn.__mockNative.createOfflineImageBufferFromVideo.mockImplementation(
+      async (_id: string, opts: { operationId?: string }) => {
+        rn.__emitVideo({
+          operationId: opts.operationId,
+          percent: 50,
+          completed: 1,
+          total: 2,
+          ptsUs: 33333,
+        });
+        return { imageBufferId: 'img_off_1', frameCount: 2 };
+      }
+    );
+    const events: Array<{
+      percent: number;
+      completed: number;
+      total: number;
+      ptsUs: number;
+    }> = [];
+    const result = await createOfflineImageBufferFromVideo(OFF, {
+      onProgress: (e) => events.push(e),
+    });
+    expect(result).toEqual({ imageBufferId: 'img_off_1', frameCount: 2 });
+    expect(events).toEqual([
+      { percent: 50, completed: 1, total: 2, ptsUs: 33333 },
+    ]);
+    expect(
+      rn.__mockNative.createOfflineImageBufferFromVideo
+    ).toHaveBeenCalledWith(
+      OFF,
+      expect.objectContaining({
+        operationId: expect.stringMatching(/^vid_img_/),
+      })
+    );
+    expect(rn.__listenerCount()).toBe(0);
+  });
+
+  it('rejects an already-aborted image-from-video signal without a native call', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      createOfflineImageBufferFromVideo(OFF, { signal: controller.signal })
+    ).rejects.toThrow(/VIDEO_CANCELLED/);
+    expect(
+      rn.__mockNative.createOfflineImageBufferFromVideo
+    ).not.toHaveBeenCalled();
+    expect(rn.__mockNative.cancelDecode).not.toHaveBeenCalled();
   });
 
   it('forwards decodePolicy on createOfflineVideoBufferFromFile', async () => {

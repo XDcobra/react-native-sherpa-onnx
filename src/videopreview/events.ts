@@ -15,6 +15,34 @@ export type NativeVideoPreviewEvent = {
   liveBufferId?: string;
 };
 
+/**
+ * Android `VideoBufferService.emitNative` emits one JSON string (bridgeless
+ * WritableNativeMap UAF). iOS sends a map. Live video already parses both.
+ */
+function coerceNativePreviewEvent(
+  raw: unknown
+): NativeVideoPreviewEvent | null {
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as NativeVideoPreviewEvent;
+      }
+    } catch {
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn(
+          '[SherpaOnnx:video.preview] dropped unknown event reason=json_parse'
+        );
+      }
+    }
+    return null;
+  }
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as NativeVideoPreviewEvent;
+  }
+  return null;
+}
+
 function parsePayload(raw: NativeVideoPreviewEvent): Record<string, unknown> {
   const p = raw.payload as unknown;
   if (typeof p === 'string') {
@@ -36,15 +64,19 @@ function parsePayload(raw: NativeVideoPreviewEvent): Record<string, unknown> {
   return {};
 }
 
-function mapNative(raw: NativeVideoPreviewEvent): VideoPreviewEvent | null {
-  if (!raw || typeof raw.type !== 'string') {
+function mapNative(raw: unknown): VideoPreviewEvent | null {
+  const event = coerceNativePreviewEvent(raw);
+  if (!event || typeof event.type !== 'string') {
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
-      console.warn('[SherpaOnnx:video.preview] dropped unknown event');
+      console.warn(
+        '[SherpaOnnx:video.preview] dropped unknown event',
+        `reason=missing_type rawType=${typeof raw}`
+      );
     }
     return null;
   }
-  const p = parsePayload(raw);
-  switch (raw.type) {
+  const p = parsePayload(event);
+  switch (event.type) {
     case 'stateChanged':
       return {
         type: 'stateChanged',
@@ -126,6 +158,12 @@ function mapNative(raw: NativeVideoPreviewEvent): VideoPreviewEvent | null {
         message: String(p.message ?? ''),
       };
     default:
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
+        console.warn(
+          '[SherpaOnnx:video.preview] dropped unknown event',
+          `reason=unmapped_type type=${event.type}`
+        );
+      }
       return null;
   }
 }
@@ -140,14 +178,12 @@ function ensure(): void {
     return;
   }
   subscription = emitter.addListener('SherpaOnnxVideoPreviewEvent', (raw) => {
-    const event = raw as NativeVideoPreviewEvent;
-    const mapped = mapNative(event);
-    if (!mapped) {
+    const event = coerceNativePreviewEvent(raw);
+    const mapped = event ? mapNative(event) : null;
+    if (!mapped || !event) {
       return;
     }
-    const pid =
-      event.playerId ||
-      String((event as { liveBufferId?: string }).liveBufferId ?? '');
+    const pid = event.playerId || String(event.liveBufferId ?? '');
     const set = perPlayer.get(pid);
     if (!set) {
       return;

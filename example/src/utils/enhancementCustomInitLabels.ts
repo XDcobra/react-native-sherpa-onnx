@@ -6,6 +6,8 @@ export const ENHANCEMENT_CUSTOM_PATH_LABELS: Record<
   string
 > = {
   model: 'Enhancement model (.onnx)',
+  enrollModel: 'VoxLock enroll model (.onnx)',
+  chunkModel: 'VoxLock chunk model (.onnx)',
 };
 
 export function labelForEnhancementCustomPathKey(

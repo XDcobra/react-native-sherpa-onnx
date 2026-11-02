@@ -25,14 +25,50 @@ export {
   type ModelDetectResultBase,
 } from '../types/modelDetect';
 
-export type EnhancementModelType = 'gtcrn' | 'dpdfnet';
+export type EnhancementConcreteModelType = 'gtcrn' | 'dpdfnet' | 'voxlock';
+
+export type EnhancementModelType = EnhancementConcreteModelType | 'auto';
 
 export const ENHANCEMENT_MODEL_TYPES: readonly EnhancementModelType[] = [
   'gtcrn',
   'dpdfnet',
+  'voxlock',
+  'auto',
 ] as const;
 
-export type EnhancementConcreteModelType = EnhancementModelType;
+export function isEnhancementConcreteModelType(
+  value: string | undefined
+): value is EnhancementConcreteModelType {
+  return value === 'gtcrn' || value === 'dpdfnet' || value === 'voxlock';
+}
+
+export function isEnhancementModelType(
+  value: string
+): value is EnhancementModelType {
+  return value === 'auto' || isEnhancementConcreteModelType(value);
+}
+
+export function resolveEnhancementEngineModelType(
+  options: EnhancementInitializeOptions,
+  nativeType?: string
+): EnhancementConcreteModelType {
+  if (isEnhancementConcreteModelType(options.modelType)) {
+    return options.modelType;
+  }
+  if (isEnhancementConcreteModelType(nativeType)) {
+    return nativeType;
+  }
+  return 'gtcrn';
+}
+
+export function voiceSampleFromInitOptions(
+  options: EnhancementInitializeOptions
+): OfflineAudioBufferIdSource | undefined {
+  if (options.modelType !== 'voxlock') {
+    return undefined;
+  }
+  return options.voiceSample;
+}
 
 export type EnhancementInitOptionsShared = {
   numThreads?: number;
@@ -40,19 +76,70 @@ export type EnhancementInitOptionsShared = {
   debug?: boolean;
 };
 
-export type EnhancementAutoInitializeOptions = EnhancementInitOptionsShared & {
-  initMode?: 'auto';
-  modelSource: FileSource;
-  quantization?: QuantizationPreference;
-  modelType?: EnhancementModelType | 'auto';
-};
+type EnhancementVoiceSampleInitFor<T extends EnhancementConcreteModelType> =
+  T extends 'voxlock'
+    ? {
+        /**
+         * Optional VoxLock enroll clip. Applied via `setVoiceSample` after
+         * native Create. Omitted keeps auto-enroll from the input. PCM
+         * `OfflineAudioBuffer` only — not a file path and not on `customConfig`.
+         */
+        voiceSample?: OfflineAudioBufferIdSource;
+      }
+    : { voiceSample?: never };
 
-export type EnhancementCustomInitializeOptions =
+export type EnhancementAutoInitializeOptionsAuto =
   EnhancementInitOptionsShared & {
-    initMode: 'custom';
-    modelType: EnhancementConcreteModelType;
-    customConfig: import('./customConfig').EnhancementCustomConfig;
+    initMode?: 'auto';
+    modelSource: FileSource;
+    quantization?: QuantizationPreference;
+    modelType?: 'auto';
+    voiceSample?: never;
   };
+
+export type EnhancementAutoInitializeOptionsGtcrn =
+  EnhancementInitOptionsShared & {
+    initMode?: 'auto';
+    modelSource: FileSource;
+    quantization?: QuantizationPreference;
+    modelType: 'gtcrn';
+    voiceSample?: never;
+  };
+
+export type EnhancementAutoInitializeOptionsDpdfnet =
+  EnhancementInitOptionsShared & {
+    initMode?: 'auto';
+    modelSource: FileSource;
+    quantization?: QuantizationPreference;
+    modelType: 'dpdfnet';
+    voiceSample?: never;
+  };
+
+export type EnhancementAutoInitializeOptionsVoxlock =
+  EnhancementInitOptionsShared &
+    EnhancementVoiceSampleInitFor<'voxlock'> & {
+      initMode?: 'auto';
+      modelSource: FileSource;
+      quantization?: QuantizationPreference;
+      modelType: 'voxlock';
+    };
+
+export type EnhancementAutoInitializeOptions =
+  | EnhancementAutoInitializeOptionsAuto
+  | EnhancementAutoInitializeOptionsGtcrn
+  | EnhancementAutoInitializeOptionsDpdfnet
+  | EnhancementAutoInitializeOptionsVoxlock;
+
+export type EnhancementCustomInitializeOptions<
+  T extends EnhancementConcreteModelType = EnhancementConcreteModelType
+> = {
+  [K in T]: EnhancementInitOptionsShared &
+    EnhancementVoiceSampleInitFor<K> & {
+      initMode: 'custom';
+      modelType: K;
+      customConfig: import('./customConfig').EnhancementCustomConfigByModelType[K];
+    };
+}[T];
 
 export type EnhancementInitializeOptions =
   | EnhancementAutoInitializeOptions
@@ -102,8 +189,9 @@ export interface EnhancementLivePipelineOptions
   onSegment?: (segment: SpeechSegment) => void;
 }
 
-export interface EnhancementEngine {
+type EnhancementEngineCore<F extends EnhancementConcreteModelType> = {
   readonly instanceId: string;
+  readonly modelType: F;
   /**
    * Read-only input offline buffer; writes denoised PCM into empty `audioOut`.
    * Both arguments must resolve to offline audio buffer ids (`off_*`).
@@ -139,4 +227,35 @@ export interface EnhancementEngine {
 
   getSampleRate(): Promise<number>;
   destroy(): Promise<void>;
-}
+};
+
+export type EnhancementEngineOf<F extends EnhancementConcreteModelType> =
+  EnhancementEngineCore<F> &
+    (F extends 'voxlock'
+      ? {
+          /**
+           * Lock a VoxLock engine to a specific voice from an offline PCM buffer.
+           * Resamples to the model rate and keeps the loudest 3 seconds in the first
+           * 30 seconds. Create still auto-enrolls from the input until this is called.
+           * Also available at create as `voiceSample`; `customConfig` stays model files only.
+           * @throws {Error} `ENHANCEMENT_INVALID_ARGUMENT` — clip shorter than 3s after resample.
+           * @throws {Error} `ENHANCEMENT_BUFFER_NOT_FOUND` — buffer is unknown.
+           * @throws {Error} `ENHANCEMENT_BUFFER_KIND_MISMATCH` — buffer is not `off_*`.
+           * @throws {Error} `ENHANCEMENT_BUFFER_EMPTY` — buffer has no samples.
+           */
+          setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void>;
+        }
+      : { setVoiceSample?: never });
+
+/** A real union so `engine.modelType === 'voxlock'` narrows. */
+export type EnhancementEngine = {
+  [F in EnhancementConcreteModelType]: EnhancementEngineOf<F>;
+}[EnhancementConcreteModelType];
+
+/** Maps `createEnhancement({ modelType })` onto a family-typed engine. */
+export type EnhancementEngineForInit<O extends EnhancementInitializeOptions> =
+  O extends { modelType: infer T }
+    ? T extends EnhancementConcreteModelType
+      ? EnhancementEngineOf<T>
+      : EnhancementEngine
+    : EnhancementEngine;

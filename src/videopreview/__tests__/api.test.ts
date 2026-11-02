@@ -242,4 +242,21 @@ describe('videopreview events', () => {
   it('drops unknown types', () => {
     expect(mapNative({ playerId: 'p', type: 'nope', payload: {} })).toBeNull();
   });
+
+  it('parses Android emitNative JSON string wrapper', () => {
+    expect(
+      mapNative(
+        JSON.stringify({
+          type: 'progress',
+          playerId: 'p',
+          liveBufferId: 'p',
+          payload: JSON.stringify({
+            positionMs: 1200,
+            seekableRange: { startMs: 0, endMs: 5000 },
+            nativeTimestampMs: 1,
+          }),
+        })
+      )
+    ).toMatchObject({ type: 'progress', positionMs: 1200 });
+  });
 });

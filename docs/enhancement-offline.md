@@ -26,12 +26,12 @@ import { saveAudioAsFile } from 'react-native-sherpa-onnx/audio';
 
 const modelPath = { kind: 'fs', path: '/absolute/path/to/enhancement-model-dir' };
 
-const det = await detectEnhancementModel({ kind: 'fs', path: '/absolute/path/to/enhancement-model-dir' }, { modelType: 'auto' });
+const det = await detectEnhancementModel(modelPath, { modelType: 'auto' });
 if (!det.success) throw new Error(det.error ?? 'Enhancement detection failed');
 
 const enhancement = await createEnhancement({
   modelSource: modelPath,
-  modelType: (det.modelType as any) ?? 'auto',
+  modelType: 'auto',
   numThreads: 2,
   provider: 'cpu',
   debug: false,
@@ -64,7 +64,7 @@ try {
 | --- | --- | --- |
 | **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated noisy PCM (file-backed or in-memory) |
 | **Audio out** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at denoiser sample rate; `enhance` writes denoised PCM once |
-| **Engine** | `EnhancementEngine` via `createEnhancement` | `enhance(audioIn, audioOut, options?)`, `getSampleRate`, `destroy` |
+| **Engine** | `EnhancementEngine` via `createEnhancement` | `enhance(audioIn, audioOut, options?)`, `getSampleRate`, `destroy`. VoxLock also has `setVoiceSample`. |
 
 ---
 
@@ -97,8 +97,11 @@ Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory 
 | --- | --- | --- |
 | `gtcrn` | `*.onnx` (filename/path contains `gtcrn`) | `model` |
 | `dpdfnet` | `*.onnx` (contains `dpdfnet` or `dpcrn`) | `model` |
+| `voxlock` | `enroll` + `chunk` ONNX (`voxlock_enroll.onnx`, `voxlock_chunk.onnx` / `voxlock_chunk_int8.onnx`) | `enrollModel`, `chunkModel` |
 
-Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto mode prefers `gtcrn` when both ONNX stacks are present.
+Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto prefers `gtcrn` when both single-file stacks are present.
+
+VoxLock isolates a target speaker. Until `voiceSample` / `setVoiceSample`, create auto-enrolls from the input (loudest 3s in the first 15s). The clip is a populated `OfflineAudioBuffer` — not a file path, not a `customConfig` key. After resample, native keeps the loudest 3s in the first 30s; shorter clips reject `ENHANCEMENT_INVALID_ARGUMENT`.
 
 ```ts
 import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
@@ -114,23 +117,17 @@ const enhancement = await createEnhancement({
 
 ## API reference
 
-Signatures below are exported from **`react-native-sherpa-onnx/enhancement`**. Types live in **`src/enhancement/types.ts`**.
+Signatures from **`react-native-sherpa-onnx/enhancement`**.
 
 ### `detectEnhancementModel(source, options?)`
 
-File-based detection **without** initializing the engine. Use before `createEnhancement` to confirm pack layout and model type. Unified cross-feature detection: [model-detect.md](model-detect.md).
-
-The result includes `isStreaming` from native enhancement detection:
-- Filesystem-backed detection runs the online compatibility guard (`gtcrn`/`dpdfnet`) and sets `isStreaming` accordingly.
-- Name-only detection (asset/folder heuristics without files) can return `isStreaming: true` as best effort while `success` remains `false`.
-
-For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
+File-based detection without initializing the engine. Unified detection: [model-detect.md](model-detect.md).
 
 ```ts
 function detectEnhancementModel(
   source: FileSource,
   options?: {
-    modelType?: EnhancementModelType | 'auto';
+    modelType?: EnhancementModelType;
     assetName?: string;
   }
 ): Promise<EnhancementDetectResult>;
@@ -141,12 +138,12 @@ const det = await detectEnhancementModel(
   { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
   { modelType: 'auto' }
 );
-console.log(det.success, det.modelType, det.isStreaming, det.paths?.model, det.detectedModels);
+if (!det.success) throw new Error(det.error ?? 'Enhancement detection failed');
 ```
 
 ### `createEnhancement(options)`
 
-Creates an `EnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig: { model }`). Shared tuning: `numThreads`, `provider`, `debug`.
+Creates an offline `EnhancementEngine`.
 
 ```ts
 function createEnhancement(
@@ -165,7 +162,7 @@ const enhancement = await createEnhancement({
 
 ### `enhancement.enhance(audioIn, audioOut, options?)`
 
-Reads populated `audioIn`, writes denoised PCM into empty `audioOut`. Both must be `OfflineAudioBuffer` (`off_*`). `audioOut` sample rate must match the denoiser's rate (from `getSampleRate()`). Returns `EnhancementResult` with orchestration status and segment counters.
+Denoises populated `audioIn` into empty `audioOut`.
 
 ```ts
 enhance(
@@ -182,11 +179,23 @@ const audioOut = await createEmptyOfflineAudioBuffer(sr);
 await enhancement.enhance(audioIn, audioOut);
 ```
 
-### `enhancement.getSampleRate()`
+### `enhancement.setVoiceSample(buffer)`
+
+Locks a VoxLock engine to the speaker in the clip. Narrow with `modelType === 'voxlock'`.
 
 ```ts
-getSampleRate(): Promise<number>;
+setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void>;
 ```
+
+```ts
+if (enhancement.modelType === 'voxlock') {
+  await enhancement.setVoiceSample(voice);
+}
+```
+
+### `enhancement.getSampleRate()`
+
+Model output sample rate.
 
 ```ts
 const sr = await enhancement.getSampleRate();
@@ -194,11 +203,7 @@ const sr = await enhancement.getSampleRate();
 
 ### `enhancement.destroy()`
 
-Releases the native denoiser instance.
-
-```ts
-destroy(): Promise<void>;
-```
+Frees the native denoiser.
 
 ```ts
 await enhancement.destroy();
@@ -282,20 +287,22 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [Live over
 
 | Type | Description |
 | --- | --- |
-| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet'` |
-| `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list of model types |
-| `EnhancementConcreteModelType` | Alias of `EnhancementModelType` (non-`auto`) |
+| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet' \| 'voxlock' \| 'auto'` |
+| `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list including `'auto'` |
+| `EnhancementConcreteModelType` | `'gtcrn' \| 'dpdfnet' \| 'voxlock'` |
 | `EnhancementInitOptionsShared` | Shared init fields: `numThreads?`, `provider?`, `debug?` |
-| `EnhancementAutoInitializeOptions` | Auto init: `modelSource`, `quantization?`, `modelType?` + shared |
-| `EnhancementCustomInitializeOptions` | Custom init: `initMode: 'custom'`, concrete `modelType`, `customConfig` + shared |
-| `EnhancementInitializeOptions` | Union of auto and custom init options |
-| `EnhancementDetectResult` | Return of `detectEnhancementModel()` — shared detection base (`success`, `error`, `detectedModels`, `modelType`, `isStreaming`, optional `languages`, `quantization`, `detectionSources`, `paths`) |
+| `EnhancementAutoInitializeOptions` | Auto-init union (`modelSource` + `modelType`) |
+| `EnhancementCustomInitializeOptions` | Custom-init union (`initMode: 'custom'`, `customConfig`) |
+| `EnhancementInitializeOptions` | Auto or custom init |
+| `EnhancementDetectResult` | Return of `detectEnhancementModel()` |
 | `EnhanceSegmentationConfig` | `{ mode?: 'off' \| 'manual' \| 'auto'; policy?: SegmentationPolicy }` |
 | `EnhanceOptions` | `segmentation?`, `errorRecovery?`, `maxRetriesPerSegment?`, `retryExhaustedFallback?`, `onProgress?`, `overlapSamples?` |
 | `EnhancementResult` | `{ status, totalSegments, completedSegments, skippedSegments, failedSegment?, processingTimeMs }` |
-| `EnhancementLivePipelineOptions` | Live overload options — mandatory `continuous_frames` segmentation policy, optional `onSegment` |
-| `EnhancementEngine` | `enhance` (offline / live overload), `getSampleRate`, `destroy`; readonly `instanceId` |
-| `EnhancementCustomConfig` | Custom init path map: `{ model: FileSource }` |
+| `EnhancementLivePipelineOptions` | Live overload options — mandatory `continuous_frames` policy, optional `onSegment` |
+| `EnhancementEngine` | Union of `EnhancementEngineOf<F>` |
+| `EnhancementEngineOf<F>` | Family-typed engine |
+| `EnhancementEngineForInit<O>` | Maps `createEnhancement({ modelType })` onto `EnhancementEngineOf` |
+| `EnhancementCustomConfig` | Mapped path map: `{ model }` (GTCRN/DPDFNet) or `{ enrollModel, chunkModel }` (VoxLock) |
 | `EnhancementErrorCode` | Error code enum for enhancement operations |
 | `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
 
@@ -422,6 +429,10 @@ await cleanPlayer.play();
 The monorepo example exposes **Speech enhancement (offline)** (`example/src/screens/enhancement/EnhancementScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#speech-enhancement-offline).
 
 ---
+
+## Platform notes
+
+- **Android / iOS:** shared C-API wrapper (`EnhancementWrapper` in `android/src/main/cpp/enhancement/`). Android JNI and iOS bridges call the same core; there is no Kotlin AAR denoiser.
 
 ## See also
 

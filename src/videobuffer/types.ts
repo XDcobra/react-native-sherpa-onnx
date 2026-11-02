@@ -130,6 +130,13 @@ export interface CreateOfflineImageFromVideoOptions {
   timesUs?: number[];
   maxSide?: number;
   decodePolicy?: import('../codec/types').CodecPolicy;
+  onProgress?: (e: {
+    percent: number;
+    completed: number;
+    total: number;
+    ptsUs: number;
+  }) => void;
+  signal?: AbortSignal;
 }
 
 export type LiveVideoBufferEventType =

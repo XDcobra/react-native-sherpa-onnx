@@ -10,11 +10,34 @@ export const EnhancementErrorCode = {
   INVALID_ARGUMENT: 'ENHANCEMENT_INVALID_ARGUMENT',
 } as const;
 
-export type EnhancementCustomPathKey = 'model';
+export type GtcrnDpdfnetCustomPathKey = 'model';
 
-export interface EnhancementCustomConfig {
+export type VoxLockCustomPathKey = 'enrollModel' | 'chunkModel';
+
+export type EnhancementCustomPathKey =
+  | GtcrnDpdfnetCustomPathKey
+  | VoxLockCustomPathKey;
+
+export interface GtcrnDpdfnetCustomConfig {
   model: FileSource;
 }
+
+export type GtcrnCustomConfig = GtcrnDpdfnetCustomConfig;
+export type DpdfnetCustomConfig = GtcrnDpdfnetCustomConfig;
+
+export interface VoxLockCustomConfig {
+  enrollModel: FileSource;
+  chunkModel: FileSource;
+}
+
+export type EnhancementCustomConfigByModelType = {
+  gtcrn: GtcrnCustomConfig;
+  dpdfnet: DpdfnetCustomConfig;
+  voxlock: VoxLockCustomConfig;
+};
+
+export type EnhancementCustomConfig =
+  EnhancementCustomConfigByModelType[EnhancementConcreteModelType];
 
 /**
  * Structural check: every present customConfig value must be a FileSource.

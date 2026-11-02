@@ -105,8 +105,12 @@ internal object VideoBufferService : ComponentCallbacks2 {
     fps: Double,
     maxSide: Int,
     timesUs: LongArray? = null,
+    cancelFlagAddr: Long = 0L,
+    progress: Any? = null,
   ): Map<String, Any>? =
-    VideoBufferNative.nativeCreateImageFromVideo(bufferId, sampling, uniform, fps, maxSide, timesUs)
+    VideoBufferNative.nativeCreateImageFromVideo(
+      bufferId, sampling, uniform, fps, maxSide, timesUs, cancelFlagAddr, progress
+    )
 
   fun keyframeTimes(bufferId: String, fromUs: Long, toUs: Long, maxCount: Int): List<Long> =
     VideoBufferNative.nativeKeyframeTimes(bufferId, fromUs, toUs, maxCount) ?: emptyList()

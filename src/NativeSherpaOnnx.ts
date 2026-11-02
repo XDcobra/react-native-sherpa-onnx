@@ -2115,6 +2115,8 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
     paths?: {
       model?: string;
+      enrollModel?: string;
+      chunkModel?: string;
     };
   }>;
 
@@ -2841,6 +2843,11 @@ export interface Spec extends TurboModule {
     audioOutBufferId: string
   ): Promise<void>;
 
+  enhancementSetVoiceSample(
+    instanceId: string,
+    bufferId: string
+  ): Promise<void>;
+
   getEnhancementSampleRate(instanceId: string): Promise<number>;
 
   unloadEnhancement(instanceId: string): Promise<void>;
@@ -2851,6 +2858,7 @@ export interface Spec extends TurboModule {
   ): Promise<{
     success: boolean;
     error?: string;
+    modelType?: string;
     sampleRate?: number;
     frameShiftInSamples?: number;
   }>;

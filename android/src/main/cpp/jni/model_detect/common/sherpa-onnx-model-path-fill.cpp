@@ -91,6 +91,8 @@ void FillEnhancementModelPathsFromStringMap(
     EnhancementModelPaths& out
 ) {
     SetPathFromMap(paths, "model", out.model);
+    SetPathFromMap(paths, "enrollModel", out.enrollModel);
+    SetPathFromMap(paths, "chunkModel", out.chunkModel);
 }
 
 void FillSeparationModelPathsFromStringMap(
@@ -276,6 +278,8 @@ std::map<std::string, std::string> EnhancementModelPathsToStringMap(
     const EnhancementModelPaths& paths) {
     std::map<std::string, std::string> out;
     PutPathIfNonEmpty(out, "model", paths.model);
+    PutPathIfNonEmpty(out, "enrollModel", paths.enrollModel);
+    PutPathIfNonEmpty(out, "chunkModel", paths.chunkModel);
     return out;
 }
 

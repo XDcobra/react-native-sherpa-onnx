@@ -3,6 +3,7 @@
 
 #include "sherpa-onnx-common.h"
 #include "sherpa-onnx-model-detect.h"
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -23,6 +24,11 @@ struct EnhancementInitializeResult {
 struct EnhancedAudioResult {
     std::vector<float> samples;
     int32_t sampleRate = 0;
+};
+
+struct SetVoiceSampleResult {
+    bool success = false;
+    std::string error;
 };
 
 class EnhancementWrapper {
@@ -47,6 +53,11 @@ public:
     );
 
     EnhancedAudioResult runSamples(const std::vector<float>& samples, int32_t sampleRate);
+
+    SetVoiceSampleResult setVoiceSample(
+        const std::vector<float>& samples,
+        int32_t sampleRate
+    );
 
     int32_t getSampleRate() const;
 
@@ -83,6 +94,10 @@ public:
     EnhancedAudioResult runSamples(const std::vector<float>& samples, int32_t sampleRate);
     EnhancedAudioResult flush();
     void reset();
+    SetVoiceSampleResult setVoiceSample(
+        const std::vector<float>& samples,
+        int32_t sampleRate
+    );
 
     int32_t getSampleRate() const;
     int32_t getFrameShiftInSamples() const;
@@ -96,6 +111,6 @@ private:
     std::unique_ptr<Impl> pImpl;
 };
 
-} // namespace sherpaonnx
+}  // namespace sherpaonnx
 
-#endif // SHERPA_ONNX_ENHANCEMENT_WRAPPER_H
+#endif  // SHERPA_ONNX_ENHANCEMENT_WRAPPER_H

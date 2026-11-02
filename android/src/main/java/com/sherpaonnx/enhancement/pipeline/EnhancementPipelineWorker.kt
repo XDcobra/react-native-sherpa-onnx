@@ -1,12 +1,12 @@
 package com.sherpaonnx.enhancement.pipeline
 
-import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
 import com.sherpaonnx.audio.pipeline.LiveAppendOrigin
 import com.sherpaonnx.audio.pipeline.LiveAudioPipelineWriter
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
+import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -17,14 +17,14 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 class EnhancementPipelineWorker(
-  private val denoiser: OnlineSpeechDenoiser,
+  private val instanceId: String,
   private val inputEntry: LiveEntry,
   private val outputEntry: LiveEntry,
 ) : StreamingPipelineWorker {
 
   override val pipelineId: String = UUID.randomUUID().toString()
 
-  private val gateKey = NativeInstanceGate.keyFor(denoiser)
+  private val gateKey = "online-enhancement:$instanceId"
 
   @Volatile
   override var isRunning: Boolean = false
@@ -69,8 +69,8 @@ class EnhancementPipelineWorker(
   }
 
   private fun runLoop() {
-    val chunkSize = denoiser.frameShiftInSamples
-    val sampleRate = denoiser.sampleRate
+    val chunkSize = SherpaOnnxEnhancementHelper.frameShift(instanceId)
+    val sampleRate = SherpaOnnxEnhancementHelper.sampleRate(instanceId)
     try {
       while (isRunning) {
         processCommands()
@@ -80,7 +80,7 @@ class EnhancementPipelineWorker(
           if (inputEntry.state == LiveEntry.State.FINISHED) {
             if (NativeInstanceGate.beginUse(gateKey)) {
               try {
-                val flushed = denoiser.flush()
+                val flushed = SherpaOnnxEnhancementHelper.flushOnline(instanceId)
                 if (flushed.samples.isNotEmpty()) {
                   when (
                     outputEntry.tryAppendSamples(
@@ -115,23 +115,25 @@ class EnhancementPipelineWorker(
           break
         }
         val denoised = try {
-          denoiser.run(chunk, sampleRate)
+          SherpaOnnxEnhancementHelper.runOnline(instanceId, chunk, sampleRate)
         } finally {
           NativeInstanceGate.endUse(gateKey)
         }
-        when (
-          outputEntry.tryAppendSamples(
-            denoised.samples,
-            sampleRate,
-            LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
-          )
-        ) {
-          LiveEntry.AppendResult.APPENDED -> {
-            unitsWritten += denoised.samples.size
-          }
-          LiveEntry.AppendResult.BUFFER_FINALIZED -> {
-            isRunning = false
-            break
+        if (denoised.samples.isNotEmpty()) {
+          when (
+            outputEntry.tryAppendSamples(
+              denoised.samples,
+              sampleRate,
+              LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
+            )
+          ) {
+            LiveEntry.AppendResult.APPENDED -> {
+              unitsWritten += denoised.samples.size
+            }
+            LiveEntry.AppendResult.BUFFER_FINALIZED -> {
+              isRunning = false
+              break
+            }
           }
         }
 
@@ -171,12 +173,12 @@ class EnhancementPipelineWorker(
               continue
             }
             try {
-              val flushed = denoiser.flush()
+              val flushed = SherpaOnnxEnhancementHelper.flushOnline(instanceId)
               if (flushed.samples.isNotEmpty()) {
                 when (
                   outputEntry.tryAppendSamples(
                     flushed.samples,
-                    denoiser.sampleRate,
+                    SherpaOnnxEnhancementHelper.sampleRate(instanceId),
                     LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.ENHANCEMENT),
                   )
                 ) {
@@ -206,7 +208,7 @@ class EnhancementPipelineWorker(
               continue
             }
             try {
-              denoiser.reset()
+              SherpaOnnxEnhancementHelper.resetOnline(instanceId)
               cmd.completion.complete(Unit)
             } finally {
               NativeInstanceGate.endUse(gateKey)

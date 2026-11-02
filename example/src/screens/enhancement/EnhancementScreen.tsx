@@ -26,7 +26,7 @@ import {
   detectEnhancementModel,
   assertEnhancementCustomConfig,
   type EnhancementEngine,
-  type EnhancementModelType,
+  type EnhancementConcreteModelType,
 } from 'react-native-sherpa-onnx/enhancement';
 import {
   createEmptyOfflineAudioBuffer,
@@ -41,7 +41,7 @@ import {
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
-import { AUDIO_FILES } from '../../audioConfig';
+import { getAudioFilesForEnhancement } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
@@ -51,6 +51,7 @@ import {
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
+import { VoxLockReferenceAudioPicker } from '../../components/VoxLockReferenceAudioPicker';
 import {
   SegmentationPolicyControls,
   buildSegmentationOption,
@@ -63,7 +64,13 @@ import {
   type ModelInitMode,
   type EnhancementCustomInitFormState,
 } from '../../components/modelInit';
-import { fillEnhancementCustomConfigFromModelFolder } from '../../utils/enhancementCustomInitFill';
+import {
+  buildEnhancementAutoInitializeOptions,
+  buildEnhancementCustomInitializeOptions,
+  enhancementLoadedKindFromDetect,
+  fillEnhancementCustomConfigFromModelFolder,
+  isEnhancementFolderHint,
+} from '../../utils/enhancementCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
@@ -74,9 +81,7 @@ const DEFAULT_ENHANCEMENT_CUSTOM_INIT: EnhancementCustomInitFormState = {
 };
 
 function isEnhancementHint(folder: string, hint: string): boolean {
-  if (hint === 'enhancement') return true;
-  const n = folder.toLowerCase();
-  return n.includes('gtcrn') || n.includes('dpdfnet');
+  return isEnhancementFolderHint(folder, hint);
 }
 
 const localStyles = StyleSheet.create({
@@ -134,7 +139,7 @@ export default function EnhancementScreen() {
     Array<{ type: string; modelDir: string }>
   >([]);
   const [selectedModelKind, setSelectedModelKind] =
-    useState<EnhancementModelType | null>(null);
+    useState<EnhancementConcreteModelType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorSource, setErrorSource] = useState<'init' | 'enhance' | null>(
@@ -367,14 +372,13 @@ export default function EnhancementScreen() {
         customConfig as unknown as Record<string, unknown>
       );
 
-      const engine = await createEnhancement({
-        initMode: 'custom',
-        modelType: customInitForm.modelType,
-        customConfig: customConfig as {
-          model: import('react-native-sherpa-onnx/fileio').FileSource;
-        },
-        numThreads: NUM_THREADS,
-      });
+      const engine = await createEnhancement(
+        buildEnhancementCustomInitializeOptions(
+          customInitForm.modelType,
+          customConfig as Record<string, unknown>,
+          { numThreads: NUM_THREADS }
+        )
+      );
 
       engineRef.current = engine;
       setCurrentModelFolder(null);
@@ -445,24 +449,18 @@ export default function EnhancementScreen() {
         type: m.type,
         modelDir: m.modelDir,
       }));
-      const loadedKind =
-        (detectResult.modelType as EnhancementModelType | undefined) ??
-        (normalized[0]?.type === 'gtcrn' || normalized[0]?.type === 'dpdfnet'
-          ? (normalized[0].type as EnhancementModelType)
-          : null);
+      const loadedKind = enhancementLoadedKindFromDetect(
+        detectResult.modelType,
+        normalized
+      );
 
       engineRef.current = engine;
       setDetectedModels(normalized);
       setCurrentModelFolder(modelFolder);
       setInitializedSummary(null);
       setSelectedModelForInit(modelFolder);
-      if (loadedKind === 'gtcrn' || loadedKind === 'dpdfnet') {
+      if (loadedKind) {
         setSelectedModelKind(loadedKind);
-      } else if (
-        normalized.length === 1 &&
-        (normalized[0]!.type === 'gtcrn' || normalized[0]!.type === 'dpdfnet')
-      ) {
-        setSelectedModelKind(normalized[0]!.type as EnhancementModelType);
       }
 
       const types = normalized.map((m) => m.type).join(', ');
@@ -495,7 +493,7 @@ export default function EnhancementScreen() {
     }
   };
 
-  const handleReinitWithKind = async (kind: EnhancementModelType) => {
+  const handleReinitWithKind = async (kind: EnhancementConcreteModelType) => {
     if (!currentModelFolder) return;
     setSelectedModelKind(kind);
     const folder = currentModelFolder;
@@ -512,11 +510,11 @@ export default function EnhancementScreen() {
       const modelPath = resolveEnhancementModelPath(folder);
       const modelSource = await toDetectSource(modelPath);
 
-      const engine = await createEnhancement({
-        modelSource,
-        numThreads: NUM_THREADS,
-        modelType: kind,
-      });
+      const engine = await createEnhancement(
+        buildEnhancementAutoInitializeOptions(modelSource, kind, {
+          numThreads: NUM_THREADS,
+        })
+      );
       const detectResult = await detectEnhancementModel(modelSource, {
         modelType: kind,
       });
@@ -718,13 +716,42 @@ export default function EnhancementScreen() {
     }
   };
 
+  const applyVoxLockVoiceSample = useCallback(async (bufferId: string) => {
+    const engine = engineRef.current;
+    if (!engine || engine.modelType !== 'voxlock') {
+      throw new Error('VoxLock engine is not initialized');
+    }
+    await engine.setVoiceSample(bufferId);
+  }, []);
+
   const engineReady =
     (currentModelFolder != null || initializedSummary != null) &&
     engineRef.current != null;
+  const voxLockEngineId =
+    engineReady && engineRef.current?.modelType === 'voxlock'
+      ? engineRef.current.instanceId
+      : null;
   const showKindPicker =
     detectedModels.length > 1 &&
     detectedModels.some((m) => m.type === 'gtcrn') &&
     detectedModels.some((m) => m.type === 'dpdfnet');
+  const resultPlaybackLabel =
+    selectedModelKind === 'voxlock' ? 'Isolated' : 'Enhanced';
+  const enhancementAudioFiles = useMemo(
+    () =>
+      getAudioFilesForEnhancement({
+        modelFolder: currentModelFolder ?? selectedModelForInit,
+        modelType:
+          initMode === 'custom' ? customInitForm.modelType : selectedModelKind,
+      }),
+    [
+      currentModelFolder,
+      customInitForm.modelType,
+      initMode,
+      selectedModelForInit,
+      selectedModelKind,
+    ]
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -754,7 +781,7 @@ export default function EnhancementScreen() {
             />
             <Text style={styles.hint}>
               {initMode === 'auto'
-                ? 'Offline denoising (GTCRN / DPDFNet). Select a folder, then tap "Use model".'
+                ? 'Offline denoising (GTCRN / DPDFNet / VoxLock). Select a folder, then tap "Use model".'
                 : 'Choose model type, pick the ONNX file (or Fill from catalog), then Initialize custom.'}
             </Text>
 
@@ -905,27 +932,26 @@ export default function EnhancementScreen() {
             </View>
           )}
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              {showKindPicker ? '3. Enhance audio' : '2. Enhance audio'}
-            </Text>
-            <Text style={styles.hint}>
-              WAV input (example clips or a file from disk). Enhanced audio
-              stays in an offline buffer until you save or play it below.
-            </Text>
+          {engineReady ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                {showKindPicker ? '3. Enhance audio' : '2. Enhance audio'}
+              </Text>
+              <Text style={styles.hint}>
+                WAV input (example clips or a file from disk). Enhanced audio
+                stays in an offline buffer until you save or play it below.
+              </Text>
 
-            {!engineReady && (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  Initialize an enhancement model first.
-                </Text>
-              </View>
-            )}
+              <VoxLockReferenceAudioPicker
+                key={voxLockEngineId ?? 'voxlock-ref'}
+                visible={voxLockEngineId != null}
+                disabled={enhancing || loading}
+                applyVoiceSample={applyVoxLockVoiceSample}
+              />
 
-            {engineReady && (
               <OfflineAudioBufferWidget
                 ref={offlineWidgetRef}
-                audioFiles={AUDIO_FILES}
+                audioFiles={enhancementAudioFiles}
                 disabled={enhancing || loading}
                 onBufferReady={(info) => {
                   setPreparedInputBuffer(info);
@@ -939,115 +965,115 @@ export default function EnhancementScreen() {
                   setLastEnhancedAudio(null);
                 }}
               />
-            )}
 
-            {engineReady && preparedInputBuffer && (
-              <>
-                <SegmentationPolicyControls
-                  variant="speech-offline"
-                  value={segConfig}
-                  onChange={setSegConfig}
-                  disabled={enhancing || loading}
-                />
-                <TouchableOpacity
-                  style={[
-                    styles.button,
-                    (enhancing || loading) && styles.buttonDisabled,
-                  ]}
-                  onPress={handleEnhance}
-                  disabled={enhancing || loading}
-                >
-                  {enhancing ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.buttonText}>Run enhancement</Text>
-                  )}
-                </TouchableOpacity>
-              </>
-            )}
-
-            {enhanceResult && (
-              <View style={styles.resultSection}>
-                <Text style={styles.resultLabel}>Enhancement</Text>
-                <Text style={styles.resultText} selectable>
-                  {enhanceResult}
-                </Text>
-                <View style={localStyles.playRow}>
+              {preparedInputBuffer && (
+                <>
+                  <SegmentationPolicyControls
+                    variant="speech-offline"
+                    value={segConfig}
+                    onChange={setSegConfig}
+                    disabled={enhancing || loading}
+                  />
                   <TouchableOpacity
                     style={[
-                      styles.playButton,
-                      localStyles.playHalf,
-                      !preparedInputBuffer && localStyles.playDisabled,
+                      styles.button,
+                      (enhancing || loading) && styles.buttonDisabled,
                     ]}
-                    onPress={() => togglePlayOriginalOutput()}
-                    disabled={!preparedInputBuffer}
+                    onPress={handleEnhance}
+                    disabled={enhancing || loading}
                   >
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name={
-                          activePlaybackKind === 'original' ? 'stop' : 'play'
-                        }
-                        size={16}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.playButtonText}>
-                        {activePlaybackKind === 'original'
-                          ? 'Stop'
-                          : 'Original'}
-                      </Text>
-                    </View>
+                    {enhancing ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.buttonText}>Run enhancement</Text>
+                    )}
                   </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.playButton,
-                      localStyles.playHalf,
-                      !lastEnhancedAudio && localStyles.playDisabled,
-                    ]}
-                    onPress={() => togglePlayEnhancedOutput()}
-                    disabled={!lastEnhancedAudio}
-                  >
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name={
-                          activePlaybackKind === 'enhanced' ? 'stop' : 'play'
-                        }
-                        size={16}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.playButtonText}>
-                        {activePlaybackKind === 'enhanced'
-                          ? 'Stop'
-                          : 'Enhanced'}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-                {lastEnhancedAudio && (
-                  <View style={styles.mt12}>
-                    <AudioSaveDestinationPicker
-                      audioInput={lastEnhancedAudio.outputBufferId}
-                      filename={`sherpa_enhanced_${Date.now()}.wav`}
-                      format="wav"
-                      onSaveComplete={(result) => {
-                        const location = formatResolvedLocation(result);
-                        Alert.alert('Saved', `Audio saved to:\n${location}`);
-                      }}
-                      onError={(saveError) => {
-                        Alert.alert('Save failed', saveError.message);
-                      }}
-                    />
+                </>
+              )}
+
+              {enhanceResult && (
+                <View style={styles.resultSection}>
+                  <Text style={styles.resultLabel}>Enhancement</Text>
+                  <Text style={styles.resultText} selectable>
+                    {enhanceResult}
+                  </Text>
+                  <View style={localStyles.playRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.playButton,
+                        localStyles.playHalf,
+                        !preparedInputBuffer && localStyles.playDisabled,
+                      ]}
+                      onPress={() => togglePlayOriginalOutput()}
+                      disabled={!preparedInputBuffer}
+                    >
+                      <View style={styles.rowAlignCenter}>
+                        <Ionicons
+                          name={
+                            activePlaybackKind === 'original' ? 'stop' : 'play'
+                          }
+                          size={16}
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.playButtonText}>
+                          {activePlaybackKind === 'original'
+                            ? 'Stop'
+                            : 'Original'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.playButton,
+                        localStyles.playHalf,
+                        !lastEnhancedAudio && localStyles.playDisabled,
+                      ]}
+                      onPress={() => togglePlayEnhancedOutput()}
+                      disabled={!lastEnhancedAudio}
+                    >
+                      <View style={styles.rowAlignCenter}>
+                        <Ionicons
+                          name={
+                            activePlaybackKind === 'enhanced' ? 'stop' : 'play'
+                          }
+                          size={16}
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.playButtonText}>
+                          {activePlaybackKind === 'enhanced'
+                            ? 'Stop'
+                            : resultPlaybackLabel}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
                   </View>
-                )}
-              </View>
-            )}
+                  {lastEnhancedAudio && (
+                    <View style={styles.mt12}>
+                      <AudioSaveDestinationPicker
+                        audioInput={lastEnhancedAudio.outputBufferId}
+                        filename={`sherpa_enhanced_${Date.now()}.wav`}
+                        format="wav"
+                        onSaveComplete={(result) => {
+                          const location = formatResolvedLocation(result);
+                          Alert.alert('Saved', `Audio saved to:\n${location}`);
+                        }}
+                        onError={(saveError) => {
+                          Alert.alert('Save failed', saveError.message);
+                        }}
+                      />
+                    </View>
+                  )}
+                </View>
+              )}
 
-            {error && errorSource === 'enhance' && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorLabel}>Error:</Text>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
-          </View>
+              {error && errorSource === 'enhance' && (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorLabel}>Error:</Text>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
+            </View>
+          ) : null}
         </ScrollView>
       </View>
 
