@@ -22,14 +22,22 @@ export interface GtcrnDpdfnetCustomConfig {
   model: FileSource;
 }
 
+export type GtcrnCustomConfig = GtcrnDpdfnetCustomConfig;
+export type DpdfnetCustomConfig = GtcrnDpdfnetCustomConfig;
+
 export interface VoxLockCustomConfig {
   enrollModel: FileSource;
   chunkModel: FileSource;
 }
 
+export type EnhancementCustomConfigByModelType = {
+  gtcrn: GtcrnCustomConfig;
+  dpdfnet: DpdfnetCustomConfig;
+  voxlock: VoxLockCustomConfig;
+};
+
 export type EnhancementCustomConfig =
-  | GtcrnDpdfnetCustomConfig
-  | VoxLockCustomConfig;
+  EnhancementCustomConfigByModelType[EnhancementConcreteModelType];
 
 /**
  * Structural check: every present customConfig value must be a FileSource.

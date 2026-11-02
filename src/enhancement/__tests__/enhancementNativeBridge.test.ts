@@ -67,4 +67,13 @@ describe('enhancementNativeBridge', () => {
       chunkModel: '/models/voxlock_chunk.onnx',
     });
   });
+
+  it('does not forward voiceSample onto the native init map', async () => {
+    const bridge = await buildEnhancementInitBridgeOptions({
+      modelSource: { kind: 'fs', path: '/models/voxlock' },
+      modelType: 'voxlock',
+      voiceSample: 'off_voice',
+    });
+    expect(bridge).not.toHaveProperty('voiceSample');
+  });
 });

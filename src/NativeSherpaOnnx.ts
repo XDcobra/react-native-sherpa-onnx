@@ -2858,6 +2858,7 @@ export interface Spec extends TurboModule {
   ): Promise<{
     success: boolean;
     error?: string;
+    modelType?: string;
     sampleRate?: number;
     frameShiftInSamples?: number;
   }>;

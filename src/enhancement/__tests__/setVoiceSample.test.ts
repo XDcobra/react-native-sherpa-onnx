@@ -114,22 +114,13 @@ describe('setVoiceSample', () => {
     );
   });
 
-  it('propagates GTCRN ENHANCEMENT_INVALID_ARGUMENT', async () => {
-    native.enhancementSetVoiceSample.mockRejectedValue(
-      rejectWith(
-        'ENHANCEMENT_INVALID_ARGUMENT',
-        'setVoiceSample is only supported for VoxLock'
-      )
-    );
+  it('does not expose setVoiceSample on a GTCRN engine', async () => {
     const engine = await createEnhancement({
       modelSource: { kind: 'fs', path: '/models/gtcrn' },
       modelType: 'gtcrn',
     });
 
-    await expect(engine.setVoiceSample('off_voice')).rejects.toMatchObject({
-      code: 'ENHANCEMENT_INVALID_ARGUMENT',
-      message: 'setVoiceSample is only supported for VoxLock',
-    });
+    expect('setVoiceSample' in engine).toBe(false);
   });
 
   it('propagates too-short ENHANCEMENT_INVALID_ARGUMENT', async () => {
@@ -178,5 +169,55 @@ describe('setVoiceSample', () => {
       expect.stringMatching(/^streaming_enhancement_/),
       'off_voice'
     );
+  });
+
+  it('create with voiceSample forwards the buffer id', async () => {
+    const engine = await createEnhancement({
+      modelSource: { kind: 'fs', path: '/models/voxlock' },
+      modelType: 'voxlock',
+      voiceSample: 'off_voice',
+    });
+
+    expect(native.enhancementSetVoiceSample).toHaveBeenCalledWith(
+      engine.instanceId,
+      'off_voice'
+    );
+    expect(native.unloadEnhancement).not.toHaveBeenCalled();
+  });
+
+  it('unloads the instance when init voiceSample fails', async () => {
+    native.enhancementSetVoiceSample.mockRejectedValue(
+      rejectWith(
+        'ENHANCEMENT_INVALID_ARGUMENT',
+        'VoxLock voice sample is too short after resample (need 3 seconds)'
+      )
+    );
+
+    await expect(
+      createEnhancement({
+        modelSource: { kind: 'fs', path: '/models/voxlock' },
+        modelType: 'voxlock',
+        voiceSample: 'off_short',
+      })
+    ).rejects.toMatchObject({
+      code: 'ENHANCEMENT_INVALID_ARGUMENT',
+    });
+    expect(native.unloadEnhancement).toHaveBeenCalledWith(
+      expect.stringMatching(/^enhancement_/)
+    );
+  });
+
+  it('streaming create with voiceSample forwards the buffer id', async () => {
+    const engine = await createStreamingEnhancement({
+      modelSource: { kind: 'fs', path: '/models/voxlock' },
+      modelType: 'voxlock',
+      voiceSample: 'off_voice',
+    });
+
+    expect(native.enhancementSetVoiceSample).toHaveBeenCalledWith(
+      engine.instanceId,
+      'off_voice'
+    );
+    expect(native.unloadOnlineEnhancement).not.toHaveBeenCalled();
   });
 });

@@ -573,6 +573,7 @@ internal class SherpaOnnxEnhancementHelper(
     onlineInstances[instanceId] = OnlineEnhancementInstance(instanceId)
     val out = Arguments.createMap()
     out.putBoolean("success", true)
+    out.putString("modelType", (result["modelType"] as? String) ?: "unknown")
     out.putInt("sampleRate", (result["sampleRate"] as? Number)?.toInt() ?: 0)
     out.putInt("frameShiftInSamples", (result["frameShiftInSamples"] as? Number)?.toInt() ?: 0)
     promise.resolve(out)

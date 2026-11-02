@@ -5,11 +5,16 @@ import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTy
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
+import { applyVoiceSampleAfterCreate } from './applyVoiceSampleAfterCreate';
 import { buildEnhancementInitBridgeOptions } from './enhancementNativeBridge';
-import type { EnhancementModelType } from './types';
+import {
+  resolveEnhancementEngineModelType,
+  voiceSampleFromInitOptions,
+  type EnhancementModelType,
+} from './types';
 import type {
   EnhancementPipelineHandle,
-  StreamingEnhancementEngine,
+  StreamingEnhancementEngineForInit,
   StreamingEnhancementEnhanceOptions,
   StreamingEnhancementInitializeOptions,
 } from './streamingTypes';
@@ -66,12 +71,15 @@ function createEnhancementPipelineHandle(
 
 /**
  * Create an online speech-enhancement engine. Call `destroy()` when finished.
- * @throws {Error} `ENHANCEMENT_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * Optional `voiceSample` is applied after Create via `setVoiceSample` when
+ * `modelType` is `'voxlock'`. Failure unloads the instance and rethrows.
+ * Returns `StreamingEnhancementEngineOf<T>` when `modelType` is a concrete family.
+ * @throws {Error} `ENHANCEMENT_INVALID_ARGUMENT` — custom model paths are incomplete or invalid, or `voiceSample` is too short.
  * @throws {Error} Native init failed (`Streaming enhancement initialization failed` / `ONLINE_ENHANCEMENT_INIT_ERROR`).
  */
-export async function createStreamingEnhancement(
-  options: StreamingEnhancementInitializeOptions
-): Promise<StreamingEnhancementEngine> {
+export async function createStreamingEnhancement<
+  O extends StreamingEnhancementInitializeOptions
+>(options: O): Promise<StreamingEnhancementEngineForInit<O>> {
   const instanceId = `streaming_enhancement_${++streamingEnhancementInstanceCounter}`;
   const bridgeOptions = await buildEnhancementInitBridgeOptions(options);
   const result = await SherpaOnnx.initializeOnlineEnhancement(
@@ -89,6 +97,17 @@ export async function createStreamingEnhancement(
     );
   }
 
+  await applyVoiceSampleAfterCreate({
+    instanceId,
+    voiceSample: voiceSampleFromInitOptions(options),
+    unload: () => SherpaOnnx.unloadOnlineEnhancement(instanceId),
+  });
+
+  const modelType = resolveEnhancementEngineModelType(
+    options,
+    result.modelType
+  );
+
   let destroyed = false;
   const guard = () => {
     if (destroyed) {
@@ -102,6 +121,9 @@ export async function createStreamingEnhancement(
     get instanceId() {
       return instanceId;
     },
+    get modelType() {
+      return modelType;
+    },
 
     async getSampleRate(): Promise<number> {
       guard();
@@ -113,11 +135,17 @@ export async function createStreamingEnhancement(
       return Number(result.frameShiftInSamples ?? 0);
     },
 
-    async setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void> {
-      guard();
-      const bufferId = resolvePipelineAudioBufferId(buffer);
-      await SherpaOnnx.enhancementSetVoiceSample(instanceId, bufferId);
-    },
+    ...(modelType === 'voxlock'
+      ? {
+          async setVoiceSample(
+            buffer: OfflineAudioBufferIdSource
+          ): Promise<void> {
+            guard();
+            const bufferId = resolvePipelineAudioBufferId(buffer);
+            await SherpaOnnx.enhancementSetVoiceSample(instanceId, bufferId);
+          },
+        }
+      : {}),
 
     async destroy(): Promise<void> {
       if (destroyed) return;
@@ -188,7 +216,7 @@ export async function createStreamingEnhancement(
         throw err;
       }
     },
-  };
+  } as StreamingEnhancementEngineForInit<O>;
 }
 
 export type {
