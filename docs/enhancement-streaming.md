@@ -128,7 +128,7 @@ console.log(det.success, det.modelType, det.paths?.model, det.detectedModels);
 
 ### `createStreamingEnhancement(options)`
 
-Creates a `StreamingEnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock detect works; create still rejects with `VoxLock inference is not implemented`.
+Creates a `StreamingEnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock passes audio through until 3s of speech, then locks to that voice. There is no `voiceSample` init option yet.
 
 ```ts
 function createStreamingEnhancement(

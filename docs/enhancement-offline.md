@@ -99,7 +99,7 @@ Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory 
 | `dpdfnet` | `*.onnx` (contains `dpdfnet` or `dpcrn`) | `model` |
 | `voxlock` | `enroll` + `chunk` ONNX (`voxlock_enroll.onnx`, `voxlock_chunk.onnx` / `voxlock_chunk_int8.onnx`) | `enrollModel`, `chunkModel` |
 
-Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto mode prefers `gtcrn` when both single-file stacks are present. VoxLock is detected when the enroll+chunk pair is present (or the folder name contains `voxlock`). **`createEnhancement` / `createStreamingEnhancement` do not run VoxLock yet** (`VoxLock inference is not implemented`).
+Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto mode prefers `gtcrn` when both single-file stacks are present. VoxLock is detected when the enroll+chunk pair is present (or the folder name contains `voxlock`). Create uses empty `voice_sample`: the loudest 3s in the first 15s of the **input** become the enroll clip. There is no `voiceSample` init option yet.
 
 ```ts
 import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
@@ -147,7 +147,7 @@ console.log(det.success, det.modelType, det.isStreaming, det.paths?.model, det.d
 
 ### `createEnhancement(options)`
 
-Creates an `EnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock detect works; create still rejects with `VoxLock inference is not implemented`.
+Creates an `EnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock auto-enrolls from the input (loudest 3s in the first 15s). Do not put a voice clip in `customConfig`.
 
 ```ts
 function createEnhancement(

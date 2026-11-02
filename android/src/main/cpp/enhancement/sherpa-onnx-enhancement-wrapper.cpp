@@ -32,9 +32,6 @@
 namespace sherpaonnx {
 namespace {
 
-constexpr const char* kVoxLockInferenceNotImplemented =
-    "VoxLock inference is not implemented";
-
 std::string EnhancementKindToString(EnhancementModelKind kind) {
     switch (kind) {
         case EnhancementModelKind::kGtcrn:
@@ -57,19 +54,15 @@ EnhancementModelKind ParseEnhancementModelTypeFromString(
     return EnhancementModelKind::kUnknown;
 }
 
-bool RejectVoxLockInference(
-    EnhancementModelKind kind,
-    EnhancementInitializeResult& result
-) {
-    if (kind != EnhancementModelKind::kVoxLock) {
-        return false;
-    }
-    result.error = kVoxLockInferenceNotImplemented;
-    return true;
+std::string PathBaseName(const std::string& path) {
+    const auto pos = path.find_last_of("/\\");
+    return pos == std::string::npos ? path : path.substr(pos + 1);
 }
 
 struct DenoiserOwnedStrings {
     std::string model;
+    std::string enrollModel;
+    std::string chunkModel;
     std::string provider;
 };
 
@@ -89,12 +82,23 @@ void FillModelConfig(
         (provider.has_value() && !provider->empty()) ? *provider : "cpu";
     model.provider = owned.provider.c_str();
     owned.model = paths.model;
+    owned.enrollModel = paths.enrollModel;
+    owned.chunkModel = paths.chunkModel;
     switch (kind) {
         case EnhancementModelKind::kGtcrn:
             model.gtcrn.model = owned.model.c_str();
             break;
         case EnhancementModelKind::kDpdfNet:
             model.dpdfnet.model = owned.model.c_str();
+            break;
+        case EnhancementModelKind::kVoxLock:
+            model.voxlock.enroll_model = owned.enrollModel.c_str();
+            model.voxlock.chunk_model = owned.chunkModel.c_str();
+            ENH_LOGI(
+                "enhancement Fill kind=voxlock enroll=%s chunk=%s voice_sample=empty",
+                PathBaseName(owned.enrollModel).c_str(),
+                PathBaseName(owned.chunkModel).c_str()
+            );
             break;
         default:
             break;
@@ -163,10 +167,6 @@ EnhancementInitializeResult EnhancementWrapper::initialize(
         result.error = detect.error;
         return result;
     }
-    if (RejectVoxLockInference(detect.selectedKind, result)) {
-        return result;
-    }
-
     SherpaOnnxOfflineSpeechDenoiserConfig config;
     std::memset(&config, 0, sizeof(config));
     FillModelConfig(
@@ -221,10 +221,6 @@ EnhancementInitializeResult EnhancementWrapper::initializeCustom(
     }
     result.modelType = EnhancementKindToString(selectedKind);
     result.detectedModels.push_back({result.modelType, "custom"});
-    if (RejectVoxLockInference(selectedKind, result)) {
-        return result;
-    }
-
     SherpaOnnxOfflineSpeechDenoiserConfig config;
     std::memset(&config, 0, sizeof(config));
     FillModelConfig(
@@ -327,10 +323,6 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initialize(
         result.error = detect.error;
         return result;
     }
-    if (RejectVoxLockInference(detect.selectedKind, result)) {
-        return result;
-    }
-
     SherpaOnnxOnlineSpeechDenoiserConfig config;
     std::memset(&config, 0, sizeof(config));
     FillModelConfig(
@@ -387,10 +379,6 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initializeCustom(
     }
     result.modelType = EnhancementKindToString(selectedKind);
     result.detectedModels.push_back({result.modelType, "custom"});
-    if (RejectVoxLockInference(selectedKind, result)) {
-        return result;
-    }
-
     SherpaOnnxOnlineSpeechDenoiserConfig config;
     std::memset(&config, 0, sizeof(config));
     FillModelConfig(
