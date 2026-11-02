@@ -9,6 +9,8 @@ import { fileSourceFromBundledPath } from './utils/fileSourceFromUri';
  *
  * Audio tagging event clips live under `test_wavs/audio-tagging/` (upstream
  * sherpa-onnx audio-tagging-models pack `1.wav`…`13.wav`).
+ * VoxLock showcase clip: `test_wavs/voxlock/en-combined.wav` (upstream
+ * `sherpa-onnx-voxlock-int8/test_wavs/en-combined.wav`).
  */
 
 /**
@@ -73,6 +75,9 @@ export const TEST_AUDIO_FILES = {
   // Multi-speaker test files (dedicated to Diarization and Speaker Identification)
   FOUR_SPEAKERS_ZH: 'test_wavs/0-four-speakers-zh.wav',
   TWO_SPEAKERS_EN_1: 'test_wavs/1-two-speakers-en.wav',
+
+  /** sherpa-onnx VoxLock showcase mixed clip. */
+  VOXLOCK_EN_COMBINED: 'test_wavs/voxlock/en-combined.wav',
 } as const;
 
 /** Upstream sherpa-onnx audio-tagging pack clips (`test_wavs/1.wav`…`13.wav`). */
@@ -307,6 +312,33 @@ export const AUDIO_TAGGING_AUDIO_FILES: AudioFileInfo[] = [
  * - SenseVoice: All files (Chinese, English, Japanese, Korean, Yue) - supports multiple languages
  * - FunASR Nano: All files (multi-language support) - supports multiple languages
  */
+/** sherpa-onnx VoxLock demo clip (`en-combined.wav` from the model pack). */
+export const VOXLOCK_AUDIO_FILES: AudioFileInfo[] = [
+  {
+    id: TEST_AUDIO_FILES.VOXLOCK_EN_COMBINED,
+    name: 'VoxLock combined (en)',
+    description: 'sherpa-onnx VoxLock showcase clip (mixed speakers)',
+    language: 'en',
+  },
+];
+
+/**
+ * Example clips for the enhancement screens. VoxLock only lists the upstream
+ * showcase wav; GTCRN / DPDFNet keep the shared speech set.
+ */
+export function getAudioFilesForEnhancement(args: {
+  modelFolder?: string | null;
+  modelType?: string | null;
+}): AudioFileInfo[] {
+  if (
+    args.modelType === 'voxlock' ||
+    (args.modelFolder ?? '').toLowerCase().includes('voxlock')
+  ) {
+    return VOXLOCK_AUDIO_FILES;
+  }
+  return AUDIO_FILES;
+}
+
 export function getAudioFilesForModel(modelId: string): AudioFileInfo[] {
   const isParaformer = modelId.includes('paraformer');
   const isZipformer = modelId.includes('zipformer');

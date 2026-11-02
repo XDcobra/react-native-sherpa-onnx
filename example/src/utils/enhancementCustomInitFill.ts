@@ -6,10 +6,10 @@ import {
 } from 'react-native-sherpa-onnx/detect';
 import {
   detectEnhancementModel,
+  type EnhancementAutoInitializeOptions,
   type EnhancementConcreteModelType,
   type EnhancementCustomInitializeOptions,
   type EnhancementCustomPathKey,
-  type EnhancementModelType,
   type GtcrnDpdfnetCustomConfig,
   type VoxLockCustomConfig,
 } from 'react-native-sherpa-onnx/enhancement';
@@ -81,10 +81,39 @@ function scanVoxLockPaths(files: string[]): {
   };
 }
 
+export function buildEnhancementAutoInitializeOptions(
+  modelSource: FileSource,
+  modelType: EnhancementConcreteModelType,
+  shared: { numThreads: number; voiceSample?: string }
+): EnhancementAutoInitializeOptions {
+  if (modelType === 'voxlock') {
+    return {
+      modelSource,
+      modelType: 'voxlock',
+      numThreads: shared.numThreads,
+      ...(shared.voiceSample != null
+        ? { voiceSample: shared.voiceSample }
+        : {}),
+    };
+  }
+  if (modelType === 'dpdfnet') {
+    return {
+      modelSource,
+      modelType: 'dpdfnet',
+      numThreads: shared.numThreads,
+    };
+  }
+  return {
+    modelSource,
+    modelType: 'gtcrn',
+    numThreads: shared.numThreads,
+  };
+}
+
 export function buildEnhancementCustomInitializeOptions(
-  modelType: EnhancementModelType,
+  modelType: EnhancementConcreteModelType,
   customConfig: Record<string, unknown>,
-  shared: { numThreads: number }
+  shared: { numThreads: number; voiceSample?: string }
 ): EnhancementCustomInitializeOptions {
   if (modelType === 'voxlock') {
     return {
@@ -92,6 +121,9 @@ export function buildEnhancementCustomInitializeOptions(
       modelType: 'voxlock',
       customConfig: customConfig as unknown as VoxLockCustomConfig,
       numThreads: shared.numThreads,
+      ...(shared.voiceSample != null
+        ? { voiceSample: shared.voiceSample }
+        : {}),
     };
   }
   return {
@@ -114,6 +146,30 @@ function isConcreteEnhancementModelType(
   value: string
 ): value is EnhancementConcreteModelType {
   return value === 'gtcrn' || value === 'dpdfnet' || value === 'voxlock';
+}
+
+export function isEnhancementFolderHint(folder: string, hint: string): boolean {
+  if (hint === 'enhancement') return true;
+  const n = folder.toLowerCase();
+  return n.includes('gtcrn') || n.includes('dpdfnet') || n.includes('voxlock');
+}
+
+export function enhancementLoadedKindFromDetect(
+  modelType: string | undefined,
+  detected: ReadonlyArray<{ type: string }>
+): EnhancementConcreteModelType | null {
+  if (
+    modelType === 'gtcrn' ||
+    modelType === 'dpdfnet' ||
+    modelType === 'voxlock'
+  ) {
+    return modelType;
+  }
+  const first = detected[0]?.type;
+  if (first === 'gtcrn' || first === 'dpdfnet' || first === 'voxlock') {
+    return first;
+  }
+  return null;
 }
 
 export async function fillEnhancementCustomConfigFromModelFolder(

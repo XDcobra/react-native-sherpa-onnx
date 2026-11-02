@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Text,
   View,
@@ -19,6 +19,7 @@ import {
 } from 'react-native-sherpa-onnx/utils';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
+  fileSourceFromBundledPath,
   resolveAudioFileDisplayName,
   toFileSource,
 } from '../../utils/fileSourceFromUri';
@@ -34,7 +35,7 @@ import {
   assertEnhancementCustomConfig,
   type StreamingEnhancementEngine,
   type EnhancementPipelineHandle,
-  type EnhancementModelType,
+  type EnhancementConcreteModelType,
 } from 'react-native-sherpa-onnx/enhancement';
 import {
   EngineModeModelSelector,
@@ -61,7 +62,10 @@ import {
   getModelDisplayName,
   toDetectSource,
 } from '../../modelConfig';
-import { AUDIO_FILES, type AudioFileInfo } from '../../audioConfig';
+import {
+  getAudioFilesForEnhancement,
+  type AudioFileInfo,
+} from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
   startPcmFilePlayback,
@@ -87,8 +91,11 @@ import {
   type EnhancementCustomInitFormState,
 } from '../../components/modelInit';
 import {
+  buildEnhancementAutoInitializeOptions,
   buildEnhancementCustomInitializeOptions,
+  enhancementLoadedKindFromDetect,
   fillEnhancementCustomConfigFromModelFolder,
+  isEnhancementFolderHint,
 } from '../../utils/enhancementCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
@@ -113,9 +120,7 @@ type SelectedEnhancementInput = {
 };
 
 function isEnhancementHint(folder: string, hint: string): boolean {
-  if (hint === 'enhancement') return true;
-  const n = folder.toLowerCase();
-  return n.includes('gtcrn') || n.includes('dpdfnet');
+  return isEnhancementFolderHint(folder, hint);
 }
 
 const localStyles = StyleSheet.create({
@@ -186,7 +191,7 @@ export default function EnhancementStreamingScreen() {
     Array<{ type: string; modelDir: string }>
   >([]);
   const [selectedModelKind, setSelectedModelKind] =
-    useState<EnhancementModelType | null>(null);
+    useState<EnhancementConcreteModelType | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [errorSource, setErrorSource] = useState<'init' | 'enhance' | null>(
@@ -375,11 +380,7 @@ export default function EnhancementStreamingScreen() {
     }
 
     if (effectiveSelectedAudio) {
-      const source: FileSource = {
-        kind: 'app',
-        base: 'files',
-        path: effectiveSelectedAudio.id,
-      };
+      const source = fileSourceFromBundledPath(effectiveSelectedAudio.id);
       return {
         source,
         sourceType: 'example',
@@ -756,11 +757,10 @@ export default function EnhancementStreamingScreen() {
         type: m.type,
         modelDir: m.modelDir,
       }));
-      const loadedKind =
-        (detectResult.modelType as EnhancementModelType | undefined) ??
-        (normalized[0]?.type === 'gtcrn' || normalized[0]?.type === 'dpdfnet'
-          ? (normalized[0].type as EnhancementModelType)
-          : null);
+      const loadedKind = enhancementLoadedKindFromDetect(
+        detectResult.modelType,
+        normalized
+      );
 
       engineRef.current = engine;
       setDetectedModels(normalized);
@@ -768,13 +768,8 @@ export default function EnhancementStreamingScreen() {
       setInitializedSummary(null);
       setSelectedModelForInit(modelFolder);
 
-      if (loadedKind === 'gtcrn' || loadedKind === 'dpdfnet') {
+      if (loadedKind) {
         setSelectedModelKind(loadedKind);
-      } else if (
-        normalized.length === 1 &&
-        (normalized[0]!.type === 'gtcrn' || normalized[0]!.type === 'dpdfnet')
-      ) {
-        setSelectedModelKind(normalized[0]!.type as EnhancementModelType);
       }
 
       const types = normalized.map((m) => m.type).join(', ');
@@ -815,7 +810,7 @@ export default function EnhancementStreamingScreen() {
     }
   };
 
-  const handleReinitWithKind = async (kind: EnhancementModelType) => {
+  const handleReinitWithKind = async (kind: EnhancementConcreteModelType) => {
     if (!currentModelFolder) return;
 
     setSelectedModelKind(kind);
@@ -848,11 +843,11 @@ export default function EnhancementStreamingScreen() {
         return;
       }
 
-      const engine = await createStreamingEnhancement({
-        modelSource,
-        numThreads: NUM_THREADS,
-        modelType: kind,
-      });
+      const engine = await createStreamingEnhancement(
+        buildEnhancementAutoInitializeOptions(modelSource, kind, {
+          numThreads: NUM_THREADS,
+        })
+      );
       engineRef.current = engine;
       setInitResult(
         `Initialized streaming engine: ${getModelDisplayName(
@@ -995,6 +990,24 @@ export default function EnhancementStreamingScreen() {
     }
   };
 
+  const resultPlaybackLabel =
+    selectedModelKind === 'voxlock' ? 'Isolated' : 'Enhanced';
+  const enhancementAudioFiles = useMemo(
+    () =>
+      getAudioFilesForEnhancement({
+        modelFolder: currentModelFolder ?? selectedModelForInit,
+        modelType:
+          initMode === 'custom' ? customInitForm.modelType : selectedModelKind,
+      }),
+    [
+      currentModelFolder,
+      customInitForm.modelType,
+      initMode,
+      selectedModelForInit,
+      selectedModelKind,
+    ]
+  );
+
   const handleEnhance = async (
     override?: {
       selectedAudio?: AudioFileInfo | null;
@@ -1031,8 +1044,9 @@ export default function EnhancementStreamingScreen() {
       setAudioSourceType(selectedInput.sourceType);
       setSelectedAudio(
         selectedInput.sourceType === 'example'
-          ? AUDIO_FILES.find((f) => f.id === selectedInput.selectedAudioId) ??
-              null
+          ? enhancementAudioFiles.find(
+              (f) => f.id === selectedInput.selectedAudioId
+            ) ?? null
           : null
       );
       setCustomAudioPath(selectedInput.customAudioPath);
@@ -1267,7 +1281,7 @@ export default function EnhancementStreamingScreen() {
             />
             <Text style={styles.hint}>
               {initMode === 'auto'
-                ? 'Select a streaming-capable folder, then tap "Use model".'
+                ? 'Select a streaming-capable folder (GTCRN / DPDFNet / VoxLock), then tap "Use model".'
                 : 'Choose model type, pick the ONNX file (or Fill from catalog), then Initialize custom.'}
             </Text>
 
@@ -1411,360 +1425,359 @@ export default function EnhancementStreamingScreen() {
             </View>
           )}
 
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              {showKindPicker
-                ? '3. Stream enhancement'
-                : '2. Stream enhancement'}
-            </Text>
-            <Text style={styles.hint}>
-              Same UX as offline enhancement, but processing runs as a streaming
-              pipeline with live buffers to avoid offline OOM on long audio.
-            </Text>
+          {engineReady ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                {showKindPicker
+                  ? '3. Stream enhancement'
+                  : '2. Stream enhancement'}
+              </Text>
+              <Text style={styles.hint}>
+                Same UX as offline enhancement, but processing runs as a
+                streaming pipeline with live buffers to avoid offline OOM on
+                long audio.
+              </Text>
 
-            <AudioDeviceDropdown
-              label="Output device"
-              devices={outputDevices}
-              selectedDeviceId={selectedOutputDeviceId}
-              onSelectDeviceId={setSelectedOutputDeviceId}
-              disabled={enhancing || loading || preparingInputBuffer}
-            />
-
-            {!engineReady && (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  Initialize an enhancement model first.
-                </Text>
-              </View>
-            )}
-
-            {engineReady && engineMode === 'streaming' && (
-              <SegmentationPolicyControls
-                variant="speech-streaming"
-                value={segStreamingConfig}
-                onChange={setSegStreamingConfig}
+              <AudioDeviceDropdown
+                label="Output device"
+                devices={outputDevices}
+                selectedDeviceId={selectedOutputDeviceId}
+                onSelectDeviceId={setSelectedOutputDeviceId}
                 disabled={enhancing || loading || preparingInputBuffer}
               />
-            )}
 
-            {engineReady && engineMode === 'offline' && (
-              <SegmentationPolicyControls
-                variant="speech-offline"
-                value={segStreamingConfig}
-                onChange={setSegStreamingConfig}
-                disabled={enhancing || loading || preparingInputBuffer}
-                disableOff
-                offDisabledMessage="Live Overload requires mandatory segmentation to split audio into processable chunks."
-              />
-            )}
-
-            {engineReady &&
-              (audioSourceType === 'example' || audioSourceType === 'own') &&
-              (preparingInputBuffer || inputBufferBuildStatus != null) && (
-                <View style={styles.decodeProgressContainer}>
-                  <View style={styles.decodeProgressHeaderRow}>
-                    <Text style={styles.decodeProgressLabel}>
-                      {inputBufferBuildStatus ?? 'Preparing LiveAudioBuffer...'}
-                    </Text>
-                    {inputBufferBuildProgress != null && (
-                      <Text style={styles.decodeProgressPercent}>
-                        {Math.round(inputBufferBuildProgress)}%
-                      </Text>
-                    )}
-                  </View>
-                  <View style={styles.decodeProgressTrack}>
-                    <View
-                      style={[
-                        styles.decodeProgressFill,
-                        {
-                          width: `${Math.max(
-                            0,
-                            Math.min(100, inputBufferBuildProgress ?? 0)
-                          )}%`,
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.decodeProgressMeta}>
-                    Long files are decoded and streamed into a live input
-                    buffer.
-                  </Text>
-                </View>
+              {engineMode === 'streaming' && (
+                <SegmentationPolicyControls
+                  variant="speech-streaming"
+                  value={segStreamingConfig}
+                  onChange={setSegStreamingConfig}
+                  disabled={enhancing || loading || preparingInputBuffer}
+                />
               )}
 
-            {engineReady && !audioSourceType && (
-              <>
-                <Text style={styles.subsectionTitle}>Audio source</Text>
-                <View style={styles.sourceChoiceRow}>
-                  <TouchableOpacity
-                    style={[styles.sourceChoiceButton, styles.flex1]}
-                    onPress={() => {
-                      setAudioSourceType('example');
-                      setSelectedAudio(null);
-                      setCustomAudioPath(null);
-                      setCustomAudioName(null);
-                      clearPreparedInputBuffer().catch(() => {});
-                    }}
-                    disabled={enhancing || loading || preparingInputBuffer}
-                  >
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="folder-outline"
-                        size={18}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.sourceChoiceButtonText}>
-                        Example audio
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.sourceChoiceButton, styles.flex1]}
-                    onPress={() => {
-                      setAudioSourceType('own');
-                      setSelectedAudio(null);
-                      setCustomAudioPath(null);
-                      setCustomAudioName(null);
-                      clearPreparedInputBuffer().catch(() => {});
-                    }}
-                    disabled={enhancing || loading || preparingInputBuffer}
-                  >
-                    <View style={styles.rowCenter}>
-                      <Ionicons
-                        name="musical-notes"
-                        size={18}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.sourceChoiceButtonText}>
-                        Local file
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
+              {engineMode === 'offline' && (
+                <SegmentationPolicyControls
+                  variant="speech-offline"
+                  value={segStreamingConfig}
+                  onChange={setSegStreamingConfig}
+                  disabled={enhancing || loading || preparingInputBuffer}
+                  disableOff
+                  offDisabledMessage="Live Overload requires mandatory segmentation to split audio into processable chunks."
+                />
+              )}
 
-            {engineReady && audioSourceType === 'example' && (
-              <>
-                <View style={localStyles.sourceActionRow}>
-                  <TouchableOpacity
-                    style={[
-                      localStyles.backButton,
-                      preparingInputBuffer && styles.buttonDisabled,
-                    ]}
-                    onPress={() => {
-                      setAudioSourceType(null);
-                      setSelectedAudio(null);
-                      clearPreparedInputBuffer().catch(() => {});
-                      clearFinalizedOutput().catch(() => {});
-                      setLastInputPath(null);
-                    }}
-                    disabled={preparingInputBuffer}
-                    accessibilityLabel="Back"
-                  >
-                    <Ionicons name="chevron-back" size={22} color="#007AFF" />
-                  </TouchableOpacity>
-                  <Text
-                    style={[
-                      styles.subsectionTitle,
-                      localStyles.sourceActionTitle,
-                    ]}
-                  >
-                    Select clip
-                  </Text>
-                </View>
-                <View style={styles.audioFilesContainer}>
-                  {AUDIO_FILES.map((audioFile) => (
+              {(audioSourceType === 'example' || audioSourceType === 'own') &&
+                (preparingInputBuffer || inputBufferBuildStatus != null) && (
+                  <View style={styles.decodeProgressContainer}>
+                    <View style={styles.decodeProgressHeaderRow}>
+                      <Text style={styles.decodeProgressLabel}>
+                        {inputBufferBuildStatus ??
+                          'Preparing LiveAudioBuffer...'}
+                      </Text>
+                      {inputBufferBuildProgress != null && (
+                        <Text style={styles.decodeProgressPercent}>
+                          {Math.round(inputBufferBuildProgress)}%
+                        </Text>
+                      )}
+                    </View>
+                    <View style={styles.decodeProgressTrack}>
+                      <View
+                        style={[
+                          styles.decodeProgressFill,
+                          {
+                            width: `${Math.max(
+                              0,
+                              Math.min(100, inputBufferBuildProgress ?? 0)
+                            )}%`,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.decodeProgressMeta}>
+                      Long files are decoded and streamed into a live input
+                      buffer.
+                    </Text>
+                  </View>
+                )}
+
+              {!audioSourceType && (
+                <>
+                  <Text style={styles.subsectionTitle}>Audio source</Text>
+                  <View style={styles.sourceChoiceRow}>
                     <TouchableOpacity
-                      key={audioFile.id}
-                      style={[
-                        styles.audioFileButton,
-                        selectedAudio?.id === audioFile.id &&
-                          styles.audioFileButtonActive,
-                      ]}
+                      style={[styles.sourceChoiceButton, styles.flex1]}
                       onPress={() => {
-                        handleEnhance({
-                          selectedAudio: audioFile,
-                        }).catch(() => {});
+                        setAudioSourceType('example');
+                        setSelectedAudio(null);
+                        setCustomAudioPath(null);
+                        setCustomAudioName(null);
+                        clearPreparedInputBuffer().catch(() => {});
                       }}
                       disabled={enhancing || loading || preparingInputBuffer}
                     >
-                      <Text
-                        style={[
-                          styles.audioFileButtonText,
-                          selectedAudio?.id === audioFile.id &&
-                            styles.audioFileButtonTextActive,
-                        ]}
-                      >
-                        {audioFile.name}
-                      </Text>
-                      <Text style={styles.audioFileDescription}>
-                        {audioFile.description}
-                      </Text>
+                      <View style={styles.rowCenter}>
+                        <Ionicons
+                          name="folder-outline"
+                          size={18}
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.sourceChoiceButtonText}>
+                          Example audio
+                        </Text>
+                      </View>
                     </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            )}
+                    <TouchableOpacity
+                      style={[styles.sourceChoiceButton, styles.flex1]}
+                      onPress={() => {
+                        setAudioSourceType('own');
+                        setSelectedAudio(null);
+                        setCustomAudioPath(null);
+                        setCustomAudioName(null);
+                        clearPreparedInputBuffer().catch(() => {});
+                      }}
+                      disabled={enhancing || loading || preparingInputBuffer}
+                    >
+                      <View style={styles.rowCenter}>
+                        <Ionicons
+                          name="musical-notes"
+                          size={18}
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.sourceChoiceButtonText}>
+                          Local file
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </>
+              )}
 
-            {engineReady && audioSourceType === 'own' && (
-              <>
-                {!preparingInputBuffer && (
+              {audioSourceType === 'example' && (
+                <>
                   <View style={localStyles.sourceActionRow}>
                     <TouchableOpacity
                       style={[
                         localStyles.backButton,
-                        (loading || enhancing) && styles.buttonDisabled,
+                        preparingInputBuffer && styles.buttonDisabled,
                       ]}
                       onPress={() => {
                         setAudioSourceType(null);
-                        setCustomAudioPath(null);
-                        setCustomAudioName(null);
+                        setSelectedAudio(null);
                         clearPreparedInputBuffer().catch(() => {});
                         clearFinalizedOutput().catch(() => {});
                         setLastInputPath(null);
                       }}
-                      disabled={loading || enhancing}
+                      disabled={preparingInputBuffer}
                       accessibilityLabel="Back"
                     >
                       <Ionicons name="chevron-back" size={22} color="#007AFF" />
                     </TouchableOpacity>
-                    <TouchableOpacity
+                    <Text
                       style={[
-                        styles.button,
-                        styles.flex1,
-                        (loading || enhancing) && styles.buttonDisabled,
+                        styles.subsectionTitle,
+                        localStyles.sourceActionTitle,
                       ]}
-                      onPress={handlePickLocalFile}
-                      disabled={loading || enhancing}
                     >
-                      <View style={styles.rowCenter}>
-                        <Ionicons
-                          name="folder-open-outline"
-                          size={16}
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.buttonText}>Choose file</Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {customAudioName && (
-                  <View style={styles.selectedFileContainer}>
-                    <Text style={styles.selectedFileLabel}>Selected:</Text>
-                    <Text style={styles.selectedFileName}>
-                      {customAudioName}
+                      Select clip
                     </Text>
+                  </View>
+                  <View style={styles.audioFilesContainer}>
+                    {enhancementAudioFiles.map((audioFile) => (
+                      <TouchableOpacity
+                        key={audioFile.id}
+                        style={[
+                          styles.audioFileButton,
+                          selectedAudio?.id === audioFile.id &&
+                            styles.audioFileButtonActive,
+                        ]}
+                        onPress={() => {
+                          handleEnhance({
+                            selectedAudio: audioFile,
+                          }).catch(() => {});
+                        }}
+                        disabled={enhancing || loading || preparingInputBuffer}
+                      >
+                        <Text
+                          style={[
+                            styles.audioFileButtonText,
+                            selectedAudio?.id === audioFile.id &&
+                              styles.audioFileButtonTextActive,
+                          ]}
+                        >
+                          {audioFile.name}
+                        </Text>
+                        <Text style={styles.audioFileDescription}>
+                          {audioFile.description}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </>
+              )}
+
+              {audioSourceType === 'own' && (
+                <>
+                  {!preparingInputBuffer && (
+                    <View style={localStyles.sourceActionRow}>
+                      <TouchableOpacity
+                        style={[
+                          localStyles.backButton,
+                          (loading || enhancing) && styles.buttonDisabled,
+                        ]}
+                        onPress={() => {
+                          setAudioSourceType(null);
+                          setCustomAudioPath(null);
+                          setCustomAudioName(null);
+                          clearPreparedInputBuffer().catch(() => {});
+                          clearFinalizedOutput().catch(() => {});
+                          setLastInputPath(null);
+                        }}
+                        disabled={loading || enhancing}
+                        accessibilityLabel="Back"
+                      >
+                        <Ionicons
+                          name="chevron-back"
+                          size={22}
+                          color="#007AFF"
+                        />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.button,
+                          styles.flex1,
+                          (loading || enhancing) && styles.buttonDisabled,
+                        ]}
+                        onPress={handlePickLocalFile}
+                        disabled={loading || enhancing}
+                      >
+                        <View style={styles.rowCenter}>
+                          <Ionicons
+                            name="folder-open-outline"
+                            size={16}
+                            style={styles.iconInline}
+                          />
+                          <Text style={styles.buttonText}>Choose file</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
+                  {customAudioName && (
+                    <View style={styles.selectedFileContainer}>
+                      <Text style={styles.selectedFileLabel}>Selected:</Text>
+                      <Text style={styles.selectedFileName}>
+                        {customAudioName}
+                      </Text>
+                      <TouchableOpacity
+                        style={[
+                          styles.playButton,
+                          preparingInputBuffer && styles.buttonDisabled,
+                        ]}
+                        onPress={() =>
+                          playPath(customAudioPath, {
+                            displayName: customAudioName,
+                          })
+                        }
+                        disabled={preparingInputBuffer}
+                      >
+                        <View style={styles.rowAlignCenter}>
+                          <Ionicons
+                            name="play"
+                            size={16}
+                            style={styles.iconInline}
+                          />
+                          <Text style={styles.playButtonText}>Play input</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </>
+              )}
+
+              {enhanceResult && (
+                <View style={styles.resultSection}>
+                  <Text style={styles.resultLabel}>Enhancement</Text>
+                  <Text style={styles.resultText} selectable>
+                    {enhanceResult}
+                  </Text>
+                  <View style={localStyles.playRow}>
                     <TouchableOpacity
                       style={[
                         styles.playButton,
-                        preparingInputBuffer && styles.buttonDisabled,
+                        localStyles.playHalf,
+                        !lastInputPath && localStyles.playDisabled,
                       ]}
-                      onPress={() =>
-                        playPath(customAudioPath, {
-                          displayName: customAudioName,
-                        })
-                      }
-                      disabled={preparingInputBuffer}
+                      onPress={() => togglePlayOriginalPath()}
+                      disabled={!lastInputPath}
                     >
                       <View style={styles.rowAlignCenter}>
                         <Ionicons
-                          name="play"
+                          name={
+                            activePlaybackKind === 'original' ? 'stop' : 'play'
+                          }
                           size={16}
                           style={styles.iconInline}
                         />
-                        <Text style={styles.playButtonText}>Play input</Text>
+                        <Text style={styles.playButtonText}>
+                          {activePlaybackKind === 'original'
+                            ? 'Stop'
+                            : 'Original'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[
+                        styles.playButton,
+                        localStyles.playHalf,
+                        !lastEnhancedAudio && localStyles.playDisabled,
+                      ]}
+                      onPress={() => togglePlayEnhancedOutput()}
+                      disabled={!lastEnhancedAudio}
+                    >
+                      <View style={styles.rowAlignCenter}>
+                        <Ionicons
+                          name={
+                            activePlaybackKind === 'enhanced' ? 'stop' : 'play'
+                          }
+                          size={16}
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.playButtonText}>
+                          {activePlaybackKind === 'enhanced'
+                            ? 'Stop'
+                            : resultPlaybackLabel}
+                        </Text>
                       </View>
                     </TouchableOpacity>
                   </View>
-                )}
-              </>
-            )}
-
-            {enhanceResult && (
-              <View style={styles.resultSection}>
-                <Text style={styles.resultLabel}>Enhancement</Text>
-                <Text style={styles.resultText} selectable>
-                  {enhanceResult}
-                </Text>
-                <View style={localStyles.playRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.playButton,
-                      localStyles.playHalf,
-                      !lastInputPath && localStyles.playDisabled,
-                    ]}
-                    onPress={() => togglePlayOriginalPath()}
-                    disabled={!lastInputPath}
-                  >
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name={
-                          activePlaybackKind === 'original' ? 'stop' : 'play'
-                        }
-                        size={16}
-                        style={styles.iconInline}
+                  {lastEnhancedAudio && (
+                    <View style={styles.mt12}>
+                      <AudioSaveDestinationPicker
+                        defaultDestinationKind="app"
+                        audioInput={lastEnhancedAudio.outputBufferId}
+                        filename={`sherpa_streaming_enhanced_${Date.now()}.wav`}
+                        format="wav"
+                        onSaveComplete={(result) => {
+                          const location = formatResolvedLocation(result);
+                          Alert.alert('Saved', `Audio saved to:\n${location}`);
+                        }}
+                        onError={(saveErr) => {
+                          Alert.alert('Save failed', saveErr.message);
+                        }}
                       />
-                      <Text style={styles.playButtonText}>
-                        {activePlaybackKind === 'original'
-                          ? 'Stop'
-                          : 'Original'}
-                      </Text>
                     </View>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.playButton,
-                      localStyles.playHalf,
-                      !lastEnhancedAudio && localStyles.playDisabled,
-                    ]}
-                    onPress={() => togglePlayEnhancedOutput()}
-                    disabled={!lastEnhancedAudio}
-                  >
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name={
-                          activePlaybackKind === 'enhanced' ? 'stop' : 'play'
-                        }
-                        size={16}
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.playButtonText}>
-                        {activePlaybackKind === 'enhanced'
-                          ? 'Stop'
-                          : 'Enhanced'}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
+                  )}
                 </View>
-                {lastEnhancedAudio && (
-                  <View style={styles.mt12}>
-                    <AudioSaveDestinationPicker
-                      defaultDestinationKind="app"
-                      audioInput={lastEnhancedAudio.outputBufferId}
-                      filename={`sherpa_streaming_enhanced_${Date.now()}.wav`}
-                      format="wav"
-                      onSaveComplete={(result) => {
-                        const location = formatResolvedLocation(result);
-                        Alert.alert('Saved', `Audio saved to:\n${location}`);
-                      }}
-                      onError={(saveErr) => {
-                        Alert.alert('Save failed', saveErr.message);
-                      }}
-                    />
-                  </View>
-                )}
-              </View>
-            )}
+              )}
 
-            {error && errorSource === 'enhance' && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorLabel}>Error:</Text>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
-          </View>
+              {error && errorSource === 'enhance' && (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorLabel}>Error:</Text>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
+            </View>
+          ) : null}
         </ScrollView>
       </View>
 
