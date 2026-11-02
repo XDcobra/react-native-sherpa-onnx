@@ -345,6 +345,82 @@ internal class SherpaOnnxEnhancementHelper(
     }
   }
 
+  fun setVoiceSample(
+    instanceId: String,
+    bufferId: String,
+    promise: Promise,
+  ) {
+    val offlineInst = instances[instanceId]
+    val onlineInst = onlineInstances[instanceId]
+    if (offlineInst == null && onlineInst == null) {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_ERROR,
+        "Enhancement instance not found: $instanceId",
+      )
+      return
+    }
+
+    if (!bufferId.startsWith("off_")) {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_BUFFER_KIND_MISMATCH,
+        "Expected offline audio buffer (off_*) for voice sample, got: $bufferId",
+      )
+      return
+    }
+    val audioInEntry = PipelineAudioRegistry.getOffline(bufferId)
+    if (audioInEntry == null) {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_BUFFER_NOT_FOUND,
+        "Offline audio buffer not found: $bufferId",
+      )
+      return
+    }
+    if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_BUFFER_EMPTY,
+        "Input offline audio buffer is empty: $bufferId",
+      )
+      return
+    }
+
+    try {
+      val inputSamples = audioInEntry.readAllSamples()
+      if (inputSamples.isEmpty()) {
+        promise.reject(
+          EnhancementErrorCodes.ENHANCEMENT_BUFFER_EMPTY,
+          "Input offline audio buffer is empty: $bufferId",
+        )
+        return
+      }
+      val gateKey = offlineInst?.gateKey() ?: onlineInst!!.gateKey()
+      if (!NativeInstanceGate.beginUse(gateKey)) {
+        promise.reject(
+          EnhancementErrorCodes.ENHANCEMENT_ERROR,
+          "Enhancement instance released: $instanceId",
+        )
+        return
+      }
+      val result = try {
+        nativeSetVoiceSample(instanceId, inputSamples, audioInEntry.sampleRate)
+      } finally {
+        NativeInstanceGate.endUse(gateKey)
+      }
+      if (result == null || result["success"] as? Boolean != true) {
+        val error = (result?.get("error") as? String)?.takeIf { it.isNotBlank() }
+          ?: "Failed to set VoxLock voice sample"
+        promise.reject(EnhancementErrorCodes.ENHANCEMENT_INVALID_ARGUMENT, error)
+        return
+      }
+      promise.resolve(null)
+    } catch (e: Exception) {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_ERROR,
+        "Failed to set VoxLock voice sample: ${e.message}",
+        e,
+      )
+    }
+  }
+
   fun getSampleRate(instanceId: String, promise: Promise) {
     if (instances[instanceId] == null && onlineInstances[instanceId] == null) {
       promise.reject(
@@ -765,6 +841,13 @@ internal class SherpaOnnxEnhancementHelper(
       numThreads: Int,
       provider: String?,
       debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeSetVoiceSample(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
     ): HashMap<String, Any>?
 
     @JvmStatic

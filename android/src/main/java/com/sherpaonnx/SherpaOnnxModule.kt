@@ -7229,6 +7229,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     enhancementHelper.enhanceOfflineAudioBuffers(instanceId, audioInBufferId, audioOutBufferId, promise)
   }
 
+  override fun enhancementSetVoiceSample(
+    instanceId: String,
+    bufferId: String,
+    promise: Promise
+  ) {
+    enhancementHelper.setVoiceSample(instanceId, bufferId, promise)
+  }
+
   override fun getEnhancementSampleRate(instanceId: String, promise: Promise) {
     enhancementHelper.getSampleRate(instanceId, promise)
   }

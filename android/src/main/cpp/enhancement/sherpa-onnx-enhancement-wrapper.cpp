@@ -1,10 +1,12 @@
 #include "sherpa-onnx-enhancement-wrapper.h"
 
+#include "sherpa-onnx-enhancement-c-api-set-voice-sample.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-validate-enhancement.h"
 
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <optional>
 #include <string>
 
@@ -105,6 +107,61 @@ void FillModelConfig(
     }
 }
 
+SetVoiceSampleResult CallSetVoiceSample(
+    const char* streamKind,
+    const std::string& modelKind,
+    bool initialized,
+    int32_t modelSampleRate,
+    const std::function<int32_t(const float*, int32_t, int32_t)>& nativeCall,
+    const std::vector<float>& samples,
+    int32_t sampleRate
+) {
+    const int32_t n = static_cast<int32_t>(samples.size());
+    auto log = [&](const char* ok, const char* reason, int32_t preparedLength) {
+        ENH_LOGI(
+            "%s setVoiceSample kind=%s n=%d inRate=%d preparedLength=%d ok=%s reason=%s",
+            streamKind,
+            modelKind.empty() ? "unknown" : modelKind.c_str(),
+            n,
+            sampleRate,
+            preparedLength,
+            ok,
+            reason
+        );
+    };
+
+    SetVoiceSampleResult result;
+    if (!initialized) {
+        log("false", "not-initialized", 0);
+        result.error = "Enhancement instance is not initialized";
+        return result;
+    }
+    if (n <= 0 || sampleRate <= 0) {
+        log("false", "empty-pcm", 0);
+        result.error = "Voice sample PCM is empty";
+        return result;
+    }
+    if (modelKind != "voxlock") {
+        log("false", "not-voxlock", 0);
+        result.error = "setVoiceSample is only supported for VoxLock";
+        return result;
+    }
+
+    const int32_t rc = nativeCall(samples.data(), n, sampleRate);
+    if (rc != 0) {
+        log("false", "too-short", 0);
+        result.error =
+            "VoxLock voice sample is too short after resample (need 3 seconds)";
+        return result;
+    }
+
+    const int32_t preparedLength =
+        modelSampleRate > 0 ? modelSampleRate * 3 : n;
+    log("true", "stored", preparedLength);
+    result.success = true;
+    return result;
+}
+
 EnhancedAudioResult FromDenoisedAudio(const SherpaOnnxDenoisedAudio* audio) {
     EnhancedAudioResult out;
     if (audio == nullptr) {
@@ -125,6 +182,7 @@ public:
     bool initialized = false;
     const SherpaOnnxOfflineSpeechDenoiser* denoiser = nullptr;
     DenoiserOwnedStrings owned;
+    std::string modelKind;
 
     void destroy() {
         if (denoiser != nullptr) {
@@ -133,6 +191,7 @@ public:
         }
         initialized = false;
         owned = {};
+        modelKind.clear();
     }
 };
 
@@ -188,6 +247,7 @@ EnhancementInitializeResult EnhancementWrapper::initialize(
     }
     pImpl->denoiser = created;
     pImpl->initialized = true;
+    pImpl->modelKind = result.modelType;
     ENH_LOGI("enhancement Create ok");
 
     result.success = true;
@@ -242,6 +302,7 @@ EnhancementInitializeResult EnhancementWrapper::initializeCustom(
     }
     pImpl->denoiser = created;
     pImpl->initialized = true;
+    pImpl->modelKind = result.modelType;
     ENH_LOGI("enhancement custom Create ok");
 
     result.success = true;
@@ -266,6 +327,25 @@ EnhancedAudioResult EnhancementWrapper::runSamples(
     );
 }
 
+SetVoiceSampleResult EnhancementWrapper::setVoiceSample(
+    const std::vector<float>& samples,
+    int32_t sampleRate
+) {
+    return CallSetVoiceSample(
+        "enhancement",
+        pImpl->modelKind,
+        pImpl->initialized && pImpl->denoiser != nullptr,
+        getSampleRate(),
+        [this](const float* pcm, int32_t n, int32_t sr) {
+            return SherpaOnnxOfflineSpeechDenoiserSetVoiceSample(
+                pImpl->denoiser, pcm, n, sr
+            );
+        },
+        samples,
+        sampleRate
+    );
+}
+
 int32_t EnhancementWrapper::getSampleRate() const {
     if (!pImpl->initialized || pImpl->denoiser == nullptr) return 0;
     return SherpaOnnxOfflineSpeechDenoiserGetSampleRate(pImpl->denoiser);
@@ -280,6 +360,7 @@ public:
     bool initialized = false;
     const SherpaOnnxOnlineSpeechDenoiser* denoiser = nullptr;
     DenoiserOwnedStrings owned;
+    std::string modelKind;
 
     void destroy() {
         if (denoiser != nullptr) {
@@ -288,6 +369,7 @@ public:
         }
         initialized = false;
         owned = {};
+        modelKind.clear();
     }
 };
 
@@ -344,6 +426,7 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initialize(
     }
     pImpl->denoiser = created;
     pImpl->initialized = true;
+    pImpl->modelKind = result.modelType;
     ENH_LOGI("online-enhancement Create ok");
 
     result.success = true;
@@ -400,6 +483,7 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initializeCustom(
     }
     pImpl->denoiser = created;
     pImpl->initialized = true;
+    pImpl->modelKind = result.modelType;
     ENH_LOGI("online-enhancement custom Create ok");
 
     result.success = true;
@@ -436,6 +520,25 @@ EnhancedAudioResult OnlineEnhancementWrapper::flush() {
 void OnlineEnhancementWrapper::reset() {
     if (!pImpl->initialized || pImpl->denoiser == nullptr) return;
     SherpaOnnxOnlineSpeechDenoiserReset(pImpl->denoiser);
+}
+
+SetVoiceSampleResult OnlineEnhancementWrapper::setVoiceSample(
+    const std::vector<float>& samples,
+    int32_t sampleRate
+) {
+    return CallSetVoiceSample(
+        "online-enhancement",
+        pImpl->modelKind,
+        pImpl->initialized && pImpl->denoiser != nullptr,
+        getSampleRate(),
+        [this](const float* pcm, int32_t n, int32_t sr) {
+            return SherpaOnnxOnlineSpeechDenoiserSetVoiceSample(
+                pImpl->denoiser, pcm, n, sr
+            );
+        },
+        samples,
+        sampleRate
+    );
 }
 
 int32_t OnlineEnhancementWrapper::getSampleRate() const {

@@ -286,6 +286,37 @@ Java_com_sherpaonnx_enhancement_facade_SherpaOnnxEnhancementHelper_nativeInitial
 }
 
 JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_enhancement_facade_SherpaOnnxEnhancementHelper_nativeSetVoiceSample(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jfloatArray samples,
+    jint sampleRate) {
+  const std::string id = CopyRequiredJstring(env, instanceId);
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map) return nullptr;
+
+  auto write = [&](bool success, const std::string& error) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", success);
+    if (!error.empty()) {
+      sherpaonnx::PutString(env, map, mapPut, "error", error);
+    }
+  };
+
+  const std::vector<float> pcm = CopyFloatArray(env, samples);
+  if (auto offline = LookupOffline(id)) {
+    const auto result = offline->setVoiceSample(pcm, sampleRate);
+    write(result.success, result.error);
+    return map;
+  }
+  if (auto online = LookupOnline(id)) {
+    const auto result = online->setVoiceSample(pcm, sampleRate);
+    write(result.success, result.error);
+    return map;
+  }
+  write(false, "Enhancement instance not found: " + id);
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_enhancement_facade_SherpaOnnxEnhancementHelper_nativeOfflineRun(
     JNIEnv* env, jclass /* clazz */, jstring instanceId, jfloatArray samples,
     jint sampleRate) {

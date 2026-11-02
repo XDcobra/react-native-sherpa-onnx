@@ -221,6 +221,89 @@ static NSString *const kOfflineEnhancementOomMessage =
   }
 }
 
+- (void)enhancementSetVoiceSample:(NSString *)instanceId
+                         bufferId:(NSString *)bufferId
+                          resolve:(RCTPromiseResolveBlock)resolve
+                           reject:(RCTPromiseRejectBlock)reject
+{
+  if (instanceId == nil || [instanceId length] == 0) {
+    reject(@"ENHANCEMENT_ERROR", @"instanceId is required", nil);
+    return;
+  }
+  if (bufferId == nil || [bufferId length] == 0) {
+    reject(@"ENHANCEMENT_BUFFER_NOT_FOUND", @"bufferId is required", nil);
+    return;
+  }
+
+  std::string instanceIdStr = [instanceId UTF8String];
+  std::string audioInId = [bufferId UTF8String];
+
+  if (audioInId.find("off_") != 0) {
+    reject(@"ENHANCEMENT_BUFFER_KIND_MISMATCH",
+           [NSString stringWithFormat:@"Expected offline audio buffer (off_*) for voice sample, got: %@", bufferId],
+           nil);
+    return;
+  }
+
+  int inSampleRate = 0;
+  int inNumSamples = 0;
+  std::string errCode;
+  std::string errMsg;
+  if (!pa_get_offline_metadata(audioInId, &inSampleRate, &inNumSamples, &errCode, &errMsg)) {
+    reject(@"ENHANCEMENT_BUFFER_NOT_FOUND",
+           [NSString stringWithFormat:@"Offline audio buffer not found: %@", bufferId],
+           nil);
+    return;
+  }
+  if (inSampleRate <= 0 || inNumSamples <= 0) {
+    reject(@"ENHANCEMENT_BUFFER_EMPTY",
+           [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", bufferId],
+           nil);
+    return;
+  }
+
+  std::vector<float> inputSamples;
+  int inputSr = 0;
+  if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+    reject(@"ENHANCEMENT_BUFFER_EMPTY",
+           [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", bufferId],
+           nil);
+    return;
+  }
+
+  sherpaonnx::SetVoiceSampleResult setResult;
+  bool found = false;
+  {
+    std::lock_guard<std::mutex> lock(sherpaonnx::enhancement::bridge::g_enhancement_mutex);
+    auto offlineIt = sherpaonnx::enhancement::bridge::g_enhancement_instances.find(instanceIdStr);
+    if (offlineIt != sherpaonnx::enhancement::bridge::g_enhancement_instances.end() &&
+        offlineIt->second->wrapper != nullptr) {
+      found = true;
+      setResult = offlineIt->second->wrapper->setVoiceSample(inputSamples, inputSr);
+    } else {
+      auto onlineIt = sherpaonnx::enhancement::bridge::g_online_enhancement_instances.find(instanceIdStr);
+      if (onlineIt != sherpaonnx::enhancement::bridge::g_online_enhancement_instances.end() &&
+          onlineIt->second->wrapper != nullptr) {
+        found = true;
+        setResult = onlineIt->second->wrapper->setVoiceSample(inputSamples, inputSr);
+      }
+    }
+  }
+
+  if (!found) {
+    reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
+    return;
+  }
+  if (!setResult.success) {
+    NSString *message = setResult.error.empty()
+      ? @"Failed to set VoxLock voice sample"
+      : [NSString stringWithUTF8String:setResult.error.c_str()];
+    reject(@"ENHANCEMENT_INVALID_ARGUMENT", message, nil);
+    return;
+  }
+  resolve(nil);
+}
+
 - (void)getEnhancementSampleRate:(NSString *)instanceId
                           resolve:(RCTPromiseResolveBlock)resolve
                            reject:(RCTPromiseRejectBlock)reject
