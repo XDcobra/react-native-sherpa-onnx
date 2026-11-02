@@ -2,6 +2,7 @@ import type {
   EnhanceSegmentationConfig,
   EnhancementInitializeOptions,
 } from './types';
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
 
 export type StreamingEnhancementInitializeOptions =
@@ -19,6 +20,11 @@ export interface StreamingEnhancementEngine {
   readonly instanceId: string;
   getSampleRate(): Promise<number>;
   getFrameShiftInSamples(): Promise<number>;
+  /**
+   * Lock a VoxLock online engine to a specific voice from an offline PCM buffer.
+   * Same contract as `EnhancementEngine.setVoiceSample`.
+   */
+  setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void>;
   destroy(): Promise<void>;
   /**
    * Start an online denoise pipeline from a live input buffer into a live output buffer.

@@ -1,5 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
 import type { StreamingPipelineStatus } from '../audiobuffer/streamingPipelineTypes';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import { attachSegmentationEngine, detachSegmentationEngine } from '../segment';
@@ -110,6 +111,12 @@ export async function createStreamingEnhancement(
     async getFrameShiftInSamples(): Promise<number> {
       guard();
       return Number(result.frameShiftInSamples ?? 0);
+    },
+
+    async setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void> {
+      guard();
+      const bufferId = resolvePipelineAudioBufferId(buffer);
+      await SherpaOnnx.enhancementSetVoiceSample(instanceId, bufferId);
     },
 
     async destroy(): Promise<void> {

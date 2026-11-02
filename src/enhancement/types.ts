@@ -150,5 +150,17 @@ export interface EnhancementEngine {
   ): Promise<EnhancementPipelineHandle>;
 
   getSampleRate(): Promise<number>;
+  /**
+   * Lock a VoxLock engine to a specific voice from an offline PCM buffer.
+   * Resamples to the model rate and keeps the loudest 3 seconds in the first
+   * 30 seconds. Create still auto-enrolls from the input until this is called.
+   * Not supported for GTCRN/DPDFNet. Not an init option; `customConfig` stays
+   * model files only.
+   * @throws {Error} `ENHANCEMENT_INVALID_ARGUMENT` — not VoxLock, or clip shorter than 3s after resample.
+   * @throws {Error} `ENHANCEMENT_BUFFER_NOT_FOUND` — buffer is unknown.
+   * @throws {Error} `ENHANCEMENT_BUFFER_KIND_MISMATCH` — buffer is not `off_*`.
+   * @throws {Error} `ENHANCEMENT_BUFFER_EMPTY` — buffer has no samples.
+   */
+  setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void>;
   destroy(): Promise<void>;
 }

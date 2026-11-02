@@ -2843,6 +2843,11 @@ export interface Spec extends TurboModule {
     audioOutBufferId: string
   ): Promise<void>;
 
+  enhancementSetVoiceSample(
+    instanceId: string,
+    bufferId: string
+  ): Promise<void>;
+
   getEnhancementSampleRate(instanceId: string): Promise<number>;
 
   unloadEnhancement(instanceId: string): Promise<void>;

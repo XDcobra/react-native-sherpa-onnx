@@ -378,6 +378,11 @@ export async function createEnhancement(
       guard();
       return SherpaOnnx.getEnhancementSampleRate(instanceId);
     },
+    async setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void> {
+      guard();
+      const bufferId = resolvePipelineAudioBufferId(buffer);
+      await SherpaOnnx.enhancementSetVoiceSample(instanceId, bufferId);
+    },
     async destroy(): Promise<void> {
       if (destroyed) return;
       destroyed = true;
