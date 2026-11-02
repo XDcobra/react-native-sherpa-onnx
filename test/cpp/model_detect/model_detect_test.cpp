@@ -2229,6 +2229,74 @@ TEST(ModelDetectValidation, EnhancementFileListGtcrnMarksStreaming) {
     EXPECT_TRUE(result.isStreaming);
 }
 
+TEST(ModelDetectValidation, EnhancementFileListVoxLockPairOk) {
+    const std::string dir = "test-models/enhancement-voxlock";
+    std::vector<FE> files = {
+        MakeEntry(dir, "voxlock_enroll.onnx"),
+        MakeEntry(dir, "voxlock_chunk.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "auto");
+
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kVoxLock));
+    EXPECT_FALSE(result.paths.enrollModel.empty());
+    EXPECT_FALSE(result.paths.chunkModel.empty());
+    EXPECT_TRUE(result.paths.model.empty());
+}
+
+TEST(ModelDetectValidation, EnhancementFileListVoxLockMissingChunkRejected) {
+    const std::string dir = "test-models/enhancement-voxlock-partial";
+    std::vector<FE> files = {
+        MakeEntry(dir, "voxlock_enroll.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "voxlock");
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kVoxLock));
+}
+
+TEST(ModelDetectValidation, EnhancementFileListVoxLockMissingEnrollRejected) {
+    const std::string dir = "test-models/enhancement-voxlock-partial";
+    std::vector<FE> files = {
+        MakeEntry(dir, "voxlock_chunk.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "voxlock");
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kVoxLock));
+}
+
+TEST(ModelDetectValidation, EnhancementNameOnlyVoxLockIsHeuristicStreaming) {
+    const std::string syntheticDir = "m/sherpa-onnx-speech-enhancement-voxlock";
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList({}, syntheticDir, "auto");
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_TRUE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kVoxLock));
+    EXPECT_NE(result.error.find("heuristic"), std::string::npos)
+        << "Expected heuristic note in error: " << result.error;
+}
+
+TEST(ModelDetectValidation, EnhancementGenericModelOnnxIsNotVoxLock) {
+    const std::string dir = "test-models/enhancement-generic";
+    std::vector<FE> files = {
+        MakeEntry(dir, "model.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "auto");
+
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kGtcrn));
+    EXPECT_FALSE(result.paths.model.empty());
+    EXPECT_TRUE(result.paths.enrollModel.empty());
+    EXPECT_TRUE(result.paths.chunkModel.empty());
+}
+
 TEST(ModelDetectValidation, ValidateCustomModelPathsSttTransducerOk) {
     std::map<std::string, std::string> paths = {
         {"encoder", "/e.onnx"},
@@ -2330,6 +2398,25 @@ TEST(ModelDetectValidation, ValidateCustomModelPathsEnhancementSmoke) {
     std::map<std::string, std::string> paths = {{"model", "/gtcrn.onnx"}};
     auto result = sherpaonnx::ValidateCustomModelPaths("enhancement", "gtcrn", paths, "custom");
     EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsEnhancementVoxLockSmoke) {
+    std::map<std::string, std::string> paths = {
+        {"enrollModel", "/voxlock_enroll.onnx"},
+        {"chunkModel", "/voxlock_chunk.onnx"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("enhancement", "voxlock", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsEnhancementVoxLockMissingChunk) {
+    std::map<std::string, std::string> paths = {
+        {"enrollModel", "/voxlock_enroll.onnx"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("enhancement", "voxlock", paths, "custom");
+    EXPECT_FALSE(result.ok);
+    ASSERT_FALSE(result.missingRequired.empty());
+    EXPECT_EQ(result.missingRequired[0], "chunkModel");
 }
 
 TEST(ModelDetectValidation, ValidateCustomModelPathsPunctuationSmoke) {

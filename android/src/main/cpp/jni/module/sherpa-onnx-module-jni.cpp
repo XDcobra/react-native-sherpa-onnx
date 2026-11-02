@@ -21,7 +21,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-stt-wrapper.h"
 #include "sherpa-onnx-tts-wrapper.h"
-#include "sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-enhancement-detect-wrapper.h"
 #include "sherpa-onnx-separation-detect-wrapper.h"
 #include "sherpa-onnx-speaker-embedding-detect-wrapper.h"
 #include "sherpa-onnx-diarization-detect-wrapper.h"

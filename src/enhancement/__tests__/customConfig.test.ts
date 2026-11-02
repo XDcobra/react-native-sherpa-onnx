@@ -44,6 +44,12 @@ describe('assertEnhancementCustomConfig', () => {
         model: fsPath('/gtcrn.onnx'),
       })
     ).not.toThrow();
+    expect(() =>
+      assertEnhancementCustomConfig({
+        enrollModel: fsPath('/voxlock_enroll.onnx'),
+        chunkModel: fsPath('/voxlock_chunk.onnx'),
+      })
+    ).not.toThrow();
   });
 
   it('throws ENHANCEMENT_INVALID_ARGUMENT when a value is not a FileSource', () => {
@@ -80,6 +86,24 @@ describe('resolveEnhancementCustomConfigPaths', () => {
       model: fsPath('/dpdfnet.onnx'),
     });
     expect(paths).toEqual({ model: '/dpdfnet.onnx' });
+    expect(mockValidate).toHaveBeenCalled();
+  });
+
+  it('resolves VoxLock enrollModel and chunkModel', async () => {
+    mockGetRequirements.mockResolvedValue({
+      fields: [
+        { key: 'enrollModel', required: true, kind: 'file' },
+        { key: 'chunkModel', required: true, kind: 'file' },
+      ],
+    });
+    const paths = await resolveEnhancementCustomConfigPaths('voxlock', {
+      enrollModel: fsPath('/voxlock_enroll.onnx'),
+      chunkModel: fsPath('/voxlock_chunk.onnx'),
+    });
+    expect(paths).toEqual({
+      enrollModel: '/voxlock_enroll.onnx',
+      chunkModel: '/voxlock_chunk.onnx',
+    });
     expect(mockValidate).toHaveBeenCalled();
   });
 });

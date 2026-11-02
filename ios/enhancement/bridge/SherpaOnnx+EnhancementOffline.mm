@@ -2,7 +2,7 @@
 #import <React/RCTLog.h>
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
 #include "../EnhancementOfflineLivePipelineWorker.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"

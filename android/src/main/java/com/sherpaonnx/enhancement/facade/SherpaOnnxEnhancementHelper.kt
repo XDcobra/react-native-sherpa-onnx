@@ -5,11 +5,8 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.WritableNativeMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiser
-import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiserConfig
-import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
-import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiserConfig
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
@@ -20,19 +17,17 @@ import com.sherpaonnx.enhancement.config.EnhancementInitOptionsParser
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.enhancement.core.EnhancementErrorCodes
 import com.sherpaonnx.enhancement.core.EnhancementInstance
-import com.sherpaonnx.enhancement.core.EnhancementModelConfigFactory
 import com.sherpaonnx.enhancement.core.EnhancementResultMapper
+import com.sherpaonnx.enhancement.core.NativeEnhanceAudio
 import com.sherpaonnx.enhancement.core.OnlineEnhancementInstance
-import com.sherpaonnx.enhancement.pipeline.EnhancementPipelineWorker
 import com.sherpaonnx.enhancement.pipeline.EnhancementOfflineLivePipelineWorker
+import com.sherpaonnx.enhancement.pipeline.EnhancementPipelineWorker
 import com.sherpaonnx.lifecycle.ActivePipelineStop
 import com.sherpaonnx.lifecycle.NativeInstanceGate
-import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
-import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
-import com.facebook.react.bridge.WritableNativeMap
-import java.util.concurrent.ConcurrentHashMap
+import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 internal class SherpaOnnxEnhancementHelper(
   private val context: ReactApplicationContext,
@@ -71,10 +66,25 @@ internal class SherpaOnnxEnhancementHelper(
     for (id in activeOnlinePipelineByInstance.keys.toList()) {
       stopActiveOnlinePipeline(id)
     }
-    instances.values.forEach { it.release() }
+    for (inst in instances.values.toList()) {
+      NativeInstanceGate.releaseWhenIdle(inst.gateKey()) {
+        try {
+          nativeUnloadOffline(inst.instanceId)
+        } catch (_: Exception) {
+        }
+      }
+    }
     instances.clear()
-    onlineInstances.values.forEach { it.release() }
+    for (inst in onlineInstances.values.toList()) {
+      NativeInstanceGate.releaseWhenIdle(inst.gateKey()) {
+        try {
+          nativeUnloadOnline(inst.instanceId)
+        } catch (_: Exception) {
+        }
+      }
+    }
     onlineInstances.clear()
+    nativeShutdownAll()
   }
 
   fun detectEnhancementModel(
@@ -151,7 +161,7 @@ internal class SherpaOnnxEnhancementHelper(
       )
       return
     }
-    if (modelTypeStr != "gtcrn" && modelTypeStr != "dpdfnet") {
+    if (modelTypeStr != "gtcrn" && modelTypeStr != "dpdfnet" && modelTypeStr != "voxlock") {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR,
         "Unsupported enhancement model type: $modelTypeStr",
@@ -165,13 +175,15 @@ internal class SherpaOnnxEnhancementHelper(
       return
     }
 
-    finishInitializeOfflineWithModelPath(
-      instanceId = instanceId,
-      modelTypeStr = modelTypeStr,
-      paths = pathStrings,
-      parsed = parsed,
-      promise = promise,
+    val result = nativeInitializeOfflineCustom(
+      instanceId,
+      modelTypeStr,
+      HashMap(pathStrings),
+      parsed.numThreads.toInt().coerceAtLeast(1),
+      parsed.provider,
+      parsed.debug,
     )
+    resolveOfflineInit(instanceId, result, promise)
   }
 
   private fun initializeEnhancementAuto(
@@ -180,68 +192,47 @@ internal class SherpaOnnxEnhancementHelper(
     promise: Promise,
   ) {
     val modelDir = parsed.modelDir.orEmpty()
-    val result = nativeDetectEnhancementModel(modelDir, null, parsed.modelType, parsed.quantization)
-    if (result == null || result["success"] as? Boolean != true) {
-      val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
-      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, reason)
+    if (modelDir.isBlank()) {
+      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, "modelDir is required for initMode auto")
       return
     }
-
-    val modelTypeStr = EnhancementModelConfigFactory.extractModelType(result)
-    val paths = EnhancementModelConfigFactory.extractPaths(result)
-    finishInitializeOfflineWithModelPath(
-      instanceId = instanceId,
-      modelTypeStr = modelTypeStr,
-      paths = paths,
-      parsed = parsed,
-      promise = promise,
-      detectedModels = result["detectedModels"] as? ArrayList<*>,
+    val result = nativeInitializeOfflineAuto(
+      instanceId,
+      modelDir,
+      parsed.modelType,
+      parsed.numThreads.toInt().coerceAtLeast(1),
+      parsed.provider,
+      parsed.debug,
     )
+    resolveOfflineInit(instanceId, result, promise)
   }
 
-  private fun finishInitializeOfflineWithModelPath(
+  private fun resolveOfflineInit(
     instanceId: String,
-    modelTypeStr: String,
-    paths: Map<String, String>,
-    parsed: EnhancementInitOptionsParser.Parsed,
+    result: HashMap<String, Any>?,
     promise: Promise,
-    detectedModels: ArrayList<*>? = null,
   ) {
-    val modelConfig = try {
-      EnhancementModelConfigFactory.build(
-        modelTypeStr,
-        paths,
-        parsed.numThreads,
-        parsed.provider,
-        parsed.debug,
-      )
-    } catch (e: IllegalArgumentException) {
-      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, e.message)
+    if (result == null) {
+      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, "Enhancement initialize returned null")
       return
     }
-
-    val inst = instances.getOrPut(instanceId) { EnhancementInstance() }
-    inst.release()
-    val denoiser = OfflineSpeechDenoiser(
-      config = OfflineSpeechDenoiserConfig(model = modelConfig),
-    )
-    inst.denoiser = denoiser
-
+    if (result["success"] as? Boolean != true) {
+      val error = (result["error"] as? String)?.takeIf { it.isNotBlank() }
+        ?: "Failed to initialize enhancement"
+      promise.reject(EnhancementErrorCodes.ENHANCEMENT_INIT_ERROR, error)
+      return
+    }
+    instances[instanceId] = EnhancementInstance(instanceId)
     val out = Arguments.createMap()
     out.putBoolean("success", true)
     out.putArray(
       "detectedModels",
       EnhancementResultMapper.detectedModelsToWritableArray(
-        detectedModels ?: arrayListOf(
-          hashMapOf(
-            "type" to modelTypeStr,
-            "modelDir" to (parsed.modelDir ?: "custom"),
-          )
-        )
+        result["detectedModels"] as? ArrayList<*>
       ),
     )
-    out.putString("modelType", modelTypeStr)
-    out.putInt("sampleRate", denoiser.sampleRate)
+    out.putString("modelType", (result["modelType"] as? String) ?: "unknown")
+    out.putInt("sampleRate", (result["sampleRate"] as? Number)?.toInt() ?: 0)
     promise.resolve(out)
   }
 
@@ -251,15 +242,14 @@ internal class SherpaOnnxEnhancementHelper(
     audioOutBufferId: String,
     promise: Promise,
   ) {
-    val denoiser = instances[instanceId]?.denoiser
-    if (denoiser == null) {
+    val inst = instances[instanceId]
+    if (inst == null) {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_ERROR,
         "Enhancement instance not found: $instanceId",
       )
       return
     }
-
 
     if (!audioInBufferId.startsWith("off_")) {
       promise.reject(
@@ -277,7 +267,7 @@ internal class SherpaOnnxEnhancementHelper(
       return
     }
     if (audioInEntry.numSamples <= 0 || audioInEntry.sampleRate <= 0) {
-            promise.reject(
+      promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_BUFFER_EMPTY,
         "Input offline audio buffer is empty: $audioInBufferId",
       )
@@ -317,7 +307,7 @@ internal class SherpaOnnxEnhancementHelper(
 
     try {
       val inputSamples = audioInEntry.readAllSamples()
-      val gateKey = NativeInstanceGate.keyFor(denoiser)
+      val gateKey = inst.gateKey()
       if (!NativeInstanceGate.beginUse(gateKey)) {
         promise.reject(
           EnhancementErrorCodes.ENHANCEMENT_ERROR,
@@ -326,7 +316,7 @@ internal class SherpaOnnxEnhancementHelper(
         return
       }
       val audio = try {
-        denoiser.run(inputSamples, audioInEntry.sampleRate)
+        runOffline(instanceId, inputSamples, audioInEntry.sampleRate)
       } finally {
         NativeInstanceGate.endUse(gateKey)
       }
@@ -356,10 +346,15 @@ internal class SherpaOnnxEnhancementHelper(
   }
 
   fun getSampleRate(instanceId: String, promise: Promise) {
-    val offlineDenoiser = instances[instanceId]?.denoiser
-    val onlineDenoiser = onlineInstances[instanceId]?.denoiser
-    val sampleRate = offlineDenoiser?.sampleRate ?: onlineDenoiser?.sampleRate
-    if (sampleRate == null) {
+    if (instances[instanceId] == null && onlineInstances[instanceId] == null) {
+      promise.reject(
+        EnhancementErrorCodes.ENHANCEMENT_ERROR,
+        "Enhancement instance not found: $instanceId",
+      )
+      return
+    }
+    val sampleRate = nativeGetSampleRate(instanceId)
+    if (sampleRate <= 0) {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_ERROR,
         "Enhancement instance not found: $instanceId",
@@ -371,7 +366,15 @@ internal class SherpaOnnxEnhancementHelper(
 
   fun unloadEnhancement(instanceId: String, promise: Promise) {
     stopActiveLivePipeline(instanceId)
-    instances.remove(instanceId)?.release()
+    val inst = instances.remove(instanceId)
+    if (inst != null) {
+      NativeInstanceGate.releaseWhenIdle(inst.gateKey()) {
+        try {
+          nativeUnloadOffline(instanceId)
+        } catch (_: Exception) {
+        }
+      }
+    }
     promise.resolve(null)
   }
 
@@ -424,7 +427,7 @@ internal class SherpaOnnxEnhancementHelper(
       )
       return
     }
-    if (modelTypeStr != "gtcrn" && modelTypeStr != "dpdfnet") {
+    if (modelTypeStr != "gtcrn" && modelTypeStr != "dpdfnet" && modelTypeStr != "voxlock") {
       promise.reject(
         EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR,
         "Unsupported enhancement model type: $modelTypeStr",
@@ -438,13 +441,15 @@ internal class SherpaOnnxEnhancementHelper(
       return
     }
 
-    finishInitializeOnlineWithModelPath(
-      instanceId = instanceId,
-      modelTypeStr = modelTypeStr,
-      paths = pathStrings,
-      parsed = parsed,
-      promise = promise,
+    val result = nativeInitializeOnlineCustom(
+      instanceId,
+      modelTypeStr,
+      HashMap(pathStrings),
+      parsed.numThreads.toInt().coerceAtLeast(1),
+      parsed.provider,
+      parsed.debug,
     )
+    resolveOnlineInit(instanceId, result, promise)
   }
 
   private fun initializeOnlineEnhancementAuto(
@@ -453,55 +458,47 @@ internal class SherpaOnnxEnhancementHelper(
     promise: Promise,
   ) {
     val modelDir = parsed.modelDir.orEmpty()
-    val result = nativeDetectEnhancementModel(modelDir, null, parsed.modelType, parsed.quantization)
-    if (result == null || result["success"] as? Boolean != true) {
-      val reason = result?.get("error") as? String ?: "Failed to detect enhancement model"
-      promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, reason)
+    if (modelDir.isBlank()) {
+      promise.reject(
+        EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR,
+        "modelDir is required for initMode auto",
+      )
       return
     }
-
-    val modelTypeStr = EnhancementModelConfigFactory.extractModelType(result)
-    val paths = EnhancementModelConfigFactory.extractPaths(result)
-    finishInitializeOnlineWithModelPath(
-      instanceId = instanceId,
-      modelTypeStr = modelTypeStr,
-      paths = paths,
-      parsed = parsed,
-      promise = promise,
+    val result = nativeInitializeOnlineAuto(
+      instanceId,
+      modelDir,
+      parsed.modelType,
+      parsed.numThreads.toInt().coerceAtLeast(1),
+      parsed.provider,
+      parsed.debug,
     )
+    resolveOnlineInit(instanceId, result, promise)
   }
 
-  private fun finishInitializeOnlineWithModelPath(
+  private fun resolveOnlineInit(
     instanceId: String,
-    modelTypeStr: String,
-    paths: Map<String, String>,
-    parsed: EnhancementInitOptionsParser.Parsed,
+    result: HashMap<String, Any>?,
     promise: Promise,
   ) {
-    val modelConfig = try {
-      EnhancementModelConfigFactory.build(
-        modelTypeStr,
-        paths,
-        parsed.numThreads,
-        parsed.provider,
-        parsed.debug,
+    if (result == null) {
+      promise.reject(
+        EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR,
+        "Online enhancement initialize returned null",
       )
-    } catch (e: IllegalArgumentException) {
-      promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, e.message)
       return
     }
-
-    val inst = onlineInstances.getOrPut(instanceId) { OnlineEnhancementInstance() }
-    inst.release()
-    val denoiser = OnlineSpeechDenoiser(
-      config = OnlineSpeechDenoiserConfig(model = modelConfig),
-    )
-    inst.denoiser = denoiser
-
+    if (result["success"] as? Boolean != true) {
+      val error = (result["error"] as? String)?.takeIf { it.isNotBlank() }
+        ?: "Failed to initialize online enhancement"
+      promise.reject(EnhancementErrorCodes.ONLINE_ENHANCEMENT_INIT_ERROR, error)
+      return
+    }
+    onlineInstances[instanceId] = OnlineEnhancementInstance(instanceId)
     val out = Arguments.createMap()
     out.putBoolean("success", true)
-    out.putInt("sampleRate", denoiser.sampleRate)
-    out.putInt("frameShiftInSamples", denoiser.frameShiftInSamples)
+    out.putInt("sampleRate", (result["sampleRate"] as? Number)?.toInt() ?: 0)
+    out.putInt("frameShiftInSamples", (result["frameShiftInSamples"] as? Number)?.toInt() ?: 0)
     promise.resolve(out)
   }
 
@@ -511,8 +508,7 @@ internal class SherpaOnnxEnhancementHelper(
     audioOutLiveBufferId: String,
     promise: Promise,
   ) {
-    val denoiser = onlineInstances[instanceId]?.denoiser
-    if (denoiser == null) {
+    if (onlineInstances[instanceId] == null) {
       promise.reject(
         EnhancementErrorCodes.ONLINE_ENHANCEMENT_ERROR,
         "Online enhancement instance not found: $instanceId",
@@ -560,17 +556,18 @@ internal class SherpaOnnxEnhancementHelper(
       return
     }
 
-    if (inputEntry.sampleRate != denoiser.sampleRate) {
+    val denoiserSampleRate = nativeGetSampleRate(instanceId)
+    if (inputEntry.sampleRate != denoiserSampleRate) {
       promise.reject(
         EnhancementErrorCodes.ENHANCEMENT_PIPELINE_SAMPLE_RATE_MISMATCH,
-        "Input buffer sample rate (${inputEntry.sampleRate}) does not match denoiser sample rate (${denoiser.sampleRate})",
+        "Input buffer sample rate (${inputEntry.sampleRate}) does not match denoiser sample rate ($denoiserSampleRate)",
       )
       return
     }
 
     try {
       stopActiveOnlinePipeline(instanceId)
-      val worker = EnhancementPipelineWorker(denoiser, inputEntry, outputEntry)
+      val worker = EnhancementPipelineWorker(instanceId, inputEntry, outputEntry)
       val pipelineId = StreamingPipelineRegistry.registerAndStart(worker) { completion ->
         activeOnlinePipelineByInstance.remove(instanceId, completion.pipelineId)
         emitPipelineCompletedEvent(completion)
@@ -591,7 +588,15 @@ internal class SherpaOnnxEnhancementHelper(
 
   fun unloadOnline(instanceId: String, promise: Promise) {
     stopActiveOnlinePipeline(instanceId)
-    onlineInstances.remove(instanceId)?.release()
+    val inst = onlineInstances.remove(instanceId)
+    if (inst != null) {
+      NativeInstanceGate.releaseWhenIdle(inst.gateKey()) {
+        try {
+          nativeUnloadOnline(instanceId)
+        } catch (_: Exception) {
+        }
+      }
+    }
     promise.resolve(null)
   }
 
@@ -603,8 +608,7 @@ internal class SherpaOnnxEnhancementHelper(
     promise: Promise,
   ) {
     try {
-      val enhancer = instances[instanceId]?.denoiser
-      if (enhancer == null) {
+      if (instances[instanceId] == null) {
         promise.reject(EnhancementErrorCodes.ENHANCEMENT_ERROR, "Enhancement instance not found: $instanceId")
         return
       }
@@ -641,7 +645,7 @@ internal class SherpaOnnxEnhancementHelper(
           liveAudioEntry = liveAudioIn,
           liveSegmentEntry = segmentEntry,
         ),
-        enhancer = enhancer,
+        instanceId = instanceId,
         audioOutputEntry = liveAudioOut,
       )
       activeLivePipelineByInstance[instanceId] = pipelineId
@@ -686,5 +690,116 @@ internal class SherpaOnnxEnhancementHelper(
     } catch (_: Exception) {
       // JS bridge might already be shutting down.
     }
+  }
+
+  companion object {
+    private fun parseAudio(result: HashMap<String, Any>?): NativeEnhanceAudio {
+      if (result == null || result["success"] as? Boolean != true) {
+        val error = (result?.get("error") as? String)?.takeIf { it.isNotBlank() }
+          ?: "Enhancement run failed"
+        throw IllegalStateException(error)
+      }
+      val samples = result["samples"] as? FloatArray ?: FloatArray(0)
+      val sampleRate = (result["sampleRate"] as? Number)?.toInt() ?: 0
+      return NativeEnhanceAudio(samples, sampleRate)
+    }
+
+    fun runOffline(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
+    ): NativeEnhanceAudio = parseAudio(nativeOfflineRun(instanceId, samples, sampleRate))
+
+    fun runOnline(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
+    ): NativeEnhanceAudio = parseAudio(nativeOnlineRun(instanceId, samples, sampleRate))
+
+    fun flushOnline(instanceId: String): NativeEnhanceAudio =
+      parseAudio(nativeOnlineFlush(instanceId))
+
+    fun resetOnline(instanceId: String) {
+      nativeOnlineReset(instanceId)
+    }
+
+    fun sampleRate(instanceId: String): Int = nativeGetSampleRate(instanceId)
+
+    fun frameShift(instanceId: String): Int = nativeGetFrameShift(instanceId)
+
+    @JvmStatic
+    private external fun nativeInitializeOfflineAuto(
+      instanceId: String,
+      modelDir: String,
+      modelType: String,
+      numThreads: Int,
+      provider: String?,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeInitializeOfflineCustom(
+      instanceId: String,
+      modelType: String,
+      modelPaths: HashMap<String, String>,
+      numThreads: Int,
+      provider: String?,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeInitializeOnlineAuto(
+      instanceId: String,
+      modelDir: String,
+      modelType: String,
+      numThreads: Int,
+      provider: String?,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeInitializeOnlineCustom(
+      instanceId: String,
+      modelType: String,
+      modelPaths: HashMap<String, String>,
+      numThreads: Int,
+      provider: String?,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeOfflineRun(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeOnlineRun(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeOnlineFlush(instanceId: String): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeOnlineReset(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeGetSampleRate(instanceId: String): Int
+
+    @JvmStatic
+    private external fun nativeGetFrameShift(instanceId: String): Int
+
+    @JvmStatic
+    private external fun nativeUnloadOffline(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeUnloadOnline(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAll()
   }
 }

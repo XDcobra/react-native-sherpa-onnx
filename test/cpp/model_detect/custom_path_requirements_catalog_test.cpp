@@ -251,6 +251,10 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
     ExpectRequirementsMatch("vad", "ten_vad", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("enhancement", "gtcrn", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("enhancement", "dpdfnet", {{"model", true, std::nullopt}});
+    ExpectRequirementsMatch("enhancement", "voxlock", {
+        {"enrollModel", true, std::nullopt},
+        {"chunkModel", true, std::nullopt},
+    });
     ExpectRequirementsMatch("diarization", "pyannote", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("diarization", "reverb", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("diarization", "sortformer", {

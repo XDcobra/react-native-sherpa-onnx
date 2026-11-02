@@ -1,6 +1,6 @@
 #import "../../SherpaOnnx.h"
 
-#include "../sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
 #include "../core/EnhancementBridgeUtils.h"
 

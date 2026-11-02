@@ -225,8 +225,25 @@ export async function detectEnhancementModel(
     rawRows: readPublicLanguageRows(raw.languages),
   });
   const quantization = normalizeQuantization(raw.quantization);
-  const modelFilePath =
-    typeof raw.paths?.model === 'string' ? raw.paths.model.trim() : '';
+  const paths: {
+    model?: string;
+    enrollModel?: string;
+    chunkModel?: string;
+  } = {};
+  const rawPaths = raw.paths;
+  if (rawPaths != null) {
+    const modelFilePath =
+      typeof rawPaths.model === 'string' ? rawPaths.model.trim() : '';
+    const enrollModel =
+      typeof rawPaths.enrollModel === 'string'
+        ? rawPaths.enrollModel.trim()
+        : '';
+    const chunkModel =
+      typeof rawPaths.chunkModel === 'string' ? rawPaths.chunkModel.trim() : '';
+    if (modelFilePath.length > 0) paths.model = modelFilePath;
+    if (enrollModel.length > 0) paths.enrollModel = enrollModel;
+    if (chunkModel.length > 0) paths.chunkModel = chunkModel;
+  }
   const isStreaming = raw.isStreaming === true;
   return {
     success: raw.success,
@@ -239,7 +256,7 @@ export async function detectEnhancementModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
-    ...(modelFilePath.length > 0 ? { paths: { model: modelFilePath } } : {}),
+    ...(Object.keys(paths).length > 0 ? { paths } : {}),
   };
 }
 
@@ -396,5 +413,7 @@ export {
   EnhancementErrorCode,
   type EnhancementCustomConfig,
   type EnhancementCustomPathKey,
+  type GtcrnDpdfnetCustomConfig,
+  type VoxLockCustomConfig,
 } from './customConfig';
 export { ENHANCEMENT_MODEL_TYPES } from './types';

@@ -63,7 +63,10 @@ import {
   type ModelInitMode,
   type EnhancementCustomInitFormState,
 } from '../../components/modelInit';
-import { fillEnhancementCustomConfigFromModelFolder } from '../../utils/enhancementCustomInitFill';
+import {
+  buildEnhancementCustomInitializeOptions,
+  fillEnhancementCustomConfigFromModelFolder,
+} from '../../utils/enhancementCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
@@ -367,14 +370,13 @@ export default function EnhancementScreen() {
         customConfig as unknown as Record<string, unknown>
       );
 
-      const engine = await createEnhancement({
-        initMode: 'custom',
-        modelType: customInitForm.modelType,
-        customConfig: customConfig as {
-          model: import('react-native-sherpa-onnx/fileio').FileSource;
-        },
-        numThreads: NUM_THREADS,
-      });
+      const engine = await createEnhancement(
+        buildEnhancementCustomInitializeOptions(
+          customInitForm.modelType,
+          customConfig as Record<string, unknown>,
+          { numThreads: NUM_THREADS }
+        )
+      );
 
       engineRef.current = engine;
       setCurrentModelFolder(null);

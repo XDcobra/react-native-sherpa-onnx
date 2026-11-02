@@ -1,4 +1,8 @@
 import type { FileSource } from '../fileio/types';
+import type {
+  GtcrnDpdfnetCustomConfig,
+  VoxLockCustomConfig,
+} from './customConfig';
 import type { EnhancementDetectModelResult } from '../types/modelDetect';
 import type { QuantizationPreference } from '../download/types';
 import type {
@@ -25,11 +29,12 @@ export {
   type ModelDetectResultBase,
 } from '../types/modelDetect';
 
-export type EnhancementModelType = 'gtcrn' | 'dpdfnet';
+export type EnhancementModelType = 'gtcrn' | 'dpdfnet' | 'voxlock';
 
 export const ENHANCEMENT_MODEL_TYPES: readonly EnhancementModelType[] = [
   'gtcrn',
   'dpdfnet',
+  'voxlock',
 ] as const;
 
 export type EnhancementConcreteModelType = EnhancementModelType;
@@ -47,12 +52,19 @@ export type EnhancementAutoInitializeOptions = EnhancementInitOptionsShared & {
   modelType?: EnhancementModelType | 'auto';
 };
 
-export type EnhancementCustomInitializeOptions =
-  EnhancementInitOptionsShared & {
-    initMode: 'custom';
-    modelType: EnhancementConcreteModelType;
-    customConfig: import('./customConfig').EnhancementCustomConfig;
-  };
+export type EnhancementCustomInitializeOptions = EnhancementInitOptionsShared &
+  (
+    | {
+        initMode: 'custom';
+        modelType: 'gtcrn' | 'dpdfnet';
+        customConfig: GtcrnDpdfnetCustomConfig;
+      }
+    | {
+        initMode: 'custom';
+        modelType: 'voxlock';
+        customConfig: VoxLockCustomConfig;
+      }
+  );
 
 export type EnhancementInitializeOptions =
   | EnhancementAutoInitializeOptions

@@ -113,9 +113,11 @@ export interface SttDetectModelResult extends ModelDetectResultBase {
 // ─── Enhancement extension ─────────────────────────────────────────────
 
 export interface EnhancementDetectModelResult extends ModelDetectResultBase {
-  /** Resolved model file path from detection. */
+  /** Resolved model file paths from detection. */
   paths?: {
     model?: string;
+    enrollModel?: string;
+    chunkModel?: string;
   };
 }
 

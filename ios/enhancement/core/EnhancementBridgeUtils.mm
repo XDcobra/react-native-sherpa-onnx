@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 #include "EnhancementBridgeUtils.h"
+#include "sherpa-onnx-model-path-fill.h"
 #import "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 
 namespace sherpaonnx {
@@ -14,6 +15,8 @@ NSString *EnhancementKindToNSString(sherpaonnx::EnhancementModelKind kind) {
       return @"gtcrn";
     case K::kDpdfNet:
       return @"dpdfnet";
+    case K::kVoxLock:
+      return @"voxlock";
     default:
       return @"unknown";
   }
@@ -54,6 +57,21 @@ NSDictionary *EnhancementDetectResultToDict(const sherpaonnx::EnhancementDetectR
 
   if (!result.ok && !result.error.empty()) {
     dict[@"error"] = [NSString stringWithUTF8String:result.error.c_str()] ?: @"Enhancement model detection failed";
+  }
+
+  const auto pathMap = sherpaonnx::EnhancementModelPathsToStringMap(result.paths);
+  if (!pathMap.empty()) {
+    NSMutableDictionary *paths = [NSMutableDictionary dictionary];
+    for (const auto &entry : pathMap) {
+      NSString *key = [NSString stringWithUTF8String:entry.first.c_str()];
+      NSString *value = [NSString stringWithUTF8String:entry.second.c_str()];
+      if (key != nil && value != nil && value.length > 0) {
+        paths[key] = value;
+      }
+    }
+    if (paths.count > 0) {
+      dict[@"paths"] = paths;
+    }
   }
 
   return dict;

@@ -97,8 +97,9 @@ Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory 
 | --- | --- | --- |
 | `gtcrn` | `*.onnx` (filename/path contains `gtcrn`) | `model` |
 | `dpdfnet` | `*.onnx` (contains `dpdfnet` or `dpcrn`) | `model` |
+| `voxlock` | `enroll` + `chunk` ONNX (`voxlock_enroll.onnx`, `voxlock_chunk.onnx` / `voxlock_chunk_int8.onnx`) | `enrollModel`, `chunkModel` |
 
-Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto mode prefers `gtcrn` when both ONNX stacks are present.
+Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto mode prefers `gtcrn` when both single-file stacks are present. VoxLock is detected when the enroll+chunk pair is present (or the folder name contains `voxlock`). **`createEnhancement` / `createStreamingEnhancement` do not run VoxLock yet** (`VoxLock inference is not implemented`).
 
 ```ts
 import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
@@ -121,7 +122,7 @@ Signatures below are exported from **`react-native-sherpa-onnx/enhancement`**. T
 File-based detection **without** initializing the engine. Use before `createEnhancement` to confirm pack layout and model type. Unified cross-feature detection: [model-detect.md](model-detect.md).
 
 The result includes `isStreaming` from native enhancement detection:
-- Filesystem-backed detection runs the online compatibility guard (`gtcrn`/`dpdfnet`) and sets `isStreaming` accordingly.
+- Filesystem-backed detection runs the online compatibility guard (`gtcrn`/`dpdfnet`) and sets `isStreaming` accordingly. VoxLock is marked streaming when the enroll+chunk pair validates (no ORT I/O guard yet).
 - Name-only detection (asset/folder heuristics without files) can return `isStreaming: true` as best effort while `success` remains `false`.
 
 For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
@@ -146,7 +147,7 @@ console.log(det.success, det.modelType, det.isStreaming, det.paths?.model, det.d
 
 ### `createEnhancement(options)`
 
-Creates an `EnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig: { model }`). Shared tuning: `numThreads`, `provider`, `debug`.
+Creates an `EnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock detect works; create still rejects with `VoxLock inference is not implemented`.
 
 ```ts
 function createEnhancement(
@@ -282,7 +283,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [Live over
 
 | Type | Description |
 | --- | --- |
-| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet'` |
+| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet' \| 'voxlock'` |
 | `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list of model types |
 | `EnhancementConcreteModelType` | Alias of `EnhancementModelType` (non-`auto`) |
 | `EnhancementInitOptionsShared` | Shared init fields: `numThreads?`, `provider?`, `debug?` |
@@ -422,6 +423,10 @@ await cleanPlayer.play();
 The monorepo example exposes **Speech enhancement (offline)** (`example/src/screens/enhancement/EnhancementScreen.tsx`) as a developer showcase for this API. See [example/README.md](../example/README.md#speech-enhancement-offline).
 
 ---
+
+## Platform notes
+
+- **Android / iOS:** shared C-API wrapper (`EnhancementWrapper` in `android/src/main/cpp/enhancement/`). Android JNI and iOS bridges call the same core; there is no Kotlin AAR denoiser.
 
 ## See also
 

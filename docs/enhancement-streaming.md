@@ -128,7 +128,7 @@ console.log(det.success, det.modelType, det.paths?.model, det.detectedModels);
 
 ### `createStreamingEnhancement(options)`
 
-Creates a `StreamingEnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig: { model }`). Shared tuning: `numThreads`, `provider`, `debug`.
+Creates a `StreamingEnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock detect works; create still rejects with `VoxLock inference is not implemented`.
 
 ```ts
 function createStreamingEnhancement(
@@ -280,7 +280,7 @@ No pipeline-level JS event callbacks. Buffer-level `onFramesAppended` fires on t
 
 | Type | Description |
 | --- | --- |
-| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet'` |
+| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet' \| 'voxlock'` |
 | `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list of model types |
 | `StreamingEnhancementInitializeOptions` | Alias of `EnhancementInitializeOptions` — same auto/custom union |
 | `StreamingEnhancementEnhanceOptions` | `{ segmentation?: EnhanceSegmentationConfig }` |
@@ -322,8 +322,7 @@ Offline types (`EnhancementEngine`, `EnhancementInitializeOptions`, `EnhanceOpti
 
 ## Platform notes
 
-- **Android:** `OnlineSpeechDenoiser` (sherpa-onnx Kotlin API).
-- **iOS:** C++ wrapper + sherpa-onnx cxx API (`SherpaOnnx+Enhancement.mm`, `enhancement/sherpa-onnx-enhancement-wrapper.*`).
+- **Android / iOS:** shared C-API wrapper (`EnhancementWrapper` / `OnlineEnhancementWrapper` in `android/src/main/cpp/enhancement/`). Android JNI and iOS bridges call the same core; there is no Kotlin AAR denoiser.
 
 ---
 

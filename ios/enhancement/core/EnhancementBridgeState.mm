@@ -1,5 +1,5 @@
 #include "EnhancementBridgeState.h"
-#include "../sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-enhancement-wrapper.h"
 
 namespace sherpaonnx {
 namespace enhancement {

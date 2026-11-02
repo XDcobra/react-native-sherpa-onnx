@@ -3,6 +3,7 @@
 
 #include "sherpa-onnx-common.h"
 #include "sherpa-onnx-model-detect.h"
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -96,6 +97,6 @@ private:
     std::unique_ptr<Impl> pImpl;
 };
 
-} // namespace sherpaonnx
+}  // namespace sherpaonnx
 
-#endif // SHERPA_ONNX_ENHANCEMENT_WRAPPER_H
+#endif  // SHERPA_ONNX_ENHANCEMENT_WRAPPER_H

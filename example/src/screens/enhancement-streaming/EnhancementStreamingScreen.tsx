@@ -86,7 +86,10 @@ import {
   type ModelInitMode,
   type EnhancementCustomInitFormState,
 } from '../../components/modelInit';
-import { fillEnhancementCustomConfigFromModelFolder } from '../../utils/enhancementCustomInitFill';
+import {
+  buildEnhancementCustomInitializeOptions,
+  fillEnhancementCustomConfigFromModelFolder,
+} from '../../utils/enhancementCustomInitFill';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
@@ -541,12 +544,13 @@ export default function EnhancementStreamingScreen() {
         customConfig as unknown as Record<string, unknown>
       );
 
-      const engine = await createStreamingEnhancement({
-        initMode: 'custom',
-        modelType: customInitForm.modelType,
-        customConfig: customConfig as { model: FileSource },
-        numThreads: NUM_THREADS,
-      });
+      const engine = await createStreamingEnhancement(
+        buildEnhancementCustomInitializeOptions(
+          customInitForm.modelType,
+          customConfig as Record<string, unknown>,
+          { numThreads: NUM_THREADS }
+        )
+      );
 
       engineRef.current = engine;
       setCurrentModelFolder(null);

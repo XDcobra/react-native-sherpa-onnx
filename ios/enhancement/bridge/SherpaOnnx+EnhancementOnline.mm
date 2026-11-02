@@ -5,7 +5,7 @@
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../EnhancementPipelineWorker.h"
-#include "../sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
 
 #include <memory>
