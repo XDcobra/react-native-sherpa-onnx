@@ -100,19 +100,17 @@ Same packs as offline — see [enhancement-offline.md — Models](enhancement-of
 
 ## API reference
 
-Signatures below are exported from **`react-native-sherpa-onnx/enhancement`** unless noted. Types live in **`src/enhancement/types.ts`** and **`src/enhancement/streamingTypes.ts`**.
+Signatures from **`react-native-sherpa-onnx/enhancement`**.
 
 ### `detectEnhancementModel(source, options?)`
 
-Shared with offline. File-based detection **without** initializing the engine. Unified cross-feature detection: [model-detect.md](model-detect.md).
-
-For `FileSource` resolution problems, the promise can reject with `FILEIO_*` errors before native model detection runs.
+Same as offline. Unified detection: [model-detect.md](model-detect.md).
 
 ```ts
 function detectEnhancementModel(
   source: FileSource,
   options?: {
-    modelType?: EnhancementModelType | 'auto';
+    modelType?: EnhancementModelType;
     assetName?: string;
   }
 ): Promise<EnhancementDetectResult>;
@@ -123,12 +121,12 @@ const det = await detectEnhancementModel(
   { kind: 'fs', path: '/absolute/path/to/sherpa-onnx-speech-enhancement-gtcrn' },
   { modelType: 'auto' }
 );
-console.log(det.success, det.modelType, det.paths?.model, det.detectedModels);
+if (!det.success) throw new Error(det.error ?? 'Enhancement detection failed');
 ```
 
 ### `createStreamingEnhancement(options)`
 
-Creates a `StreamingEnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock passes audio through until 3s of speech, then locks to that voice, unless `setVoiceSample` is called first. There is no `voiceSample` init option and no file path.
+Creates an online `StreamingEnhancementEngine`.
 
 ```ts
 function createStreamingEnhancement(
@@ -145,9 +143,7 @@ const denoiser = await createStreamingEnhancement({
 
 ### `denoiser.enhance(inputBuffer, outputBuffer, options?)`
 
-Starts a native background thread that drains the input `LiveAudioBuffer`, runs samples through the denoiser, and appends enhanced output to the output `LiveAudioBuffer` with source `"enhancement"`. When the input buffer finalizes → auto-flushes and stops.
-
-Both buffers must be **`LiveAudioBuffer`** (`livePcmBuffer`). The input buffer must be in **`recording`** state with `sampleRate` matching the model's rate.
+Starts a native worker that denoises live input into live output.
 
 ```ts
 enhance(
@@ -163,21 +159,21 @@ const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId);
 
 ### `denoiser.setVoiceSample(buffer)`
 
-Lock a VoxLock online engine to a specific voice from a populated `OfflineAudioBuffer` (`off_*`). Same contract as offline `setVoiceSample`: 3s minimum after resample, loudest window in the first 30s, no file path. Call before `enhance` so isolation uses the clip instead of auto-enroll from the stream.
+Locks a VoxLock engine to the speaker in the clip. Narrow with `modelType === 'voxlock'`.
 
 ```ts
 setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void>;
 ```
 
 ```ts
-await denoiser.setVoiceSample(voiceBuf);
+if (denoiser.modelType === 'voxlock') {
+  await denoiser.setVoiceSample(voiceBuf);
+}
 ```
 
 ### `denoiser.getSampleRate()`
 
-```ts
-getSampleRate(): Promise<number>;
-```
+Model output sample rate.
 
 ```ts
 const sr = await denoiser.getSampleRate();
@@ -185,9 +181,7 @@ const sr = await denoiser.getSampleRate();
 
 ### `denoiser.getFrameShiftInSamples()`
 
-```ts
-getFrameShiftInSamples(): Promise<number>;
-```
+Native frame shift in samples.
 
 ```ts
 const shift = await denoiser.getFrameShiftInSamples();
@@ -195,63 +189,22 @@ const shift = await denoiser.getFrameShiftInSamples();
 
 ### `denoiser.destroy()`
 
-Releases the native online denoiser instance.
-
-```ts
-destroy(): Promise<void>;
-```
+Frees the native online denoiser.
 
 ```ts
 await denoiser.destroy();
 ```
 
----
-
 ### Pipeline handle (`EnhancementPipelineHandle`)
 
-`EnhancementPipelineHandle` extends the generic **`StreamingPipelineHandle`** (same `pipelineId`, `stop` / `flush` / `reset` / `getStatus` / `completed`) and adds **`instanceId`**: the online denoiser that owns `startEnhancementPipeline`.
-
-### `pipeline.stop()`
-
-**Hard teardown:** stops the worker thread and unregisters the pipeline. Call before releasing **`inputBuf`** / **`outputBuf`** when you need to cancel or tear down quickly.
+Same `stop` / `flush` / `reset` / `getStatus` / `completed` as other streaming pipelines — [streaming-pipelines-overview.md](streaming-pipelines-overview.md). Adds the online denoiser `instanceId`.
 
 ```ts
-stop(): Promise<void>;
-```
-
-### `pipeline.flush()`
-
-**Tail flush:** drains internal denoiser delay lines and **appends remaining enhanced samples** to **`outputBuf`**. The pipeline **continues running** afterward (unlike a full stop). Often redundant once **`finalizeLiveAudioBuffer(input)`** has run, but useful if you must force a **mid-session** tail without finalizing the input.
-
-```ts
-flush(): Promise<void>;
-```
-
-### `pipeline.reset()`
-
-Resets **online denoiser state** (history / latency buffers). The pipeline **continues running** after reset.
-
-```ts
-reset(): Promise<void>;
-```
-
-### `pipeline.getStatus()`
-
-```ts
-getStatus(): Promise<StreamingPipelineStatus>;
-```
-
-```ts
+const pipeline = await denoiser.enhance(inputBuf, outputBuf);
 const status = await pipeline.getStatus();
-console.log(status.isRunning, status.chunksProcessed, status.unitsRead, status.unitsWritten);
-```
-
-### `pipeline.completed`
-
-Settles when the worker has **fully stopped** (including the common case where input **finalize** triggered auto-stop). Await after `stop()` if you need the completion payload or to sequence buffer release.
-
-```ts
-readonly completed: Promise<StreamingPipelineCompletion>;
+await pipeline.flush();
+await pipeline.stop();
+await pipeline.completed;
 ```
 
 ---
@@ -292,13 +245,15 @@ No pipeline-level JS event callbacks. Buffer-level `onFramesAppended` fires on t
 
 | Type | Description |
 | --- | --- |
-| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet' \| 'voxlock'` |
-| `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list of model types |
-| `StreamingEnhancementInitializeOptions` | Alias of `EnhancementInitializeOptions` — same auto/custom union |
+| `EnhancementModelType` | `'gtcrn' \| 'dpdfnet' \| 'voxlock' \| 'auto'` |
+| `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list including `'auto'` |
+| `StreamingEnhancementInitializeOptions` | Alias of `EnhancementInitializeOptions` |
 | `StreamingEnhancementEnhanceOptions` | `{ segmentation?: EnhanceSegmentationConfig }` |
-| `StreamingEnhancementEngine` | `enhance`, `setVoiceSample`, `getSampleRate`, `getFrameShiftInSamples`, `destroy`; readonly `instanceId` |
-| `EnhancementPipelineHandle` | Extends `StreamingPipelineHandle` + readonly `instanceId` — `stop`, `flush`, `reset`, `getStatus`, `completed` |
-| `EnhancementDetectResult` | Shared detection base (`success`, `error`, `detectedModels`, `modelType`, `isStreaming`, optional `languages`, `quantization`, `detectionSources`, `paths`) |
+| `StreamingEnhancementEngine` | Union of `StreamingEnhancementEngineOf<F>` |
+| `StreamingEnhancementEngineOf<F>` | Family-typed online engine |
+| `StreamingEnhancementEngineForInit<O>` | Maps `createStreamingEnhancement({ modelType })` onto `StreamingEnhancementEngineOf` |
+| `EnhancementPipelineHandle` | `StreamingPipelineHandle` plus online denoiser `instanceId` |
+| `EnhancementDetectResult` | Return of `detectEnhancementModel()` |
 
 ### Related pipeline types
 
