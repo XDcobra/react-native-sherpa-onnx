@@ -76,6 +76,42 @@ TEST(AudioExtract, LateAudioMediaStart) {
   std::remove(out.c_str());
 }
 
+TEST(AudioExtract, ProgressPercentAdvances) {
+  if (!Exists(Fixture("av_h264_aac.mp4"))) {
+    GTEST_SKIP();
+  }
+  auto opened = OfflineVideoEntry::OpenFile(Fixture("av_h264_aac.mp4"), "/tmp");
+  ASSERT_TRUE(opened.ok()) << opened.status.errorMessage;
+  const std::string out = TmpF32();
+  AudioExtractOptions opts;
+  opts.targetSampleRate = 16000;
+  AudioExtractResult r;
+  struct Event {
+    int percent = 0;
+    int64_t decodedMs = 0;
+  };
+  std::vector<Event> events;
+  auto st = VideoAudioExtractor::Run(
+      opened.value, opts, out, nullptr,
+      [&](int percent, int64_t decodedMs) {
+        events.push_back({percent, decodedMs});
+      },
+      &r);
+  ASSERT_TRUE(st.ok) << st.errorMessage;
+  ASSERT_FALSE(events.empty());
+  EXPECT_EQ(events.back().percent, 100);
+  int maxPercent = 0;
+  for (const auto& e : events) {
+    EXPECT_GE(e.percent, 0);
+    EXPECT_LE(e.percent, 100);
+    if (e.percent > maxPercent) {
+      maxPercent = e.percent;
+    }
+  }
+  EXPECT_EQ(maxPercent, 100);
+  std::remove(out.c_str());
+}
+
 TEST(AudioExtract, RangeTrim) {
   if (!Exists(Fixture("av_h264_aac.mp4"))) {
     GTEST_SKIP();

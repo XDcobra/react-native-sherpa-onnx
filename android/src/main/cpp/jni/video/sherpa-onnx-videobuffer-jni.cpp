@@ -435,7 +435,7 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeIngestFile(JNIEnv* env, jclass
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_video_VideoBufferNative_nativeCreateImageFromVideo(
     JNIEnv* env, jclass, jstring jId, jint sampling, jint uniform, jdouble fps,
-    jint maxSide, jlongArray jTimes) {
+    jint maxSide, jlongArray jTimes, jlong cancelAddr, jobject progress) {
   ImageBridgeRequest req;
   req.sampling = static_cast<sherpa_onnx::video::SamplingMode>(sampling);
   req.uniformCount = uniform;
@@ -446,8 +446,36 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeCreateImageFromVideo(
     req.timesUs.resize(static_cast<size_t>(n));
     env->GetLongArrayRegion(jTimes, 0, n, reinterpret_cast<jlong*>(req.timesUs.data()));
   }
+  std::atomic<bool>* cancel =
+      cancelAddr != 0 ? reinterpret_cast<std::atomic<bool>*>(cancelAddr)
+                      : nullptr;
+  jmethodID progressMid = nullptr;
+  jobject progressGlobal = nullptr;
+  if (progress) {
+    progressGlobal = env->NewGlobalRef(progress);
+    jclass cls = env->GetObjectClass(progress);
+    progressMid = env->GetMethodID(cls, "onProgress", "(IIIJ)V");
+    env->DeleteLocalRef(cls);
+  }
   auto r = sherpa_onnx::video::VideoImageBridge::CreateImageBuffer(
-      JstringToStd(env, jId), req);
+      JstringToStd(env, jId), req, cancel,
+      [&](int percent, int completed, int total, int64_t ptsUs) {
+        if (progressGlobal == nullptr || progressMid == nullptr) {
+          return;
+        }
+        env->CallVoidMethod(progressGlobal, progressMid, percent, completed,
+                            total, static_cast<jlong>(ptsUs));
+        if (env->ExceptionCheck()) {
+          VIDEO_LOGW(
+              "image-from-video progress JNI exception percent=%d completed=%d",
+              percent, completed);
+          env->ExceptionDescribe();
+          env->ExceptionClear();
+        }
+      });
+  if (progressGlobal) {
+    env->DeleteGlobalRef(progressGlobal);
+  }
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   if (!r.status.ok) {

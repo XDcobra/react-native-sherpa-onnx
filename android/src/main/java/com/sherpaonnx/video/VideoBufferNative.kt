@@ -88,6 +88,8 @@ internal object VideoBufferNative {
     fps: Double,
     maxSide: Int,
     timesUs: LongArray?,
+    cancelFlagAddr: Long,
+    progress: Any?,
   ): HashMap<String, Any>?
 
   external fun nativeKeyframeTimes(

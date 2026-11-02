@@ -22,6 +22,8 @@ class VideoFrameIterator {
                      std::vector<int64_t> selected);
   Result<VideoFrameLease> Next();
   bool done() const { return index_ >= static_cast<int64_t>(selected_.size()); }
+  int64_t size() const { return static_cast<int64_t>(selected_.size()); }
+  int64_t index() const { return index_; }
   int seekCount() const { return seekCount_; }
 
  private:

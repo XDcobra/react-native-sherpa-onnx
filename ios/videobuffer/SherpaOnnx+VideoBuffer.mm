@@ -628,6 +628,10 @@ void BindVideoModule(SherpaOnnx *mod) {
                                   resolve:(RCTPromiseResolveBlock)resolve
                                    reject:(RCTPromiseRejectBlock)reject {
   BindVideoModule(self);
+  NSString *operationId = options[@"operationId"];
+  if (![operationId isKindOfClass:[NSString class]] || [operationId length] == 0) {
+    operationId = [[NSUUID UUID] UUIDString];
+  }
   ImageBridgeRequest req;
   if ([options[@"sampling"] respondsToSelector:@selector(intValue)]) {
     req.sampling = static_cast<SamplingMode>([options[@"sampling"] intValue]);
@@ -647,15 +651,47 @@ void BindVideoModule(SherpaOnnx *mod) {
       req.timesUs.push_back((int64_t)[v longLongValue]);
     }
   }
-  auto r = sherpa_onnx::video::VideoImageBridge::CreateImageBuffer(
-      bufferId ? [bufferId UTF8String] : "", req);
-  if (!r.status.ok) {
-    resolve(VideoError(r.status.errorCode.c_str(), r.status.errorMessage));
-    return;
-  }
-  resolve(@{
-    @"imageBufferId" : [NSString stringWithUTF8String:r.imageBufferId.c_str()],
-    @"frameCount" : @(r.frameCount),
+  auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
+  std::string opId = [operationId UTF8String];
+  pa_register_decode_cancel(opId, cancelFlag);
+  std::string idStr = bufferId ? [bufferId UTF8String] : "";
+  __weak SherpaOnnx *weakSelf = self;
+  NSString *opIdNs = operationId;
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    auto r = sherpa_onnx::video::VideoImageBridge::CreateImageBuffer(
+        idStr, req, cancelFlag.get(),
+        [weakSelf, opIdNs](int percent, int completed, int total, int64_t ptsUs) {
+          SherpaOnnx *strongSelf = weakSelf;
+          if (!strongSelf) return;
+          dispatch_async(dispatch_get_main_queue(), ^{
+            [strongSelf sendEventWithName:@"decodeProgress"
+                                     body:@{
+                                       @"operationId" : opIdNs,
+                                       @"percent" : @(percent),
+                                       @"completed" : @(completed),
+                                       @"total" : @(total),
+                                       @"ptsUs" : @((double)ptsUs),
+                                     }];
+          });
+        });
+    pa_unregister_decode_cancel(opId);
+    if (!r.status.ok) {
+      NSString *code = [NSString stringWithUTF8String:r.status.errorCode.c_str()];
+      NSString *msg = [NSString stringWithUTF8String:r.status.errorMessage.c_str()];
+      dispatch_async(dispatch_get_main_queue(), ^{
+        reject(code, msg, nil);
+      });
+      return;
+    }
+    NSString *imageId =
+        [NSString stringWithUTF8String:r.imageBufferId.c_str()];
+    NSNumber *frameCount = @(r.frameCount);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      resolve(@{
+        @"imageBufferId" : imageId,
+        @"frameCount" : frameCount,
+      });
+    });
   });
 }
 
