@@ -64,7 +64,7 @@ try {
 | --- | --- | --- |
 | **Audio in** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Populated noisy PCM (file-backed or in-memory) |
 | **Audio out** | [`OfflineAudioBuffer`](audiobuffer-offline.md) | Empty buffer at denoiser sample rate; `enhance` writes denoised PCM once |
-| **Engine** | `EnhancementEngine` via `createEnhancement` | `enhance(audioIn, audioOut, options?)`, `getSampleRate`, `destroy` |
+| **Engine** | `EnhancementEngine` via `createEnhancement` | `enhance(audioIn, audioOut, options?)`, `setVoiceSample`, `getSampleRate`, `destroy` |
 
 ---
 
@@ -99,7 +99,7 @@ Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory 
 | `dpdfnet` | `*.onnx` (contains `dpdfnet` or `dpcrn`) | `model` |
 | `voxlock` | `enroll` + `chunk` ONNX (`voxlock_enroll.onnx`, `voxlock_chunk.onnx` / `voxlock_chunk_int8.onnx`) | `enrollModel`, `chunkModel` |
 
-Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto mode prefers `gtcrn` when both single-file stacks are present. VoxLock is detected when the enroll+chunk pair is present (or the folder name contains `voxlock`). Create uses empty `voice_sample`: the loudest 3s in the first 15s of the **input** become the enroll clip. There is no `voiceSample` init option yet.
+Validate category: **`enhancement`**. Overview: [README — Speech Enhancement](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Enhancement`). Auto mode prefers `gtcrn` when both single-file stacks are present. VoxLock is detected when the enroll+chunk pair is present (or the folder name contains `voxlock`). Create uses empty `voice_sample`: the loudest 3s in the first 15s of the **input** become the enroll clip. Lock to a specific voice with `setVoiceSample` (PCM `OfflineAudioBuffer`, 3s minimum after resample, loudest window in the first 30s). There is no `voiceSample` init option and no file path.
 
 ```ts
 import { createEnhancement } from 'react-native-sherpa-onnx/enhancement';
@@ -147,7 +147,7 @@ console.log(det.success, det.modelType, det.isStreaming, det.paths?.model, det.d
 
 ### `createEnhancement(options)`
 
-Creates an `EnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock auto-enrolls from the input (loudest 3s in the first 15s). Do not put a voice clip in `customConfig`.
+Creates an `EnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock auto-enrolls from the input (loudest 3s in the first 15s) until `setVoiceSample` is called. Do not put a voice clip in `customConfig`.
 
 ```ts
 function createEnhancement(
@@ -181,6 +181,22 @@ const audioIn = await createOfflineAudioBufferFromFile({ kind: 'fs', path: '/tmp
 const sr = await enhancement.getSampleRate();
 const audioOut = await createEmptyOfflineAudioBuffer(sr);
 await enhancement.enhance(audioIn, audioOut);
+```
+
+### `enhancement.setVoiceSample(buffer)`
+
+Lock a VoxLock engine to a specific voice from a populated `OfflineAudioBuffer` (`off_*`). PCM is resampled to the model rate; the loudest 3 seconds in the first 30 seconds are kept. Clips shorter than 3 seconds after resample are rejected (`ENHANCEMENT_INVALID_ARGUMENT`). GTCRN/DPDFNet reject. Not a file path and not an init option.
+
+```ts
+setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void>;
+```
+
+```ts
+const voice = await createOfflineAudioBufferFromFile({
+  kind: 'fs',
+  path: '/tmp/target-voice.wav',
+});
+await enhancement.setVoiceSample(voice);
 ```
 
 ### `enhancement.getSampleRate()`
@@ -295,7 +311,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [Live over
 | `EnhanceOptions` | `segmentation?`, `errorRecovery?`, `maxRetriesPerSegment?`, `retryExhaustedFallback?`, `onProgress?`, `overlapSamples?` |
 | `EnhancementResult` | `{ status, totalSegments, completedSegments, skippedSegments, failedSegment?, processingTimeMs }` |
 | `EnhancementLivePipelineOptions` | Live overload options — mandatory `continuous_frames` segmentation policy, optional `onSegment` |
-| `EnhancementEngine` | `enhance` (offline / live overload), `getSampleRate`, `destroy`; readonly `instanceId` |
+| `EnhancementEngine` | `enhance` (offline / live overload), `setVoiceSample`, `getSampleRate`, `destroy`; readonly `instanceId` |
 | `EnhancementCustomConfig` | Custom init path map: `{ model: FileSource }` |
 | `EnhancementErrorCode` | Error code enum for enhancement operations |
 | `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |

@@ -128,7 +128,7 @@ console.log(det.success, det.modelType, det.paths?.model, det.detectedModels);
 
 ### `createStreamingEnhancement(options)`
 
-Creates a `StreamingEnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock passes audio through until 3s of speech, then locks to that voice. There is no `voiceSample` init option yet.
+Creates a `StreamingEnhancementEngine`. Init modes: **`auto`** (default — `modelSource` + optional `modelType` / `quantization`) or **`custom`** (`initMode: 'custom'`, concrete `modelType`, `customConfig`: `{ model }` for GTCRN/DPDFNet or `{ enrollModel, chunkModel }` for VoxLock). Shared tuning: `numThreads`, `provider`, `debug`. VoxLock passes audio through until 3s of speech, then locks to that voice, unless `setVoiceSample` is called first. There is no `voiceSample` init option and no file path.
 
 ```ts
 function createStreamingEnhancement(
@@ -159,6 +159,18 @@ enhance(
 
 ```ts
 const pipeline = await denoiser.enhance(inputBuf.bufferId, outputBuf.bufferId);
+```
+
+### `denoiser.setVoiceSample(buffer)`
+
+Lock a VoxLock online engine to a specific voice from a populated `OfflineAudioBuffer` (`off_*`). Same contract as offline `setVoiceSample`: 3s minimum after resample, loudest window in the first 30s, no file path. Call before `enhance` so isolation uses the clip instead of auto-enroll from the stream.
+
+```ts
+setVoiceSample(buffer: OfflineAudioBufferIdSource): Promise<void>;
+```
+
+```ts
+await denoiser.setVoiceSample(voiceBuf);
 ```
 
 ### `denoiser.getSampleRate()`
@@ -284,7 +296,7 @@ No pipeline-level JS event callbacks. Buffer-level `onFramesAppended` fires on t
 | `ENHANCEMENT_MODEL_TYPES` | Readonly runtime list of model types |
 | `StreamingEnhancementInitializeOptions` | Alias of `EnhancementInitializeOptions` — same auto/custom union |
 | `StreamingEnhancementEnhanceOptions` | `{ segmentation?: EnhanceSegmentationConfig }` |
-| `StreamingEnhancementEngine` | `enhance`, `getSampleRate`, `getFrameShiftInSamples`, `destroy`; readonly `instanceId` |
+| `StreamingEnhancementEngine` | `enhance`, `setVoiceSample`, `getSampleRate`, `getFrameShiftInSamples`, `destroy`; readonly `instanceId` |
 | `EnhancementPipelineHandle` | Extends `StreamingPipelineHandle` + readonly `instanceId` — `stop`, `flush`, `reset`, `getStatus`, `completed` |
 | `EnhancementDetectResult` | Shared detection base (`success`, `error`, `detectedModels`, `modelType`, `isStreaming`, optional `languages`, `quantization`, `detectionSources`, `paths`) |
 
