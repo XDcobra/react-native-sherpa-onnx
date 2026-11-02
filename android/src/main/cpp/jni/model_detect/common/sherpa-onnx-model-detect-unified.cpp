@@ -93,6 +93,7 @@ const char* EnhancementModelKindToString(EnhancementModelKind k) {
     switch (k) {
         case EnhancementModelKind::kGtcrn: return "gtcrn";
         case EnhancementModelKind::kDpdfNet: return "dpdfnet";
+        case EnhancementModelKind::kVoxLock: return "voxlock";
         default: return "unknown";
     }
 }

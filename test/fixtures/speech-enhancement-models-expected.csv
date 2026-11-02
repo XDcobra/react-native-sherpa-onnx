@@ -5,3 +5,5 @@ dpdfnet4.onnx,dpdfnet
 dpdfnet8.onnx,dpdfnet
 dpdfnet_baseline.onnx,dpdfnet
 gtcrn_simple.onnx,gtcrn
+sherpa-onnx-voxlock-int8.tar.bz2,voxlock
+sherpa-onnx-voxlock.tar.bz2,voxlock

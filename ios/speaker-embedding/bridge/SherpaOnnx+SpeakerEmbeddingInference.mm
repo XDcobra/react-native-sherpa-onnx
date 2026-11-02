@@ -1268,6 +1268,36 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   resolve(@{ @"names": arr });
 }
 
+- (void)speakerEmbeddingManagerGetEmbedding:(NSString *)managerId
+                                       name:(NSString *)name
+                                    resolve:(RCTPromiseResolveBlock)resolve
+                                     reject:(RCTPromiseRejectBlock)reject
+{
+  if (managerId == nil) {
+    reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR", @"managerId is required", nil);
+    return;
+  }
+  if (name == nil || [name length] == 0) {
+    reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR", @"name is empty", nil);
+    return;
+  }
+  const std::string managerIdStr = [managerId UTF8String];
+  auto manager =
+      sherpaonnx::speaker_embedding::bridge::LookupManager(managerIdStr);
+  if (!manager) {
+    reject(@"SPEAKER_EMBEDDING_MANAGER_ERROR",
+           [NSString stringWithFormat:@"Speaker embedding manager not found: %@", managerId],
+           nil);
+    return;
+  }
+  auto embedding = manager->getEmbedding(std::string([name UTF8String]));
+  if (!embedding.has_value()) {
+    resolve(@{ @"embedding": [NSNull null] });
+    return;
+  }
+  resolve(@{ @"embedding": FloatVectorToNSArray(*embedding) });
+}
+
 - (void)destroySpeakerEmbeddingManager:(NSString *)managerId
                                resolve:(RCTPromiseResolveBlock)resolve
                                 reject:(RCTPromiseRejectBlock)reject

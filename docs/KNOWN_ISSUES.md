@@ -4,24 +4,26 @@ Short, SDK-facing notes so we do not lose track and others can find them quickly
 
 ---
 
-## Zipvoice: `lexicon.txt` must be present (upstream aborts if empty)
+## Zipvoice: lexicon optional at init (2.0.1 no longer aborts)
 
-**Symptom:** App **crashes** (native `abort`, sometimes followed by libc FORTIFY mutex errors in unrelated threads) when initializing Zipvoice — e.g. after “Please provide lexicon.txt for this model” in logcat.
+**Was:** older sherpa-onnx Zipvoice built a **`MatchaTtsLexicon`** and called **`SHERPA_ONNX_EXIT(-1)`** when the lexicon path was empty — init aborted the process.
 
-**Cause:** The sherpa-onnx Zipvoice implementation builds a **`MatchaTtsLexicon`**, which calls **`SHERPA_ONNX_EXIT(-1)`** when the lexicon path is empty. The **full** GitHub release tarball **`sherpa-onnx-zipvoice-zh-en-emilia.tar.bz2`** (`tts-models`) often **does not** ship `lexicon.txt` inside the extracted folder (only ONNX, `tokens.txt`, `pinyin.raw`, `espeak-ng-data`, etc.). That is why it looks “missing” — it was never in that package.
+**Now (sherpa-onnx 2.0.1):** lexicon is loaded only when the path is non-empty. Init succeeds without it. Raw text without a lexicon (and without `synthesize({ tokens })`) yields empty audio → `TTS_GENERATE_ERROR`. `espeak-ng-data` in Zipvoice packs is ignored.
 
-**Where k2-fsa actually gets `lexicon.txt` for zh-en Zipvoice**
+The **full** GitHub tarball **`sherpa-onnx-zipvoice-zh-en-emilia.tar.bz2`** (`tts-models`) often **does not** ship `lexicon.txt` (only ONNX, `tokens.txt`, `pinyin.raw`, leftover `espeak-ng-data`, etc.).
 
-1. **Generate it (canonical upstream method)** — In [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), run from the repo root:
+**Where to get a zh-en Zipvoice lexicon**
+
+1. **Generate it (canonical upstream method)** — In [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), from the repo root:
    - `pip install pypinyin`
    - `python3 scripts/zipvoice/zh-en/generate_lexicon.py`  
-   This writes **`lexicon.txt`** in the current working directory (Chinese coverage from `pypinyin` + phrase/user entries in that script). Copy that file next to your model’s `tokens.txt`. The same script is what CI uses when building the **distill** release bundles (see `.github/workflows/upload-zipvoice-models.yaml`).
+   Copy the written **`lexicon.txt`** next to `tokens.txt`, or pass it as `customConfig.lexicon`.
 
-2. **Copy from another k2-fsa bundle that includes it** — The **`sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2`** and **`sherpa-onnx-zipvoice-distill-fp32-zh-en-emilia.tar.bz2`** assets on the **`tts-models`** release are assembled with `lexicon.txt` in the inner folder. You can extract **`…/lexicon.txt`** from one of those archives. Prefer this only if your **`tokens.txt`** matches the ZipVoice line those bundles use (when in doubt, regenerate with the script above).
+2. **Copy from a distill bundle** — **`sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2`** / **`…-fp32-…`** on the **`tts-models`** release include `lexicon.txt`. Prefer this only if `tokens.txt` matches.
 
-3. **Not the same thing:** `https://github.com/k2-fsa/sherpa-onnx/releases/download/hr-files/lexicon.txt` is used in **nodejs HR-TTS examples**, not documented as the zh-en Zipvoice lexicon — do not assume it matches Emilia Zipvoice without verification.
+3. **Not the same thing:** `https://github.com/k2-fsa/sherpa-onnx/releases/download/hr-files/lexicon.txt` is for nodejs HR-TTS examples, not documented as the Emilia Zipvoice lexicon.
 
-**SDK:** Detection and validation **require** `lexicon` and `dataDir` for Zipvoice so initialization fails with a **clear error** instead of calling native code that aborts.
+**SDK:** Zipvoice `lexicon` is optional at detect/validate/init. Put `lexicon.txt` / `lexicon-*.txt` in the model folder (auto) or set `customConfig.lexicon`. For pre-tokenized ZipVoice input, use `synthesize({ tokens })`.
 
 ---
 

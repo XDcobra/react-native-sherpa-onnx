@@ -91,7 +91,6 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
       PutString(env, pathsMap, mapPut, "ttsModel", result.paths.ttsModel);
       PutString(env, pathsMap, mapPut, "tokens", result.paths.tokens);
       PutString(env, pathsMap, mapPut, "lexicon", result.paths.lexicon);
-      PutString(env, pathsMap, mapPut, "dataDir", result.paths.dataDir);
       PutString(env, pathsMap, mapPut, "voices", result.paths.voices);
       PutString(env, pathsMap, mapPut, "acousticModel", result.paths.acousticModel);
       PutString(env, pathsMap, mapPut, "vocoder", result.paths.vocoder);

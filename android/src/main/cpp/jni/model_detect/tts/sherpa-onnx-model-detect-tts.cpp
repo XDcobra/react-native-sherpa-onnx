@@ -8,10 +8,10 @@
  *
  * 1. Gather files in modelDir (recursive), then map file names to logical paths (ttsModel,
  *    acousticModel, vocoder, encoder, decoder, lmFlow, lmMain, textConditioner, tokens, lexicon,
- *    dataDir, voices, vocabJson, tokenScoresJson). Path hints from directory name (isLikelyVits,
+ *    voices, vocabJson, tokenScoresJson). Path hints from directory name (isLikelyVits,
  *    isLikelyKitten, isLikelyKokoro).
  *
- * 2. Capabilities (hasVits, hasMatcha, hasPocket, hasZipvoice, hasVoicesFile, hasDataDir): which
+ * 2. Capabilities (hasVits, hasMatcha, hasPocket, hasZipvoice, hasVoicesFile): which
  *    model types are *possible* given the paths. Multiple can be true (e.g. voices.bin can satisfy
  *    both Kokoro and Kitten).
  *
@@ -82,8 +82,7 @@ TtsModelKind ParseTtsModelType(const std::string& modelType) {
 }
 
 /** Returns true if the given kind is supported by the current paths and hints (required files present).
- *  data_dir (espeak-ng-data) is required for Kitten, Kokoro, and Zipvoice (Zipvoice uses MatchaTtsLexicon + espeak).
- *  VITS and Matcha use dataDir optionally in this detector; Pocket does not use it. */
+ *  espeak-ng-data / dataDir is ignored (sherpa-onnx 2.0.1). Lexicon is optional at detect time. */
 static bool CapabilitySupportsTtsKind(
     TtsModelKind kind,
     bool hasVits,
@@ -91,8 +90,7 @@ static bool CapabilitySupportsTtsKind(
     bool hasPocket,
     bool hasZipvoice,
     bool hasSupertonic,
-    bool hasVoicesFile,
-    bool hasDataDir
+    bool hasVoicesFile
 ) {
     switch (kind) {
         case TtsModelKind::kVits:
@@ -101,7 +99,7 @@ static bool CapabilitySupportsTtsKind(
             return hasMatcha;
         case TtsModelKind::kKokoro:
         case TtsModelKind::kKitten:
-            return hasVoicesFile && hasDataDir;
+            return hasVoicesFile;
         case TtsModelKind::kPocket:
             return hasPocket;
         case TtsModelKind::kZipvoice:
@@ -208,11 +206,6 @@ static TtsDetectResult DetectTtsModelFromFiles(
 
     std::string tokensFile = FindFileByName(files, "tokens.txt");
     std::vector<LexiconCandidate> lexiconCandidates = FindLexiconCandidates(files, modelDir);
-    std::string dataDirPath = FindDirectoryUnderRoot(files, modelDir, "espeak-ng-data");
-    LOGI("DetectTtsModel: modelDir=%s espeak-ng dataDir=%s (empty=%d)",
-         modelDir.c_str(),
-         dataDirPath.empty() ? "(empty)" : dataDirPath.c_str(),
-         (int)dataDirPath.empty());
     std::string voicesFile = FindFileByName(files, "voices.bin");
 
     std::string acousticModel = FindOnnxByAnyToken(files, {"acoustic_model", "acoustic-model"}, quantization);
@@ -264,8 +257,6 @@ static TtsDetectResult DetectTtsModelFromFiles(
     bool hasSupertonic = !durationPredictor.empty() && !textEncoderSupertonic.empty() &&
                          !vectorEstimator.empty() && !vocoder.empty() && !ttsJsonFile.empty() &&
                          !unicodeIndexerFile.empty() && !voiceStyleFile.empty();
-    bool hasDataDir = !dataDirPath.empty();
-
     bool isLikelyKitten = modelDirLower.find("kitten") != std::string::npos;
     bool isLikelyKokoro = modelDirLower.find("kokoro") != std::string::npos;
 
@@ -304,7 +295,7 @@ static TtsDetectResult DetectTtsModelFromFiles(
         if (!nameCandidates.empty()) {
             for (TtsModelKind k : nameCandidates) {
                 if (CapabilitySupportsTtsKind(k, hasVits, hasMatcha, hasPocket, hasZipvoice, hasSupertonic,
-                                              hasVoicesFile, hasDataDir)) {
+                                              hasVoicesFile)) {
                     selected = k;
                     pickedFromDir = true;
                     break;
@@ -345,7 +336,6 @@ static TtsDetectResult DetectTtsModelFromFiles(
     result.paths.ttsModel = ttsModel;
     result.paths.tokens = tokensFile;
     result.paths.lexicon = lexiconPath;
-    result.paths.dataDir = dataDirPath;
     result.paths.voices = voicesFile;
     result.paths.acousticModel = acousticModel;
     result.paths.vocoder = vocoder;
@@ -451,13 +441,11 @@ TtsDetectResult DetectTtsModel(
         if (!result.error.empty()) LOGE("%s", result.error.c_str());
         return result;
     }
-    LOGI("DetectTtsModel: tokens=%s, lexicon=%s, dataDir=%s, voices=%s",
+    LOGI("DetectTtsModel: tokens=%s, lexicon=%s, voices=%s",
          result.paths.tokens.c_str(), result.paths.lexicon.c_str(),
-         result.paths.dataDir.c_str(), result.paths.voices.c_str());
+         result.paths.voices.c_str());
     LOGI("DetectTtsModel: selected kind=%d, ttsModel=%s",
          static_cast<int>(result.selectedKind), result.paths.ttsModel.c_str());
-    LOGI("DetectTtsModel: final paths — tokens=%s, dataDir=%s",
-         result.paths.tokens.c_str(), result.paths.dataDir.c_str());
     LOGI("DetectTtsModel: detection OK for %s", modelDir.c_str());
     return result;
 }

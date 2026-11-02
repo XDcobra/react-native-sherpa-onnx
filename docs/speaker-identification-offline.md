@@ -434,12 +434,13 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `SPEAKER_EMBEDDING_DETECT_ERROR` | `detectSpeakerEmbeddingModel` failed or returned no usable layout. |
 | `SPEAKER_EMBEDDING_INIT_ERROR` | Extractor init failed (invalid model path/type or native construct failure). |
 | `SPEAKER_EMBEDDING_COMPUTE_ERROR` | Embedding extraction failed for an offline audio buffer / range. |
-| `SPEAKER_EMBEDDING_MANAGER_ERROR` | Named-speaker manager create / add / search / verify / destroy failed. |
+| `SPEAKER_EMBEDDING_MANAGER_ERROR` | Named-speaker manager create / add / search / verify / getEmbedding / destroy failed. |
 | `SPEAKER_EMBEDDING_BUFFER_NOT_FOUND` | Audio buffer id missing from the audio registry (released or never created). |
 | `SPEAKER_EMBEDDING_BUFFER_KIND_MISMATCH` | A non-offline audio buffer was passed to offline extract. |
 | `SPEAKER_EMBEDDING_BUFFER_EMPTY` | Offline audio buffer (or extracted range) has no samples. |
 | `SPEAKER_EMBEDDING_INVALID_ARGUMENT` | Invalid `customConfig` / init arguments on the JS custom-path resolver. |
 | `SID_INVALID_OPTIONS` | `onProgress` / `onLabeled` / `onVerified` provided but not a function. |
+| `SID_ENROLL_INVALID_RESULT` | Export listed a speaker but native `GetEmbedding` returned no usable vector. |
 | `SID_ENROLLMENT_BUNDLE_INVALID` | Malformed `SpeakerEnrollmentBundle` (version, speakers, embeddings). |
 | `SID_ENROLLMENT_DIM_MISMATCH` | Bundle `dim` ≠ current manager dim. |
 | `SID_ENROLLMENT_MODEL_MISMATCH` | Bundle `modelKey` ≠ this SID instance's model key. |
@@ -451,7 +452,7 @@ JS-side SID guards (message match, not always a native `code`): empty speaker na
 
 ## Persistence
 
-The native manager cannot read embeddings back by name. SID keeps a **JS mirror** of vectors returned once from `enrollSpeakerOffline` (and from `importEnrollments`), and clears it on `removeSpeaker` / `destroy`.
+Export reads the native manager (`listSpeakers` + `getEmbedding`). Each speaker is **one** averaged, L2-normalized row: `embeddings: [averagedRow]`. Import still calls `manager.add` and accepts older bundles with multiple clip rows (native averages them). A listed name without a readable vector rejects with `SID_ENROLL_INVALID_RESULT`. The SDK does not write files.
 
 ```ts
 const bundle = await sid.exportEnrollments();
@@ -467,8 +468,8 @@ await sid.importEnrollments(restored, { replaceExisting: true });
 
 - `dim` must match the current manager (else `SID_ENROLLMENT_DIM_MISMATCH`).
 - When both the bundle and this SID instance have a `modelKey`, a mismatch rejects with `SID_ENROLLMENT_MODEL_MISMATCH`.
-- Export only includes speakers enrolled through this SID instance's enroll/import paths.
-- Future: native readout via upstream `GetEmbedding` — [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md).
+- Export includes every name currently in the native manager (enroll, import, or low-level `add`).
+- Native readout: [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md).
 
 ## Patterns
 
@@ -493,7 +494,6 @@ PCM stays native via buffer ids. Identify / label / verify / enroll use combined
 - Score / top-N search results
 - In-place mutation of VAD segment buffers
 - Enroll from a segment buffer **without** PCM audio
-- Native embedding dump / Upstream `GetEmbedding` (export uses the JS mirror; see [future-work/speaker-embedding-manager-upstream-export-import.md](future-work/speaker-embedding-manager-upstream-export-import.md))
 - Automatic file / cloud I/O for enrollment bundles (app-owned storage)
 
 ## Use case examples

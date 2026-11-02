@@ -112,7 +112,7 @@ console.log(out.info.kind, out.bufferId);
 
 #### `createOfflineTextBufferFromText(text, options?)`
 
-Creates an **immutable** offline buffer already populated with `text` (e.g. offline TTS input or [`segmentOfflineBuffer`](segmentation-engine.md) on text). `text` must not be empty.
+Creates an **immutable** offline buffer already populated with `text` (e.g. offline TTS input or [`segmentOfflineBuffer`](segmentation-engine.md) on text). Empty `text` is allowed for TTS `phonemeCodepoints` / `tokens` synthesis.
 
 ```ts
 function createOfflineTextBufferFromText(

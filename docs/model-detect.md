@@ -463,7 +463,7 @@ Read-only schema for custom-init. Do not hardcode key lists in app code.
 
 - `key` — config key passed to `customConfig` / `validateCustomModelPaths`
 - `required` — whether native validation treats the key as mandatory
-- `kind` — `'file'` or `'dir'` (for example TTS `dataDir` → `'dir'`)
+- `kind` — `'file'` or `'dir'`
 
 Helpers (same module):
 
@@ -517,7 +517,7 @@ type DetectModelResult =
     };
 ```
 
-`paths` uses the same string keys as `validateCustomModelPaths` / custom init (`encoder`, `ttsModel`, `dataDir`, …). Only non-empty values are included.
+`paths` uses the same string keys as `validateCustomModelPaths` / custom init (`encoder`, `ttsModel`, `lexicon`, …). Only non-empty values are included. TTS `espeak-ng-data` is ignored and is not a path key.
 
 Name-only input (`{ assetName }`) uses native name heuristics when no listable directory exists.
 

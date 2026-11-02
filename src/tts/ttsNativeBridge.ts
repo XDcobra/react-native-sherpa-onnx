@@ -255,6 +255,12 @@ export function toNativeSynthesisOptions(
     out.silenceScale = options.silenceScale;
   }
   if (options.numSteps !== undefined) out.numSteps = options.numSteps;
+  if (options.phonemeCodepoints != null) {
+    out.phonemeCodepoints = options.phonemeCodepoints;
+  }
+  if (options.tokens != null) {
+    out.tokens = options.tokens;
+  }
   if (options.lang !== undefined && options.lang.length > 0) {
     out.lang = options.lang;
   }

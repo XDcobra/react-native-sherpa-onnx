@@ -5,3 +5,5 @@ dpdfnet4.onnx,apache-2.0,yes,high,manual,https://huggingface.co/Ceva-IP/DPDFNet/
 dpdfnet8.onnx,apache-2.0,yes,high,manual,https://huggingface.co/Ceva-IP/DPDFNet/tree/main/onnx
 dpdfnet_baseline.onnx,apache-2.0,yes,high,manual,https://huggingface.co/Ceva-IP/DPDFNet/tree/main/onnx
 gtcrn_simple.onnx,mit,yes,high,manual,https://github.com/Xiaobin-Rong/gtcrn/tree/main
+sherpa-onnx-voxlock-int8.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/arbazsiddiqui/voxlock
+sherpa-onnx-voxlock.tar.bz2,apache-2.0,yes,high,manual,https://huggingface.co/arbazsiddiqui/voxlock

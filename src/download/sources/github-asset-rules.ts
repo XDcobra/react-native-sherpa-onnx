@@ -39,7 +39,7 @@ export function isAssetSupportedForCategory(
     case ModelCategory.Diarization:
       return ext === 'tar.bz2';
     case ModelCategory.Enhancement:
-      return ext === 'onnx';
+      return ext === 'tar.bz2' || ext === 'onnx';
     case ModelCategory.Separation:
       return ext === 'tar.bz2' || ext === 'onnx';
     case ModelCategory.SpeakerEmbedding:

@@ -139,7 +139,6 @@ const FieldList kStreamingSingleModelFields = {
 const FieldList kTtsVitsFields = {
     {"ttsModel", true, false},
     {"tokens", true, false},
-    {"dataDir", false, true},
     {"lexicon", false, false},
 };
 
@@ -147,7 +146,6 @@ const FieldList kTtsMatchaFields = {
     {"acousticModel", true, false},
     {"vocoder", true, false},
     {"tokens", true, false},
-    {"dataDir", false, true},
     {"lexicon", false, false},
 };
 
@@ -155,7 +153,6 @@ const FieldList kTtsKokoroFields = {
     {"ttsModel", true, false},
     {"tokens", true, false},
     {"voices", true, false},
-    {"dataDir", true, true},
     {"lexicon", false, false},
 };
 
@@ -174,8 +171,7 @@ const FieldList kTtsZipvoiceFields = {
     {"decoder", true, false},
     {"vocoder", true, false},
     {"tokens", true, false},
-    {"dataDir", true, true},
-    {"lexicon", true, false},
+    {"lexicon", false, false},
 };
 
 const FieldList kTtsSupertonicFields = {
@@ -255,6 +251,10 @@ TEST(CustomPathRequirementsCatalog, VadEnhancementAlignmentPunctuation) {
     ExpectRequirementsMatch("vad", "ten_vad", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("enhancement", "gtcrn", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("enhancement", "dpdfnet", {{"model", true, std::nullopt}});
+    ExpectRequirementsMatch("enhancement", "voxlock", {
+        {"enrollModel", true, std::nullopt},
+        {"chunkModel", true, std::nullopt},
+    });
     ExpectRequirementsMatch("diarization", "pyannote", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("diarization", "reverb", {{"model", true, std::nullopt}});
     ExpectRequirementsMatch("diarization", "sortformer", {

@@ -28,7 +28,7 @@ describe('getCustomModelPathRequirements', () => {
       fields: [
         { key: 'ttsModel', required: true, kind: 'file' },
         { key: 'tokens', required: true, kind: 'file' },
-        { key: 'dataDir', required: false, kind: 'dir' },
+        { key: 'lexicon', required: false, kind: 'file' },
       ],
     });
 
@@ -37,7 +37,7 @@ describe('getCustomModelPathRequirements', () => {
     expect(schema.fields).toEqual([
       { key: 'ttsModel', required: true, kind: 'file' },
       { key: 'tokens', required: true, kind: 'file' },
-      { key: 'dataDir', required: false, kind: 'dir' },
+      { key: 'lexicon', required: false, kind: 'file' },
     ]);
     expect(requiredCustomModelPathFieldKeys(schema)).toEqual([
       'ttsModel',
@@ -46,7 +46,7 @@ describe('getCustomModelPathRequirements', () => {
     expect(customModelPathFieldKeys(schema)).toEqual([
       'ttsModel',
       'tokens',
-      'dataDir',
+      'lexicon',
     ]);
   });
 

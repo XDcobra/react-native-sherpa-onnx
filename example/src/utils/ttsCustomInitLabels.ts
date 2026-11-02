@@ -4,8 +4,7 @@ import type { TtsCustomPathKey } from 'react-native-sherpa-onnx/tts';
 export const TTS_CUSTOM_PATH_LABELS: Record<TtsCustomPathKey, string> = {
   ttsModel: 'TTS model (.onnx)',
   tokens: 'Tokens (tokens.txt)',
-  lexicon: 'Lexicon (lexicon.txt, optional)',
-  dataDir: 'espeak-ng-data directory',
+  lexicon: 'Lexicon (lexicon.txt / lexicon-*.txt, optional)',
   voices: 'Voices file (e.g. voices.bin)',
   acousticModel: 'Acoustic model (.onnx)',
   vocoder: 'Vocoder (.onnx)',

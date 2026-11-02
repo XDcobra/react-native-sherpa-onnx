@@ -135,7 +135,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   VideoOcrPipeline: {
     title: 'Video to OCR pipeline',
-    body: 'Developer pipeline for createOfflineImageBufferFromVideo: play a bundled clip with burned-in captions, sample frames (default fps=1), preview the ImageBuffer, initialize OCR, then recognize every frame into a TextBuffer.',
+    body: 'Developer pipeline for createOfflineImageBufferFromVideo: play a bundled clip with burned-in captions, sample frames (default fps=1) with live progress, optionally extract clip audio with createOfflineAudioBufferFromVideo, preview the ImageBuffer, initialize OCR, then recognize every frame into a TextBuffer.',
   },
   Documents: {
     title: 'Read documents aloud',

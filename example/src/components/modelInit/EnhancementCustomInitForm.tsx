@@ -12,6 +12,10 @@ import {
   type EnhancementConcreteModelType,
   type EnhancementCustomPathKey,
 } from 'react-native-sherpa-onnx/enhancement';
+
+const ENHANCEMENT_CUSTOM_MODEL_TYPES = ENHANCEMENT_MODEL_TYPES.filter(
+  (type): type is EnhancementConcreteModelType => type !== 'auto'
+);
 import {
   getCustomModelPathRequirements,
   type CustomModelPathRequirements,
@@ -104,7 +108,7 @@ export function EnhancementCustomInitForm({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.typeRow}
       >
-        {ENHANCEMENT_MODEL_TYPES.map((type) => {
+        {ENHANCEMENT_CUSTOM_MODEL_TYPES.map((type) => {
           const active = value.modelType === type;
           return (
             <TouchableOpacity

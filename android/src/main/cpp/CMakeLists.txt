@@ -137,7 +137,9 @@ set(SOURCES
     jni/model_detect/enhancement/sherpa-onnx-enhancement-online-guard.cpp
     jni/model_detect/enhancement/sherpa-onnx-model-detect-enhancement.cpp
     jni/model_detect/enhancement/sherpa-onnx-validate-enhancement.cpp
-    jni/model_detect/enhancement/sherpa-onnx-enhancement-wrapper.cpp
+    jni/model_detect/enhancement/sherpa-onnx-enhancement-detect-wrapper.cpp
+    enhancement/sherpa-onnx-enhancement-wrapper.cpp
+    jni/enhancement/sherpa-onnx-enhancement-jni.cpp
     jni/model_detect/separation/sherpa-onnx-model-detect-separation.cpp
     jni/model_detect/separation/sherpa-onnx-validate-separation.cpp
     jni/model_detect/separation/sherpa-onnx-separation-detect-wrapper.cpp
@@ -555,6 +557,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/separation
     ${CMAKE_CURRENT_SOURCE_DIR}/diarization
     ${CMAKE_CURRENT_SOURCE_DIR}/speaker-embedding
+    ${CMAKE_CURRENT_SOURCE_DIR}/enhancement
     ${ORT_INCLUDE_DIR}
     # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
     ${ORT_INCLUDE_DIR}/onnxruntime/core/session

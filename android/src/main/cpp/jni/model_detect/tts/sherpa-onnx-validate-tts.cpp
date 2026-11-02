@@ -20,7 +20,6 @@ namespace {
 static const TtsFieldRequirement kVitsReqs[] = {
     {"ttsModel", &TtsModelPaths::ttsModel, true, false},
     {"tokens",   &TtsModelPaths::tokens,   true, false},
-    {"dataDir",  &TtsModelPaths::dataDir,  false, true},
     {"lexicon",  &TtsModelPaths::lexicon,  false, false},
 };
 
@@ -28,7 +27,6 @@ static const TtsFieldRequirement kMatchaReqs[] = {
     {"acousticModel", &TtsModelPaths::acousticModel, true, false},
     {"vocoder",       &TtsModelPaths::vocoder,       true, false},
     {"tokens",        &TtsModelPaths::tokens,        true, false},
-    {"dataDir",       &TtsModelPaths::dataDir,       false, true},
     {"lexicon",       &TtsModelPaths::lexicon,       false, false},
 };
 
@@ -36,7 +34,6 @@ static const TtsFieldRequirement kKokoroReqs[] = {
     {"ttsModel", &TtsModelPaths::ttsModel, true, false},
     {"tokens",   &TtsModelPaths::tokens,   true, false},
     {"voices",   &TtsModelPaths::voices,   true, false},
-    {"dataDir",  &TtsModelPaths::dataDir,  true, true},
     {"lexicon",  &TtsModelPaths::lexicon,  false, false},
 };
 
@@ -55,8 +52,7 @@ static const TtsFieldRequirement kZipvoiceReqs[] = {
     {"decoder",  &TtsModelPaths::decoder,  true, false},
     {"vocoder",  &TtsModelPaths::vocoder,  true, false},
     {"tokens",   &TtsModelPaths::tokens,   true, false},
-    {"dataDir",  &TtsModelPaths::dataDir,  true, true},
-    {"lexicon",  &TtsModelPaths::lexicon,  true, false},
+    {"lexicon",  &TtsModelPaths::lexicon,  false, false},
 };
 
 static const TtsFieldRequirement kSupertonicReqs[] = {
@@ -112,12 +108,10 @@ static const char* TtsKindToName(TtsModelKind k) {
 }
 
 static const char* GetFieldHint(const char* fieldName) {
-    if (std::strcmp(fieldName, "dataDir") == 0)
-        return "Copy espeak-ng-data into the model directory.";
     if (std::strcmp(fieldName, "tokens") == 0)
         return "Ensure tokens.txt is present in the model directory.";
     if (std::strcmp(fieldName, "lexicon") == 0)
-        return "Add lexicon.txt (or lexicon-<lang>.txt) from the official sherpa-onnx Zipvoice/Matcha release; without it the native engine aborts.";
+        return "Optional: add lexicon.txt or lexicon-<lang>.txt (e.g. lexicon-en-us.txt) for raw-text synthesis.";
     return nullptr;
 }
 

@@ -9,7 +9,7 @@ describe('customModelPathFieldKeys', () => {
     fields: [
       { key: 'ttsModel', required: true, kind: 'file' },
       { key: 'tokens', required: true, kind: 'file' },
-      { key: 'dataDir', required: false, kind: 'dir' },
+      { key: 'lexicon', required: false, kind: 'file' },
     ],
   };
 
@@ -17,7 +17,7 @@ describe('customModelPathFieldKeys', () => {
     expect(customModelPathFieldKeys(schema)).toEqual([
       'ttsModel',
       'tokens',
-      'dataDir',
+      'lexicon',
     ]);
   });
 

@@ -434,6 +434,40 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
   return map;
 }
 
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nativeManagerGetEmbedding(
+    JNIEnv* env, jclass /* clazz */, jstring managerId, jstring name) {
+  const std::string id = CopyRequiredJstring(env, managerId);
+  const std::string nameStr = CopyRequiredJstring(env, name);
+  std::optional<std::vector<float>> embedding;
+  auto manager = LookupManager(id);
+  if (manager) {
+    embedding = manager->getEmbedding(nameStr);
+  }
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map) return nullptr;
+  jstring key = env->NewStringUTF("embedding");
+  if (!key) return map;
+  if (embedding.has_value()) {
+    jfloatArray embArray =
+        env->NewFloatArray(static_cast<jsize>(embedding->size()));
+    if (embArray) {
+      if (!embedding->empty()) {
+        env->SetFloatArrayRegion(embArray, 0,
+                                 static_cast<jsize>(embedding->size()),
+                                 embedding->data());
+      }
+      env->CallObjectMethod(map, mapPut, key, embArray);
+      env->DeleteLocalRef(embArray);
+    }
+  } else {
+    env->CallObjectMethod(map, mapPut, key, nullptr);
+  }
+  env->DeleteLocalRef(key);
+  return map;
+}
+
 JNIEXPORT void JNICALL
 Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nativeDestroyManager(
     JNIEnv* env, jclass /* clazz */, jstring managerId) {

@@ -754,6 +754,34 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     }
   }
 
+  fun speakerEmbeddingManagerGetEmbedding(
+    managerId: String,
+    name: String,
+    promise: Promise,
+  ) {
+    if (name.isEmpty()) {
+      promise.reject(MANAGER_ERROR, "name is empty")
+      return
+    }
+    try {
+      val result = nativeManagerGetEmbedding(managerId, name)
+      val embedding = result?.get("embedding") as? FloatArray
+      val out = Arguments.createMap()
+      if (embedding == null) {
+        out.putNull("embedding")
+      } else {
+        val arr = Arguments.createArray()
+        for (v in embedding) {
+          arr.pushDouble(v.toDouble())
+        }
+        out.putArray("embedding", arr)
+      }
+      promise.resolve(out)
+    } catch (e: Exception) {
+      promise.reject(MANAGER_ERROR, "getEmbedding failed: ${e.message}", e)
+    }
+  }
+
   fun destroySpeakerEmbeddingManager(managerId: String, promise: Promise) {
     nativeDestroyManager(managerId)
     promise.resolve(null)
@@ -1135,6 +1163,12 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     private external fun nativeManagerAllSpeakerNames(
       managerId: String,
     ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeManagerGetEmbedding(
+      managerId: String,
+      name: String,
+    ): HashMap<String, Any?>?
 
     @JvmStatic
     private external fun nativeDestroyManager(managerId: String)

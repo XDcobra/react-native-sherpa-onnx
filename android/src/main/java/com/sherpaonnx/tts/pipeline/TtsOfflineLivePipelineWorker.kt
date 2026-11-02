@@ -36,6 +36,8 @@ internal class TtsOfflineLivePipelineWorker(
   private val defaultLang: String? = null,
   /** When set (and no [voiceClone]), use GenerationConfig.numSteps for non-clone models. */
   private val defaultNumSteps: Int? = null,
+  private val defaultPhonemeCodepoints: Array<IntArray>? = null,
+  private val defaultTokens: Array<Array<String>>? = null,
   private val voiceClone: TtsVoiceCloneConfig? = null,
 ) : OfflineLivePipelineWorker(
   pipelineId = pipelineId,
@@ -46,7 +48,12 @@ internal class TtsOfflineLivePipelineWorker(
 
   override fun onSegmentCommitted(segment: CommittedSegmentRef) {
     val text = segment as? CommittedSegmentRef.Text ?: return
-    if (text.text.isBlank()) return
+    val hasPhonemes =
+      defaultPhonemeCodepoints != null ||
+        defaultTokens != null ||
+        voiceClone?.phonemeCodepoints != null ||
+        voiceClone?.tokens != null
+    if (text.text.isBlank() && !hasPhonemes) return
 
     val effectiveSid = (text.meta?.get("sid") as? Number)?.toInt() ?: defaultSid
     val effectiveSpeed = (text.meta?.get("speed") as? Number)?.toFloat() ?: defaultSpeed
@@ -66,6 +73,8 @@ internal class TtsOfflineLivePipelineWorker(
             referenceText = voiceClone.referenceText,
             silenceScale = voiceClone.silenceScale,
             numSteps = voiceClone.numSteps,
+            phonemeCodepoints = voiceClone.phonemeCodepoints ?: defaultPhonemeCodepoints,
+            tokens = voiceClone.tokens ?: defaultTokens,
           )
           tts.generateWithConfig(text.text, config)
         }
@@ -77,14 +86,22 @@ internal class TtsOfflineLivePipelineWorker(
             speed = effectiveSpeed,
             numSteps = defaultNumSteps,
             extra = extra,
+            phonemeCodepoints = defaultPhonemeCodepoints,
+            tokens = defaultTokens,
           )
           tts.generateWithConfig(text.text, config)
         }
-        !defaultLang.isNullOrBlank() -> {
+        !defaultLang.isNullOrBlank() ||
+          defaultPhonemeCodepoints != null ||
+          defaultTokens != null -> {
+          val extra =
+            if (!defaultLang.isNullOrBlank()) mapOf("lang" to defaultLang) else null
           val config = GenerationConfig(
             sid = effectiveSid,
             speed = effectiveSpeed,
-            extra = mapOf("lang" to defaultLang),
+            extra = extra,
+            phonemeCodepoints = defaultPhonemeCodepoints,
+            tokens = defaultTokens,
           )
           tts.generateWithConfig(text.text, config)
         }

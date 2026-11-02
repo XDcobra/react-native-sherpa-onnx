@@ -118,4 +118,38 @@ export const styles = StyleSheet.create({
     color: '#0f172a',
     lineHeight: 22,
   },
+  progressBox: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+  },
+  progressHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  progressLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: '#334155',
+    lineHeight: 18,
+  },
+  progressPercent: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#007AFF',
+    fontVariant: ['tabular-nums'],
+  },
+  progressTrack: {
+    height: 6,
+    backgroundColor: '#ddd',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    backgroundColor: '#007AFF',
+  },
 });

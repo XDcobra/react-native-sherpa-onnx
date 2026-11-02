@@ -9,6 +9,11 @@ static const EnhancementFieldRequirement kGenericReqs[] = {
     {"model", &EnhancementModelPaths::model, true},
 };
 
+static const EnhancementFieldRequirement kVoxLockReqs[] = {
+    {"enrollModel", &EnhancementModelPaths::enrollModel, true},
+    {"chunkModel", &EnhancementModelPaths::chunkModel, true},
+};
+
 static const EnhancementFieldRequirement* GetRequirements(
     EnhancementModelKind kind,
     size_t& count
@@ -18,6 +23,9 @@ static const EnhancementFieldRequirement* GetRequirements(
         case EnhancementModelKind::kDpdfNet:
             count = std::size(kGenericReqs);
             return kGenericReqs;
+        case EnhancementModelKind::kVoxLock:
+            count = std::size(kVoxLockReqs);
+            return kVoxLockReqs;
         default:
             count = 0;
             return nullptr;
@@ -30,6 +38,8 @@ static const char* EnhancementKindToName(EnhancementModelKind kind) {
             return "GTCRN";
         case EnhancementModelKind::kDpdfNet:
             return "DPDFNet";
+        case EnhancementModelKind::kVoxLock:
+            return "VoxLock";
         default:
             return "Unknown";
     }

@@ -109,7 +109,11 @@ export type SpeakerIdentificationLiveLabelOptions =
 /** One enrolled speaker in a {@link SpeakerEnrollmentBundle}. */
 export type SpeakerEnrollmentEntry = {
   name: string;
-  /** Exact embedding vectors that were (or will be) passed to `manager.add`. */
+  /**
+   * Embedding row(s) for this speaker. Native export is one averaged
+   * L2-normalized vector: `[averagedRow]`. Import still accepts N rows
+   * (`manager.add` averages them).
+   */
   embeddings: number[][];
 };
 
@@ -146,7 +150,6 @@ export interface SpeakerIdentificationEngine {
   /**
    * Enroll a named speaker from one or more offline audio buffers.
    * Multiple clips are averaged (L2-normalized) by the native manager.
-   * @throws {Error} `SID_ENROLL_INVALID_RESULT` — native returned no usable embeddings.
    * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
    * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_NOT_FOUND` — audio buffer is unknown.
    * @throws {Error} `SPEAKER_EMBEDDING_BUFFER_EMPTY` — audio buffer has no samples.
@@ -167,7 +170,6 @@ export interface SpeakerIdentificationEngine {
    *   count after skipping silence/empty rows). Duplicate names in the list are
    *   grouped and averaged under that speaker (same multi-embedding `add` path).
    * @throws {Error} `SID_INVALID_OPTIONS` — names, spans, or options are invalid.
-   * @throws {Error} `SID_ENROLL_INVALID_RESULT` — native returned no usable embeddings.
    * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
    * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager add failed.
    */
@@ -285,8 +287,9 @@ export interface SpeakerIdentificationEngine {
   numSpeakers(): Promise<number>;
 
   /**
-   * Snapshot enrolled speakers from the JS enrollment mirror
-   * (speakers enrolled via this SID instance's `enroll*` / `importEnrollments`).
+   * Snapshot enrolled speakers from the native manager
+   * (`listSpeakers` + `getEmbedding` per name). Each speaker is one averaged row.
+   * @throws {Error} `SID_ENROLL_INVALID_RESULT` — a listed speaker has no readable embedding.
    */
   exportEnrollments(): Promise<SpeakerEnrollmentBundle>;
 

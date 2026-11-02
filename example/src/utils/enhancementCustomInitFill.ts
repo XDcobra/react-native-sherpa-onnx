@@ -6,8 +6,12 @@ import {
 } from 'react-native-sherpa-onnx/detect';
 import {
   detectEnhancementModel,
+  type EnhancementAutoInitializeOptions,
   type EnhancementConcreteModelType,
+  type EnhancementCustomInitializeOptions,
   type EnhancementCustomPathKey,
+  type GtcrnDpdfnetCustomConfig,
+  type VoxLockCustomConfig,
 } from 'react-native-sherpa-onnx/enhancement';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 
@@ -67,6 +71,69 @@ function scanEnhancementModelPath(
   );
 }
 
+function scanVoxLockPaths(files: string[]): {
+  enrollModel: string;
+  chunkModel: string;
+} {
+  return {
+    enrollModel: findOnnxByTokens(files, ['voxlock_enroll', 'enroll']) || '',
+    chunkModel: findOnnxByTokens(files, ['voxlock_chunk', 'chunk']) || '',
+  };
+}
+
+export function buildEnhancementAutoInitializeOptions(
+  modelSource: FileSource,
+  modelType: EnhancementConcreteModelType,
+  shared: { numThreads: number; voiceSample?: string }
+): EnhancementAutoInitializeOptions {
+  if (modelType === 'voxlock') {
+    return {
+      modelSource,
+      modelType: 'voxlock',
+      numThreads: shared.numThreads,
+      ...(shared.voiceSample != null
+        ? { voiceSample: shared.voiceSample }
+        : {}),
+    };
+  }
+  if (modelType === 'dpdfnet') {
+    return {
+      modelSource,
+      modelType: 'dpdfnet',
+      numThreads: shared.numThreads,
+    };
+  }
+  return {
+    modelSource,
+    modelType: 'gtcrn',
+    numThreads: shared.numThreads,
+  };
+}
+
+export function buildEnhancementCustomInitializeOptions(
+  modelType: EnhancementConcreteModelType,
+  customConfig: Record<string, unknown>,
+  shared: { numThreads: number; voiceSample?: string }
+): EnhancementCustomInitializeOptions {
+  if (modelType === 'voxlock') {
+    return {
+      initMode: 'custom',
+      modelType: 'voxlock',
+      customConfig: customConfig as unknown as VoxLockCustomConfig,
+      numThreads: shared.numThreads,
+      ...(shared.voiceSample != null
+        ? { voiceSample: shared.voiceSample }
+        : {}),
+    };
+  }
+  return {
+    initMode: 'custom',
+    modelType,
+    customConfig: customConfig as unknown as GtcrnDpdfnetCustomConfig,
+    numThreads: shared.numThreads,
+  };
+}
+
 function toFsSource(path: string): FileSource | undefined {
   const trimmed = path.trim();
   if (!trimmed) {
@@ -78,7 +145,31 @@ function toFsSource(path: string): FileSource | undefined {
 function isConcreteEnhancementModelType(
   value: string
 ): value is EnhancementConcreteModelType {
-  return value === 'gtcrn' || value === 'dpdfnet';
+  return value === 'gtcrn' || value === 'dpdfnet' || value === 'voxlock';
+}
+
+export function isEnhancementFolderHint(folder: string, hint: string): boolean {
+  if (hint === 'enhancement') return true;
+  const n = folder.toLowerCase();
+  return n.includes('gtcrn') || n.includes('dpdfnet') || n.includes('voxlock');
+}
+
+export function enhancementLoadedKindFromDetect(
+  modelType: string | undefined,
+  detected: ReadonlyArray<{ type: string }>
+): EnhancementConcreteModelType | null {
+  if (
+    modelType === 'gtcrn' ||
+    modelType === 'dpdfnet' ||
+    modelType === 'voxlock'
+  ) {
+    return modelType;
+  }
+  const first = detected[0]?.type;
+  if (first === 'gtcrn' || first === 'dpdfnet' || first === 'voxlock') {
+    return first;
+  }
+  return null;
 }
 
 export async function fillEnhancementCustomConfigFromModelFolder(
@@ -111,12 +202,21 @@ export async function fillEnhancementCustomConfigFromModelFolder(
   const modelDir = await resolveFileSourceForModelInit(modelSource);
   const files = await listFilesRecursive(modelDir);
   const modelPath = scanEnhancementModelPath(files, modelType);
+  const voxLockPaths = scanVoxLockPaths(files);
 
   const schema = await getCustomModelPathRequirements('enhancement', modelType);
   const customConfig: Partial<Record<EnhancementCustomPathKey, FileSource>> =
     {};
   for (const field of schema.fields) {
-    const source = field.key === 'model' ? toFsSource(modelPath) : undefined;
+    const pathForKey =
+      field.key === 'enrollModel'
+        ? voxLockPaths.enrollModel
+        : field.key === 'chunkModel'
+        ? voxLockPaths.chunkModel
+        : field.key === 'model'
+        ? modelPath
+        : '';
+    const source = toFsSource(pathForKey);
     if (source) {
       customConfig[field.key as EnhancementCustomPathKey] = source;
     }

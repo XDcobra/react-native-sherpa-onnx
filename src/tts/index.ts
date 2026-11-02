@@ -133,6 +133,12 @@ function toNativeOfflineLivePipelineOptions(
     out.silenceScale = options.silenceScale;
   }
   if (options.numSteps !== undefined) out.numSteps = options.numSteps;
+  if (options.phonemeCodepoints != null) {
+    out.phonemeCodepoints = options.phonemeCodepoints;
+  }
+  if (options.tokens != null) {
+    out.tokens = options.tokens;
+  }
   if (options.lang !== undefined && options.lang.length > 0) {
     out.lang = options.lang;
   }
@@ -242,7 +248,7 @@ async function synthesizeLiveOverload(
  * Detect TTS model type and structure without initializing the engine.
  * Uses the same native file-based detection as createTTS. Stateless; no instance required.
  * Lexicon files: `lexiconLanguages` (`{ id, path }` from `lexicon.txt` / `lexicon-*.txt`) — use with
- * init `lexiconLanguageId` on vits/matcha/kokoro/zipvoice (re-init to change). Not for kitten.
+ * init `lexiconLanguageId` on vits/matcha/kokoro/kitten/zipvoice (re-init to change).
  * Catalog hints: `languages` — UI/download metadata only, not an engine switch.
  * Runtime language: `tts.synthesize({ lang })` — effective for kokoro and supertonic only; see
  * `supportsSynthesisLang` in `./languagePolicy`.
@@ -628,6 +634,7 @@ export type {
   TtsSupertonicModelOptions,
   TtsUpdateOptions,
   TtsUpdateOptionsEmpty,
+  TtsPhonemeInput,
   TtsSynthesisOptions,
   TtsSynthesisResult,
   TtsExecutionProvider,
@@ -652,6 +659,9 @@ export {
   type TtsCustomConfig,
   type TtsCustomConfigByModelType,
   type TtsCustomPathKey,
+  type TtsKittenCustomConfig,
+  type TtsKokoroCustomConfig,
+  type TtsVitsCustomConfig,
 } from './customConfig';
 export {
   resolveLexiconPath,

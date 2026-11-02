@@ -1238,6 +1238,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun emitImageFromVideoProgress(
+    operationId: String,
+    percent: Int,
+    completed: Int,
+    total: Int,
+    ptsUs: Long,
+  ) {
+    try {
+      val payload = Arguments.createMap()
+      payload.putString("operationId", operationId)
+      payload.putInt("percent", percent)
+      payload.putInt("completed", completed)
+      payload.putInt("total", total)
+      payload.putDouble("ptsUs", ptsUs.toDouble())
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("decodeProgress", payload)
+    } catch (t: Throwable) {
+      Log.w("SherpaOnnx:video", "emit image-from-video progress failed: ${t.message}")
+    }
+  }
+
   private fun emitVideoExportProgress(
     operationId: String,
     percent: Int,
@@ -3402,10 +3424,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   override fun createOfflineTextBufferFromText(text: String, options: ReadableMap?, promise: Promise) {
     try {
-      if (text.isEmpty()) {
-        promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INVALID_ARGUMENT, "text must not be empty")
-        return
-      }
       val lang = options?.getString("lang") ?: ""
       val emotion = options?.getString("emotion") ?: ""
       val event = options?.getString("event") ?: ""
@@ -4548,24 +4566,59 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   override fun createOfflineImageBufferFromVideo(bufferId: String, options: ReadableMap?, promise: Promise) {
-    try {
-      com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
-      val sampling = if (options != null && options.hasKey("sampling")) options.getInt("sampling") else 0
-      val uniform = if (options != null && options.hasKey("uniformCount")) options.getInt("uniformCount") else 0
-      val fps = if (options != null && options.hasKey("fps")) options.getDouble("fps") else 0.0
-      val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 0
-      var times: LongArray? = null
-      if (options != null && options.hasKey("timesUs") && !options.isNull("timesUs")) {
-        val arr = options.getArray("timesUs")
-        if (arr != null && arr.size() > 0) {
-          times = LongArray(arr.size()) { i -> arr.getDouble(i).toLong() }
-        }
+    val operationId =
+      if (options != null && options.hasKey("operationId") && !options.isNull("operationId")) {
+        options.getString("operationId") ?: "vid_img_${java.util.UUID.randomUUID()}"
+      } else {
+        "vid_img_${java.util.UUID.randomUUID()}"
       }
-      promise.resolve(videoInfoToWritableMap(
-        com.sherpaonnx.video.VideoBufferService.createImageFromVideo(bufferId, sampling, uniform, fps, maxSide, times)
-      ))
-    } catch (e: Exception) {
-      promise.reject("VIDEO_INTERNAL", e.message, e)
+    val sampling = if (options != null && options.hasKey("sampling")) options.getInt("sampling") else 0
+    val uniform = if (options != null && options.hasKey("uniformCount")) options.getInt("uniformCount") else 0
+    val fps = if (options != null && options.hasKey("fps")) options.getDouble("fps") else 0.0
+    val maxSide = if (options != null && options.hasKey("maxSide")) options.getInt("maxSide") else 0
+    var times: LongArray? = null
+    if (options != null && options.hasKey("timesUs") && !options.isNull("timesUs")) {
+      val arr = options.getArray("timesUs")
+      if (arr != null && arr.size() > 0) {
+        times = LongArray(arr.size()) { i -> arr.getDouble(i).toLong() }
+      }
+    }
+    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    decodeCancelFlags[operationId] = cancelFlag
+    decodeExecutor.execute {
+      val cancelFlagAddr = nativeAllocateCancelFlag()
+      val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
+      try {
+        com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
+        val progressCallback = object {
+          @Suppress("unused")
+          fun onProgress(percent: Int, completed: Int, total: Int, ptsUs: Long) {
+            emitImageFromVideoProgress(operationId, percent, completed, total, ptsUs)
+          }
+        }
+        @Suppress("UNCHECKED_CAST")
+        val raw = com.sherpaonnx.video.VideoBufferService.createImageFromVideo(
+          bufferId, sampling, uniform, fps, maxSide, times, cancelFlagAddr, progressCallback
+        ) as? HashMap<String, Any>
+        if (raw == null) {
+          promise.reject("VIDEO_INTERNAL", "null image-from-video result")
+          return@execute
+        }
+        val err = raw["errorCode"] as? String
+        if (!err.isNullOrEmpty()) {
+          promise.reject(err, raw["errorMessage"] as? String ?: err)
+          return@execute
+        }
+        promise.resolve(videoInfoToWritableMap(raw))
+      } catch (e: Exception) {
+        val msg = e.message ?: "image from video failed"
+        val code = if (msg.startsWith("VIDEO_")) msg.substringBefore(":").trim() else "VIDEO_INTERNAL"
+        promise.reject(code, msg, e)
+      } finally {
+        stopNativeCancelBridge(cancelChecker, operationId)
+        nativeFreeCancelFlag(cancelFlagAddr)
+        decodeCancelFlags.remove(operationId)
+      }
     }
   }
 
@@ -7096,6 +7149,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     speakerEmbeddingHelper.speakerEmbeddingManagerAllSpeakerNames(managerId, promise)
   }
 
+  override fun speakerEmbeddingManagerGetEmbedding(
+    managerId: String,
+    name: String,
+    promise: Promise
+  ) {
+    speakerEmbeddingHelper.speakerEmbeddingManagerGetEmbedding(managerId, name, promise)
+  }
+
   override fun destroySpeakerEmbeddingManager(managerId: String, promise: Promise) {
     speakerEmbeddingHelper.destroySpeakerEmbeddingManager(managerId, promise)
   }
@@ -7223,6 +7284,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     enhancementHelper.enhanceOfflineAudioBuffers(instanceId, audioInBufferId, audioOutBufferId, promise)
+  }
+
+  override fun enhancementSetVoiceSample(
+    instanceId: String,
+    bufferId: String,
+    promise: Promise
+  ) {
+    enhancementHelper.setVoiceSample(instanceId, bufferId, promise)
   }
 
   override fun getEnhancementSampleRate(instanceId: String, promise: Promise) {

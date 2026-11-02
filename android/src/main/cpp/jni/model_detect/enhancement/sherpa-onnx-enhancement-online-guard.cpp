@@ -18,7 +18,8 @@ using namespace sherpaonnx::ort_guard_utils;
 
 bool IsStreamingCandidate(EnhancementModelKind kind) {
     return kind == EnhancementModelKind::kGtcrn ||
-           kind == EnhancementModelKind::kDpdfNet;
+           kind == EnhancementModelKind::kDpdfNet ||
+           kind == EnhancementModelKind::kVoxLock;
 }
 
 bool LooksLikeAbsolutePath(const std::string& path) {

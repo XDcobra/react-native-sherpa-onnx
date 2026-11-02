@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -27,8 +29,12 @@ struct ImageBridgeResult {
 
 class VideoImageBridge {
  public:
-  static ImageBridgeResult CreateImageBuffer(const std::string& videoBufferId,
-                                             const ImageBridgeRequest& req);
+  using ProgressFn = std::function<void(int percent, int completed, int total,
+                                        int64_t ptsUs)>;
+
+  static ImageBridgeResult CreateImageBuffer(
+      const std::string& videoBufferId, const ImageBridgeRequest& req,
+      std::atomic<bool>* cancel = nullptr, ProgressFn progress = nullptr);
 };
 
 }  // namespace video

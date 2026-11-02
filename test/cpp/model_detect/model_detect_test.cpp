@@ -384,12 +384,12 @@ TEST(ModelDetectTest, DetectSttFromFileListMatchesExpected) {
  *   layout is sufficient for native init, not merely “looks like” a type.
  * - model_type == "unsupported": not init-ready / unknown kind; result.ok == false and
  *   selectedKind == kUnknown (e.g. hardware-specific or non-model assets).
- * - model_type == "zipvoice_rejected": classified as Zipvoice but ValidateTtsPaths fails on the
- *   real release file list (e.g. missing lexicon.txt, or distill-only layout without vocoder).
- *   Expects ok == false, non-empty error, selectedKind still kZipvoice.
+ * - model_type == "zipvoice_rejected": classified as Zipvoice but ValidateTtsPaths fails
+ *   (e.g. distill-only layout without vocoder). Expects ok == false, non-empty error,
+ *   selectedKind still kZipvoice. Lexicon is optional.
  *
- * Note: Some TTS types (e.g. vits) require espeak-ng-data in the fixture; otherwise
- * detection may return result.ok == false.
+ * Note: espeak-ng-data is ignored. A Piper folder with only espeak-ng-data (no
+ * lexicon) still detects as valid; lexicon is optional at detect time.
  */
 TEST(ModelDetectTest, DetectTtsFromFileListMatchesExpected) {
     std::string dir = GetFixturesDir();
@@ -1696,7 +1696,7 @@ TEST(SttIsStreaming, FileListWhisperIsNotStreaming) {
 }
 
 
-TEST(ModelDetectValidation, TtsKokoroMissingEspeakData) {
+TEST(ModelDetectValidation, TtsKokoroOkWithoutEspeakData) {
     const std::string dir = "test-models/kokoro-v1.0";
     std::vector<FE> files = {
         MakeEntry(dir, "model.onnx"),
@@ -1704,11 +1704,8 @@ TEST(ModelDetectValidation, TtsKokoroMissingEspeakData) {
         MakeEntry(dir, "voices.bin"),
     };
     auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "kokoro");
-    EXPECT_FALSE(result.ok) << "Should fail when espeak-ng-data is missing";
-    EXPECT_NE(result.error.find("dataDir"), std::string::npos)
-        << "Error should mention 'dataDir': " << result.error;
-    EXPECT_NE(result.error.find("espeak-ng-data"), std::string::npos)
-        << "Error should include hint about espeak-ng-data: " << result.error;
+    EXPECT_TRUE(result.ok) << "Should succeed without espeak-ng-data: " << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kKokoro);
 }
 
 TEST(ModelDetectValidation, TtsKokoroMissingVoices) {
@@ -1755,15 +1752,18 @@ TEST(ModelDetectValidation, TtsPocketMissingTextConditioner) {
 // TTS validation: optional fields do NOT cause failure
 // ============================================================
 
-TEST(ModelDetectValidation, TtsVitsOptionalDataDir) {
+TEST(ModelDetectValidation, TtsVitsOkWithOnlyEspeakDataDir) {
     const std::string dir = "test-models/vits-piper";
     std::vector<FE> files = {
         MakeEntry(dir, "model.onnx"),
         MakeEntry(dir, "tokens.txt"),
+        MakeEntry(dir + "/espeak-ng-data", "phontab"),
     };
     auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "vits");
-    EXPECT_TRUE(result.ok) << "Should succeed without optional dataDir: " << result.error;
+    EXPECT_TRUE(result.ok) << "Should succeed with leftover espeak-ng-data and no lexicon: "
+                          << result.error;
     EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kVits);
+    EXPECT_TRUE(result.lexiconLanguages.empty());
 }
 
 TEST(ModelDetectValidation, TtsMatchaOptionalLexicon) {
@@ -1908,7 +1908,6 @@ TEST(ModelDetectValidation, ValidateTtsPathsDirectOk) {
     paths.ttsModel = "/m/model.onnx";
     paths.tokens = "/m/tokens.txt";
     paths.voices = "/m/voices.bin";
-    paths.dataDir = "/m/espeak-ng-data";
     auto v = sherpaonnx::ValidateTtsPaths(sherpaonnx::TtsModelKind::kKokoro, paths, "/m");
     EXPECT_TRUE(v.ok);
     EXPECT_TRUE(v.missingRequired.empty());
@@ -1919,12 +1918,10 @@ TEST(ModelDetectValidation, ValidateTtsPathsDirectMissing) {
     paths.ttsModel = "/m/model.onnx";
     auto v = sherpaonnx::ValidateTtsPaths(sherpaonnx::TtsModelKind::kKokoro, paths, "/m");
     EXPECT_FALSE(v.ok);
-    EXPECT_EQ(v.missingRequired.size(), 3u);
+    EXPECT_EQ(v.missingRequired.size(), 2u);
     EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "tokens"),
               v.missingRequired.end());
     EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "voices"),
-              v.missingRequired.end());
-    EXPECT_NE(std::find(v.missingRequired.begin(), v.missingRequired.end(), "dataDir"),
               v.missingRequired.end());
 }
 
@@ -2232,6 +2229,74 @@ TEST(ModelDetectValidation, EnhancementFileListGtcrnMarksStreaming) {
     EXPECT_TRUE(result.isStreaming);
 }
 
+TEST(ModelDetectValidation, EnhancementFileListVoxLockPairOk) {
+    const std::string dir = "test-models/enhancement-voxlock";
+    std::vector<FE> files = {
+        MakeEntry(dir, "voxlock_enroll.onnx"),
+        MakeEntry(dir, "voxlock_chunk.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "auto");
+
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kVoxLock));
+    EXPECT_FALSE(result.paths.enrollModel.empty());
+    EXPECT_FALSE(result.paths.chunkModel.empty());
+    EXPECT_TRUE(result.paths.model.empty());
+}
+
+TEST(ModelDetectValidation, EnhancementFileListVoxLockMissingChunkRejected) {
+    const std::string dir = "test-models/enhancement-voxlock-partial";
+    std::vector<FE> files = {
+        MakeEntry(dir, "voxlock_enroll.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "voxlock");
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kVoxLock));
+}
+
+TEST(ModelDetectValidation, EnhancementFileListVoxLockMissingEnrollRejected) {
+    const std::string dir = "test-models/enhancement-voxlock-partial";
+    std::vector<FE> files = {
+        MakeEntry(dir, "voxlock_chunk.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "voxlock");
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kVoxLock));
+}
+
+TEST(ModelDetectValidation, EnhancementNameOnlyVoxLockIsHeuristicStreaming) {
+    const std::string syntheticDir = "m/sherpa-onnx-speech-enhancement-voxlock";
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList({}, syntheticDir, "auto");
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_TRUE(result.isStreaming);
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kVoxLock));
+    EXPECT_NE(result.error.find("heuristic"), std::string::npos)
+        << "Expected heuristic note in error: " << result.error;
+}
+
+TEST(ModelDetectValidation, EnhancementGenericModelOnnxIsNotVoxLock) {
+    const std::string dir = "test-models/enhancement-generic";
+    std::vector<FE> files = {
+        MakeEntry(dir, "model.onnx"),
+    };
+    auto result = sherpaonnx::DetectEnhancementModelFromFileList(files, dir, "auto");
+
+    EXPECT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(static_cast<int>(result.selectedKind),
+              static_cast<int>(sherpaonnx::EnhancementModelKind::kGtcrn));
+    EXPECT_FALSE(result.paths.model.empty());
+    EXPECT_TRUE(result.paths.enrollModel.empty());
+    EXPECT_TRUE(result.paths.chunkModel.empty());
+}
+
 TEST(ModelDetectValidation, ValidateCustomModelPathsSttTransducerOk) {
     std::map<std::string, std::string> paths = {
         {"encoder", "/e.onnx"},
@@ -2335,6 +2400,25 @@ TEST(ModelDetectValidation, ValidateCustomModelPathsEnhancementSmoke) {
     EXPECT_TRUE(result.ok) << result.error;
 }
 
+TEST(ModelDetectValidation, ValidateCustomModelPathsEnhancementVoxLockSmoke) {
+    std::map<std::string, std::string> paths = {
+        {"enrollModel", "/voxlock_enroll.onnx"},
+        {"chunkModel", "/voxlock_chunk.onnx"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("enhancement", "voxlock", paths, "custom");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(ModelDetectValidation, ValidateCustomModelPathsEnhancementVoxLockMissingChunk) {
+    std::map<std::string, std::string> paths = {
+        {"enrollModel", "/voxlock_enroll.onnx"},
+    };
+    auto result = sherpaonnx::ValidateCustomModelPaths("enhancement", "voxlock", paths, "custom");
+    EXPECT_FALSE(result.ok);
+    ASSERT_FALSE(result.missingRequired.empty());
+    EXPECT_EQ(result.missingRequired[0], "chunkModel");
+}
+
 TEST(ModelDetectValidation, ValidateCustomModelPathsPunctuationSmoke) {
     std::map<std::string, std::string> paths = {{"ct_transformer", "/p.onnx"}};
     auto result = sherpaonnx::ValidateCustomModelPaths(
@@ -2411,7 +2495,7 @@ TEST(ModelDetectValidation, GetCustomModelPathRequirementsSttTransducer) {
     }
 }
 
-TEST(ModelDetectValidation, GetCustomModelPathRequirementsTtsVitsDataDirIsDirectory) {
+TEST(ModelDetectValidation, GetCustomModelPathRequirementsTtsVitsLexiconIsOptionalFile) {
     auto reqs = sherpaonnx::GetCustomModelPathRequirements("tts", "vits");
     ASSERT_FALSE(reqs.fields.empty());
     auto dataDir = std::find_if(
@@ -2420,9 +2504,16 @@ TEST(ModelDetectValidation, GetCustomModelPathRequirementsTtsVitsDataDirIsDirect
         [](const sherpaonnx::CustomPathFieldSpec& field) {
             return field.key == "dataDir";
         });
-    ASSERT_NE(dataDir, reqs.fields.end());
-    EXPECT_FALSE(dataDir->required);
-    EXPECT_TRUE(dataDir->isDirectory);
+    EXPECT_EQ(dataDir, reqs.fields.end());
+    auto lexicon = std::find_if(
+        reqs.fields.begin(),
+        reqs.fields.end(),
+        [](const sherpaonnx::CustomPathFieldSpec& field) {
+            return field.key == "lexicon";
+        });
+    ASSERT_NE(lexicon, reqs.fields.end());
+    EXPECT_FALSE(lexicon->required);
+    EXPECT_FALSE(lexicon->isDirectory);
     auto ttsModel = std::find_if(
         reqs.fields.begin(),
         reqs.fields.end(),
@@ -2438,15 +2529,46 @@ TEST(ModelDetectValidation, TtsModelPathsToStringMapOmitsEmptyValues) {
     sherpaonnx::TtsModelPaths paths;
     paths.ttsModel = "/tmp/model.onnx";
     paths.tokens = "/tmp/tokens.txt";
-    paths.dataDir = "/tmp/espeak-ng-data";
     auto map = sherpaonnx::TtsModelPathsToStringMap(paths);
     EXPECT_EQ(map.at("ttsModel"), "/tmp/model.onnx");
     EXPECT_EQ(map.at("tokens"), "/tmp/tokens.txt");
-    EXPECT_EQ(map.at("dataDir"), "/tmp/espeak-ng-data");
+    EXPECT_EQ(map.find("dataDir"), map.end());
     EXPECT_EQ(map.find("lexicon"), map.end());
 }
 
 }  // namespace
+
+TEST(ModelDetectValidation, TtsDetectListsLexiconTxtAndLexiconEnUs) {
+    const std::string dir = "test-models/vits-piper";
+    std::vector<FE> files = {
+        MakeEntry(dir, "model.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+        MakeEntry(dir, "lexicon.txt"),
+        MakeEntry(dir, "lexicon-en-us.txt"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "vits");
+    EXPECT_TRUE(result.ok) << result.error;
+    ASSERT_EQ(result.lexiconLanguages.size(), 2u);
+    EXPECT_EQ(result.lexiconLanguages[0].languageId, "default");
+    EXPECT_NE(result.lexiconLanguages[0].path.find("lexicon.txt"), std::string::npos);
+    EXPECT_EQ(result.lexiconLanguages[1].languageId, "en-us");
+    EXPECT_NE(result.lexiconLanguages[1].path.find("lexicon-en-us.txt"), std::string::npos);
+    EXPECT_EQ(result.paths.lexicon, result.lexiconLanguages[0].path);
+}
+
+TEST(ModelDetectValidation, TtsZipvoiceOkWithoutLexicon) {
+    const std::string dir = "test-models/zipvoice";
+    std::vector<FE> files = {
+        MakeEntry(dir, "encoder.onnx"),
+        MakeEntry(dir, "decoder.onnx"),
+        MakeEntry(dir, "vocoder.onnx"),
+        MakeEntry(dir, "tokens.txt"),
+    };
+    auto result = sherpaonnx::DetectTtsModelFromFileList(files, dir, "zipvoice");
+    EXPECT_TRUE(result.ok) << "Zipvoice lexicon is optional: " << result.error;
+    EXPECT_EQ(result.selectedKind, sherpaonnx::TtsModelKind::kZipvoice);
+    EXPECT_TRUE(result.paths.lexicon.empty());
+}
 
 TEST(ModelDetectTest, ResolveLexiconPathSelectsByLanguageId) {
     std::vector<sherpaonnx::model_detect::LexiconCandidate> candidates = {

@@ -1,4 +1,4 @@
-#include "sherpa-onnx-enhancement-wrapper.h"
+#include "sherpa-onnx-enhancement-detect-wrapper.h"
 
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-detect.h"
@@ -12,12 +12,14 @@ const char* EnhancementModelKindToString(EnhancementModelKind k) {
       return "gtcrn";
     case EnhancementModelKind::kDpdfNet:
       return "dpdfnet";
+    case EnhancementModelKind::kVoxLock:
+      return "voxlock";
     default:
       return "unknown";
   }
 }
 
-} // namespace
+}  // namespace
 
 jobject EnhancementDetectResultToJava(
     JNIEnv* env,
@@ -79,6 +81,8 @@ jobject EnhancementDetectResultToJava(
     env->DeleteLocalRef(hashMapClass);
     if (pathsMap) {
       PutString(env, pathsMap, mapPut, "model", result.paths.model);
+      PutString(env, pathsMap, mapPut, "enrollModel", result.paths.enrollModel);
+      PutString(env, pathsMap, mapPut, "chunkModel", result.paths.chunkModel);
       jstring keyPaths = env->NewStringUTF("paths");
       env->CallObjectMethod(map, mapPut, keyPaths, pathsMap);
       env->DeleteLocalRef(keyPaths);
@@ -89,4 +93,4 @@ jobject EnhancementDetectResultToJava(
   return map;
 }
 
-} // namespace sherpaonnx
+}  // namespace sherpaonnx

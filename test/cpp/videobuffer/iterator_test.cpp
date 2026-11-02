@@ -6,6 +6,9 @@
 #include "image/ImageRegistry.h"
 #include "synth.h"
 
+#include <atomic>
+#include <vector>
+
 #include <gtest/gtest.h>
 
 using namespace sherpa_onnx::video;
@@ -89,5 +92,89 @@ TEST_F(IteratorTest, ImageBridgeCopiesSourcePts) {
   EXPECT_EQ(info.sourceVideoBufferId, e->id());
   EXPECT_GE(info.sourcePtsUs, 0);
   sherpa_onnx::image::ImageRegistry::Instance().Release(r.imageBufferId);
+  VideoRegistry::Instance().Release(e->id());
+}
+
+TEST_F(IteratorTest, ImageBridgeProgressMatchesFrameCount) {
+  auto src = std::make_unique<MemoryPacketSource>();
+  FillIpp(src.get(), 6, 3, false);
+  auto e = VideoRegistry::Instance().CreateOfflineFromPackets(std::move(src));
+  ImageBridgeRequest req;
+  req.sampling = SamplingMode::All;
+  struct Event {
+    int percent = 0;
+    int completed = 0;
+    int total = 0;
+    int64_t ptsUs = 0;
+  };
+  std::vector<Event> events;
+  auto r = VideoImageBridge::CreateImageBuffer(
+      e->id(), req, nullptr,
+      [&](int percent, int completed, int total, int64_t ptsUs) {
+        events.push_back({percent, completed, total, ptsUs});
+      });
+  ASSERT_TRUE(r.status.ok) << r.status.errorMessage;
+  EXPECT_EQ(r.frameCount, 6);
+  ASSERT_EQ(events.size(), 6u);
+  for (int i = 0; i < 6; ++i) {
+    EXPECT_EQ(events[static_cast<size_t>(i)].completed, i + 1);
+    EXPECT_EQ(events[static_cast<size_t>(i)].total, 6);
+    EXPECT_EQ(events[static_cast<size_t>(i)].percent, ((i + 1) * 100) / 6);
+    EXPECT_GE(events[static_cast<size_t>(i)].ptsUs, 0);
+  }
+  EXPECT_EQ(events.back().percent, 100);
+  sherpa_onnx::image::ImageRegistry::Instance().Release(r.imageBufferId);
+  VideoRegistry::Instance().Release(e->id());
+}
+
+TEST_F(IteratorTest, ImageBridgeEmptySelectionEmitsCompleteProgress) {
+  auto src = std::make_unique<MemoryPacketSource>();
+  FillIpp(src.get(), 6, 3, false);
+  auto e = VideoRegistry::Instance().CreateOfflineFromPackets(std::move(src));
+  ImageBridgeRequest req;
+  req.sampling = SamplingMode::Times;
+  struct Event {
+    int percent = 0;
+    int completed = 0;
+    int total = 0;
+    int64_t ptsUs = -1;
+  };
+  std::vector<Event> events;
+  auto r = VideoImageBridge::CreateImageBuffer(
+      e->id(), req, nullptr,
+      [&](int percent, int completed, int total, int64_t ptsUs) {
+        events.push_back({percent, completed, total, ptsUs});
+      });
+  ASSERT_TRUE(r.status.ok) << r.status.errorMessage;
+  EXPECT_EQ(r.frameCount, 0);
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0].percent, 100);
+  EXPECT_EQ(events[0].completed, 0);
+  EXPECT_EQ(events[0].total, 0);
+  EXPECT_EQ(events[0].ptsUs, 0);
+  sherpa_onnx::image::ImageRegistry::Instance().Release(r.imageBufferId);
+  VideoRegistry::Instance().Release(e->id());
+}
+
+TEST_F(IteratorTest, ImageBridgeCancelReleasesBuffer) {
+  auto src = std::make_unique<MemoryPacketSource>();
+  FillIpp(src.get(), 6, 3, false);
+  auto e = VideoRegistry::Instance().CreateOfflineFromPackets(std::move(src));
+  ImageBridgeRequest req;
+  req.sampling = SamplingMode::All;
+  std::atomic<bool> cancel{false};
+  auto r = VideoImageBridge::CreateImageBuffer(
+      e->id(), req, &cancel,
+      [&](int, int completed, int, int64_t) {
+        if (completed >= 2) {
+          cancel.store(true);
+        }
+      });
+  EXPECT_FALSE(r.status.ok);
+  EXPECT_EQ(r.status.errorCode, kErrCancelled);
+  EXPECT_FALSE(r.imageBufferId.empty());
+  sherpa_onnx::image::ImageBufferInfo info;
+  EXPECT_FALSE(sherpa_onnx::image::ImageRegistry::Instance().GetInfo(
+      r.imageBufferId, info));
   VideoRegistry::Instance().Release(e->id());
 }

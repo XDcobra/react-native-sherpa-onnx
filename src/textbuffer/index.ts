@@ -571,9 +571,9 @@ export async function createOfflineTextBufferFromLive(
  * Create an offline text buffer pre-populated with the given text.
  * Use as TTS input source (e.g. `tts.synthesize(textIn, audioOut)`).
  *
- * @param text - The text content to populate the buffer with (must not be empty).
+ * @param text - Text to populate the buffer with. Empty is allowed (TTS
+ *   `phonemeCodepoints` / `tokens` ignore the text buffer contents).
  * @param options - Optional metadata: `lang`, `emotion`, `event`.
- * @throws {Error} `TEXT_INVALID_ARGUMENT` — text is empty.
  * @throws {Error} `TEXT_INTERNAL_ERROR` — native create failed.
  */
 export async function createOfflineTextBufferFromText(

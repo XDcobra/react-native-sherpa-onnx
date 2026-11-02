@@ -1,7 +1,7 @@
 package com.sherpaonnx.enhancement.pipeline
 
-import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiser
 import com.sherpaonnx.audio.pipeline.LiveEntry
+import com.sherpaonnx.enhancement.facade.SherpaOnnxEnhancementHelper
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
@@ -10,7 +10,7 @@ internal class EnhancementOfflineLivePipelineWorker(
   pipelineId: String,
   attachedSegmentationEngineId: String,
   private val audioInputRef: AudioInput,
-  private val enhancer: OfflineSpeechDenoiser,
+  private val instanceId: String,
   private val audioOutputEntry: LiveEntry,
 ) : OfflineLivePipelineWorker(
   pipelineId = pipelineId,
@@ -18,7 +18,7 @@ internal class EnhancementOfflineLivePipelineWorker(
   audioInput = audioInputRef,
   textInput = null,
 ) {
-  private val gateKey = NativeInstanceGate.keyFor(enhancer)
+  private val gateKey = "enhancement:$instanceId"
 
   override fun onSegmentCommitted(segment: CommittedSegmentRef) {
     val speech = segment as? CommittedSegmentRef.Speech
@@ -39,7 +39,7 @@ internal class EnhancementOfflineLivePipelineWorker(
 
     if (!NativeInstanceGate.beginUse(gateKey)) return
     val denoised = try {
-      enhancer.run(pcm, speech.sampleRate)
+      SherpaOnnxEnhancementHelper.runOffline(instanceId, pcm, speech.sampleRate)
     } finally {
       NativeInstanceGate.endUse(gateKey)
     }

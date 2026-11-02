@@ -228,11 +228,17 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
     cfg.model.provider = scalars.provider;
 
     auto created = sherpa_onnx::cxx::OfflinePunctuation::Create(cfg);
+    if (created.Get() == nullptr) {
+      NSLog(@"[SherpaOnnx:init] punctuation-offline Create Get()==null branch=reject");
+      reject(kInitErr, @"OfflinePunctuation::Create returned null", nil);
+      return;
+    }
     {
       std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
       g_punct_offline.erase(idStr);
       g_punct_offline.emplace(idStr, std::move(created));
     }
+    NSLog(@"[SherpaOnnx:init] punctuation-offline Create Get() ok");
 
     resolve(@{
       @"success": @YES,

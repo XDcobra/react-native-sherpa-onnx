@@ -189,8 +189,8 @@ vits-piper-en_US-ljspeech-high-int8.tar.bz2,vits
 vits-piper-en_US-ljspeech-high-fp16.tar.bz2,vits
 kokoro-int8-en-v0_19.tar.bz2,kokoro
 kokoro-en-v0_19.tar.bz2,kokoro
-sherpa-onnx-zipvoice-distill-zh-en-emilia.tar.bz2,zipvoice_rejected
-sherpa-onnx-zipvoice-zh-en-emilia.tar.bz2,zipvoice_rejected
+sherpa-onnx-zipvoice-distill-zh-en-emilia.tar.bz2,zipvoice
+sherpa-onnx-zipvoice-zh-en-emilia.tar.bz2,zipvoice
 vits-piper-en_GB-dii-high.tar.bz2,vits
 vits-piper-en_GB-dii-high-int8.tar.bz2,vits
 vits-piper-en_GB-dii-high-fp16.tar.bz2,vits

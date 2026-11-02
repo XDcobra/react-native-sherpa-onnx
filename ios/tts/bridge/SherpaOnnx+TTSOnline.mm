@@ -212,6 +212,8 @@ static std::mutex g_tts_pipeline_mutex;
         } else {
             clone.num_steps = kDefaultVoiceCloneNumSteps;
         }
+        clone.phoneme_codepoints = PhonemeCodepointsFromId(options.phonemeCodepoints());
+        clone.tokens = TokensFromId(options.tokens());
         voiceClone = std::move(clone);
     } else if (defaultNumSteps.has_value()) {
         auto modelKind = inst->wrapper->getModelKind();
@@ -246,7 +248,9 @@ static std::mutex g_tts_pipeline_mutex;
           defaultSpeed,
           std::move(voiceClone),
           std::move(defaultLang),
-          std::move(defaultNumSteps)
+          std::move(defaultNumSteps),
+          PhonemeCodepointsFromId(options.phonemeCodepoints()),
+          TokensFromId(options.tokens())
         );
 
         {

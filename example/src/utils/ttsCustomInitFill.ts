@@ -57,16 +57,10 @@ function findFileEndingWith(files: string[], suffix: string): string {
   return files.find((file) => file.toLowerCase().endsWith(lowerSuffix)) ?? '';
 }
 
-function findDirByToken(files: string[], token: string): string {
-  const dirs = new Set<string>();
-  for (const file of files) {
-    const normalized = file.replace(/\\/g, '/');
-    const idx = normalized.toLowerCase().indexOf(`/${token.toLowerCase()}/`);
-    if (idx >= 0) {
-      dirs.add(normalized.slice(0, idx + token.length + 1));
-    }
-  }
-  return dirs.values().next().value ?? '';
+function findLexicon(files: string[]): string {
+  const exact = findFileEndingWith(files, 'lexicon.txt');
+  if (exact) return exact;
+  return files.find((file) => /^lexicon-.+\.txt$/i.test(basename(file))) ?? '';
 }
 
 function scanTtsPaths(
@@ -81,16 +75,14 @@ function scanTtsPaths(
           findOnnxByTokens(files, ['vits', 'model']) ||
           findOnnxByTokens(files, ['model']),
         tokens,
-        dataDir: findDirByToken(files, 'espeak-ng-data'),
-        lexicon: findFileEndingWith(files, 'lexicon.txt'),
+        lexicon: findLexicon(files),
       };
     case 'matcha':
       return {
         acousticModel: findOnnxByTokens(files, ['acoustic', 'model']),
         vocoder: findOnnxByTokens(files, ['vocoder', 'vocos']),
         tokens,
-        dataDir: findDirByToken(files, 'espeak-ng-data'),
-        lexicon: findFileEndingWith(files, 'lexicon.txt'),
+        lexicon: findLexicon(files),
       };
     case 'kokoro':
     case 'kitten':
@@ -100,8 +92,7 @@ function scanTtsPaths(
         voices:
           findFileEndingWith(files, 'voices.bin') ||
           findFileEndingWith(files, 'voices.pt'),
-        dataDir: findDirByToken(files, 'espeak-ng-data'),
-        lexicon: findFileEndingWith(files, 'lexicon.txt'),
+        lexicon: findLexicon(files),
       };
     case 'pocket':
       return {
@@ -123,8 +114,7 @@ function scanTtsPaths(
         decoder: findOnnxByTokens(files, ['decoder']),
         vocoder: findOnnxByTokens(files, ['vocoder', 'vocos']),
         tokens,
-        dataDir: findDirByToken(files, 'espeak-ng-data'),
-        lexicon: findFileEndingWith(files, 'lexicon.txt'),
+        lexicon: findLexicon(files),
       };
     case 'supertonic':
       return {

@@ -466,11 +466,17 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
     cfg.model.debug = scalars.debug;
     cfg.model.provider = scalars.provider;
     auto created = sherpa_onnx::cxx::OnlinePunctuation::Create(cfg);
+    if (created.Get() == nullptr) {
+      NSLog(@"[SherpaOnnx:init] punctuation-online Create Get()==null branch=reject");
+      reject(kInitErr, @"OnlinePunctuation::Create returned null", nil);
+      return;
+    }
     auto ptr = std::make_shared<sherpa_onnx::cxx::OnlinePunctuation>(std::move(created));
     {
       std::lock_guard<std::mutex> lock(g_punct_online_mutex);
       g_punct_online[idStr] = ptr;
     }
+    NSLog(@"[SherpaOnnx:init] punctuation-online Create Get() ok");
 
     resolve(@{
       @"success": @YES,

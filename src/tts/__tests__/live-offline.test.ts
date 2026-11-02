@@ -186,6 +186,26 @@ describe('tts live offline overload', () => {
     expect(opts.silenceScale).toBe(0.3);
   });
 
+  it('forwards phonemeCodepoints and tokens on live options', async () => {
+    const tts = await createTTS({
+      modelSource: { kind: 'fs', path: '/models/vits' },
+      modelType: 'vits',
+    });
+
+    await tts.synthesize('txt_live_in_1', 'live_out_1', {
+      segmentation: {
+        mode: 'auto',
+        policy: { evaluator: 'text_synthetic_auto' },
+      },
+      phonemeCodepoints: [[116, 601]],
+    });
+
+    const opts = mockNative.startTtsOfflineLivePipeline.mock.calls[0][3] as {
+      phonemeCodepoints?: number[][];
+    };
+    expect(opts.phonemeCodepoints).toEqual([[116, 601]]);
+  });
+
   it('rejects numSteps on unsupported live model types', async () => {
     const tts = await createTTS({
       modelSource: { kind: 'fs', path: '/models/vits' },

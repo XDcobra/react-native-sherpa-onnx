@@ -14,7 +14,6 @@ export type TtsCustomPathKey =
   | 'ttsModel'
   | 'tokens'
   | 'lexicon'
-  | 'dataDir'
   | 'voices'
   | 'acousticModel'
   | 'vocoder'
@@ -35,7 +34,6 @@ export type TtsCustomPathKey =
 export interface TtsVitsCustomConfig {
   ttsModel: FileSource;
   tokens: FileSource;
-  dataDir?: FileSource;
   lexicon?: FileSource;
 }
 
@@ -43,7 +41,6 @@ export interface TtsMatchaCustomConfig {
   acousticModel: FileSource;
   vocoder: FileSource;
   tokens: FileSource;
-  dataDir?: FileSource;
   lexicon?: FileSource;
 }
 
@@ -51,7 +48,13 @@ export interface TtsKokoroCustomConfig {
   ttsModel: FileSource;
   tokens: FileSource;
   voices: FileSource;
-  dataDir: FileSource;
+  lexicon?: FileSource;
+}
+
+export interface TtsKittenCustomConfig {
+  ttsModel: FileSource;
+  tokens: FileSource;
+  voices: FileSource;
   lexicon?: FileSource;
 }
 
@@ -70,8 +73,7 @@ export interface TtsZipvoiceCustomConfig {
   decoder: FileSource;
   vocoder: FileSource;
   tokens: FileSource;
-  dataDir: FileSource;
-  lexicon: FileSource;
+  lexicon?: FileSource;
 }
 
 export interface TtsSupertonicCustomConfig {
@@ -88,7 +90,7 @@ export type TtsCustomConfigByModelType = {
   vits: TtsVitsCustomConfig;
   matcha: TtsMatchaCustomConfig;
   kokoro: TtsKokoroCustomConfig;
-  kitten: TtsKokoroCustomConfig;
+  kitten: TtsKittenCustomConfig;
   pocket: TtsPocketCustomConfig;
   zipvoice: TtsZipvoiceCustomConfig;
   supertonic: TtsSupertonicCustomConfig;

@@ -67,9 +67,13 @@ static NSString *const kOfflineTtsOomMessage =
     std::string textError;
     if (!txt_read_offline_text(textInIdStr, &text, &textError)) {
         NSString *msg = [NSString stringWithUTF8String:textError.c_str()] ?: @"Text buffer read failed";
-        NSString *code = [msg containsString:@"not found"] ? @"TTS_TEXT_BUFFER_NOT_FOUND" : @"TTS_TEXT_BUFFER_EMPTY";
-        reject(code, msg, nil);
-        return;
+        if (NSDictionaryHasPhonemeInput(options) && [msg containsString:@"empty"]) {
+            text.clear();
+        } else {
+            NSString *code = [msg containsString:@"not found"] ? @"TTS_TEXT_BUFFER_NOT_FOUND" : @"TTS_TEXT_BUFFER_EMPTY";
+            reject(code, msg, nil);
+            return;
+        }
     }
 
     // 3. Resolve output audio buffer

@@ -1,37 +1,18 @@
 package com.sherpaonnx.enhancement.core
 
-import com.k2fsa.sherpa.onnx.OfflineSpeechDenoiser
-import com.k2fsa.sherpa.onnx.OnlineSpeechDenoiser
-import com.sherpaonnx.lifecycle.NativeInstanceGate
-
 internal data class EnhancementInstance(
-  @Volatile var denoiser: OfflineSpeechDenoiser? = null,
+  val instanceId: String,
 ) {
-  fun release() {
-    val eng = denoiser
-    denoiser = null
-    if (eng == null) return
-    NativeInstanceGate.releaseWhenIdle(NativeInstanceGate.keyFor(eng)) {
-      try {
-        eng.release()
-      } catch (_: Exception) {
-      }
-    }
-  }
+  fun gateKey(): String = "enhancement:$instanceId"
 }
 
 internal data class OnlineEnhancementInstance(
-  @Volatile var denoiser: OnlineSpeechDenoiser? = null,
+  val instanceId: String,
 ) {
-  fun release() {
-    val eng = denoiser
-    denoiser = null
-    if (eng == null) return
-    NativeInstanceGate.releaseWhenIdle(NativeInstanceGate.keyFor(eng)) {
-      try {
-        eng.release()
-      } catch (_: Exception) {
-      }
-    }
-  }
+  fun gateKey(): String = "online-enhancement:$instanceId"
 }
+
+internal data class NativeEnhanceAudio(
+  val samples: FloatArray,
+  val sampleRate: Int,
+)

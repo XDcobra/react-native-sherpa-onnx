@@ -173,12 +173,19 @@ Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live pa
 
 | `modelType` | Required files | Custom-init keys |
 | --- | --- | --- |
-| `vits` | `ttsModel`, `tokens` | `ttsModel`, `tokens` (+ optional `dataDir`, `lexicon`) |
-| `matcha` | `acousticModel`, `vocoder`, `tokens` | `acousticModel`, `vocoder`, `tokens` (+ optional `dataDir`, `lexicon`) |
-| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices`, `dataDir` | same as required (+ optional `lexicon` for kokoro) |
+| `vits` | `ttsModel`, `tokens` | `ttsModel`, `tokens` (+ optional `lexicon`) |
+| `matcha` | `acousticModel`, `vocoder`, `tokens` | `acousticModel`, `vocoder`, `tokens` (+ optional `lexicon`) |
+| `kokoro`, `kitten` | `ttsModel`, `tokens`, `voices` | same as required (+ optional `lexicon`) |
 | `pocket` | `lmFlow`, `lmMain`, `encoder`, `decoder`, `textConditioner`, `vocabJson`, `tokenScoresJson` | same as required |
-| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens`, `dataDir`, `lexicon` | same as required |
+| `zipvoice` | `encoder`, `decoder`, `vocoder`, `tokens` | same as required (+ optional `lexicon`) |
 | `supertonic` | `durationPredictor`, `textEncoder`, `vectorEstimator`, `vocoder`, `ttsJson`, `unicodeIndexer`, `voiceStyle` | same as required |
+
+Raw English Piper / Kitten / Matcha-EN / Kokoro-EN text needs a lexicon at init. Two supported ways:
+
+1. **Auto / `modelSource`:** put `lexicon.txt`, `lexicon-en-us.txt`, or another `lexicon-*.txt` **inside** the model folder. Detect fills `lexiconLanguages`; `createTTS` loads it via `lexiconLanguageId` (default: first after sort, `lexicon.txt` first). The shared US-English file is [`lexicon-en-us.txt`](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt).
+2. **Custom:** set `customConfig.lexicon` to any `FileSource` (including a file outside the model folder). Auto-init does **not** mix in a lexicon from outside `modelSource`.
+
+`espeak-ng-data` is ignored. Packs may still contain it. Without a lexicon and without `phonemeCodepoints` / `tokens` at synthesize time, init still succeeds; raw text yields empty audio → `TTS_GENERATE_ERROR`.
 
 Validate category: **`tts`**. Overview: [README — TTS](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Tts`).
 
@@ -251,7 +258,22 @@ synthesize(
 ```ts
 await tts.synthesize(textBuf, audioBuf);                          // defaults
 await tts.synthesize(textBuf, audioBuf, { sid: 1, speed: 0.9 }); // speaker + speed
+
+// Power-user: app-phonemized Unicode codepoints (vits / matcha / kokoro / kitten).
+// Text is ignored. ZipVoice ignores this field — use `tokens` instead.
+await tts.synthesize(emptyTextBuf, audioBuf, {
+  sid: 0,
+  phonemeCodepoints: [[116, 601, 100, 101, 618]],
+});
+
+// ZipVoice (and pinyin-like frontends): phoneme strings, not tokens.txt IDs.
+await tts.synthesize(textBuf, audioBuf, {
+  tokens: [['ð', 'ə'], ['h', 'ɛ', 'l', 'oʊ']],
+  voiceClone: { kind: 'zipvoice', referenceAudio, referenceText: 'the' },
+});
 ```
+
+`phonemeCodepoints` and `tokens` are exclusive on the TypeScript type. Runtime does not extra-guard a conflict — upstream then yields empty audio / `TTS_GENERATE_ERROR`.
 
 ### `tts.updateParams(options)`
 
@@ -434,7 +456,9 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTSInitializeOptions` | Discriminated union: concrete `modelType` required for `modelOptions` |
 | `TTSInitializeOptionsBase` | Shared fields: `modelSource`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsUpdateOptions` | Arg to `updateParams()` — same per-`modelType` coupling as init |
-| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, lang?, extra?, voiceClone?, segmentation?, … }` — `numSteps` for **supertonic** (no clone), **zipvoice**, **pocket** (with `voiceClone`); see `supportsNumSteps` / `requiresVoiceCloneForNumSteps` |
+| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, lang?, extra?, voiceClone?, phonemeCodepoints?, tokens?, segmentation?, … }` — `numSteps` for **supertonic** (no clone), **zipvoice**, **pocket** (with `voiceClone`); `phonemeCodepoints` (vits/matcha/kokoro/kitten) or `tokens` (ZipVoice) are exclusive; see `supportsNumSteps` / `requiresVoiceCloneForNumSteps` |
+| `TtsPhonemeInput` | `{ phonemeCodepoints: number[][] } \| { tokens: string[][] }` — Unicode codepoints vs ZipVoice phoneme strings; not `tokens.txt` |
+| `TtsKittenCustomConfig` | `{ ttsModel, tokens, voices, lexicon? }` — no `dataDir` |
 | `TtsVoiceClone` | `TtsVoiceCloneZipvoice \| TtsVoiceClonePocket` |
 | `TtsVoiceCloneZipvoice` | `{ kind: 'zipvoice'; referenceAudio: OfflineAudioBufferRef \| OfflineBufferHandle; referenceText: string }` |
 | `TtsVoiceClonePocket` | `{ kind: 'pocket'; referenceAudio: OfflineAudioBufferRef \| OfflineBufferHandle; referenceText?: string }` |
@@ -469,7 +493,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | --- | --- | --- |
 | `TTS_TEXT_BUFFER_NOT_FOUND` | `synthesize` | `textInBufferId` not in registry — buffer was released or never created |
 | `TTS_TEXT_BUFFER_KIND_MISMATCH` | `synthesize` | Buffer ID does not start with `txt_off_` — wrong buffer type passed |
-| `TTS_TEXT_BUFFER_EMPTY` | `synthesize` | Text buffer has no text content |
+| `TTS_TEXT_BUFFER_EMPTY` | `synthesize` | Text buffer has no text content, and neither `phonemeCodepoints` nor `tokens` was set |
 | `TTS_AUDIO_OUT_NOT_FOUND` | `synthesize` | `audioOutBufferId` not in registry — released too early or never created |
 | `TTS_AUDIO_OUT_KIND_MISMATCH` | `synthesize` | Buffer ID does not start with `off_` or is file-backed (must be in-memory) |
 | `TTS_AUDIO_OUT_ALREADY_POPULATED` | `synthesize` | `audioOut` already has samples — create a new `createEmptyOfflineAudioBuffer` each call |

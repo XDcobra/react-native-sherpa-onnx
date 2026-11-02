@@ -60,6 +60,7 @@ VadModelKind ParseVadModelTypeLocal(const std::string& modelType) {
 EnhancementModelKind ParseEnhancementModelTypeLocal(const std::string& modelType) {
     if (modelType == "gtcrn") return EnhancementModelKind::kGtcrn;
     if (modelType == "dpdfnet") return EnhancementModelKind::kDpdfNet;
+    if (modelType == "voxlock") return EnhancementModelKind::kVoxLock;
     return EnhancementModelKind::kUnknown;
 }
 

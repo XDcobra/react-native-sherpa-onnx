@@ -154,7 +154,8 @@ export function isIncludedHfModelPath(relativePath: string): boolean {
   if (!normalized || normalized.endsWith('/')) {
     return false;
   }
-  // Keep full repo file trees for HF folder models (e.g. espeak-ng-data/**),
+  // Keep full repo file trees for HF folder models (packs may still include
+  // leftover espeak-ng-data/**; detect/init ignore that directory),
   // but avoid VCS metadata paths.
   if (normalized.startsWith('.git/')) {
     return false;

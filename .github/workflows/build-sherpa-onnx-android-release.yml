@@ -82,6 +82,12 @@ jobs:
           esac
           echo "ort_maven_version=${ORT_TAG#${PREFIX}}" >> "$GITHUB_OUTPUT"
 
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
       - name: Set up Android NDK
         id: setup-ndk
         uses: nttld/setup-ndk@v1
@@ -248,7 +254,7 @@ jobs:
           make_latest: false  # do not set this release as GitHub's "latest" (e.g. to keep app/npm release as latest)
           body: |
             ## What's New
-            - Updated sherpa-onnx to the newest release `${{ steps.tag.outputs.maven_version }}`
+            - TODO
 
             ## Archive Structure
             Prebuilt sherpa-onnx for Android (arm64-v8a, armeabi-v7a, x86, x86_64) with QNN-linked native libs. **ONNX Runtime** (`libonnxruntime.so`, JNI, Java API, headers) is provided by `com.xdcobra.sherpa:onnxruntime` — not bundled in this zip/AAR.

@@ -2115,6 +2115,8 @@ export interface Spec extends TurboModule {
     detectionSources?: string[];
     paths?: {
       model?: string;
+      enrollModel?: string;
+      chunkModel?: string;
     };
   }>;
 
@@ -2503,8 +2505,8 @@ export interface Spec extends TurboModule {
 
   /**
    * Compute embeddings from one or more offline buffers (optional per-item ranges)
-   * and `manager.add` in one native call. Returns flattened embeddings (`dim * count`)
-   * for the JS enrollment mirror only — not for a second add roundtrip.
+   * and `manager.add` in one native call. Returns flattened embeddings (`dim * count`);
+   * SID export reads them back via `GetEmbedding` and does not re-add.
    */
   enrollSpeakerOffline(
     instanceId: string,
@@ -2588,6 +2590,11 @@ export interface Spec extends TurboModule {
   speakerEmbeddingManagerAllSpeakerNames(
     managerId: string
   ): Promise<{ names: string[] }>;
+
+  speakerEmbeddingManagerGetEmbedding(
+    managerId: string,
+    name: string
+  ): Promise<{ embedding: number[] | null }>;
 
   destroySpeakerEmbeddingManager(managerId: string): Promise<void>;
 
@@ -2805,6 +2812,8 @@ export interface Spec extends TurboModule {
       lang?: string;
       numSteps?: number;
       silenceScale?: number;
+      phonemeCodepoints?: Object;
+      tokens?: Object;
       referenceAudioBufferId?: string;
       referenceText?: string;
     }
@@ -2834,6 +2843,11 @@ export interface Spec extends TurboModule {
     audioOutBufferId: string
   ): Promise<void>;
 
+  enhancementSetVoiceSample(
+    instanceId: string,
+    bufferId: string
+  ): Promise<void>;
+
   getEnhancementSampleRate(instanceId: string): Promise<number>;
 
   unloadEnhancement(instanceId: string): Promise<void>;
@@ -2844,6 +2858,7 @@ export interface Spec extends TurboModule {
   ): Promise<{
     success: boolean;
     error?: string;
+    modelType?: string;
     sampleRate?: number;
     frameShiftInSamples?: number;
   }>;

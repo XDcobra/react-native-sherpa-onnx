@@ -23,6 +23,8 @@ struct VoiceCloneOptions {
     bool apply_num_steps = false;
     float silence_scale = 0.2f;
     std::unordered_map<std::string, std::string> extra;
+    std::vector<std::vector<int32_t>> phoneme_codepoints;
+    std::vector<std::vector<std::string>> tokens;
 };
 
 /**

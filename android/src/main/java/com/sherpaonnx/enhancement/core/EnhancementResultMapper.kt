@@ -48,6 +48,21 @@ internal object EnhancementResultMapper {
           it.forEach(arr::pushString)
           putArray("languages", arr)
         }
+
+      @Suppress("UNCHECKED_CAST")
+      val paths = result["paths"] as? HashMap<String, Any?>
+      if (paths != null) {
+        val writablePaths = Arguments.createMap()
+        for (key in listOf("model", "enrollModel", "chunkModel")) {
+          val value = paths[key] as? String
+          if (!value.isNullOrBlank()) {
+            writablePaths.putString(key, value)
+          }
+        }
+        if (writablePaths.toHashMap().isNotEmpty()) {
+          putMap("paths", writablePaths)
+        }
+      }
     }
   }
 

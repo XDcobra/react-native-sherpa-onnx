@@ -113,5 +113,10 @@ export interface SpeakerEmbeddingManager {
    * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native list failed.
    */
   listSpeakers(): Promise<string[]>;
+  /**
+   * Stored averaged embedding for `name`, or `null` if the name is not enrolled.
+   * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — empty name or native readout failed.
+   */
+  getEmbedding(name: string): Promise<Float32Array | null>;
   destroy(): Promise<void>;
 }

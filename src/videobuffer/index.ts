@@ -59,6 +59,7 @@ import type {
 
 let extractOpId = 0;
 let exportOpId = 0;
+let imageFromVideoOpId = 0;
 
 const VIDEO_EXPORT_FORMATS: readonly VideoExportContainer[] = [
   'mp4',
@@ -488,6 +489,7 @@ export async function releaseVideoBuffer(
  * @throws {Error} `VIDEO_DECODER_UNAVAILABLE` — no usable decoder for the policy.
  * @throws {Error} `VIDEO_MEMORY_BUDGET_EXCEEDED` — decoded/RGB copy exceeded the process cap.
  * @throws {Error} `VIDEO_SW_DECODER_DISABLED` — bundled SW requested but missing.
+ * @throws {Error} `VIDEO_CANCELLED` — `signal` aborted.
  */
 export async function createOfflineImageBufferFromVideo(
   video: OfflineVideoBufferIdSource,
@@ -514,28 +516,72 @@ export async function createOfflineImageBufferFromVideo(
       options?.maxSide ?? 0
     );
   }
-  const raw = await getNative().createOfflineImageBufferFromVideo(id, {
-    sampling,
-    uniformCount: options?.uniformCount ?? 0,
-    fps: options?.fps ?? 0,
-    maxSide: options?.maxSide ?? 0,
-    timesUs: options?.timesUs,
-    decodePolicy: options?.decodePolicy,
-  });
-  if (raw.errorCode) {
-    if (__DEV__) {
-      console.log(
-        '[SherpaOnnx:video] createOfflineImageBufferFromVideo fail',
-        raw.errorCode,
-        raw.errorMessage
+  const operationId = `vid_img_${Date.now()}_${++imageFromVideoOpId}`;
+  let progressSubscription: { remove: () => void } | null = null;
+  let abortHandler: (() => void) | null = null;
+  try {
+    if (options?.onProgress) {
+      const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+      const onProgress = options.onProgress;
+      progressSubscription = emitter.addListener(
+        'decodeProgress',
+        (raw: unknown) => {
+          const event = raw as {
+            operationId?: string;
+            percent?: number;
+            completed?: number;
+            total?: number;
+            ptsUs?: number;
+          };
+          if (event.operationId === operationId) {
+            onProgress({
+              percent: event.percent ?? 0,
+              completed: event.completed ?? 0,
+              total: event.total ?? 0,
+              ptsUs: event.ptsUs ?? 0,
+            });
+          }
+        }
       );
     }
-    throw new Error(`${raw.errorCode}: ${raw.errorMessage ?? ''}`);
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        throw new Error('VIDEO_CANCELLED: Operation cancelled');
+      }
+      abortHandler = () => {
+        getNative().cancelDecode(operationId);
+      };
+      options.signal.addEventListener('abort', abortHandler);
+    }
+    const raw = await getNative().createOfflineImageBufferFromVideo(id, {
+      sampling,
+      uniformCount: options?.uniformCount ?? 0,
+      fps: options?.fps ?? 0,
+      maxSide: options?.maxSide ?? 0,
+      timesUs: options?.timesUs,
+      decodePolicy: options?.decodePolicy,
+      operationId,
+    });
+    if (raw.errorCode) {
+      if (__DEV__) {
+        console.log(
+          '[SherpaOnnx:video] createOfflineImageBufferFromVideo fail',
+          raw.errorCode,
+          raw.errorMessage
+        );
+      }
+      throw new Error(`${raw.errorCode}: ${raw.errorMessage ?? ''}`);
+    }
+    return {
+      imageBufferId: raw.imageBufferId ?? '',
+      frameCount: raw.frameCount ?? 0,
+    };
+  } finally {
+    progressSubscription?.remove();
+    if (abortHandler && options?.signal) {
+      options.signal.removeEventListener('abort', abortHandler);
+    }
   }
-  return {
-    imageBufferId: raw.imageBufferId ?? '',
-    frameCount: raw.frameCount ?? 0,
-  };
 }
 
 /**
@@ -636,6 +682,17 @@ export async function createOfflineAudioBufferFromVideo(
             framesDecoded?: number;
           };
           if (event.operationId === operationId) {
+            if (__DEV__) {
+              console.log(
+                '[SherpaOnnx:video] extract audio progress',
+                'op=',
+                operationId,
+                'percent=',
+                event.percent ?? 0,
+                'decodedMs=',
+                event.framesDecoded ?? 0
+              );
+            }
             onProgress({
               percent: event.percent ?? 0,
               decodedMs: event.framesDecoded ?? 0,
