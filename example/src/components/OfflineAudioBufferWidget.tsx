@@ -124,6 +124,11 @@ type Props = {
    * segmented pipelines match orchestrator output buffers.
    */
   decodeTargetSampleRateHz?: number;
+  /**
+   * `example-or-own` (default): Example Audio vs Select Your Own Audio.
+   * `own-file`: system file picker only — no bundled example list.
+   */
+  pickerMode?: 'example-or-own' | 'own-file';
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,11 +305,15 @@ export const OfflineAudioBufferWidget = forwardRef<
     visible = true,
     externalError = null,
     decodeTargetSampleRateHz,
+    pickerMode = 'example-or-own',
   },
   ref
 ) {
+  const ownFileOnly = pickerMode === 'own-file';
   // ── source choice ──────────────────────────────────────────────────────────
-  const [sourceType, setSourceType] = useState<'example' | 'own' | null>(null);
+  const [sourceType, setSourceType] = useState<'example' | 'own' | null>(
+    ownFileOnly ? 'own' : null
+  );
 
   // ── decode state ───────────────────────────────────────────────────────────
   const [decoding, setDecoding] = useState(false);
@@ -396,10 +405,10 @@ export const OfflineAudioBufferWidget = forwardRef<
       setDecodeError(null);
       await releaseBuffer();
       if (!keepSourceChoice) {
-        setSourceType(null);
+        setSourceType(ownFileOnly ? 'own' : null);
       }
     },
-    [releaseBuffer]
+    [ownFileOnly, releaseBuffer]
   );
 
   const handleDelete = useCallback(async () => {
@@ -613,9 +622,10 @@ export const OfflineAudioBufferWidget = forwardRef<
 
   const busy = disabled || decoding;
   const errorMsg = decodeError ?? externalError ?? null;
+  const resolvedSourceType = ownFileOnly ? 'own' : sourceType;
 
   // ── Source choice ──
-  if (!sourceType) {
+  if (!resolvedSourceType) {
     return (
       <View>
         <Text style={s.subsectionTitle}>Choose Audio Source:</Text>
@@ -743,7 +753,7 @@ export const OfflineAudioBufferWidget = forwardRef<
   }
 
   // ── Example file list ──
-  if (sourceType === 'example') {
+  if (resolvedSourceType === 'example') {
     return (
       <View>
         <View style={s.sourceActionRow}>
@@ -781,17 +791,19 @@ export const OfflineAudioBufferWidget = forwardRef<
   return (
     <View>
       <View style={s.sourceActionRow}>
-        <TouchableOpacity
-          style={[s.backButton, busy && s.buttonDisabled]}
-          onPress={() => {
-            setSourceType(null);
-            setDecodeError(null);
-          }}
-          disabled={busy}
-          accessibilityLabel="Back"
-        >
-          <Ionicons name="chevron-back" size={22} color="#007AFF" />
-        </TouchableOpacity>
+        {ownFileOnly ? null : (
+          <TouchableOpacity
+            style={[s.backButton, busy && s.buttonDisabled]}
+            onPress={() => {
+              setSourceType(null);
+              setDecodeError(null);
+            }}
+            disabled={busy}
+            accessibilityLabel="Back"
+          >
+            <Ionicons name="chevron-back" size={22} color="#007AFF" />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={[s.pickButton, busy && s.buttonDisabled]}
           onPress={handlePickOwnFile}

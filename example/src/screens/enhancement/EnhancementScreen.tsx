@@ -51,6 +51,7 @@ import {
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
+import { VoxLockReferenceAudioPicker } from '../../components/VoxLockReferenceAudioPicker';
 import {
   SegmentationPolicyControls,
   buildSegmentationOption,
@@ -715,9 +716,21 @@ export default function EnhancementScreen() {
     }
   };
 
+  const applyVoxLockVoiceSample = useCallback(async (bufferId: string) => {
+    const engine = engineRef.current;
+    if (!engine || engine.modelType !== 'voxlock') {
+      throw new Error('VoxLock engine is not initialized');
+    }
+    await engine.setVoiceSample(bufferId);
+  }, []);
+
   const engineReady =
     (currentModelFolder != null || initializedSummary != null) &&
     engineRef.current != null;
+  const voxLockEngineId =
+    engineReady && engineRef.current?.modelType === 'voxlock'
+      ? engineRef.current.instanceId
+      : null;
   const showKindPicker =
     detectedModels.length > 1 &&
     detectedModels.some((m) => m.type === 'gtcrn') &&
@@ -928,6 +941,13 @@ export default function EnhancementScreen() {
                 WAV input (example clips or a file from disk). Enhanced audio
                 stays in an offline buffer until you save or play it below.
               </Text>
+
+              <VoxLockReferenceAudioPicker
+                key={voxLockEngineId ?? 'voxlock-ref'}
+                visible={voxLockEngineId != null}
+                disabled={enhancing || loading}
+                applyVoiceSample={applyVoxLockVoiceSample}
+              />
 
               <OfflineAudioBufferWidget
                 ref={offlineWidgetRef}

@@ -90,6 +90,7 @@ import {
   type ModelInitMode,
   type EnhancementCustomInitFormState,
 } from '../../components/modelInit';
+import { VoxLockReferenceAudioPicker } from '../../components/VoxLockReferenceAudioPicker';
 import {
   buildEnhancementAutoInitializeOptions,
   buildEnhancementCustomInitializeOptions,
@@ -1245,9 +1246,21 @@ export default function EnhancementStreamingScreen() {
     setLastInputPath(null);
   };
 
+  const applyVoxLockVoiceSample = useCallback(async (bufferId: string) => {
+    const engine = engineRef.current;
+    if (!engine || engine.modelType !== 'voxlock') {
+      throw new Error('VoxLock engine is not initialized');
+    }
+    await engine.setVoiceSample(bufferId);
+  }, []);
+
   const engineReady =
     (currentModelFolder != null || initializedSummary != null) &&
     engineRef.current != null;
+  const voxLockEngineId =
+    engineReady && engineRef.current?.modelType === 'voxlock'
+      ? engineRef.current.instanceId
+      : null;
   const showKindPicker =
     detectedModels.length > 1 &&
     detectedModels.some((m) => m.type === 'gtcrn') &&
@@ -1437,6 +1450,13 @@ export default function EnhancementStreamingScreen() {
                 streaming pipeline with live buffers to avoid offline OOM on
                 long audio.
               </Text>
+
+              <VoxLockReferenceAudioPicker
+                key={voxLockEngineId ?? 'voxlock-ref'}
+                visible={voxLockEngineId != null}
+                disabled={enhancing || loading || preparingInputBuffer}
+                applyVoiceSample={applyVoxLockVoiceSample}
+              />
 
               <AudioDeviceDropdown
                 label="Output device"
