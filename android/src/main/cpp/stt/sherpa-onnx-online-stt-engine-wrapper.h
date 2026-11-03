@@ -1,16 +1,17 @@
 /**
- * sherpa-onnx-online-stt-wrapper.h
+ * sherpa-onnx-online-stt-engine-wrapper.h
  *
- * Purpose: Wraps sherpa-onnx C++ OnlineRecognizer for iOS streaming STT.
- * Manages recognizer instances and streams; scans model directory for paths.
- * Used by SherpaOnnx+OnlineSTT.mm.
+ * Shared CXX OnlineRecognizer wrapper for streaming STT (Android + iOS).
+ * Manages recognizer instances and streams; distinct from offline
+ * sherpa-onnx-stt-engine-wrapper and from model_detect validate-online-stt.
  */
 
-#ifndef SHERPA_ONNX_ONLINE_STT_WRAPPER_H
-#define SHERPA_ONNX_ONLINE_STT_WRAPPER_H
+#ifndef SHERPA_ONNX_ONLINE_STT_ENGINE_WRAPPER_H
+#define SHERPA_ONNX_ONLINE_STT_ENGINE_WRAPPER_H
 
 #include "sherpa-onnx-validate-online-stt.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -112,4 +113,4 @@ private:
 
 } // namespace sherpaonnx
 
-#endif // SHERPA_ONNX_ONLINE_STT_WRAPPER_H
+#endif // SHERPA_ONNX_ONLINE_STT_ENGINE_WRAPPER_H

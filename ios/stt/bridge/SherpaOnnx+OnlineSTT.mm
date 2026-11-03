@@ -16,7 +16,7 @@
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../pipeline/SttPipelineWorker.h"
-#include "../native/sherpa-onnx-online-stt-wrapper.h"
+#include "sherpa-onnx-online-stt-engine-wrapper.h"
 #include "sherpa-onnx-model-path-fill.h"
 
 #include <chrono>

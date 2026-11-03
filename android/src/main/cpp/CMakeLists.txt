@@ -205,6 +205,8 @@ set(SOURCES
     jni/kws/sherpa-onnx-kws-jni.cpp
     stt/sherpa-onnx-stt-engine-wrapper.cpp
     jni/stt/sherpa-onnx-stt-jni.cpp
+    stt/sherpa-onnx-online-stt-engine-wrapper.cpp
+    jni/stt/sherpa-onnx-online-stt-jni.cpp
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
     jni/audio/audio_f32le_to_format.cpp

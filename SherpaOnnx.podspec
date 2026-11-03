@@ -69,7 +69,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/vad/*.{h,cpp}",
     # Shared KWS core (C-API KeywordSpotter). JNI excluded below.
     "android/src/main/cpp/kws/*.{h,cpp}",
-    # Shared offline STT core (CXX OfflineRecognizer). JNI excluded below.
+    # Shared offline + online STT core (CXX Offline/OnlineRecognizer). JNI excluded below.
     "android/src/main/cpp/stt/*.{h,cpp}",
     # Shared ImageBuffer core (decode + registry; JNI excluded below).
     "android/src/main/cpp/image/**/*.{h,cpp}",
@@ -274,7 +274,6 @@ Pod::Spec.new do |s|
 
   header_search_paths = [
     "$(inherited)",
-    "\"#{pod_root}/ios/stt/native\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/common\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/stt\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/tts\"",

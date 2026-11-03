@@ -1,12 +1,11 @@
 package com.sherpaonnx.stt.pipeline
 
 import android.util.Log
-import com.k2fsa.sherpa.onnx.OnlineRecognizer
-import com.k2fsa.sherpa.onnx.OnlineStream
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
+import com.sherpaonnx.stt.facade.SherpaOnnxOnlineSttHelper
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import com.sherpaonnx.text.pipeline.TextSegment
 import java.util.concurrent.CompletableFuture
@@ -18,8 +17,9 @@ import kotlin.concurrent.withLock
 
 class SttPipelineWorker(
   override val pipelineId: String,
-  private val recognizer: OnlineRecognizer,
-  private val stream: OnlineStream,
+  private val instanceId: String,
+  private val streamId: String,
+  private val sampleRate: Int,
   private val inputEntry: LiveEntry,
   private val outputEntry: LiveTextEntry,
   private val chunkSize: Int = 6400,
@@ -66,6 +66,35 @@ class SttPipelineWorker(
     class Reset(val completion: CompletableFuture<Unit>) : PipelineCommand()
   }
 
+  private data class StreamResult(
+    val text: String,
+    val tokens: Array<String>,
+    val timestamps: FloatArray,
+  )
+
+  private fun readResult(): StreamResult {
+    @Suppress("UNCHECKED_CAST")
+    val raw = SherpaOnnxOnlineSttHelper.nativeGetResult(instanceId, streamId)
+    val text = raw?.get("text") as? String ?: ""
+    val tokensList = raw?.get("tokens") as? ArrayList<*>
+    val tokens = tokensList
+      ?.mapNotNull { it as? String }
+      ?.toTypedArray()
+      ?: emptyArray()
+    val timestamps = when (val ts = raw?.get("timestamps")) {
+      is FloatArray -> ts
+      is ArrayList<*> -> {
+        val out = FloatArray(ts.size)
+        for (i in ts.indices) {
+          out[i] = (ts[i] as? Number)?.toFloat() ?: 0f
+        }
+        out
+      }
+      else -> FloatArray(0)
+    }
+    return StreamResult(text = text, tokens = tokens, timestamps = timestamps)
+  }
+
   override fun start() {
     isRunning = true
     audioCursorId = inputEntry.createCursorHandle()
@@ -85,7 +114,6 @@ class SttPipelineWorker(
   }
 
   private fun runLoop() {
-    val sampleRate = recognizer.config.featConfig.sampleRate
     try {
       while (isRunning) {
         processCommands()
@@ -102,15 +130,17 @@ class SttPipelineWorker(
           continue
         }
 
-        stream.acceptWaveform(chunk, sampleRate)
+        SherpaOnnxOnlineSttHelper.nativeAcceptWaveform(
+          instanceId, streamId, sampleRate, chunk
+        )
         unitsRead += chunk.size
 
-        while (recognizer.isReady(stream)) {
-          recognizer.decode(stream)
+        while (SherpaOnnxOnlineSttHelper.nativeIsReady(instanceId, streamId)) {
+          SherpaOnnxOnlineSttHelper.nativeDecode(instanceId, streamId)
         }
         chunksProcessed++
 
-        val result = recognizer.getResult(stream)
+        val result = readResult()
 
         if (result.text.isNotBlank()) {
           if (dbgFirstHypothesis == null) dbgFirstHypothesis = result.text
@@ -120,7 +150,7 @@ class SttPipelineWorker(
           outputEntry.writePartial(result.text)
         }
 
-        if (recognizer.isEndpoint(stream)) {
+        if (SherpaOnnxOnlineSttHelper.nativeIsEndpoint(instanceId, streamId)) {
           if (result.text.isNotBlank()) {
             dbgEndpointCommits++
             val createdAtMs = System.currentTimeMillis()
@@ -150,7 +180,7 @@ class SttPipelineWorker(
             unitsWritten += result.text.length
             outputEntry.writePartial("")
           }
-          recognizer.reset(stream)
+          SherpaOnnxOnlineSttHelper.nativeResetStream(instanceId, streamId)
         }
       }
     } catch (e: Exception) {
@@ -159,7 +189,7 @@ class SttPipelineWorker(
       inputEntry.releaseCursor(audioCursorId)
       appendListener?.let { inputEntry.removeAppendListener(it) }
       appendListener = null
-      stream.release()
+      SherpaOnnxOnlineSttHelper.nativeReleaseStream(instanceId, streamId)
       synchronized(cmdLock) {
         while (true) {
           val cmd = commandQueue.poll() ?: break
@@ -178,20 +208,19 @@ class SttPipelineWorker(
    * Decode tail and optionally commit the final hypothesis.
    *
    * When [endOfAudio] is true (live input buffer finalized / file ingest done),
-   * call [OnlineStream.inputFinished] so sherpa-onnx can flush internal frames
-   * before the last decode passes — omitting this often truncates the transcript
-   * (especially the leading context for Zipformer streaming).
+   * call InputFinished so sherpa-onnx can flush internal frames before the last
+   * decode passes — omitting this often truncates the transcript.
    */
   private fun autoFlushAndCommit(endOfAudio: Boolean = false) {
     if (endOfAudio) {
-      stream.inputFinished()
+      SherpaOnnxOnlineSttHelper.nativeInputFinished(instanceId, streamId)
     }
     var tailDecodePasses = 0
-    while (recognizer.isReady(stream)) {
-      recognizer.decode(stream)
+    while (SherpaOnnxOnlineSttHelper.nativeIsReady(instanceId, streamId)) {
+      SherpaOnnxOnlineSttHelper.nativeDecode(instanceId, streamId)
       tailDecodePasses++
     }
-    val result = recognizer.getResult(stream)
+    val result = readResult()
     if (endOfAudio) {
       val firstLen = dbgFirstHypothesis?.length ?: 0
       val finalLen = result.text.length
@@ -243,7 +272,7 @@ class SttPipelineWorker(
       when (cmd) {
         is PipelineCommand.Flush -> {
           try {
-            // Do not call stream.inputFinished(): more audio may still arrive.
+            // Do not call InputFinished: more audio may still arrive.
             autoFlushAndCommit(endOfAudio = false)
             cmd.completion.complete(Unit)
           } catch (e: Exception) {
@@ -252,7 +281,7 @@ class SttPipelineWorker(
         }
         is PipelineCommand.Reset -> {
           try {
-            recognizer.reset(stream)
+            SherpaOnnxOnlineSttHelper.nativeResetStream(instanceId, streamId)
             outputEntry.writePartial("")
             cmd.completion.complete(Unit)
           } catch (e: Exception) {

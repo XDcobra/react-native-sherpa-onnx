@@ -1403,3 +1403,54 @@ else()
     "stt_offline_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
 endif()
 
+# --- Online OnlineSttWrapper host tests (shared CXX API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(STT_ONLINE_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/stt")
+  set(STT_ONLINE_DETECT_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni/model_detect")
+  set(SHERPA_ONNX_SRC_ROOT_STT_ONLINE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(stt_online_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/stt/stt_online_host_test.cpp"
+    "${STT_ONLINE_CPP_ROOT}/sherpa-onnx-online-stt-engine-wrapper.cpp"
+    "${STT_ONLINE_DETECT_ROOT}/stt/sherpa-onnx-validate-online-stt.cpp"
+    "${STT_ONLINE_DETECT_ROOT}/common/sherpa-onnx-model-detect-helper.cpp"
+  )
+  target_include_directories(stt_online_host_test PRIVATE
+    "${STT_ONLINE_CPP_ROOT}"
+    "${STT_ONLINE_DETECT_ROOT}/common"
+    "${STT_ONLINE_DETECT_ROOT}/stt"
+    "${SHERPA_ONNX_SRC_ROOT_STT_ONLINE}"
+  )
+  target_link_directories(stt_online_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(stt_online_host_test PRIVATE
+    sherpa-onnx-c-api sherpa-onnx-cxx-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(stt_online_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(stt_online_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(stt_online_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(stt_online_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME stt_online_host_test
+    COMMAND $<TARGET_FILE:stt_online_host_test>)
+  set_tests_properties(stt_online_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "stt_online_host_test enabled (sherpa C/CXX-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "stt_online_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
