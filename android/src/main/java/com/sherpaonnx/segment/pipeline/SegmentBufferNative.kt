@@ -48,7 +48,6 @@ internal object SegmentBufferNative {
   @JvmStatic external fun nativeLiveState(liveId: String): Int
   @JvmStatic external fun nativeLiveTotalSegmentsWritten(liveId: String): Long
   @JvmStatic external fun nativeLiveSnapshotJson(liveId: String, mode: String): String?
-  @JvmStatic external fun nativeOfflineSnapshotJson(offlineId: String): String?
 
   @JvmStatic external fun nativeOfflineSegmentCount(offlineId: String): Int
   /** JSON `{"segments":[...]}` for a bounded offline slice; null if missing. */

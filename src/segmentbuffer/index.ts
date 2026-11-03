@@ -978,8 +978,12 @@ export async function getPipelineSegmentBufferInfo(
   return mapPipelineInfo(raw);
 }
 
+/** Max segments returned by one TurboModule getter call; paginate for more. */
+const SEGMENT_TM_MAX_PAGE_COUNT = 4096;
+
 /**
  * Read committed segments from an offline segment buffer.
+ * Returns at most {@link SEGMENT_TM_MAX_PAGE_COUNT} records per call — paginate with `start` for more.
  * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid returned payload.
  * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
  * @throws {Error} `SEGMENT_SLICE_INVALID` — start or count is out of range.
@@ -988,13 +992,17 @@ export async function getPipelineSegmentBufferInfo(
 export async function getOfflineSegmentBufferSegments(
   buffer: OfflineSegmentBufferIdSource,
   start = 0,
-  maxCount = 4096
+  maxCount = SEGMENT_TM_MAX_PAGE_COUNT
 ): Promise<SegmentMeta[]> {
   const id = resolveOfflineSegmentBufferId(buffer);
-  const sliceMaxCount =
+  const requested =
     maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
-      ? 4096
+      ? SEGMENT_TM_MAX_PAGE_COUNT
       : maxCount;
+  const sliceMaxCount = Math.min(
+    Math.max(0, requested),
+    SEGMENT_TM_MAX_PAGE_COUNT
+  );
   const raw = await getNative().getOfflineSegmentBufferSegments(
     id,
     start,
@@ -1055,6 +1063,7 @@ export async function getOfflineSegmentBufferSegments(
 
 /**
  * Read committed segments from a live segment buffer.
+ * Returns at most {@link SEGMENT_TM_MAX_PAGE_COUNT} records per call — paginate with `startIndex` for more.
  * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid returned payload.
  * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
  * @throws {Error} `SEGMENT_SLICE_INVALID` — start or count is out of range.
@@ -1066,10 +1075,14 @@ export async function getLiveSegmentBufferSegments(
   maxCount: number
 ): Promise<SegmentMeta[]> {
   const id = resolveLiveSegmentBufferId(liveBuffer);
-  const sliceMaxCount =
+  const requested =
     maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
-      ? 4096
+      ? SEGMENT_TM_MAX_PAGE_COUNT
       : maxCount;
+  const sliceMaxCount = Math.min(
+    Math.max(0, requested),
+    SEGMENT_TM_MAX_PAGE_COUNT
+  );
   const raw = await getNative().getLiveSegmentBufferSegments(
     id,
     startIndex,

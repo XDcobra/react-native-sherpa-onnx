@@ -455,6 +455,11 @@ bool seg_offline_populate(const std::string &offlineBufferId,
   return true;
 }
 
+int seg_clamp_tm_page_count(int requested) {
+  if (requested <= 0) return 0;
+  return std::min(requested, SEG_TM_MAX_PAGE_COUNT);
+}
+
 void seg_release_all_entries() {
   std::vector<std::shared_ptr<SegLiveEntry>> liveEntries;
   {

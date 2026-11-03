@@ -2434,8 +2434,10 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       return;
     }
     const int total = seg_offline_segment_count(bufferKey);
+    const int pageCount =
+        seg_clamp_tm_page_count(c64 > SEG_TM_MAX_PAGE_COUNT ? SEG_TM_MAX_PAGE_COUNT : static_cast<int>(c64));
     std::vector<SegRecord> snap =
-        seg_offline_get_segments(bufferKey, static_cast<int>(s64), static_cast<int>(c64));
+        seg_offline_get_segments(bufferKey, static_cast<int>(s64), pageCount);
 #if DEBUG
     seg_debug_log([NSString stringWithFormat:
       @"getOfflineSegmentBufferSegments slice total=%d s=%lld c=%lld snap=%lu",
@@ -2507,8 +2509,10 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
       return;
     }
+    const int pageCount =
+        seg_clamp_tm_page_count(c64 > SEG_TM_MAX_PAGE_COUNT ? SEG_TM_MAX_PAGE_COUNT : static_cast<int>(c64));
     std::vector<SegRecord> snap =
-        seg_live_get_window_segments(bufferKey, static_cast<int>(s64), static_cast<int>(c64));
+        seg_live_get_window_segments(bufferKey, static_cast<int>(s64), pageCount);
     NSArray *segmentsOut = nil;
     if (snap.empty()) {
       segmentsOut = @[];

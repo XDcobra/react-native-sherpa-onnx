@@ -189,6 +189,16 @@ TEST_F(SegmentRegistryFixture, LiveFinalize_RejectsFurtherAppend) {
   EXPECT_TRUE(seg_release_buffer(id));
 }
 
+TEST_F(SegmentRegistryFixture, TmPageClamp) {
+  EXPECT_EQ(seg_clamp_tm_page_count(-1), 0);
+  EXPECT_EQ(seg_clamp_tm_page_count(0), 0);
+  EXPECT_EQ(seg_clamp_tm_page_count(1), 1);
+  EXPECT_EQ(seg_clamp_tm_page_count(SEG_TM_MAX_PAGE_COUNT), SEG_TM_MAX_PAGE_COUNT);
+  EXPECT_EQ(seg_clamp_tm_page_count(SEG_TM_MAX_PAGE_COUNT + 1), SEG_TM_MAX_PAGE_COUNT);
+  EXPECT_EQ(seg_clamp_tm_page_count(1'000'000), SEG_TM_MAX_PAGE_COUNT);
+  EXPECT_EQ(SEG_TM_DEFAULT_PAGE_COUNT, SEG_TM_MAX_PAGE_COUNT);
+}
+
 TEST_F(SegmentRegistryFixture, OfflineFromLive_WindowSnapshotAndSlice) {
   std::string liveId;
   std::string err;

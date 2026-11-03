@@ -207,14 +207,6 @@ Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeLiveSnapshotJson(
   }
 }
 
-JNIEXPORT jstring JNICALL
-Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeOfflineSnapshotJson(
-    JNIEnv *env, jclass, jstring offlineId) {
-  auto off = seg_get_offline_entry(jstringToUtf8(env, offlineId));
-  if (!off) return nullptr;
-  return utf8ToJstring(env, segment_records_to_json(off->segments));
-}
-
 JNIEXPORT jint JNICALL
 Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeOfflineSegmentCount(
     JNIEnv *env, jclass, jstring offlineId) {

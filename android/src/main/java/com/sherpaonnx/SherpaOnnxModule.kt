@@ -5525,34 +5525,43 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return out
   }
 
-  private fun segmentRecordToWritableMapWithAnnotation(
-    record: com.sherpaonnx.segment.pipeline.SegmentRecord,
+  /** Matches C SEG_TM_MAX_PAGE_COUNT / TS SEGMENT_TM_MAX_PAGE_COUNT. */
+  private val SEGMENT_TM_MAX_PAGE_COUNT = 4096
+
+  private fun clampTmPageCount(requested: Int): Int {
+    if (requested <= 0) return 0
+    return minOf(requested, SEGMENT_TM_MAX_PAGE_COUNT)
+  }
+
+  private fun segmentJsonObjectToWritableMapWithAnnotation(
+    obj: JSONObject,
   ): com.facebook.react.bridge.WritableMap {
     val out = Arguments.createMap()
-    out.putString("id", record.id)
-    out.putString("kind", record.kind)
-    out.putString("sourceAudioBufferId", record.sourceAudioBufferId)
-    out.putInt("startSample", record.startSample)
-    out.putInt("endSample", record.endSample)
-    out.putInt("sampleRate", record.sampleRate)
-    out.putInt("durationMs", record.durationMs)
-    record.confidence?.let { out.putDouble("confidence", it) }
+    val id = obj.optString("id")
+    out.putString("id", id)
+    out.putString("kind", obj.optString("kind", "speech"))
+    out.putString("sourceAudioBufferId", obj.optString("sourceAudioBufferId"))
+    out.putInt("startSample", obj.optInt("startSample"))
+    out.putInt("endSample", obj.optInt("endSample"))
+    out.putInt("sampleRate", obj.optInt("sampleRate"))
+    out.putInt("durationMs", obj.optInt("durationMs"))
+    if (obj.has("confidence")) out.putDouble("confidence", obj.optDouble("confidence"))
 
     val annotation =
-      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.peekSegmentAnnotation(
-        record.id
-      )
+      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.peekSegmentAnnotation(id)
     annotation?.let {
       out.putString("reason", it.reason)
       out.putString("source", it.source)
       out.putDouble("createdAtMs", it.createdAtMs.toDouble())
     }
 
-    record.payloadJson?.let { payloadJson ->
+    val payloadObj = obj.optJSONObject("payload")
+    if (payloadObj != null) {
       try {
-        val json = JSONObject(payloadJson)
-        val payload = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(json)
-        out.putMap("payload", payload)
+        out.putMap(
+          "payload",
+          com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(payloadObj),
+        )
       } catch (_: Exception) {
       }
     }
@@ -5560,12 +5569,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return out
   }
 
-  private fun segmentRecordsToWritableArrayWithAnnotation(
-    records: List<com.sherpaonnx.segment.pipeline.SegmentRecord>,
+  private fun segmentSliceJsonToWritableArrayWithAnnotation(
+    sliceJson: String?,
   ): com.facebook.react.bridge.WritableArray {
     val arr = Arguments.createArray()
-    for (record in records) {
-      arr.pushMap(segmentRecordToWritableMapWithAnnotation(record))
+    if (sliceJson.isNullOrEmpty()) return arr
+    val root = JSONObject(sliceJson)
+    val segments = root.optJSONArray("segments") ?: return arr
+    for (i in 0 until segments.length()) {
+      val obj = segments.optJSONObject(i) ?: continue
+      arr.pushMap(segmentJsonObjectToWritableMapWithAnnotation(obj))
     }
     return arr
   }
@@ -5934,16 +5947,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
-      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getOffline(bufferId)
-      if (entry == null) {
+      if (!com.sherpaonnx.segment.pipeline.SegmentBufferNative.nativeIsOffline(bufferId)) {
         promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Offline segment buffer not found: $bufferId")
         return
       }
       val from = start?.toInt() ?: 0
-      val count = maxCount?.toInt() ?: 1024
-      val segments = entry.snapshotSegments(from, count)
+      val requested = maxCount?.toInt() ?: SEGMENT_TM_MAX_PAGE_COUNT
+      if (from < 0 || requested < 0) {
+        promise.reject(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.SLICE_INVALID,
+          "Invalid segment slice range start=$from maxCount=$requested",
+        )
+        return
+      }
+      val count = clampTmPageCount(requested)
+      val json =
+        com.sherpaonnx.segment.pipeline.SegmentBufferNative.nativeOfflineSegmentsSlice(
+          bufferId,
+          from,
+          count,
+        )
       val out = Arguments.createMap()
-      out.putArray("segments", segmentRecordsToWritableArrayWithAnnotation(segments))
+      out.putArray("segments", segmentSliceJsonToWritableArrayWithAnnotation(json))
       promise.resolve(out)
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -5959,14 +5984,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
-      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
-      if (entry == null) {
+      if (!com.sherpaonnx.segment.pipeline.SegmentBufferNative.nativeIsLive(liveBufferId)) {
         promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
         return
       }
-      val segments = entry.getSegments(startIndex.toInt(), maxCount.toInt())
+      val from = startIndex.toInt()
+      val requested = maxCount.toInt()
+      if (from < 0 || requested < 0) {
+        promise.reject(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.SLICE_INVALID,
+          "Invalid segment slice range start=$from maxCount=$requested",
+        )
+        return
+      }
+      val count = clampTmPageCount(requested)
+      val json =
+        com.sherpaonnx.segment.pipeline.SegmentBufferNative.nativeLiveSegmentsSlice(
+          liveBufferId,
+          from,
+          count,
+        )
       val out = Arguments.createMap()
-      out.putArray("segments", segmentRecordsToWritableArrayWithAnnotation(segments))
+      out.putArray("segments", segmentSliceJsonToWritableArrayWithAnnotation(json))
       promise.resolve(out)
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
       promise.reject(e.code, e.message, e)

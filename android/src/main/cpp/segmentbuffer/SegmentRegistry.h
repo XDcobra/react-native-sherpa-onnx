@@ -68,6 +68,12 @@ std::vector<SegRecord> seg_live_get_window_segments(const std::string &liveBuffe
 bool seg_offline_populate(const std::string &offlineBufferId,
                           const std::vector<SegRecord> &records, std::string *error = nullptr);
 
+/** TurboModule segment getter page size (align TS / Android / iOS). */
+constexpr int SEG_TM_DEFAULT_PAGE_COUNT = 4096;
+constexpr int SEG_TM_MAX_PAGE_COUNT = 4096;
+/** Clamp requested page size: <=0 → 0; else min(requested, SEG_TM_MAX_PAGE_COUNT). */
+int seg_clamp_tm_page_count(int requested);
+
 void seg_release_all_entries();
 
 /** Optional: bridge installs callback for pipelineLiveSegmentAppended. */
