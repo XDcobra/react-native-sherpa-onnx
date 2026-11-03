@@ -44,6 +44,7 @@ internal object TextBufferNative {
   @JvmStatic external fun nativeSnapshotText(liveId: String): String?
 
   @JvmStatic external fun nativeLiveRevision(liveId: String): Int
+  @JvmStatic external fun nativeLivePartialUtf16Length(liveId: String): Int
 
   @JvmStatic external fun nativeCreateSegmentCursor(liveId: String): Int
 

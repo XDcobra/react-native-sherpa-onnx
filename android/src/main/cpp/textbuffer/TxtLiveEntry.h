@@ -30,7 +30,7 @@ void seg_engine_on_buffer_released(const std::string &bufferId);
 void txt_dispatch_pipeline_live_text_partial(
     const std::string &bufferId,
     const char *source,
-    const std::string &partialText,
+    int utf16Length,
     int64_t revisionValue,
     int64_t partialEventMinIntervalMs);
 
@@ -533,7 +533,7 @@ struct TxtLiveEntry {
 		bool shouldEmitPartial = false;
 		int64_t minIntervalMs = 0;
 		std::string bid;
-		std::string partialSnap;
+		int utf16LenSnap = 0;
 		int64_t revSnap = 0;
 		{
 			std::lock_guard<std::mutex> lock(stateMutex);
@@ -553,11 +553,11 @@ struct TxtLiveEntry {
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
-			partialSnap = currentText;
+			utf16LenSnap = txt_utf16_length(currentText);
 			revSnap = (int64_t)revision.load();
 		}
 		if (shouldEmitPartial) {
-			txt_dispatch_pipeline_live_text_partial(bid, "replace", partialSnap, revSnap, minIntervalMs);
+			txt_dispatch_pipeline_live_text_partial(bid, "replace", utf16LenSnap, revSnap, minIntervalMs);
 		}
 	}
 
@@ -565,7 +565,7 @@ struct TxtLiveEntry {
 		bool shouldEmitPartial = false;
 		int64_t minIntervalMs = 0;
 		std::string bid;
-		std::string partialSnap;
+		int utf16LenSnap = 0;
 		int64_t revSnap = 0;
 		{
 			std::lock_guard<std::mutex> lock(stateMutex);
@@ -587,11 +587,11 @@ struct TxtLiveEntry {
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
-			partialSnap = currentText;
+			utf16LenSnap = txt_utf16_length(currentText);
 			revSnap = (int64_t)revision.load();
 		}
 		if (shouldEmitPartial) {
-			txt_dispatch_pipeline_live_text_partial(bid, "append", partialSnap, revSnap, minIntervalMs);
+			txt_dispatch_pipeline_live_text_partial(bid, "append", utf16LenSnap, revSnap, minIntervalMs);
 		}
 	}
 
@@ -680,6 +680,11 @@ struct TxtLiveEntry {
 	std::string snapshotText() {
 		std::lock_guard<std::mutex> lock(stateMutex);
 		return currentText;
+	}
+
+	int partialUtf16Length() {
+		std::lock_guard<std::mutex> lock(stateMutex);
+		return txt_utf16_length(currentText);
 	}
 
 	std::string snapshotFullTextIfSpooled() {

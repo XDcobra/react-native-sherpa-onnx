@@ -124,6 +124,8 @@ import {
   createLiveTextBuffer,
   getLiveTextBufferSegmentCount,
   getLiveTextBufferSegments,
+  readLiveTextPartial,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import {
@@ -143,17 +145,19 @@ const textOut = await createLiveTextBuffer({
   windowMaxChars: 65536,
   maxSegments: 2048,
   streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
-  onPartial: (event) => {
-    if (event.partialText.length > 0) {
-      console.log('[partial]', event.partialText);
+  onPartial: async (event) => {
+    const partial = await readLiveTextPartial(event);
+    if (partial.length > 0) {
+      console.log('[partial]', partial);
       // Example output: [partial] hello wor
     }
     if (event.isEndpoint === true) {
       console.log('[endpoint]');
     }
   },
-  onSegment: (e) => {
-    console.log(`[committed ${e.segment.segmentIndex}]`, e.segment.text);
+  onSegment: async (e) => {
+    const seg = await readLiveTextSegment(e);
+    console.log(`[committed ${e.segmentIndex}]`, seg?.text);
     // Example output: [committed 0] hello world
   },
 });

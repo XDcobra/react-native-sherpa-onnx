@@ -41,6 +41,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createLiveTextBuffer,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
@@ -75,8 +76,9 @@ const audioIn = await createEmptyLiveAudioBuffer({
 // callbacks only, prefer spooling off to avoid disk I/O on each hit:
 const textOut = await createLiveTextBuffer({
   spooling: { mode: 'off' },
-  onSegment: (e) => {
-    console.log('[kws segment]', e.segment.text, e.segment.meta);
+  onSegment: async (e) => {
+    const seg = await readLiveTextSegment(e, { includeMeta: true });
+    console.log('[kws segment]', seg?.text, seg?.meta);
   },
 });
 
@@ -330,9 +332,10 @@ Committed segment text is the keyword **label**. `KeywordDetection` also exposes
 ```ts
 const textOut = await createLiveTextBuffer({
   spooling: { mode: 'off' },
-  onSegment: (e) => {
-    if (e.segment.meta?.source !== 'kws_stream') return;
-    console.log('[onSegment]', e.segment.text, e.segment.meta);
+  onSegment: async (e) => {
+    const seg = await readLiveTextSegment(e, { includeMeta: true });
+    if (seg?.meta?.source !== 'kws_stream') return;
+    console.log('[onSegment]', seg.text, seg.meta);
   },
 });
 

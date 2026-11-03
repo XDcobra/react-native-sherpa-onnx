@@ -26,10 +26,18 @@ jest.mock('../../audiobuffer', () => ({
 }));
 
 const mockSubscribeLiveTextBufferEvents = jest.fn();
+const mockReadLiveTextSegment = jest.fn();
+const mockLiveTextNotifyToTextSegment = jest.fn(
+  (_event: unknown, segment: { text: string }) => ({
+    domain: 'text',
+    text: segment.text,
+  })
+);
 jest.mock('../../textbuffer', () => ({
   resolvePipelineTextBufferId: jest.fn((value: unknown) => String(value)),
-  subscribeLiveTextBufferEvents: (...args: unknown[]) =>
-    mockSubscribeLiveTextBufferEvents(...args),
+  subscribeLiveTextBufferEvents: mockSubscribeLiveTextBufferEvents,
+  readLiveTextSegment: mockReadLiveTextSegment,
+  liveTextNotifyToTextSegment: mockLiveTextNotifyToTextSegment,
   getOfflineTextBufferTextSlice: jest.fn(),
   getPipelineTextBufferInfo: jest.fn(),
   releasePipelineTextBuffer: jest.fn(),
@@ -233,16 +241,27 @@ describe('stt live offline overload', () => {
 
   it('L-8 forwards committed text segments to onSegment callback and unsubscribes on completion', async () => {
     const unsubscribe = jest.fn();
-    let onSegmentCb: ((event: { segment: unknown }) => void) | undefined;
+    let onSegmentCb: ((event: unknown) => void) | undefined;
     mockSubscribeLiveTextBufferEvents.mockImplementation(
       (
         _bufferId: unknown,
-        callbacks: { onSegment?: (event: { segment: unknown }) => void }
+        callbacks: { onSegment?: (event: unknown) => void }
       ) => {
         onSegmentCb = callbacks.onSegment;
         return unsubscribe;
       }
     );
+    mockReadLiveTextSegment
+      .mockResolvedValueOnce({
+        text: 'hello',
+        source: 'stt_stream',
+        segmentIndex: 0,
+      })
+      .mockResolvedValueOnce({
+        text: 'world',
+        source: 'stt_stream',
+        segmentIndex: 1,
+      });
 
     const onSegment = jest.fn();
     const stt = await createSTT({
@@ -256,8 +275,22 @@ describe('stt live offline overload', () => {
       onSegment,
     })) as unknown as SttPipelineHandle;
 
-    onSegmentCb?.({ segment: { text: 'hello' } });
-    onSegmentCb?.({ segment: { text: 'world' } });
+    onSegmentCb?.({
+      liveBufferId: 'txt_live_1',
+      segmentIndex: 0,
+      totalSegments: 1,
+      utf16Length: 5,
+      source: 'stt_stream',
+    });
+    onSegmentCb?.({
+      liveBufferId: 'txt_live_1',
+      segmentIndex: 1,
+      totalSegments: 2,
+      utf16Length: 5,
+      source: 'stt_stream',
+    });
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(onSegment).toHaveBeenCalledTimes(2);
 

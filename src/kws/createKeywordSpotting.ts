@@ -4,9 +4,15 @@ import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
 import type { StreamingPipelineHandle } from '../audiobuffer/streamingPipelineTypes';
 import { resolveFileSourceForModelInit } from '../detect/resolveModelInput';
-import { resolvePipelineTextBufferId } from '../textbuffer';
-import { subscribeLiveTextBufferEvents } from '../textbuffer';
-import type { LiveTextBufferSegmentEvent } from '../textbuffer/types';
+import {
+  readLiveTextSegment,
+  resolvePipelineTextBufferId,
+  subscribeLiveTextBufferEvents,
+} from '../textbuffer';
+import type {
+  LiveTextBufferSegmentEvent,
+  LiveTextSegment,
+} from '../textbuffer/types';
 import { resolveKwsCustomConfigPaths } from './customConfig';
 import { detectKwsModel } from './detectKwsModel';
 import { buildKeywordSpottingInitBridgeOptions } from './kwsNativeBridge';
@@ -75,18 +81,15 @@ function logKwsPipelineStart(args: {
 }
 
 function mapSegmentToKeywordDetection(
-  event: LiveTextBufferSegmentEvent
+  event: LiveTextBufferSegmentEvent,
+  segment: LiveTextSegment
 ): (KeywordDetection & { segmentIndex: number }) | null {
-  if (event.segment.domain !== 'text') {
-    return null;
-  }
-  const meta = (event.segment.meta ?? {}) as Record<string, unknown>;
-  // Segment.source collapses pipeline tags to segmentation_engine|manual|external;
+  const meta = (segment.meta ?? {}) as Record<string, unknown>;
   // KWS workers stamp public meta.source = 'kws_stream' (and keyword) for filtering.
   if (meta.source !== 'kws_stream') {
     return null;
   }
-  const keyword = (event.segment.text ?? '').trim();
+  const keyword = (segment.text ?? '').trim();
   if (!keyword) {
     return null;
   }
@@ -97,12 +100,10 @@ function mapSegmentToKeywordDetection(
       : undefined;
   return {
     keyword,
-    tokens: Array.isArray(event.segment.tokens) ? event.segment.tokens : [],
-    timestamps: Array.isArray(event.segment.timestamps)
-      ? event.segment.timestamps
-      : [],
+    tokens: Array.isArray(segment.tokens) ? segment.tokens : [],
+    timestamps: Array.isArray(segment.timestamps) ? segment.timestamps : [],
     ...(startTime !== undefined ? { startTime } : {}),
-    segmentIndex: event.segment.segmentIndex,
+    segmentIndex: event.segmentIndex,
   };
 }
 
@@ -242,10 +243,19 @@ export async function createKeywordSpotting(
           textOutLiveBufferId,
           {
             onSegment: (event) => {
-              const mapped = mapSegmentToKeywordDetection(event);
-              if (mapped) {
-                onKeyword(mapped);
-              }
+              readLiveTextSegment(event, {
+                includeTokens: true,
+                includeTimestamps: true,
+                includeMeta: true,
+              })
+                .then((segment) => {
+                  if (!segment) return;
+                  const mapped = mapSegmentToKeywordDetection(event, segment);
+                  if (mapped) {
+                    onKeyword(mapped);
+                  }
+                })
+                .catch(() => undefined);
             },
           }
         );

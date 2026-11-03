@@ -52,10 +52,12 @@ jest.mock('../../audiobuffer', () => ({
 }));
 
 const mockSubscribeLiveTextBufferEvents = jest.fn();
+const mockReadLiveTextSegment = jest.fn();
 jest.mock('../../textbuffer', () => ({
   resolvePipelineTextBufferId: jest.fn((value: unknown) => String(value)),
   subscribeLiveTextBufferEvents: (...args: unknown[]) =>
     mockSubscribeLiveTextBufferEvents(...args),
+  readLiveTextSegment: (...args: unknown[]) => mockReadLiveTextSegment(...args),
 }));
 
 const mockAttachSegmentationEngine = jest.fn();
@@ -174,6 +176,19 @@ describe('audio tagging live overload', () => {
         return jest.fn();
       }
     );
+    mockReadLiveTextSegment.mockResolvedValue({
+      text: 'Speech',
+      source: 'unknown',
+      segmentIndex: 0,
+      timestamps: [0, 2],
+      meta: {
+        durationMs: 2000,
+        events: [
+          { name: 'Speech', index: 0, prob: 0.9 },
+          { name: 'Music', index: 1, prob: 0.2 },
+        ],
+      },
+    });
 
     const engine = await createEngine();
     const onSegment = jest.fn();
@@ -187,21 +202,16 @@ describe('audio tagging live overload', () => {
     });
 
     textOnSegment?.({
-      segment: {
-        domain: 'text',
-        segmentIndex: 0,
-        text: 'Speech',
-        timestamps: [0, 2],
-        meta: {
-          durationMs: 2000,
-          events: [
-            { name: 'Speech', index: 0, prob: 0.9 },
-            { name: 'Music', index: 1, prob: 0.2 },
-          ],
-        },
-      },
+      liveBufferId: LIVE_TEXT,
+      segmentIndex: 0,
+      totalSegments: 1,
+      utf16Length: 6,
+      source: 'unknown',
     });
+    await Promise.resolve();
+    await Promise.resolve();
 
+    expect(mockReadLiveTextSegment).toHaveBeenCalled();
     expect(onSegment).toHaveBeenCalledTimes(1);
     expect(onSegment).toHaveBeenCalledWith({
       segmentIndex: 0,

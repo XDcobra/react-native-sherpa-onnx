@@ -28,9 +28,10 @@ The partial text is a **mutable string** that represents the current unstable hy
 ┌─────────────────────────────────────────────┐
 │              Partial Window                  │
 │                                              │
-│  partialText: string                         │
+│  currentText window (C SoT)                  │
 │  revision: number (monotonic)                │
 │  totalCharsWritten: number                   │
+│  JS events: notify-only (utf16Length/rev)    │
 │                                              │
 │  Operations:                                 │
 │    SET: replace entire partial               │

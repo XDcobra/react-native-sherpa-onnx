@@ -186,7 +186,7 @@ extern "C" void txt_set_partial_event_module(SherpaOnnx *module) {
 static void txt_ios_partial_emit(
     const std::string &bufferId,
     const char *source,
-    const std::string &partialText,
+    int utf16Length,
     int64_t revisionValue,
     int64_t partialEventMinIntervalMs
 ) {
@@ -206,12 +206,11 @@ static void txt_ios_partial_emit(
     if (bridge == nil) return;
     NSString *bid = [NSString stringWithUTF8String:bufferId.c_str()];
     NSString *src = source ? [NSString stringWithUTF8String:source] : @"unknown";
-    NSString *partial = [NSString stringWithUTF8String:partialText.c_str()] ?: @"";
     dispatch_async(dispatch_get_main_queue(), ^{
         [bridge sendEventWithName:@"pipelineLiveTextPartial" body:@{
             @"liveBufferId": bid ?: @"",
             @"source": src ?: @"unknown",
-            @"partialText": partial,
+            @"utf16Length": @(utf16Length),
             @"revision": @(revisionValue),
         }];
     });
@@ -226,17 +225,6 @@ static std::string txt_bridge_generate_id(const char *prefix) {
     return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
 }
 
-static NSString *txt_truncate_event_text(NSString *text, BOOL *truncated) {
-    static const NSUInteger kTxtMaxEventTextChars = 4096;
-    if (truncated) *truncated = NO;
-    if (text == nil) return @"";
-    if (text.length <= kTxtMaxEventTextChars) return text;
-
-    if (truncated) *truncated = YES;
-    NSRange safeRange = [text rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, kTxtMaxEventTextChars)];
-    return [text substringWithRange:safeRange];
-}
-
 static void txt_emit_live_text_segment_event(
     SherpaOnnx *module,
     NSString *liveBufferId,
@@ -248,37 +236,9 @@ static void txt_emit_live_text_segment_event(
     NSMutableDictionary *body = [NSMutableDictionary dictionary];
     body[@"liveBufferId"] = liveBufferId ?: @"";
     body[@"totalSegments"] = @(totalSegments);
-    NSString *fullText = [NSString stringWithUTF8String:segment.text.c_str()] ?: @"";
-    BOOL textTruncated = NO;
-    body[@"text"] = txt_truncate_event_text(fullText, &textTruncated);
-    if (textTruncated) {
-        body[@"textTruncated"] = @YES;
-    }
     body[@"source"] = [NSString stringWithUTF8String:segment.source.c_str()] ?: @"unknown";
     body[@"segmentIndex"] = @(segment.segmentIndex);
-
-    if (!segment.tokens.empty()) {
-        NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:segment.tokens.size()];
-        for (const auto &token : segment.tokens) {
-            [tokens addObject:[NSString stringWithUTF8String:token.c_str()] ?: @""];
-        }
-        body[@"tokens"] = tokens;
-    }
-
-    if (!segment.timestamps.empty()) {
-        NSMutableArray *timestamps = [NSMutableArray arrayWithCapacity:segment.timestamps.size()];
-        for (float ts : segment.timestamps) {
-            [timestamps addObject:@(ts)];
-        }
-        body[@"timestamps"] = timestamps;
-    }
-
-    if (!txtMetaDictFromJson(segment.metaJson)Json.empty()) {
-        NSDictionary *metaDict = txtMetaDictFromJson(txtMetaDictFromJson(segment.metaJson)Json);
-        if (metaDict != nil) {
-            body[@"meta"] = metaDict;
-        }
-    }
+    body[@"utf16Length"] = @(txt_utf16_length(segment.text));
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [module sendEventWithName:@"pipelineLiveTextSegmentAppended" body:body];

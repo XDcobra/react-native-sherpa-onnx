@@ -32,6 +32,10 @@ class LiveTextEntry(
   val currentText: String
     get() = TextBufferNative.nativeSnapshotText(bufferId) ?: ""
 
+  /** UTF-16 length of the current partial window (no full-string materialize). */
+  val partialUtf16Length: Int
+    get() = TextBufferNative.nativeLivePartialUtf16Length(bufferId).coerceAtLeast(0)
+
   val totalCharsWritten: Long
     get() = TextBufferNative.nativeLiveTotalChars(bufferId).coerceAtLeast(0)
 

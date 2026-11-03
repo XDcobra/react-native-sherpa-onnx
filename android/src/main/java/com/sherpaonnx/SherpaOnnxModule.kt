@@ -294,15 +294,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
   private val liveTextPartialLastEmitAtMs = ConcurrentHashMap<String, Long>()
-  private val maxEventTextChars = 4096
-
-  private fun truncateSegmentEventText(text: String): Pair<String, Boolean> {
-    if (text.length <= maxEventTextChars) {
-      return Pair(text, false)
-    }
-    return Pair(text.substring(0, maxEventTextChars), true)
-  }
-
   private fun maybeEmitLiveTextPartial(
     entry: com.sherpaonnx.text.pipeline.LiveTextEntry,
     source: String,
@@ -323,7 +314,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val payload = Arguments.createMap()
       payload.putString("liveBufferId", entry.bufferId)
       payload.putString("source", source)
-      payload.putString("partialText", entry.currentText)
+      payload.putInt("utf16Length", entry.partialUtf16Length)
       payload.putInt("revision", entry.revision)
       eventEmitter.emit("pipelineLiveTextPartial", payload)
     } catch (_: Exception) {
@@ -336,22 +327,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     segment: com.sherpaonnx.text.pipeline.TextSegment,
     totalSegments: Int,
   ) {
-    // Snapshot before main-looper emit — do not retain JNI-backed segment fields
-    // across the hop into the JS event payload.
-    val eventTextPair = truncateSegmentEventText(segment.text)
-    val snapshotText = eventTextPair.first
-    val textTruncated = eventTextPair.second
+    // Notify-only: pull text/meta via getLiveTextBufferSegments.
     val snapshotSource = segment.source
     val snapshotIndex = segment.segmentIndex
-    val snapshotTokens = segment.tokens.map { it.orEmpty() }.toTypedArray()
-    val snapshotTimestamps = segment.timestamps.copyOf()
-    val snapshotMeta: Map<String, Any?>? = segment.meta?.mapValues { (_, v) ->
-      when (v) {
-        is Long -> v.toDouble()
-        is Float -> v.toDouble()
-        else -> v
-      }
-    }
+    val utf16Length = segment.text.length
 
     val emit = Runnable {
       try {
@@ -360,30 +339,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val payload = Arguments.createMap().apply {
           putString("liveBufferId", liveBufferId)
           putInt("totalSegments", totalSegments)
-          putString("text", snapshotText)
-          if (textTruncated) {
-            putBoolean("textTruncated", true)
-          }
           putString("source", snapshotSource)
           putInt("segmentIndex", snapshotIndex)
-
-          if (snapshotTokens.isNotEmpty()) {
-            val tokenArray = Arguments.createArray()
-            snapshotTokens.forEach { tokenArray.pushString(it) }
-            putArray("tokens", tokenArray)
-          }
-
-          if (snapshotTimestamps.isNotEmpty()) {
-            val tsArray = Arguments.createArray()
-            snapshotTimestamps.forEach { tsArray.pushDouble(it.toDouble()) }
-            putArray("timestamps", tsArray)
-          }
-
-          snapshotMeta?.let { rawMeta ->
-            com.sherpaonnx.text.pipeline.LiveTextJsonMeta.packMetaMap(rawMeta)?.let { metaMap ->
-              putMap("meta", metaMap)
-            }
-          }
+          putInt("utf16Length", utf16Length)
         }
         eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
       } catch (e: Exception) {

@@ -44,10 +44,10 @@ TXT_WEAK_ATTR void seg_engine_on_buffer_finalized(const std::string & /*bufferId
 TXT_WEAK_ATTR void seg_engine_on_buffer_released(const std::string & /*bufferId*/) {}
 
 void txt_dispatch_pipeline_live_text_partial(const std::string &bufferId, const char *source,
-                                             const std::string &partialText, int64_t revisionValue,
+                                             int utf16Length, int64_t revisionValue,
                                              int64_t partialEventMinIntervalMs) {
   if (g_txt_partial_emit) {
-    g_txt_partial_emit(bufferId, source, partialText, revisionValue, partialEventMinIntervalMs);
+    g_txt_partial_emit(bufferId, source, utf16Length, revisionValue, partialEventMinIntervalMs);
   }
 }
 
@@ -155,6 +155,15 @@ bool txt_live_snapshot_text(const std::shared_ptr<TxtLiveEntry> &entry, std::str
   } catch (...) {
     if (error) *error = "Unknown live text snapshotText error";
     return false;
+  }
+}
+
+int txt_live_partial_utf16_length(const std::shared_ptr<TxtLiveEntry> &entry) {
+  if (!entry) return -1;
+  try {
+    return entry->partialUtf16Length();
+  } catch (...) {
+    return -1;
   }
 }
 

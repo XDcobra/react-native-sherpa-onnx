@@ -226,6 +226,14 @@ Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeLiveRevision(JNIEnv *en
 }
 
 JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeLivePartialUtf16Length(JNIEnv *env,
+                                                                                jclass,
+                                                                                jstring liveId) {
+  auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
+  return txt_live_partial_utf16_length(live);
+}
+
+JNIEXPORT jint JNICALL
 Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeCreateSegmentCursor(JNIEnv *env, jclass,
                                                                              jstring liveId) {
   auto live = txt_get_live_entry(jstringToUtf8(env, liveId));

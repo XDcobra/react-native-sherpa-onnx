@@ -16,19 +16,20 @@ import {
   detachSegmentationEngine,
   getSegmentationEngineInfo,
 } from '../segment';
-import type { TextSegment, Segment } from '../segment/segment';
 import { resolveLiveSegmentBufferId } from '../segmentbuffer';
 import type {
   LiveSegmentBufferIdSource,
   LiveSegmentBufferRef,
 } from '../segmentbuffer/types';
 import {
+  readLiveTextSegment,
   resolvePipelineTextBufferId,
   subscribeLiveTextBufferEvents,
 } from '../textbuffer';
 import type {
   LiveTextBufferIdSource,
   LiveTextBufferRef,
+  LiveTextSegment,
   PipelineTextBufferIdSource,
 } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
@@ -189,10 +190,8 @@ export function assertAudioTaggingLiveSpanPolicy(
 }
 
 function mapTextSegmentToLiveEvent(
-  segment: Segment
+  textSeg: LiveTextSegment
 ): AudioTaggingLiveSegmentEvent | null {
-  if (segment.domain !== 'text') return null;
-  const textSeg = segment as TextSegment;
   const primaryName =
     typeof textSeg.text === 'string' ? textSeg.text.trim() : '';
   if (!primaryName) return null;
@@ -254,9 +253,17 @@ function createAudioTaggingPipelineHandle(
   if (onSegment) {
     unsubEvents = subscribeLiveTextBufferEvents(textOut, {
       onSegment: (event) => {
-        const mapped = mapTextSegmentToLiveEvent(event.segment);
-        if (!mapped) return;
-        onSegment(mapped);
+        readLiveTextSegment(event, {
+          includeTimestamps: true,
+          includeMeta: true,
+        })
+          .then((segment) => {
+            if (!segment) return;
+            const mapped = mapTextSegmentToLiveEvent(segment);
+            if (!mapped) return;
+            onSegment(mapped);
+          })
+          .catch(() => undefined);
       },
     });
   }

@@ -405,6 +405,47 @@ TEST_F(TextRegistryFixture, InvalidId_FailsCleanly) {
   EXPECT_FALSE(txt_read_offline_text("txt_off_missing", &text, &err));
 }
 
+TEST_F(TextRegistryFixture, PartialEmit_PassesUtf16LengthNotFullString) {
+  struct Capture {
+    std::string bufferId;
+    std::string source;
+    int utf16Length = -1;
+    int64_t revision = -1;
+    int calls = 0;
+  };
+  static Capture cap;
+  cap = Capture{};
+
+  txt_set_partial_emit_fn([](const std::string &bufferId, const char *source, int utf16Length,
+                             int64_t revision, int64_t /*minIntervalMs*/) {
+    cap.bufferId = bufferId;
+    cap.source = source ? source : "";
+    cap.utf16Length = utf16Length;
+    cap.revision = revision;
+    cap.calls += 1;
+  });
+
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_live(1024, 100, true, 0, "off", "", true, &id, &err)) << err;
+  auto live = txt_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+  ASSERT_TRUE(txt_live_write_partial(live, "hello", &err)) << err;
+
+  EXPECT_EQ(cap.calls, 1);
+  EXPECT_EQ(cap.bufferId, id);
+  EXPECT_EQ(cap.source, "replace");
+  EXPECT_EQ(cap.utf16Length, 5);
+  EXPECT_GE(cap.revision, 1);
+
+  ASSERT_TRUE(txt_live_append_text(live, "!", &err)) << err;
+  EXPECT_EQ(cap.calls, 2);
+  EXPECT_EQ(cap.source, "append");
+  EXPECT_EQ(cap.utf16Length, 6);
+
+  txt_set_partial_emit_fn(nullptr);
+}
+
 TEST_F(TextRegistryFixture, OptInSpool_SkippedWithoutEnv) {
   const char *flag = std::getenv("SHERPA_HOST_TEXT_SPOOL");
   if (flag == nullptr || std::string(flag) != "1") {

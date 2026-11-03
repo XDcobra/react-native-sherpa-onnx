@@ -28,8 +28,6 @@ internal class SherpaOnnxOnlineSttHelper(
   private val context: ReactApplicationContext,
   private val logTag: String
 ) {
-  private val maxEventTextChars = 4096
-
   private data class OnlineSttInstance(
     val sampleRate: Int,
     var activePipelineId: String? = null,
@@ -41,59 +39,18 @@ internal class SherpaOnnxOnlineSttHelper(
 
   private val pathResolver = SttPathResolver(context)
 
-  private fun truncateSegmentEventText(text: String): Pair<String, Boolean> {
-    if (text.length <= maxEventTextChars) {
-      return Pair(text, false)
-    }
-    return Pair(text.substring(0, maxEventTextChars), true)
-  }
-
   private fun emitLiveTextSegmentEvent(
     liveBufferId: String,
     segment: TextSegment,
     totalSegments: Int,
   ) {
     try {
-      val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
       val payload = Arguments.createMap().apply {
         putString("liveBufferId", liveBufferId)
         putInt("totalSegments", totalSegments)
-        putString("text", eventText)
-        if (textTruncated) {
-          putBoolean("textTruncated", true)
-        }
         putString("source", segment.source)
         putInt("segmentIndex", segment.segmentIndex)
-
-        if (segment.tokens.isNotEmpty()) {
-          val tokenArray = Arguments.createArray()
-          segment.tokens.forEach { tokenArray.pushString(it) }
-          putArray("tokens", tokenArray)
-        }
-
-        if (segment.timestamps.isNotEmpty()) {
-          val tsArray = Arguments.createArray()
-          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
-          putArray("timestamps", tsArray)
-        }
-
-        segment.meta?.let { rawMeta ->
-          val metaMap = Arguments.createMap()
-          for ((key, value) in rawMeta) {
-            when (value) {
-              null -> metaMap.putNull(key)
-              is Boolean -> metaMap.putBoolean(key, value)
-              is Int -> metaMap.putInt(key, value)
-              is Long -> metaMap.putDouble(key, value.toDouble())
-              is Float -> metaMap.putDouble(key, value.toDouble())
-              is Double -> metaMap.putDouble(key, value)
-              is Number -> metaMap.putDouble(key, value.toDouble())
-              is String -> metaMap.putString(key, value)
-              else -> Unit
-            }
-          }
-          putMap("meta", metaMap)
-        }
+        putInt("utf16Length", segment.text.length)
       }
 
       context

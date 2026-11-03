@@ -36,6 +36,8 @@ bool txt_live_commit_segment(const std::shared_ptr<TxtLiveEntry> &entry, const s
                              const std::string &metaJson = {}, std::string *error = nullptr);
 bool txt_live_snapshot_text(const std::shared_ptr<TxtLiveEntry> &entry, std::string *textOut,
                             std::string *error = nullptr);
+/** UTF-16 length of the current live partial window (no string materialize). */
+int txt_live_partial_utf16_length(const std::shared_ptr<TxtLiveEntry> &entry);
 
 bool txt_read_offline_text(const std::string &bufferId, std::string *text,
                            std::string *error = nullptr);
@@ -79,6 +81,5 @@ void txt_release_all_entries();
 
 /** Optional: bridge installs callback for pipelineLiveTextPartial (iOS/Android). */
 using TxtPartialEmitFn = void (*)(const std::string &bufferId, const char *source,
-                                  const std::string &partialText, int64_t revision,
-                                  int64_t minIntervalMs);
+                                  int utf16Length, int64_t revision, int64_t minIntervalMs);
 void txt_set_partial_emit_fn(TxtPartialEmitFn fn);

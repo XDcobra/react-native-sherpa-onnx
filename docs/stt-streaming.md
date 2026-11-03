@@ -32,6 +32,7 @@ import {
   getLiveTextBufferPartialSlice,
   getLiveTextBufferSegmentCount,
   getLiveTextBufferSegments,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
@@ -59,8 +60,9 @@ const audioIn = await createEmptyLiveAudioBuffer({
 const textOut = await createLiveTextBuffer({
   windowMaxChars: 65536,
   maxSegments: 2048,
-  onSegment: (e) => {
-    console.log(`[committed ${e.segment.segmentIndex}]`, e.segment.text);
+  onSegment: async (e) => {
+    const seg = await readLiveTextSegment(e);
+    console.log(`[committed ${e.segmentIndex}]`, seg?.text);
   },
 });
 
@@ -323,8 +325,9 @@ Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are
 
 ```ts
 const textOut = await createLiveTextBuffer({
-  onSegment: (e) => {
-    console.log(`[committed ${e.segment.segmentIndex}]`, e.segment.text);
+  onSegment: async (e) => {
+    const seg = await readLiveTextSegment(e);
+    console.log(`[committed ${e.segmentIndex}]`, seg?.text);
   },
 });
 ```

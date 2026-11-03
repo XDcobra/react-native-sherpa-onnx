@@ -16,19 +16,20 @@ import {
   detachSegmentationEngine,
   getSegmentationEngineInfo,
 } from '../segment';
-import type { TextSegment, Segment } from '../segment/segment';
 import { resolveLiveSegmentBufferId } from '../segmentbuffer';
 import type {
   LiveSegmentBufferIdSource,
   LiveSegmentBufferRef,
 } from '../segmentbuffer/types';
 import {
+  readLiveTextSegment,
   resolvePipelineTextBufferId,
   subscribeLiveTextBufferEvents,
 } from '../textbuffer';
 import type {
   LiveTextBufferIdSource,
   LiveTextBufferRef,
+  LiveTextSegment,
   PipelineTextBufferIdSource,
 } from '../textbuffer/types';
 import { LanguageIdErrorCode } from './types';
@@ -106,13 +107,18 @@ function assertLiveOptions(
 }
 
 function mapTextSegmentToLanguageIdEvent(
-  segment: Segment
+  textSeg: LiveTextSegment
 ): LanguageIdSegmentEvent | null {
-  if (segment.domain !== 'text') return null;
-  const textSeg = segment as TextSegment;
+  const metaLang =
+    textSeg.meta &&
+    typeof textSeg.meta === 'object' &&
+    typeof (textSeg.meta as Record<string, unknown>).__segmentLang === 'string'
+      ? (
+          (textSeg.meta as Record<string, unknown>).__segmentLang as string
+        ).trim()
+      : '';
   const lang =
-    (typeof textSeg.lang === 'string' && textSeg.lang.trim()) ||
-    (typeof textSeg.text === 'string' ? textSeg.text.trim() : '');
+    metaLang || (typeof textSeg.text === 'string' ? textSeg.text.trim() : '');
   if (!lang) return null;
 
   const timestamps = Array.isArray(textSeg.timestamps)
@@ -160,23 +166,31 @@ function createLanguageIdPipelineHandle(
   if (onSegment || onLanguageChanged) {
     unsubEvents = subscribeLiveTextBufferEvents(textOut, {
       onSegment: (event) => {
-        const mapped = mapTextSegmentToLanguageIdEvent(event.segment);
-        if (!mapped) return;
-        onSegment?.(mapped);
-        if (
-          onLanguageChanged &&
-          (previousLang === null || mapped.lang !== previousLang)
-        ) {
-          onLanguageChanged({
-            previousLang,
-            currentLang: mapped.lang,
-            timestamp: mapped.startTime,
-            segmentIndex: mapped.segmentIndex,
-          });
-          previousLang = mapped.lang;
-        } else if (previousLang === null) {
-          previousLang = mapped.lang;
-        }
+        readLiveTextSegment(event, {
+          includeTimestamps: true,
+          includeMeta: true,
+        })
+          .then((segment) => {
+            if (!segment) return;
+            const mapped = mapTextSegmentToLanguageIdEvent(segment);
+            if (!mapped) return;
+            onSegment?.(mapped);
+            if (
+              onLanguageChanged &&
+              (previousLang === null || mapped.lang !== previousLang)
+            ) {
+              onLanguageChanged({
+                previousLang,
+                currentLang: mapped.lang,
+                timestamp: mapped.startTime,
+                segmentIndex: mapped.segmentIndex,
+              });
+              previousLang = mapped.lang;
+            } else if (previousLang === null) {
+              previousLang = mapped.lang;
+            }
+          })
+          .catch(() => undefined);
       },
     });
   }
