@@ -102,6 +102,24 @@ bool txt_live_write_partial(const std::shared_ptr<TxtLiveEntry> &entry, const st
   }
 }
 
+bool txt_live_append_text(const std::shared_ptr<TxtLiveEntry> &entry, const std::string &text,
+                          std::string *error) {
+  if (!entry) {
+    if (error) *error = "Live text buffer not found";
+    return false;
+  }
+  try {
+    entry->appendText(text);
+    return true;
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return false;
+  } catch (...) {
+    if (error) *error = "Unknown live text appendText error";
+    return false;
+  }
+}
+
 bool txt_live_commit_segment(const std::shared_ptr<TxtLiveEntry> &entry, const std::string &text,
                              const std::vector<std::string> &tokens,
                              const std::vector<float> &timestamps, const std::string &source,
@@ -118,6 +136,24 @@ bool txt_live_commit_segment(const std::shared_ptr<TxtLiveEntry> &entry, const s
     return false;
   } catch (...) {
     if (error) *error = "Unknown live text commitSegment error";
+    return false;
+  }
+}
+
+bool txt_live_snapshot_text(const std::shared_ptr<TxtLiveEntry> &entry, std::string *textOut,
+                            std::string *error) {
+  if (!entry || !textOut) {
+    if (error) *error = "Live text buffer not found";
+    return false;
+  }
+  try {
+    *textOut = entry->snapshotText();
+    return true;
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return false;
+  } catch (...) {
+    if (error) *error = "Unknown live text snapshotText error";
     return false;
   }
 }

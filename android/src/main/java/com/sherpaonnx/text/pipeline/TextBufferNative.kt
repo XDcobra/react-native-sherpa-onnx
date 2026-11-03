@@ -29,13 +29,31 @@ internal object TextBufferNative {
 
   @JvmStatic external fun nativeWritePartial(liveId: String, text: String): Boolean
 
+  @JvmStatic external fun nativeAppendText(liveId: String, text: String): Boolean
+
   @JvmStatic
   external fun nativeCommitSegment(
     liveId: String,
     text: String,
+    tokens: Array<String>?,
+    timestamps: FloatArray?,
     source: String,
     metaJson: String?,
   ): Int
+
+  @JvmStatic external fun nativeSnapshotText(liveId: String): String?
+
+  @JvmStatic external fun nativeLiveRevision(liveId: String): Int
+
+  @JvmStatic external fun nativeCreateSegmentCursor(liveId: String): Int
+
+  @JvmStatic
+  external fun nativeDrainSegments(liveId: String, cursorId: Int, maxCount: Int): String?
+
+  @JvmStatic
+  external fun nativeGetSegments(liveId: String, startIndex: Int, maxCount: Int): String?
+
+  @JvmStatic external fun nativeReleaseSegmentCursor(liveId: String, cursorId: Int): Boolean
 
   @JvmStatic external fun nativeFinalizeLive(liveId: String): Boolean
   @JvmStatic external fun nativeRelease(bufferId: String): Boolean

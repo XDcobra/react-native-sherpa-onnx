@@ -5,14 +5,12 @@ import com.facebook.react.bridge.WritableMap
 import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Thin handle over shared C++ TxtLiveEntry for spool/window SoT.
- * Kotlin keeps segment log + listeners for existing pipeline workers (materialize path;
- * tracked in Post–Buffer-in-C backlog T1).
+ * Thin handle over shared C++ TxtLiveEntry (window / segment log / cursors in C).
+ * Kotlin keeps listener tokens + JS event fan-out only (Audio LiveEntry pattern).
  */
 class LiveTextEntry(
   val bufferId: String,
@@ -27,34 +25,26 @@ class LiveTextEntry(
 ) {
   enum class State { RECORDING, FINISHED }
 
-  private val stateRef = AtomicReference(State.RECORDING)
-  val state: State get() = stateRef.get()
+  val state: State
+    get() =
+      if (TextBufferNative.nativeLiveState(bufferId) == 1) State.FINISHED else State.RECORDING
 
-  @Volatile
-  var currentText: String = ""
-    private set
+  val currentText: String
+    get() = TextBufferNative.nativeSnapshotText(bufferId) ?: ""
 
-  private val totalChars = AtomicLong(0)
-  val totalCharsWritten: Long get() = totalChars.get()
+  val totalCharsWritten: Long
+    get() = TextBufferNative.nativeLiveTotalChars(bufferId).coerceAtLeast(0)
 
-  private val revisionCounter = AtomicInteger(0)
-  val revision: Int get() = revisionCounter.get()
+  val revision: Int
+    get() = TextBufferNative.nativeLiveRevision(bufferId).coerceAtLeast(0)
 
-  private val segments = ArrayDeque<TextSegment>()
-  private val segmentLock = Any()
-  private var evictedCount = 0L
+  val segmentCount: Int
+    get() = TextBufferNative.nativeLiveSegmentCount(bufferId).coerceAtLeast(0)
 
   private val appendListeners = CopyOnWriteArrayList<Pair<Int, () -> Unit>>()
   private val nextListenerToken = AtomicInteger(0)
   private val commitListeners = CopyOnWriteArrayList<Pair<Int, (TextSegment) -> Unit>>()
   private val nextCommitListenerToken = AtomicInteger(0)
-
-  private class SegmentCursor(val cursorId: Int, @Volatile var readPos: Int = 0)
-  private val cursors = HashMap<Int, SegmentCursor>()
-  private val nextCursorId = AtomicInteger(0)
-  private val cursorLock = Any()
-
-  val segmentCount: Int get() = synchronized(segmentLock) { segments.size }
 
   fun toWritableMap(): WritableMap {
     val map = Arguments.createMap()
@@ -77,10 +67,6 @@ class LiveTextEntry(
     if (!TextBufferNative.nativeWritePartial(bufferId, text)) {
       throw TextPipelineException(TextErrorCodes.INVALID_STATE, "writePartial failed for $bufferId")
     }
-    currentText =
-      if (text.length > windowMaxChars) text.takeLast(windowMaxChars) else text
-    totalChars.addAndGet(text.length.toLong())
-    revisionCounter.incrementAndGet()
     SegmentationEngineRegistry.onLiveTextWrite(bufferId)
     TextPipelineRegistry.notifyLivePartialWritten(this, "set")
     notifyAppendListeners()
@@ -88,14 +74,9 @@ class LiveTextEntry(
 
   fun appendText(text: String) {
     check(state == State.RECORDING) { "Live text buffer is finalized: $bufferId" }
-    val combined = currentText + text
-    if (!TextBufferNative.nativeWritePartial(bufferId, combined)) {
+    if (!TextBufferNative.nativeAppendText(bufferId, text)) {
       throw TextPipelineException(TextErrorCodes.INVALID_STATE, "appendText failed for $bufferId")
     }
-    currentText =
-      if (combined.length > windowMaxChars) combined.takeLast(windowMaxChars) else combined
-    totalChars.addAndGet(text.length.toLong())
-    revisionCounter.incrementAndGet()
     SegmentationEngineRegistry.onLiveTextWrite(bufferId)
     TextPipelineRegistry.notifyLivePartialWritten(this, "append")
     notifyAppendListeners()
@@ -110,40 +91,23 @@ class LiveTextEntry(
   ): Int {
     check(state == State.RECORDING) { "Live text buffer is finalized: $bufferId" }
     val metaJson = meta?.let { JSONObject(it).toString() }
-    val idx = TextBufferNative.nativeCommitSegment(bufferId, text, source, metaJson)
+    val idx =
+      TextBufferNative.nativeCommitSegment(bufferId, text, tokens, timestamps, source, metaJson)
     if (idx < 0) {
       throw TextPipelineException(TextErrorCodes.INVALID_STATE, "commitSegment failed for $bufferId")
     }
-    val segment: TextSegment
-    synchronized(segmentLock) {
-      segment =
-        TextSegment(
-          text = text,
-          tokens = tokens,
-          timestamps = timestamps,
-          source = source,
-          segmentIndex = (evictedCount + segments.size).toInt(),
-          meta = meta,
-        )
-      segments.addLast(segment)
-      while (segments.size > maxSegments) {
-        segments.removeFirst()
-        evictedCount++
-        synchronized(cursorLock) {
-          for (c in cursors.values) {
-            if (c.readPos > 0) c.readPos-- else c.readPos = 0
-          }
-        }
-      }
-      if (currentText.startsWith(text)) {
-        currentText = currentText.substring(text.length)
-      }
-      totalChars.addAndGet(text.length.toLong())
-      revisionCounter.incrementAndGet()
-    }
+    val segment =
+      TextSegment(
+        text = text,
+        tokens = tokens,
+        timestamps = timestamps,
+        source = source,
+        segmentIndex = idx,
+        meta = meta,
+      )
     notifyAppendListeners()
     notifyCommitListeners(segment)
-    return segment.segmentIndex
+    return idx
   }
 
   fun finalize_() {
@@ -151,7 +115,6 @@ class LiveTextEntry(
     if (!TextBufferNative.nativeFinalizeLive(bufferId)) {
       throw TextPipelineException(TextErrorCodes.ALREADY_FINALIZED, "finalize failed for $bufferId")
     }
-    stateRef.set(State.FINISHED)
     notifyAppendListeners()
     SegmentationEngineRegistry.onBufferFinalized(bufferId)
   }
@@ -159,45 +122,36 @@ class LiveTextEntry(
   fun snapshotText(): String = currentText
 
   fun snapshotFullTextIfSpooled(): String {
-    // Prefer C spool replay when available.
     val snap = TextBufferNative.nativeLiveSnapshot(bufferId)
-    if (snap != null && snap.isNotEmpty()) return snap
-    synchronized(segmentLock) {
-      val committed = segments.joinToString("") { it.text }
-      return committed + currentText
-    }
+    if (snap != null) return snap
+    return currentText
   }
 
   fun getSegments(startIndex: Int, maxCount: Int): List<TextSegment> {
     if (startIndex < 0 || maxCount <= 0) return emptyList()
-    synchronized(segmentLock) {
-      if (startIndex >= segments.size) return emptyList()
-      val end = minOf(startIndex + maxCount, segments.size)
-      return segments.toList().subList(startIndex, end)
-    }
+    val json = TextBufferNative.nativeGetSegments(bufferId, startIndex, maxCount) ?: return emptyList()
+    return parseSegmentsJson(json)
   }
 
   fun createSegmentCursor(): Int {
-    val id = nextCursorId.getAndIncrement()
-    synchronized(cursorLock) { cursors[id] = SegmentCursor(id) }
+    val id = TextBufferNative.nativeCreateSegmentCursor(bufferId)
+    if (id < 0) {
+      throw TextPipelineException(
+        TextErrorCodes.INVALID_STATE,
+        "createSegmentCursor failed for $bufferId",
+      )
+    }
     return id
   }
 
   fun drainSegments(cursorId: Int, maxCount: Int): List<TextSegment> {
-    synchronized(cursorLock) {
-      val cursor = cursors[cursorId] ?: return emptyList()
-      synchronized(segmentLock) {
-        if (cursor.readPos >= segments.size) return emptyList()
-        val end = minOf(cursor.readPos + maxCount, segments.size)
-        val out = segments.toList().subList(cursor.readPos, end)
-        cursor.readPos = end
-        return out
-      }
-    }
+    val json =
+      TextBufferNative.nativeDrainSegments(bufferId, cursorId, maxCount) ?: return emptyList()
+    return parseSegmentsJson(json)
   }
 
   fun releaseSegmentCursor(cursorId: Int) {
-    synchronized(cursorLock) { cursors.remove(cursorId) }
+    TextBufferNative.nativeReleaseSegmentCursor(bufferId, cursorId)
   }
 
   fun addAppendListener(listener: () -> Unit): Int {
@@ -243,14 +197,83 @@ class LiveTextEntry(
     SegmentationEngineRegistry.onBufferReleased(bufferId)
     appendListeners.clear()
     commitListeners.clear()
-    synchronized(cursorLock) { cursors.clear() }
-    synchronized(segmentLock) { segments.clear() }
   }
 
   companion object {
     fun wrap(bufferId: String): LiveTextEntry? {
       if (!TextBufferNative.nativeIsLive(bufferId)) return null
       return LiveTextEntry(bufferId = bufferId)
+    }
+
+    internal fun parseSegmentsJson(json: String): List<TextSegment> {
+      if (json.isEmpty() || json == "[]") return emptyList()
+      val arr = JSONArray(json)
+      val out = ArrayList<TextSegment>(arr.length())
+      for (i in 0 until arr.length()) {
+        val obj = arr.getJSONObject(i)
+        val tokensArr = obj.optJSONArray("tokens")
+        val tokens =
+          if (tokensArr != null) {
+            Array(tokensArr.length()) { t -> tokensArr.optString(t, "") }
+          } else {
+            emptyArray()
+          }
+        val tsArr = obj.optJSONArray("timestamps")
+        val timestamps =
+          if (tsArr != null) {
+            FloatArray(tsArr.length()) { t -> tsArr.optDouble(t, 0.0).toFloat() }
+          } else {
+            FloatArray(0)
+          }
+        val metaJson = obj.optString("metaJson", "")
+        val meta: Map<String, Any?>? =
+          if (metaJson.isNotEmpty()) {
+            try {
+              jsonObjectToMap(JSONObject(metaJson))
+            } catch (_: Exception) {
+              null
+            }
+          } else {
+            null
+          }
+        out.add(
+          TextSegment(
+            text = obj.optString("text", ""),
+            tokens = tokens,
+            timestamps = timestamps,
+            source = obj.optString("source", "unknown"),
+            segmentIndex = obj.optInt("segmentIndex", i),
+            meta = meta,
+          ),
+        )
+      }
+      return out
+    }
+
+    private fun jsonObjectToMap(obj: JSONObject): Map<String, Any?> {
+      val map = LinkedHashMap<String, Any?>()
+      val keys = obj.keys()
+      while (keys.hasNext()) {
+        val key = keys.next()
+        map[key] = jsonValueToAny(obj.get(key))
+      }
+      return map
+    }
+
+    private fun jsonValueToAny(value: Any?): Any? {
+      return when (value) {
+        null, JSONObject.NULL -> null
+        is JSONObject -> jsonObjectToMap(value)
+        is JSONArray -> {
+          val list = ArrayList<Any?>(value.length())
+          for (i in 0 until value.length()) {
+            list.add(jsonValueToAny(value.get(i)))
+          }
+          list
+        }
+        is Number, is Boolean, is String -> value
+        else -> value.toString()
+      }
     }
   }
 }

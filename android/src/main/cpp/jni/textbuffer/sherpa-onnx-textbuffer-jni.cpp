@@ -2,6 +2,8 @@
 
 #include "TextRegistry.h"
 
+#include <cstdio>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -16,6 +18,99 @@ std::string jstringToUtf8(JNIEnv *env, jstring s) {
 }
 
 jstring utf8ToJstring(JNIEnv *env, const std::string &s) { return env->NewStringUTF(s.c_str()); }
+
+void appendJsonEscaped(std::ostringstream &out, const std::string &s) {
+  out << '"';
+  for (unsigned char c : s) {
+    switch (c) {
+      case '"':
+        out << "\\\"";
+        break;
+      case '\\':
+        out << "\\\\";
+        break;
+      case '\b':
+        out << "\\b";
+        break;
+      case '\f':
+        out << "\\f";
+        break;
+      case '\n':
+        out << "\\n";
+        break;
+      case '\r':
+        out << "\\r";
+        break;
+      case '\t':
+        out << "\\t";
+        break;
+      default:
+        if (c < 0x20) {
+          char buf[8];
+          std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+          out << buf;
+        } else {
+          out << static_cast<char>(c);
+        }
+        break;
+    }
+  }
+  out << '"';
+}
+
+std::string segmentsToJson(const std::vector<TextSegment> &segments) {
+  std::ostringstream out;
+  out << '[';
+  for (size_t i = 0; i < segments.size(); ++i) {
+    if (i > 0) out << ',';
+    const TextSegment &seg = segments[i];
+    out << '{';
+    out << "\"text\":";
+    appendJsonEscaped(out, seg.text);
+    out << ",\"source\":";
+    appendJsonEscaped(out, seg.source);
+    out << ",\"segmentIndex\":" << seg.segmentIndex;
+    out << ",\"metaJson\":";
+    appendJsonEscaped(out, seg.metaJson);
+    out << ",\"tokens\":[";
+    for (size_t t = 0; t < seg.tokens.size(); ++t) {
+      if (t > 0) out << ',';
+      appendJsonEscaped(out, seg.tokens[t]);
+    }
+    out << "],\"timestamps\":[";
+    for (size_t t = 0; t < seg.timestamps.size(); ++t) {
+      if (t > 0) out << ',';
+      out << seg.timestamps[t];
+    }
+    out << "]}";
+  }
+  out << ']';
+  return out.str();
+}
+
+std::vector<std::string> jstringArrayToUtf8(JNIEnv *env, jobjectArray arr) {
+  std::vector<std::string> out;
+  if (!arr) return out;
+  const jsize n = env->GetArrayLength(arr);
+  out.reserve((size_t)n);
+  for (jsize i = 0; i < n; ++i) {
+    auto js = (jstring)env->GetObjectArrayElement(arr, i);
+    out.push_back(jstringToUtf8(env, js));
+    if (js) env->DeleteLocalRef(js);
+  }
+  return out;
+}
+
+std::vector<float> jfloatArrayToVector(JNIEnv *env, jfloatArray arr) {
+  std::vector<float> out;
+  if (!arr) return out;
+  const jsize n = env->GetArrayLength(arr);
+  out.resize((size_t)n);
+  if (n > 0) {
+    env->GetFloatArrayRegion(arr, 0, n, out.data());
+  }
+  return out;
+}
 
 }  // namespace
 
@@ -67,17 +162,83 @@ Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeWritePartial(JNIEnv *en
   return txt_live_write_partial(live, jstringToUtf8(env, text), &err) ? JNI_TRUE : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeAppendText(JNIEnv *env, jclass,
+                                                                    jstring liveId, jstring text) {
+  auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
+  std::string err;
+  return txt_live_append_text(live, jstringToUtf8(env, text), &err) ? JNI_TRUE : JNI_FALSE;
+}
+
 JNIEXPORT jint JNICALL
 Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeCommitSegment(
-    JNIEnv *env, jclass, jstring liveId, jstring text, jstring source, jstring metaJson) {
+    JNIEnv *env, jclass, jstring liveId, jstring text, jobjectArray tokens, jfloatArray timestamps,
+    jstring source, jstring metaJson) {
   auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
   if (!live) return -1;
   try {
-    return live->commitSegment(jstringToUtf8(env, text), {}, {}, jstringToUtf8(env, source),
+    return live->commitSegment(jstringToUtf8(env, text), jstringArrayToUtf8(env, tokens),
+                               jfloatArrayToVector(env, timestamps), jstringToUtf8(env, source),
                                jstringToUtf8(env, metaJson));
   } catch (...) {
     return -1;
   }
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeSnapshotText(JNIEnv *env, jclass,
+                                                                      jstring liveId) {
+  auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
+  std::string text, err;
+  if (!txt_live_snapshot_text(live, &text, &err)) return nullptr;
+  return utf8ToJstring(env, text);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeLiveRevision(JNIEnv *env, jclass,
+                                                                      jstring liveId) {
+  auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
+  return live ? live->revision.load() : -1;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeCreateSegmentCursor(JNIEnv *env, jclass,
+                                                                             jstring liveId) {
+  auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
+  if (!live) return -1;
+  return live->createSegmentCursor();
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeDrainSegments(JNIEnv *env, jclass,
+                                                                       jstring liveId,
+                                                                       jint cursorId,
+                                                                       jint maxCount) {
+  auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
+  if (!live) return nullptr;
+  auto segs = live->drainSegments(cursorId, maxCount);
+  return utf8ToJstring(env, segmentsToJson(segs));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeGetSegments(JNIEnv *env, jclass,
+                                                                     jstring liveId,
+                                                                     jint startIndex,
+                                                                     jint maxCount) {
+  auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
+  if (!live) return nullptr;
+  auto segs = live->getSegments(startIndex, maxCount);
+  return utf8ToJstring(env, segmentsToJson(segs));
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeReleaseSegmentCursor(JNIEnv *env, jclass,
+                                                                              jstring liveId,
+                                                                              jint cursorId) {
+  auto live = txt_get_live_entry(jstringToUtf8(env, liveId));
+  if (!live) return JNI_FALSE;
+  live->releaseSegmentCursor(cursorId);
+  return JNI_TRUE;
 }
 
 JNIEXPORT jboolean JNICALL
