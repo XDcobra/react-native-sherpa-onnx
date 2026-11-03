@@ -318,7 +318,7 @@ build_abi "x86_64"      "build-android-x86-64.sh"      "build-android-x86-64"
 
 # Build sherpa-onnx API (classes.jar). Default: Kotlin API (data-class style for Kotlin/RN apps).
 # Optional: --java (Java Builder API only) or --both (Kotlin --> classes.jar, Java --> classes-java.jar for Maven classifier).
-# Maven: default artifact = Kotlin; use classifier "java" for Java API: com.xdcobra.sherpa:sherpa-onnx:VERSION:java@aar
+# Maven (from 2.0.1-2): default = native-only; classifier "kotlin" / "java" for fat API AARs.
 JAVA_API_DIR="$SHERPA_SRC/sherpa-onnx/java-api"
 KOTLIN_API_BUILD_DIR="$SCRIPT_DIR/kotlin-api-build"
 OUT_JAVA_DIR="$OUTPUT_BASE/java"

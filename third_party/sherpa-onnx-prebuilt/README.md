@@ -42,18 +42,21 @@ If `QNN_SDK_ROOT` is not set or invalid, the script exits with a clear error bef
 
 Prefer letting **Gradle** resolve prebuilts (`android/prebuilt-download.gradle`: local `jniLibs`, Maven `com.xdcobra.sherpa:sherpa-onnx`, or GitHub `ANDROID_RELEASE_TAG`). If you need a fully local layout after `./build_sherpa_onnx.sh`, copy `android/<abi>/lib/*.so` into `android/src/main/jniLibs/<abi>/` in the RN package (same paths the Gradle task would populate).
 
-## API variant: Kotlin (default) vs Java
+## API variant: Kotlin vs Java (for Maven classifiers)
 
-By default the script builds the **Kotlin API** (data classes, `WaveReader.readWave()`, etc.) so that Kotlin and React Native apps can use the same API style as the official sherpa-onnx AAR. You can switch to the Java API (Builder pattern) or build both:
+The build script can produce JVM API jars used when packaging **fat** AARs. React Native consumes the **native-only** Maven default and does not need these jars.
 
-- `./build_sherpa_onnx.sh` — Kotlin API → `android/java/classes.jar` (default).
+- `./build_sherpa_onnx.sh` — Kotlin API → `android/java/classes.jar`.
 - `./build_sherpa_onnx.sh --java` — Java API only → `android/java/classes.jar`.
-- `./build_sherpa_onnx.sh --both` — Kotlin → `classes.jar`, Java → `classes-java.jar` (for publishing a second Maven artifact with classifier `java`).
+- `./build_sherpa_onnx.sh --both` — Kotlin → `classes.jar`, Java → `classes-java.jar` (release workflow uses `--both`).
 
-**Publishing Kotlin and Java to Maven:** Use the same version and distinguish by **classifier**. Default AAR = Kotlin API. To publish a Java-only AAR, build with `--java` and publish that AAR with classifier `java`, e.g. `com.xdcobra.sherpa:sherpa-onnx:VERSION:java@aar`. Consumers then choose:
+**Maven layout (from 2.0.1-2):** same version; distinguish by classifier via `create_sherpa_onnx_aar.sh` modes `native` | `kotlin` | `java`:
 
-- Kotlin/default: `com.xdcobra.sherpa:sherpa-onnx:VERSION` (or `@aar`).
-- Java: `com.xdcobra.sherpa:sherpa-onnx:VERSION:java@aar`.
+- Native / default: `com.xdcobra.sherpa:sherpa-onnx:VERSION@aar` (jni + c-api; no Kotlin/Java API).
+- Kotlin: `com.xdcobra.sherpa:sherpa-onnx:VERSION:kotlin@aar` (fat AAR).
+- Java: `com.xdcobra.sherpa:sherpa-onnx:VERSION:java@aar` (fat AAR).
+
+**Breaking:** before 2.0.1-2 the default AAR was the Kotlin API. Kotlin consumers must switch to `:kotlin@aar`.
 
 ## Output layout
 

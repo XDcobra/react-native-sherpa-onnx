@@ -38,7 +38,6 @@ def requiredOnnxruntimeJniSoFiles = ['libonnxruntime4j_jni.so']
 def requiredOnnxruntimeBundleSoFiles = ['libonnxruntime4j_jni.so', 'libonnxruntime.so']
 
 def jniLibsDir = file("${project.projectDir}/src/main/jniLibs")
-def sherpaOnnxClassesDir = file("${project.buildDir}/sherpa-onnx-classes")
 def onnxruntimeClassesDir = file("${project.buildDir}/onnxruntime-classes")
 
 def thirdPartyDir = file("${project.projectDir.parent}/third_party")
@@ -1292,18 +1291,9 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
         from fileTree(sherpaExtractDir) { include 'c-api/**' }
         into includeSherpaDir
       }
-      // Side-effect: extract classes.jar if present in the ZIP (saves extractSherpaOnnxClasses a trip)
-      def sherpaJavaJar = new File(sherpaExtractDir, "java/classes.jar")
-      if (sherpaJavaJar.exists()) {
-        sherpaOnnxClassesDir.mkdirs()
-        copy { from sherpaJavaJar; into sherpaOnnxClassesDir }
-      }
       downloadDir.mkdirs()
       sherpaVersionFile.text = currentSherpaVersion
       logPrebuilt("sherpa-onnx", "native", "GITHUB_RELEASE", tag)
-      if (sherpaJavaJar.exists()) {
-        logPrebuilt("sherpa-onnx", "classes", "GITHUB_RELEASE", "classes.jar")
-      }
     }
     println ""
   }
@@ -1381,48 +1371,9 @@ project.afterEvaluate {
   project.tasks.findByName('preBuild')?.dependsOn(project.tasks.findByName('checkJniLibs'))
 }
 
-// sherpa-onnx classes.jar: resolution order THIRD_PARTY --> MAVEN_AAR --> GITHUB_EXTRACT
-def sherpaLocalJar = file("${project.projectDir.parent}/third_party/sherpa-onnx-prebuilt/android/java/classes.jar")
-def sherpaExtractedJar = file("${project.buildDir}/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar")
-
-project.tasks.register("extractSherpaOnnxClasses") {
-  // Pin change (ANDROID_RELEASE_TAG / SHERPA_ONNX_VERSION) must re-extract classes.jar,
-  // not only a different AAR file identity in the Gradle cache.
-  inputs.property("sherpaOnnxVersion", project.ext.sherpaOnnxVersion)
-  outputs.dir sherpaOnnxClassesDir
-  inputs.files(project.configurations.sherpaOnnxAar)
-  if (sherpaLocalJar.exists()) inputs.file(sherpaLocalJar)
-  doLast {
-    sherpaOnnxClassesDir.mkdirs()
-    file(sherpaOnnxClassesDir).listFiles()?.findAll { it.name.endsWith('.jar') }?.each { it.delete() }
-    if (sherpaLocalJar.exists()) {
-      copy { from sherpaLocalJar; into sherpaOnnxClassesDir }
-      logPrebuilt("sherpa-onnx", "classes", "THIRD_PARTY")
-      return
-    }
-    def aarFiles = project.configurations.sherpaOnnxAar.files
-    if (!aarFiles.isEmpty()) {
-      def aar = aarFiles.iterator().next()
-      copy {
-        from zipTree(aar)
-        include 'classes.jar'
-        into sherpaOnnxClassesDir
-      }
-      logPrebuilt("sherpa-onnx", "classes", "MAVEN_AAR", aar.name)
-      return
-    }
-    if (sherpaExtractedJar.exists()) {
-      copy { from sherpaExtractedJar; into sherpaOnnxClassesDir }
-      logPrebuilt("sherpa-onnx", "classes", "GITHUB_EXTRACT")
-      return
-    }
-    throw new RuntimeException(
-      "Missing sherpa-onnx classes.jar (Kotlin API). Tried: THIRD_PARTY (third_party/.../classes.jar), MAVEN_AAR (sherpaOnnxAar), GITHUB_EXTRACT (build/prebuilt-downloads/sherpa-onnx-extract/java/classes.jar after GitHub zip).")
-  }
-}
-
 // Extract classes.jar from the onnxruntime AAR so ai.onnxruntime.* Java classes
 // are bundled directly in the SDK. No compileOnly needed; users get it for free.
+// (Sherpa Kotlin/Java API is not on the RN path; default Maven AAR is native-only.)
 project.tasks.register("extractOnnxruntimeClasses") {
   // Pin change (ANDROID_RELEASE_TAG / ORT_VERSION) must re-extract classes.jar.
   inputs.property("ortVersion", project.ext.ortVersion)

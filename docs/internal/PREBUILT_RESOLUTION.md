@@ -30,7 +30,7 @@ For each row, resolution tries **1 --> 2 --> 3 --> 4** in order; **5** applies i
 | **sherpa-onnx** | JNI | `libsherpa-onnx-jni.so`, `libsherpa-onnx-c-api.so`, `libsherpa-onnx-cxx-api.so` per ABI (**no** `libonnxruntime.so`; use ONNX Runtime AAR) | `third_party/sherpa-onnx-prebuilt/android/jni/<abi>/*.so` | `src/main/jniLibs/<abi>/` | `sherpaOnnxAar` --> `jni/<abi>/` | `sherpa-onnx-android.zip` --> `<abi>/**` |
 | **sherpa-onnx** | Native debug symbols | Unstripped `libsherpa-onnx-*.so` per ABI (Crashlytics / Play). **Not** app runtime. | `android-native-debug-symbols/<abi>/` (local build output only) | — | — | `sherpa-onnx-android-native-debug-symbols.zip` (**GitHub Release only**; no Maven) |
 | **sherpa-onnx** | C headers | `c-api/**` (e.g. `c-api.h`) | `third_party/sherpa-onnx-prebuilt/android/include/sherpa-onnx/c-api/**` | `src/main/cpp/include/sherpa-onnx/` | AAR `c-api/**` | ZIP `c-api/**` |
-| **sherpa-onnx** | Java/Kotlin API | `classes.jar` | `third_party/sherpa-onnx-prebuilt/android/java/classes.jar` | (build dir from previous run) | `sherpaOnnxAar` --> `classes.jar` | ZIP `java/classes.jar` or extract cache |
+| **sherpa-onnx** | Java/Kotlin API | **Not used by RN SDK** (C/CXX only). From 2.0.1-2: default Maven AAR is native-only; external apps use classifiers `:kotlin@aar` / `:java@aar`. Zip may still ship `java/classes.jar` for non-SDK consumers. | — | — | — | — |
 | **FFmpeg** | JNI | `libavcodec.so`, `libavformat.so`, `libavutil.so`, `libswresample.so`, `libavfilter.so`, `libshine.so` | `third_party/ffmpeg_prebuilt/android/jni/<abi>/` | `src/main/jniLibs/<abi>/` | `ffmpegAar` | `ffmpeg-android.zip` |
 | **FFmpeg** | C headers | `libavcodec/avcodec.h` etc. | `third_party/ffmpeg_prebuilt/android/include/**` | `src/main/cpp/include/ffmpeg/` | AAR `include/**` | ZIP `include/**` |
 | **FFmpeg vsw** (opt-in) | JNI + headers | same `.so` set; H.264/HEVC SW decoders inside `libavcodec` | — (stage 1 skipped; audio-only pin is not vsw) | stamp `<ver>-vsw` in `ffmpeg-version.txt` | `ffmpeg-vsw` AAR | `ffmpeg-vsw-android-v<ver>` / `ffmpeg-vsw-android.zip` |
@@ -56,7 +56,6 @@ For each row, resolution tries **1 --> 2 --> 3 --> 4** in order; **5** applies i
 |------|---------------|
 | `downloadNativeLibsIfNeeded` | JNI `.so`, C headers, and version stamps for all packages (sherpa-onnx, FFmpeg, libarchive, lexbor, libyuv, libwebp, pdfium when enabled, ORT as applicable). Runs stages 1-->2-->3-->4 per package. |
 | `checkJniLibs` | Hard-fails if any required `.so` is missing after `downloadNativeLibsIfNeeded`. Depends on it. |
-| `extractSherpaOnnxClasses` | Sherpa `classes.jar` into `build/sherpa-onnx-classes`. Resolution: THIRD_PARTY --> MAVEN_AAR --> GITHUB_EXTRACT. |
 | `extractOnnxruntimeClasses` | ORT `classes.jar` into `build/onnxruntime-classes`. Currently Maven only. |
 
 **Versions** are defined in `android/prebuilt-versions.gradle`; AAR configurations in `android/build.gradle`.
