@@ -40,6 +40,7 @@ class VadPipelineWorker(
   private val dataAvailable = lock.newCondition()
   private var appendListener: ((LiveFramesAppendedEvent) -> Unit)? = null
   private var cursorId: Int = -1
+  private val drainScratch = FloatArray(chunkSize)
   private val pendingCommands = LinkedBlockingQueue<Cmd>()
   private val cmdLock = Any()
   private val queueDepth = AtomicInteger(0)
@@ -82,8 +83,8 @@ class VadPipelineWorker(
     try {
       while (isRunning) {
         processCommands()
-        val chunk = inputEntry.drainCursor(cursorId, chunkSize)
-        if (chunk.isEmpty()) {
+        val n = inputEntry.drainCursorInto(cursorId, drainScratch, 0, chunkSize)
+        if (n <= 0) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
             flushInternal()
             break
@@ -91,6 +92,7 @@ class VadPipelineWorker(
           lock.withLock { dataAvailable.await(10, TimeUnit.MILLISECONDS) }
           continue
         }
+        val chunk = if (n == drainScratch.size) drainScratch else drainScratch.copyOf(n)
         processChunk(chunk)
       }
       emitEvent(

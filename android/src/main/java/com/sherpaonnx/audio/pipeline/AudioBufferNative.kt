@@ -33,6 +33,14 @@ internal object AudioBufferNative {
     sampleRate: Int,
   ): Boolean
 
+  /** Append Int16 PCM; C converts ÷32768 (no Kotlin FloatArray). */
+  @JvmStatic
+  external fun nativeAppendInt16SamplesToLive(
+    bufferId: String,
+    samples: ShortArray,
+    sampleRate: Int,
+  ): Boolean
+
   @JvmStatic external fun nativeFinalizeLive(bufferId: String): Boolean
   @JvmStatic external fun nativeRelease(bufferId: String): Boolean
 
@@ -40,6 +48,16 @@ internal object AudioBufferNative {
 
   @JvmStatic
   external fun nativeReadOfflineSlice(bufferId: String, start: Int, count: Int): FloatArray?
+
+  /** Copy offline samples into [out] at [outOffset]; returns samples written. */
+  @JvmStatic
+  external fun nativeReadOfflineInto(
+    bufferId: String,
+    start: Int,
+    out: FloatArray,
+    outOffset: Int,
+    maxSamples: Int,
+  ): Int
 
   @JvmStatic
   external fun nativeReadLiveSlice(bufferId: String, start: Int, count: Int): FloatArray?
@@ -60,6 +78,11 @@ internal object AudioBufferNative {
   ): String?
 
   @JvmStatic external fun nativeAdoptIfEmpty(bufferId: String, samples: FloatArray): Boolean
+
+  /** Move source offline PCM into empty target (C SoT); erases source id. */
+  @JvmStatic
+  external fun nativePopulateOfflineIfEmpty(targetBufferId: String, sourceBufferId: String): Boolean
+
   @JvmStatic external fun nativeUpgradeToMmap(bufferId: String)
   @JvmStatic external fun nativeTransferFromLive(liveBufferId: String, fullIfSpooled: Boolean): String?
 
@@ -67,6 +90,16 @@ internal object AudioBufferNative {
 
   @JvmStatic
   external fun nativeDrainCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray?
+
+  /** Drain live cursor into [out] at [outOffset]; returns samples written. */
+  @JvmStatic
+  external fun nativeDrainCursorInto(
+    liveBufferId: String,
+    cursorId: Int,
+    out: FloatArray,
+    outOffset: Int,
+    maxSamples: Int,
+  ): Int
 
   @JvmStatic
   external fun nativePeekCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray?

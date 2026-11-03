@@ -14,6 +14,7 @@ class OwnedBuffer : public facebook::jsi::MutableBuffer {
 
   size_t size() const override { return buf_.size(); }
   uint8_t *data() override { return buf_.data(); }
+  void resize(size_t size) { buf_.resize(size); }
 
  private:
   std::vector<uint8_t> buf_;

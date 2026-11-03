@@ -104,6 +104,25 @@ class LiveEntry(
     return AppendResult.APPENDED
   }
 
+  /** Append Int16 PCM without a Kotlin FloatArray convert (C ÷32768). */
+  fun tryAppendInt16Samples(
+    samples: ShortArray,
+    inputSampleRate: Int = sampleRate,
+    origin: LiveAppendOrigin = LiveAppendOrigin.Ingress(LiveAudioIngressSource.APPEND),
+    backpressure: Boolean = false,
+  ): AppendResult {
+    @Suppress("UNUSED_VARIABLE")
+    val unusedBp = backpressure
+    if (state != State.RECORDING) return AppendResult.BUFFER_FINALIZED
+    if (samples.isEmpty()) return AppendResult.APPENDED
+    val ok = AudioBufferNative.nativeAppendInt16SamplesToLive(bufferId, samples, inputSampleRate)
+    if (!ok) {
+      return AppendResult.BUFFER_FINALIZED
+    }
+    dispatchFramesAppended(samples.size, origin)
+    return AppendResult.APPENDED
+  }
+
   fun appendSamples(
     samples: FloatArray,
     inputSampleRate: Int = sampleRate,
@@ -167,6 +186,23 @@ class LiveEntry(
 
   fun drainCursor(cursorId: Int, maxSamples: Int): FloatArray =
     AudioBufferNative.nativeDrainCursor(bufferId, cursorId, maxSamples) ?: FloatArray(0)
+
+  /** Drain into [out] at [outOffset]; returns samples written (no new FloatArray). */
+  fun drainCursorInto(
+    cursorId: Int,
+    out: FloatArray,
+    outOffset: Int,
+    maxSamples: Int,
+  ): Int {
+    if (maxSamples <= 0 || outOffset < 0 || outOffset >= out.size) return 0
+    return AudioBufferNative.nativeDrainCursorInto(
+      bufferId,
+      cursorId,
+      out,
+      outOffset,
+      maxSamples,
+    )
+  }
 
   fun peekCursor(cursorId: Int, maxSamples: Int): FloatArray =
     AudioBufferNative.nativePeekCursor(bufferId, cursorId, maxSamples) ?: FloatArray(0)

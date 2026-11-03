@@ -637,16 +637,35 @@ struct PaLiveEntry {
     return out;
   }
 
-  std::vector<float> getSamplesSlice(int startFrame, int frameCount) {
-    std::lock_guard<std::mutex> lock(ringMutex);
+  /** Caller must hold ringMutex. */
+  int copySamplesSliceIntoLocked(int startFrame, int frameCount, float *dest, int maxSamples) {
+    if (!dest || maxSamples <= 0 || frameCount <= 0) return 0;
     int used = (int)std::min(totalSamplesWritten, (int64_t)windowCapacity);
-    if (startFrame >= used || frameCount <= 0) return {};
+    if (startFrame >= used) return 0;
     int actualCount = std::min(frameCount, used - startFrame);
-    std::vector<float> out(actualCount);
-    int ringStart = (totalSamplesWritten <= windowCapacity) ? startFrame : (writePos + startFrame) % windowCapacity;
+    actualCount = std::min(actualCount, maxSamples);
+    if (actualCount <= 0) return 0;
+    int ringStart =
+        (totalSamplesWritten <= windowCapacity) ? startFrame : (writePos + startFrame) % windowCapacity;
     for (int i = 0; i < actualCount; i++) {
-      out[i] = ring[(ringStart + i) % windowCapacity];
+      dest[i] = ring[(ringStart + i) % windowCapacity];
     }
+    return actualCount;
+  }
+
+  /** Non-advancing ring peek into caller dest; same clamp math as getSamplesSlice. */
+  int copySamplesSliceInto(int startFrame, int frameCount, float *dest, int maxSamples) {
+    if (!dest || maxSamples <= 0 || frameCount <= 0) return 0;
+    std::lock_guard<std::mutex> lock(ringMutex);
+    return copySamplesSliceIntoLocked(startFrame, frameCount, dest, maxSamples);
+  }
+
+  std::vector<float> getSamplesSlice(int startFrame, int frameCount) {
+    if (frameCount <= 0) return {};
+    std::lock_guard<std::mutex> lock(ringMutex);
+    std::vector<float> out((size_t)frameCount);
+    int n = copySamplesSliceIntoLocked(startFrame, frameCount, out.data(), frameCount);
+    out.resize((size_t)n);
     return out;
   }
 
@@ -666,12 +685,14 @@ struct PaLiveEntry {
     return (int)cursors.size();
   }
 
-  std::vector<float> drainCursor(int cursorId, int maxSamples) {
-    std::vector<float> result;
+  /** Copy up to maxSamples into dest and advance cursor; returns samples written. */
+  int drainCursorInto(int cursorId, float *dest, int maxSamples) {
+    if (!dest || maxSamples <= 0) return 0;
+    int copied = 0;
     {
       std::lock_guard<std::mutex> cLock(cursorMutex);
       auto it = cursors.find(cursorId);
-      if (it == cursors.end()) return {};
+      if (it == cursors.end()) return 0;
 
       int64_t readPos = it->second.absoluteReadPos;
       int64_t written = totalSamplesWritten;
@@ -680,57 +701,70 @@ struct PaLiveEntry {
       if (readPos >= oldestInRing) {
         // Fast path: cursor is within ring — read from RAM under ring lock
         std::lock_guard<std::mutex> lock(ringMutex);
-        // Re-check under lock
-        int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
+        int64_t oldestInRingLocked =
+            (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
         int64_t rp = std::max(readPos, oldestInRingLocked);
         int available = (int)std::max((int64_t)0, totalSamplesWritten - rp);
-        if (available == 0) return {};
+        if (available == 0) return 0;
         int count = std::min(maxSamples, available);
-        result.resize(count);
         int ringOffset = (int)(rp % windowCapacity);
         for (int i = 0; i < count; i++) {
-          result[i] = ring[(ringOffset + i) % windowCapacity];
+          dest[i] = ring[(ringOffset + i) % windowCapacity];
         }
         it->second.absoluteReadPos = rp + count;
+        copied = count;
       } else if (hasActiveSpool) {
         // Slow path: cursor is behind ring — read from spool (no ring lock)
         int available = (int)std::max((int64_t)0, written - readPos);
-        if (available == 0) return {};
+        if (available == 0) return 0;
         int count = std::min(maxSamples, available);
-        // Clamp to what spool has committed
         int64_t spoolEnd = std::min(spoolSamplesWritten, written);
         int64_t safeEnd = std::min(readPos + count, spoolEnd);
         int spoolCount = (int)std::max((int64_t)0, safeEnd - readPos);
 
         if (spoolCount > 0) {
-          result = readFromSpool(readPos, spoolCount);
-          if (!result.empty()) {
-            it->second.absoluteReadPos = readPos + (int64_t)result.size();
+          std::vector<float> fromSpool = readFromSpool(readPos, spoolCount);
+          if (!fromSpool.empty()) {
+            const int n = std::min((int)fromSpool.size(), maxSamples);
+            std::memcpy(dest, fromSpool.data(), (size_t)n * sizeof(float));
+            it->second.absoluteReadPos = readPos + (int64_t)n;
+            copied = n;
           } else {
-            throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
+            throw std::runtime_error(
+                "AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
           }
         } else {
-          throw std::runtime_error("AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
+          throw std::runtime_error(
+              "AUDIO_CURSOR_LAG_EXCEEDED: Cursor has fallen behind retained data");
         }
       } else {
         // Ring-only: snap read position forward to the oldest ring sample
         std::lock_guard<std::mutex> lock(ringMutex);
-        int64_t oldestInRingLocked = (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
+        int64_t oldestInRingLocked =
+            (totalSamplesWritten > windowCapacity) ? totalSamplesWritten - windowCapacity : 0;
         int available = (int)std::max((int64_t)0, totalSamplesWritten - oldestInRingLocked);
-        if (available == 0) return {};
+        if (available == 0) return 0;
         int count = std::min(maxSamples, available);
-        result.resize(count);
         int ringOffset = (int)(oldestInRingLocked % windowCapacity);
         for (int i = 0; i < count; i++) {
-          result[i] = ring[(ringOffset + i) % windowCapacity];
+          dest[i] = ring[(ringOffset + i) % windowCapacity];
         }
         it->second.absoluteReadPos = oldestInRingLocked + count;
+        copied = count;
       }
     } // release cursorMutex
 
-    if (!result.empty()) {
+    if (copied > 0) {
       notifyCursorAdvanced();
     }
+    return copied;
+  }
+
+  std::vector<float> drainCursor(int cursorId, int maxSamples) {
+    if (maxSamples <= 0) return {};
+    std::vector<float> result((size_t)maxSamples);
+    int n = drainCursorInto(cursorId, result.data(), maxSamples);
+    result.resize((size_t)n);
     return result;
   }
 

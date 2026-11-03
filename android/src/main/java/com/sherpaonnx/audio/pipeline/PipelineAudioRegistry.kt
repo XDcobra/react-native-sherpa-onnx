@@ -207,15 +207,14 @@ object PipelineAudioRegistry {
   }
 
   fun populateOfflineIfEmpty(targetBufferId: String, sourceBufferId: String) {
-    val source =
-      getOffline(sourceBufferId) ?: throw IllegalArgumentException("source not found")
-    val target =
-      getOffline(targetBufferId) ?: throw IllegalArgumentException("target not found")
-    if (target.numSamples > 0) {
-      throw IllegalStateException("target not empty")
-    }
-    val ok = AudioBufferNative.nativeAdoptIfEmpty(targetBufferId, source.readAllSamples())
-    if (!ok) throw IllegalStateException("adopt failed")
+    getOffline(sourceBufferId) ?: throw IllegalArgumentException("source not found")
+    getOffline(targetBufferId) ?: throw IllegalArgumentException("target not found")
+    val ok =
+      AudioBufferNative.nativePopulateOfflineIfEmpty(targetBufferId, sourceBufferId)
+    if (!ok) throw IllegalStateException("populate failed")
+    // C moves source SoT into target and erases source id — mirror handle map.
+    offlineEntries.remove(sourceBufferId)
+    OfflineEntry.wrap(targetBufferId)?.let { offlineEntries[targetBufferId] = it }
   }
 
   fun upgradeToMmapIfNeeded(bufferId: String) {
@@ -361,33 +360,6 @@ object PipelineAudioRegistry {
 
   fun getLiveSamplesSlice(liveBufferId: String, startFrame: Int, frameCount: Int): FloatArray =
     AudioBufferNative.nativeReadLiveSlice(liveBufferId, startFrame, frameCount) ?: FloatArray(0)
-
-  fun getOfflineSamplesSliceJni(
-    bufferId: String,
-    startFrame: Int,
-    frameCount: Int,
-  ): FloatArray =
-    AudioBufferNative.nativeReadOfflineSlice(bufferId, startFrame, frameCount) ?: FloatArray(0)
-
-  fun getLiveSamplesSliceJni(
-    bufferId: String,
-    startFrame: Int,
-    frameCount: Int,
-  ): FloatArray = getLiveSamplesSlice(bufferId, startFrame, frameCount)
-
-  fun createOfflineFromFloatArrayJni(
-    samples: FloatArray,
-    sampleRate: Int,
-    channelCount: Int,
-  ): String = createOfflineFromFloatArray(samples, sampleRate, channelCount).bufferId
-
-  fun appendSamplesToLiveJni(
-    bufferId: String,
-    samples: FloatArray,
-    sampleRate: Int,
-  ) {
-    appendSamplesToLive(bufferId, samples, sampleRate)
-  }
 
   fun createLiveCursor(liveBufferId: String): Int = AudioBufferNative.nativeCreateCursor(liveBufferId)
 

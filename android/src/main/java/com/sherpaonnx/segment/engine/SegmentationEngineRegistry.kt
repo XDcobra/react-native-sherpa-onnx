@@ -1320,11 +1320,13 @@ object SegmentationEngineRegistry {
             }
 
             runtime.reset()
+            val chunkBuf = FloatArray(chunkSize)
             while (cursor < offline.numSamples) {
               val count = minOf(chunkSize, offline.numSamples - cursor)
-              val chunk = offline.readSlice(cursor, count)
-              cursor += chunk.size
-              if (chunk.isEmpty()) break
+              val n = offline.readInto(cursor, chunkBuf, 0, count)
+              if (n <= 0) break
+              cursor += n
+              val chunk = if (n == chunkBuf.size) chunkBuf else chunkBuf.copyOf(n)
 
               val merged = FloatArray(pending.size + chunk.size)
               pending.copyInto(merged, 0, 0, pending.size)
@@ -1476,11 +1478,13 @@ object SegmentationEngineRegistry {
           var cursor = 0
           var silenceRun = 0
           val frameSize = (sr / 50).coerceAtLeast(160)
+          val frameBuf = FloatArray(frameSize)
 
           while (cursor < offline.numSamples) {
             val readCount = minOf(frameSize, offline.numSamples - cursor)
-            val frame = offline.readSlice(cursor, readCount)
-            if (frame.isEmpty()) break
+            val n = offline.readInto(cursor, frameBuf, 0, readCount)
+            if (n <= 0) break
+            val frame = if (n == frameBuf.size) frameBuf else frameBuf.copyOf(n)
             val end = cursor + frame.size
             var sum = 0.0
             for (value in frame) {

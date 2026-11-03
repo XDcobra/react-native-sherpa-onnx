@@ -42,6 +42,7 @@ class KwsStreamingPipelineWorker(
   }
 
   private val gateKey = "kws:$instanceId"
+  private val drainScratch = FloatArray(chunkSize)
 
   @Volatile
   override var isRunning: Boolean = false
@@ -100,8 +101,8 @@ class KwsStreamingPipelineWorker(
       while (isRunning) {
         processCommands()
 
-        val chunk = inputEntry.drainCursor(audioCursorId, chunkSize)
-        if (chunk.isEmpty()) {
+        val n = inputEntry.drainCursorInto(audioCursorId, drainScratch, 0, chunkSize)
+        if (n <= 0) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
             Log.i(
               LOG_TAG,
@@ -116,9 +117,10 @@ class KwsStreamingPipelineWorker(
           }
           continue
         }
+        val chunk = if (n == drainScratch.size) drainScratch else drainScratch.copyOf(n)
 
         SherpaOnnxKwsHelper.nativeAcceptWaveform(instanceId, streamId, sampleRate, chunk)
-        unitsRead += chunk.size
+        unitsRead += n
 
         var decodeSteps = 0
         var commitsThisChunk = 0

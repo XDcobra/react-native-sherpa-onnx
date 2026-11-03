@@ -71,12 +71,13 @@ class EnhancementPipelineWorker(
   private fun runLoop() {
     val chunkSize = SherpaOnnxEnhancementHelper.frameShift(instanceId)
     val sampleRate = SherpaOnnxEnhancementHelper.sampleRate(instanceId)
+    val drainScratch = FloatArray(chunkSize.coerceAtLeast(1))
     try {
       while (isRunning) {
         processCommands()
 
-        val chunk = inputEntry.drainCursor(cursorId, chunkSize)
-        if (chunk.isEmpty()) {
+        val n = inputEntry.drainCursorInto(cursorId, drainScratch, 0, chunkSize)
+        if (n <= 0) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
             if (NativeInstanceGate.beginUse(gateKey)) {
               try {
@@ -109,6 +110,7 @@ class EnhancementPipelineWorker(
           }
           continue
         }
+        val chunk = if (n == drainScratch.size) drainScratch else drainScratch.copyOf(n)
 
         if (!NativeInstanceGate.beginUse(gateKey)) {
           isRunning = false

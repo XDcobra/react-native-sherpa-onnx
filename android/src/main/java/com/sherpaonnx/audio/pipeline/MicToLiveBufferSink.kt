@@ -92,18 +92,19 @@ class MicToLiveBufferSink(
           val read = record.read(shortBuf, 0, shortBuf.size)
           if (read <= 0) continue
 
-          // Convert Int16 to Float32, resample if needed
-          val rawSamples = if (captureRate != targetRate) {
-            val resampled = Resampler.resampleInt16(shortBuf.copyOf(read), captureRate, targetRate)
-            FloatArray(resampled.size) { resampled[it].toFloat() / 32768.0f }
-          } else {
-            FloatArray(read) { shortBuf[it].toFloat() / 32768.0f }
-          }
+          // Keep Int16 until C (÷32768 in pa_append_int16); resample in Int16 if needed.
+          val int16Samples =
+            if (captureRate != targetRate) {
+              Resampler.resampleInt16(shortBuf.copyOf(read), captureRate, targetRate)
+            } else if (read == shortBuf.size) {
+              shortBuf
+            } else {
+              shortBuf.copyOf(read)
+            }
 
-          // Write directly to the live entry's ring buffer (no JS roundtrip)
           when (
-            liveEntry.tryAppendSamples(
-              rawSamples,
+            liveEntry.tryAppendInt16Samples(
+              int16Samples,
               targetRate,
               LiveAppendOrigin.Ingress(LiveAudioIngressSource.MIC),
             )

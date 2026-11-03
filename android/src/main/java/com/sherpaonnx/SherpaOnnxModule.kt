@@ -1777,34 +1777,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         nativeAttachVisualizationProgressCallback(accumulatorPtr, progressCallback)
       }
       val chunk = FloatArray(8192)
-      when (entry) {
-        is OfflineEntry.MmapBacked -> {
-          var start = 0
-          val total = entry.numSamples
-          while (start < total) {
-            val maxSamples = minOf(chunk.size, total - start)
-            val count = entry.readInto(start, chunk, 0, maxSamples)
-            if (count <= 0) break
-            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
-            start += count
-            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
-              break
-            }
-          }
-        }
-
-        is OfflineEntry.InMemory -> {
-          var start = 0
-          val source = entry.samples
-          while (start < source.size) {
-            val count = minOf(chunk.size, source.size - start)
-            System.arraycopy(source, start, chunk, 0, count)
-            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
-            start += count
-            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
-              break
-            }
-          }
+      var start = 0
+      val total = entry.numSamples
+      while (start < total) {
+        val maxSamples = minOf(chunk.size, total - start)
+        val count = entry.readInto(start, chunk, 0, maxSamples)
+        if (count <= 0) break
+        nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+        start += count
+        if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+          break
         }
       }
 
@@ -3146,14 +3128,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       ?: throw IllegalArgumentException("Offline buffer not found: $bufferId")
     if (entry.numSamples == 0) throw IllegalArgumentException("Buffer is empty")
 
-    when (entry) {
-      is com.sherpaonnx.audio.pipeline.OfflineEntry.MmapBacked -> {
-        encodeViaOfflineReader(entry, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
-      }
-      is com.sherpaonnx.audio.pipeline.OfflineEntry.InMemory -> {
-        encodeViaPcm(entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
-      }
-    }
+    encodeViaOfflineReader(entry, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
   }
 
   private fun saveLiveBuffer(
