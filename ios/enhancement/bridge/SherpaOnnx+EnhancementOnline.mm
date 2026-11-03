@@ -1,7 +1,7 @@
 #import "../../SherpaOnnx.h"
 
-#include "../../audio/pipeline/PaLiveEntry.h"
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "PaLiveEntry.h"
+#include "AudioRegistry.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../EnhancementPipelineWorker.h"

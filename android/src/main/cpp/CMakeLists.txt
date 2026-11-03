@@ -209,8 +209,10 @@ set(SOURCES
     jni/stt/sherpa-onnx-online-stt-jni.cpp
     tts/sherpa-onnx-tts-engine-wrapper.cpp
     jni/tts/sherpa-onnx-tts-jni.cpp
+    audiobuffer/AudioRegistry.cpp
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
+    jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp
     jni/audio/AudioVisualization.cpp
@@ -581,6 +583,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/kws
     ${CMAKE_CURRENT_SOURCE_DIR}/stt
     ${CMAKE_CURRENT_SOURCE_DIR}/tts
+    ${CMAKE_CURRENT_SOURCE_DIR}/audiobuffer
     ${ORT_INCLUDE_DIR}
     # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
     ${ORT_INCLUDE_DIR}/onnxruntime/core/session

@@ -2,8 +2,8 @@
 #import <Foundation/Foundation.h>
 #include "../core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../../audio/pipeline/PaLiveEntry.h"
+#include "AudioRegistry.h"
+#include "PaLiveEntry.h"
 #include "sherpa-onnx-vad-engine-wrapper.h"
 #include "pyannote-segmentation-session.h"
 

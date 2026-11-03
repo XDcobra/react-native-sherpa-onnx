@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../livePipeline/OfflineLivePipelineWorker.h"
-#include "../audio/pipeline/PaLiveEntry.h"
+#include "PaLiveEntry.h"
 
 #include <memory>
 #include <string>

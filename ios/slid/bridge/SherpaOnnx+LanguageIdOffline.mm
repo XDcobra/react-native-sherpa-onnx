@@ -1,7 +1,7 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "../core/LanguageIdBridgeState.h"
 

@@ -420,7 +420,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  private external fun nativeInstallJSI(jsiRuntimePointer: Long, registry: Any): Boolean
+  private external fun nativeInstallJSI(jsiRuntimePointer: Long): Boolean
 
   private fun tryInstallJsiBindings(): Boolean {
     return try {
@@ -429,7 +429,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (jsContext == 0L) {
         false
       } else {
-        nativeInstallJSI(jsContext, PipelineAudioRegistry)
+        // JSI binds directly to shared C++ AudioRegistry (no Kotlin registry hop).
+        nativeInstallJSI(jsContext)
       }
     } catch (_: Exception) {
       false

@@ -1,7 +1,7 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "sherpa-onnx-separation-wrapper.h"
 #include "../core/SeparationBridgeState.h"
 #include "../SeparationOfflineLivePipelineWorker.h"

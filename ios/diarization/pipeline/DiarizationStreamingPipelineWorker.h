@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../audio/pipeline/PaLiveEntry.h"
+#include "PaLiveEntry.h"
 #include "sherpa-onnx-streaming-diarization-wrapper.h"
 
 #include <atomic>
