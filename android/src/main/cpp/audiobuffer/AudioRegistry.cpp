@@ -1,5 +1,6 @@
 #include "AudioRegistry.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -474,6 +475,49 @@ bool pa_get_offline_samples_slice(const std::string &bufferId, int startFrame, i
     entry = it->second;
   }
   *out = entry->readSlice(startFrame, frameCount);
+  return true;
+}
+
+bool pa_copy_offline_samples(const std::string &bufferId, int startSample, float *dest,
+                             int maxSamples, int *outCopied, std::string *errorCode,
+                             std::string *errorMessage) {
+  if (outCopied) *outCopied = 0;
+  if (!dest) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "dest must be non-null";
+    return false;
+  }
+  if (startSample < 0 || maxSamples < 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "startSample/maxSamples must be >= 0";
+    return false;
+  }
+  if (maxSamples == 0) {
+    return true;
+  }
+  std::shared_ptr<PaOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    auto it = g_pa_offline.find(bufferId);
+    if (it == g_pa_offline.end()) {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Offline buffer not found";
+      return false;
+    }
+    entry = it->second;
+  }
+  const int total = entry->numSamples();
+  const int safeStart = startSample;
+  if (safeStart >= total) {
+    return true;
+  }
+  const int actual = std::min(maxSamples, total - safeStart);
+  const float *base = entry->floatPtr();
+  if (!base) {
+    return true;
+  }
+  std::memcpy(dest, base + safeStart, static_cast<size_t>(actual) * sizeof(float));
+  if (outCopied) *outCopied = actual;
   return true;
 }
 

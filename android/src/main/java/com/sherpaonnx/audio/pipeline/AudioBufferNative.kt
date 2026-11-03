@@ -41,6 +41,16 @@ internal object AudioBufferNative {
   @JvmStatic
   external fun nativeReadOfflineSlice(bufferId: String, start: Int, count: Int): FloatArray?
 
+  /** Copy offline samples into [out] at [outOffset]; returns samples written. */
+  @JvmStatic
+  external fun nativeReadOfflineInto(
+    bufferId: String,
+    start: Int,
+    out: FloatArray,
+    outOffset: Int,
+    maxSamples: Int,
+  ): Int
+
   @JvmStatic
   external fun nativeReadLiveSlice(bufferId: String, start: Int, count: Int): FloatArray?
 

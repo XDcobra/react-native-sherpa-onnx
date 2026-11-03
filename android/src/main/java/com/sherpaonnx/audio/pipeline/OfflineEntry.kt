@@ -86,12 +86,14 @@ sealed class OfflineEntry : Closeable {
     override val storageKind: String = "mmap"
 
     fun readInto(startSample: Int, out: FloatArray, outOffset: Int, maxSamples: Int): Int {
-      if (maxSamples <= 0) return 0
-      val slice = readSlice(startSample, maxSamples)
-      if (slice.isEmpty()) return 0
-      val n = minOf(slice.size, maxSamples, out.size - outOffset)
-      System.arraycopy(slice, 0, out, outOffset, n)
-      return n
+      if (maxSamples <= 0 || outOffset < 0 || outOffset >= out.size) return 0
+      return AudioBufferNative.nativeReadOfflineInto(
+        bufferId,
+        startSample,
+        out,
+        outOffset,
+        maxSamples,
+      )
     }
   }
 
@@ -122,11 +124,8 @@ private class NativeOfflineReader(private val entry: OfflineEntry) : OfflineRead
   private var pos = 0
 
   override fun readSamples(out: FloatArray, offset: Int, maxSamples: Int): Int {
-    if (pos >= entry.numSamples || maxSamples <= 0) return 0
-    val slice = entry.readSlice(pos, maxSamples)
-    if (slice.isEmpty()) return 0
-    val n = minOf(slice.size, maxSamples, out.size - offset)
-    System.arraycopy(slice, 0, out, offset, n)
+    if (pos >= entry.numSamples || maxSamples <= 0 || offset < 0 || offset >= out.size) return 0
+    val n = AudioBufferNative.nativeReadOfflineInto(entry.bufferId, pos, out, offset, maxSamples)
     pos += n
     return n
   }

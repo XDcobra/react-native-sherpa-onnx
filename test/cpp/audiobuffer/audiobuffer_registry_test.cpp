@@ -107,6 +107,93 @@ TEST_F(AudioRegistryFixture, InvalidId_FailsCleanly) {
   EXPECT_EQ(errCode, "AUDIO_BUFFER_NOT_FOUND");
 }
 
+namespace {
+
+std::string bufferIdFromCreateJson(const std::string &json) {
+  auto pos = json.find("\"bufferId\":\"");
+  if (pos == std::string::npos) return {};
+  pos += 12;
+  auto end = json.find('"', pos);
+  if (end == std::string::npos) return {};
+  return json.substr(pos, end - pos);
+}
+
+}  // namespace
+
+TEST_F(AudioRegistryFixture, CopyOfflineSamples_ParityWithSlice) {
+  std::vector<float> samples(200);
+  for (int i = 0; i < 200; ++i) {
+    samples[static_cast<size_t>(i)] = static_cast<float>(i) * 0.01f;
+  }
+  std::string json;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_offline_from_samples(samples.data(), samples.size(), 16000, 1, &json,
+                                             &errCode, &errMsg))
+      << errMsg;
+  const std::string id = bufferIdFromCreateJson(json);
+  ASSERT_FALSE(id.empty());
+
+  // Mid-slice parity
+  {
+    std::vector<float> slice;
+    ASSERT_TRUE(pa_get_offline_samples_slice(id, 50, 40, &slice, &errCode, &errMsg));
+    ASSERT_EQ(slice.size(), 40u);
+
+    std::vector<float> dest(40, -1.f);
+    int copied = -1;
+    ASSERT_TRUE(pa_copy_offline_samples(id, 50, dest.data(), 40, &copied, &errCode, &errMsg));
+    EXPECT_EQ(copied, 40);
+    for (size_t i = 0; i < slice.size(); ++i) {
+      EXPECT_FLOAT_EQ(dest[i], slice[i]) << "i=" << i;
+    }
+  }
+
+  // EOF clamp
+  {
+    std::vector<float> dest(100, -1.f);
+    int copied = -1;
+    ASSERT_TRUE(pa_copy_offline_samples(id, 180, dest.data(), 100, &copied, &errCode, &errMsg));
+    EXPECT_EQ(copied, 20);
+    std::vector<float> slice;
+    ASSERT_TRUE(pa_get_offline_samples_slice(id, 180, 100, &slice, &errCode, &errMsg));
+    ASSERT_EQ(slice.size(), 20u);
+    for (size_t i = 0; i < slice.size(); ++i) {
+      EXPECT_FLOAT_EQ(dest[i], slice[i]);
+    }
+  }
+
+  // Past EOF → zero copied, success
+  {
+    std::vector<float> dest(8, -1.f);
+    int copied = -1;
+    ASSERT_TRUE(pa_copy_offline_samples(id, 200, dest.data(), 8, &copied, &errCode, &errMsg));
+    EXPECT_EQ(copied, 0);
+    EXPECT_FLOAT_EQ(dest[0], -1.f);
+  }
+
+  // Empty / maxSamples 0
+  {
+    float scratch = 0.f;
+    int copied = -1;
+    ASSERT_TRUE(pa_copy_offline_samples(id, 0, &scratch, 0, &copied, &errCode, &errMsg));
+    EXPECT_EQ(copied, 0);
+  }
+
+  // Invalid id
+  {
+    float scratch = 0.f;
+    int copied = 99;
+    errCode.clear();
+    EXPECT_FALSE(
+        pa_copy_offline_samples("off_missing", 0, &scratch, 4, &copied, &errCode, &errMsg));
+    EXPECT_EQ(errCode, "AUDIO_BUFFER_NOT_FOUND");
+    EXPECT_EQ(copied, 0);
+  }
+
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
 TEST_F(AudioRegistryFixture, OptInLargeMmap_SkippedWithoutEnv) {
   const char *flag = std::getenv("SHERPA_HOST_AUDIO_MMAP");
   if (flag == nullptr || std::string(flag) != "1") {

@@ -131,6 +131,29 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeReadOfflineSlice(
   return vectorToJfloatArray(env, out);
 }
 
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeReadOfflineInto(
+    JNIEnv *env, jclass, jstring bufferId, jint start, jfloatArray out, jint outOffset,
+    jint maxSamples) {
+  if (!out || maxSamples <= 0 || outOffset < 0 || start < 0) return 0;
+  const jsize len = env->GetArrayLength(out);
+  if (outOffset >= len) return 0;
+  const int capacity = static_cast<int>(len - outOffset);
+  const int toCopy = maxSamples < capacity ? maxSamples : capacity;
+  if (toCopy <= 0) return 0;
+
+  // Pin caller array and copy once from C float* (no intermediate jfloatArray).
+  jfloat *elems = static_cast<jfloat *>(env->GetPrimitiveArrayCritical(out, nullptr));
+  if (!elems) return 0;
+  int copied = 0;
+  std::string errCode, errMsg;
+  const bool ok =
+      pa_copy_offline_samples(jstringToUtf8(env, bufferId), start, elems + outOffset, toCopy,
+                              &copied, &errCode, &errMsg);
+  env->ReleasePrimitiveArrayCritical(out, elems, ok ? 0 : JNI_ABORT);
+  return ok ? copied : 0;
+}
+
 JNIEXPORT jfloatArray JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeReadLiveSlice(JNIEnv *env, jclass,
                                                                          jstring bufferId,

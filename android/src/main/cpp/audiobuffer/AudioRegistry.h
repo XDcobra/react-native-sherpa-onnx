@@ -45,6 +45,11 @@ bool pa_get_offline_samples_slice(const std::string &bufferId, int startFrame, i
                                   std::vector<float> *out, std::string *errorCode,
                                   std::string *errorMessage);
 
+/** Copy up to maxSamples from offline buffer into caller-owned dest (mmap or RAM). */
+bool pa_copy_offline_samples(const std::string &bufferId, int startSample, float *dest,
+                             int maxSamples, int *outCopied, std::string *errorCode,
+                             std::string *errorMessage);
+
 bool pa_get_live_samples_slice(const std::string &bufferId, int startFrame, int frameCount,
                                std::vector<float> *out, std::string *errorCode,
                                std::string *errorMessage);
