@@ -2,7 +2,8 @@
 
 **Scope:** Internal implementation details of `liveSegmentBuffer` (the streaming/live segment buffer).  
 **Audience:** SDK developers planning VAD integration, alignment flows, and incremental post-processing.  
-**Native entry types:** `LiveSegmentEntry` (Android/Kotlin), `PaLiveSegmentEntry` (iOS/C++).
+**Native SoT:** shared C++ `SegLiveEntry` / `SegmentRegistry` under `android/src/main/cpp/segmentbuffer/` (both platforms).  
+**Android facade:** thin Kotlin `LiveSegmentEntry` (mirror log + listeners; see [buffer-in-c-copy-backlog](../../migration/buffer-in-c-copy-backlog.md) S1–S8).
 
 ---
 

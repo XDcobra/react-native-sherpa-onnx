@@ -22,8 +22,14 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 | T3 | Text | Kotlin `LiveTextEntry` still mirrors segment log + window for listeners/cursors alongside C spool/window | Preserve token listeners + `drainSegments` without rewriting every worker | Drain/commit cursor from C segment store; Kotlin handle only | **open** |
 | T4 | Text | Live JS events still pack full partial / segment text into WritableMap | Event contract unchanged | Optional truncated/delta events or shared handle id without payload dump | **open** |
 | T5 | Text | Offline spatial spans / tokens / timestamps remain Kotlin-side mirrors (C holds primary text + metaJson) | Spans not required for TXT2 SoT cutover | Move spans/tokens into `TxtOfflineEntry` SoT + JNI slice APIs | **open** |
-
-*(Segment: add S\* rows when SegmentBuffer migration lands.)*
+| S1 | Segment | TurboModule getters materialize full segment arrays (`WritableArray` / JSON snapshots via JNI) | SoT PR kept TurboModule packing in Kotlin/ObjC | Slice/cursor native views; optional truncated getters | **open** |
+| S2 | Segment | Dual segmentation engine orchestration (`SegmentationEngineRegistry.kt` vs iOS `SegEngine` in `.mm`) | Buffer SoT PR deliberately deferred full engine C port | Shared C++ SegEngine + thin platform facades | **open** |
+| S3 | Segment | Link-map dual SoT | — | Shared `SegmentLinkMapRegistry` in `cpp/segmentbuffer/` | **done** (this branch) |
+| S4 | Segment | Duplicate payload validation (TS + iOS ObjC strict speech schema) | C append validates kind/samples only; bridge keeps ObjC strict checks | Single shared validator in C++ | **open** |
+| S5 | Segment | `pipelineLiveSegmentAppended` ships full segment payloads | Event contract unchanged | Optional truncated/delta events or handle id without payload dump | **open** |
+| S6 | Segment | Offline-from-live / snapshots copy full `vector`/`List` of records | SoT cutover preserved snapshot APIs | Shared readers / bounded drain without full materialize | **open** |
+| S7 | Segment | Android text/audio still notify Kotlin `SegmentationEngineRegistry` while C `seg_engine_on_*` are weak no-ops | Engine remains Kotlin on Android; iOS strong SegEngine overrides weak | Single-path hooks when engine SoT moves to C (S2) | **open** |
+| S8 | Segment | Kotlin `LiveSegmentEntry` mirrors segment log + cursors/listeners alongside C spool/window | Preserve worker drain/listener APIs without rewriting every consumer | Cursor/drain from C store; Kotlin handle only | **open** |
 
 ## Rules
 
