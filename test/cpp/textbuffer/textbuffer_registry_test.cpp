@@ -9,6 +9,7 @@
 #include "TextRegistry.h"
 #include "TxtSpatialSpanJson.h"
 #include "TxtUtf16.h"
+#include "TxtUtf16Codec.h"
 
 #include <gtest/gtest.h>
 
@@ -59,6 +60,45 @@ TEST_F(TextRegistryFixture, CreateEmptyOffline_Populate_Release) {
   EXPECT_EQ(text, "hello");
   EXPECT_TRUE(txt_release_buffer(id));
   EXPECT_FALSE(txt_read_offline_text(id, &text, &err));
+}
+
+TEST_F(TextRegistryFixture, Utf16Codec_EmojiRoundTrip) {
+  const std::string emoji = "\xF0\x9F\x98\x80";  // 😀
+  EXPECT_EQ(txt_utf16_length(emoji), 2);
+  auto units = txt_utf16_from_utf8(emoji);
+  ASSERT_EQ(units.size(), 2u);
+  EXPECT_EQ(units[0], 0xD83D);
+  EXPECT_EQ(units[1], 0xDE00);
+  EXPECT_EQ(txt_utf8_from_utf16(units.data(), units.size()), emoji);
+  EXPECT_EQ((int)units.size(), txt_utf16_length(emoji));
+}
+
+TEST_F(TextRegistryFixture, Utf16Codec_EmbeddedNulRoundTrip) {
+  std::string withNul = "a";
+  withNul.push_back('\0');
+  withNul += "b";
+  EXPECT_EQ(txt_utf16_length(withNul), 3);
+  auto units = txt_utf16_from_utf8(withNul);
+  ASSERT_EQ(units.size(), 3u);
+  EXPECT_EQ(units[0], 'a');
+  EXPECT_EQ(units[1], 0);
+  EXPECT_EQ(units[2], 'b');
+  EXPECT_EQ(txt_utf8_from_utf16(units.data(), units.size()), withNul);
+}
+
+TEST_F(TextRegistryFixture, Utf16Codec_UnpairedSurrogateBecomesReplacement) {
+  uint16_t loneHigh = 0xD800;
+  std::string utf8 = txt_utf8_from_utf16(&loneHigh, 1);
+  EXPECT_EQ(utf8, "\xEF\xBF\xBD");  // U+FFFD
+  uint16_t loneLow = 0xDC00;
+  EXPECT_EQ(txt_utf8_from_utf16(&loneLow, 1), "\xEF\xBF\xBD");
+}
+
+TEST_F(TextRegistryFixture, Utf16Codec_LengthMatchesTxtUtf16Length) {
+  const std::string mixed = std::string("hi") + "ä" + "\xF0\x9F\x98\x80";
+  auto units = txt_utf16_from_utf8(mixed);
+  EXPECT_EQ((int)units.size(), txt_utf16_length(mixed));
+  EXPECT_EQ(txt_utf8_from_utf16(units.data(), units.size()), mixed);
 }
 
 TEST_F(TextRegistryFixture, Utf16Slice_AsciiMidAndPastEnd) {
