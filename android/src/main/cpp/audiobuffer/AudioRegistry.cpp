@@ -545,6 +545,39 @@ bool pa_get_live_samples_slice(const std::string &bufferId, int startFrame, int 
   return true;
 }
 
+bool pa_copy_live_samples_slice(const std::string &bufferId, int startFrame, int frameCount,
+                                float *dest, int maxSamples, int *outCopied,
+                                std::string *errorCode, std::string *errorMessage) {
+  if (outCopied) *outCopied = 0;
+  if (!dest) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "dest must be non-null";
+    return false;
+  }
+  if (startFrame < 0 || frameCount < 0 || maxSamples < 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "startFrame/frameCount/maxSamples must be >= 0";
+    return false;
+  }
+  if (maxSamples == 0 || frameCount == 0) {
+    return true;
+  }
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(bufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
+  }
+  int n = live->copySamplesSliceInto(startFrame, frameCount, dest, maxSamples);
+  if (outCopied) *outCopied = n;
+  return true;
+}
+
 bool pa_append_samples_to_live(const std::string &bufferId, const float *samples, size_t count,
                                int sampleRate, std::string *errorCode, std::string *errorMessage) {
   if (!samples || count == 0 || sampleRate <= 0) {

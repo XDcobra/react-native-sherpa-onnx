@@ -637,16 +637,35 @@ struct PaLiveEntry {
     return out;
   }
 
-  std::vector<float> getSamplesSlice(int startFrame, int frameCount) {
-    std::lock_guard<std::mutex> lock(ringMutex);
+  /** Caller must hold ringMutex. */
+  int copySamplesSliceIntoLocked(int startFrame, int frameCount, float *dest, int maxSamples) {
+    if (!dest || maxSamples <= 0 || frameCount <= 0) return 0;
     int used = (int)std::min(totalSamplesWritten, (int64_t)windowCapacity);
-    if (startFrame >= used || frameCount <= 0) return {};
+    if (startFrame >= used) return 0;
     int actualCount = std::min(frameCount, used - startFrame);
-    std::vector<float> out(actualCount);
-    int ringStart = (totalSamplesWritten <= windowCapacity) ? startFrame : (writePos + startFrame) % windowCapacity;
+    actualCount = std::min(actualCount, maxSamples);
+    if (actualCount <= 0) return 0;
+    int ringStart =
+        (totalSamplesWritten <= windowCapacity) ? startFrame : (writePos + startFrame) % windowCapacity;
     for (int i = 0; i < actualCount; i++) {
-      out[i] = ring[(ringStart + i) % windowCapacity];
+      dest[i] = ring[(ringStart + i) % windowCapacity];
     }
+    return actualCount;
+  }
+
+  /** Non-advancing ring peek into caller dest; same clamp math as getSamplesSlice. */
+  int copySamplesSliceInto(int startFrame, int frameCount, float *dest, int maxSamples) {
+    if (!dest || maxSamples <= 0 || frameCount <= 0) return 0;
+    std::lock_guard<std::mutex> lock(ringMutex);
+    return copySamplesSliceIntoLocked(startFrame, frameCount, dest, maxSamples);
+  }
+
+  std::vector<float> getSamplesSlice(int startFrame, int frameCount) {
+    if (frameCount <= 0) return {};
+    std::lock_guard<std::mutex> lock(ringMutex);
+    std::vector<float> out((size_t)frameCount);
+    int n = copySamplesSliceIntoLocked(startFrame, frameCount, out.data(), frameCount);
+    out.resize((size_t)n);
     return out;
   }
 

@@ -18,7 +18,7 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 | **5 — Optional event contracts** | **T4, S5** | May change JS payload shape; do after storage mirrors are gone; keep or version public contract |
 | **6 — Engine in C (separate epic)** | **S7 → S2** | S7 is the dual-hook symptom; S2 is full SegEngine port. **Not** buffer-handle work — schedule after A/T/S mirrors |
 
-**Skip / already done:** A5, A6, A7, S3.
+**Skip / already done:** A5, A4, A1, A3, A2, A6, A7, S3.
 
 ## Per-ID notes (open)
 
@@ -28,7 +28,7 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 | A4 | Handle no longer rebuilds FloatArray from mmap slice | Host: mmap offline `readInto` / slice length/offset parity |
 | A1 | Features use shared copy-into-dest readers (chunked); offline one-shot engines still `readAllSamples` until bufferId handoff | Host drain-into parity; assembleDebug |
 | A3 | Mic writes C ring without Kotlin `FloatArray` | Host int16↔float append parity; assembleDebug |
-| A2 | JSI one copy into ArrayBuffer | Host/JSI slice content + frame counts |
+| A2 | JSI one copy into ArrayBuffer | Host live/offline copy-into parity; assembleDebug |
 | T3 | Live text: no Kotlin window/segment-log mirror | Host: partial/commit/cursor/finalize UTF-16 |
 | T5 | Offline text metadata SoT in C | Host: populate + span slice |
 | T1 | Features don’t default to full-string JNI | Compile + host length/slice |
@@ -49,7 +49,7 @@ Buffer behavior must stay as today (append/drain/cursor/finalize/spool/overflow/
 | ID | Buffer | Bottleneck / deferred copy | Why it remained | Target improvement | Status |
 |----|--------|----------------------------|-----------------|--------------------|--------|
 | A1 | Audio | Feature Kotlin still `drainCursor` / `readAllSamples` / `InMemory.samples` → JNI `jfloatArray` → `FloatArray` (STT, TTS, encode, viz, player) | SoT PR kept helper APIs compiling; engine `const float*` rewires out of scope | Shared C readers / `const float*` (or pinned view) into feature workers; drop full materialize as default | **done** (`readInto` + `pa_drain_cursor_into` / workers; residual offline feature `readAllSamples` until bufferId engine handoff) |
-| A2 | Audio | JSI slice path: `pa_get_*_slice` → `std::vector` → memcpy → `OwnedBuffer` ArrayBuffer (also iOS) | Same pattern as pre-migration iOS; necessary JS boundary copy, but double native copy | Write slice directly into `OwnedBuffer` / reuse buffer pool | **open** |
+| A2 | Audio | JSI slice path: `pa_get_*_slice` → `std::vector` → memcpy → `OwnedBuffer` ArrayBuffer (also iOS) | Same pattern as pre-migration iOS; necessary JS boundary copy, but double native copy | Write slice directly into `OwnedBuffer` / reuse buffer pool | **done** (`pa_copy_live_samples_slice` + JSI direct OwnedBuffer; host parity test) |
 | A3 | Audio | Mic: Int16→`FloatArray` in Kotlin then JNI `GetFloatArrayRegion` into C ring | Capture stays platform; SoT moved to C | Append via critical JNI / short native capture path without intermediate heap `FloatArray` | **done** (`pa_append_int16_samples_to_live` + `nativeAppendInt16SamplesToLive`; host parity test) |
 | A4 | Audio | `MmapBacked.readInto` now `readSlice`→new `FloatArray`→`arraycopy` (was closer to mmap `ByteBuffer`) | Thin handle over C without exposing mmap pointer to Kotlin | JNI `readInto(out, offset, max)` or C pointer path for encode/viz | **done** (`pa_copy_offline_samples` + `nativeReadOfflineInto`; host parity test) |
 | A5 | Audio | Dead `PipelineAudioRegistry.*Jni` sample methods (JSI no longer calls them) | Left for compatibility during cutover | Delete once no callers | **done** (`refactor/close-audiobuffer-copy-backlog`, `*Jni` helpers removed) |

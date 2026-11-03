@@ -83,19 +83,20 @@ jsi::Value jsiGetOfflineSamples(jsi::Runtime &rt, const jsi::Value &,
   const int start_frame = requireIntArg(rt, args, 1, "startFrame");
   const int frame_count = requireIntArg(rt, args, 2, "frameCount");
 
-  std::vector<float> slice;
+  auto out = std::make_shared<sherpa::OwnedBuffer>(
+      frame_count > 0 ? static_cast<size_t>(frame_count) * sizeof(float) : 0);
+  float dummy = 0.f;
+  float *dest =
+      (frame_count > 0 && out->size() > 0) ? reinterpret_cast<float *>(out->data()) : &dummy;
+  int copied = 0;
   std::string error_code;
   std::string error_message;
-  const bool ok = pa_get_offline_samples_slice(buffer_id, start_frame, frame_count,
-                                                &slice, &error_code, &error_message);
+  const bool ok = pa_copy_offline_samples(buffer_id, start_frame, dest, frame_count, &copied,
+                                          &error_code, &error_message);
   if (!ok) {
     throw jsi::JSError(rt, joinError(error_code, error_message));
   }
-
-  auto out = std::make_shared<sherpa::OwnedBuffer>(slice.size() * sizeof(float));
-  if (!slice.empty()) {
-    std::memcpy(out->data(), slice.data(), slice.size() * sizeof(float));
-  }
+  out->resize(static_cast<size_t>(copied) * sizeof(float));
   return jsi::ArrayBuffer(rt, std::move(out));
 }
 
@@ -110,19 +111,20 @@ jsi::Value jsiGetLiveSamples(jsi::Runtime &rt, const jsi::Value &,
   const int start_frame = requireIntArg(rt, args, 1, "startFrame");
   const int frame_count = requireIntArg(rt, args, 2, "frameCount");
 
-  std::vector<float> slice;
+  auto out = std::make_shared<sherpa::OwnedBuffer>(
+      frame_count > 0 ? static_cast<size_t>(frame_count) * sizeof(float) : 0);
+  float dummy = 0.f;
+  float *dest =
+      (frame_count > 0 && out->size() > 0) ? reinterpret_cast<float *>(out->data()) : &dummy;
+  int copied = 0;
   std::string error_code;
   std::string error_message;
-  const bool ok = pa_get_live_samples_slice(buffer_id, start_frame, frame_count,
-                                             &slice, &error_code, &error_message);
+  const bool ok = pa_copy_live_samples_slice(buffer_id, start_frame, frame_count, dest,
+                                             frame_count, &copied, &error_code, &error_message);
   if (!ok) {
     throw jsi::JSError(rt, joinError(error_code, error_message));
   }
-
-  auto out = std::make_shared<sherpa::OwnedBuffer>(slice.size() * sizeof(float));
-  if (!slice.empty()) {
-    std::memcpy(out->data(), slice.data(), slice.size() * sizeof(float));
-  }
+  out->resize(static_cast<size_t>(copied) * sizeof(float));
   return jsi::ArrayBuffer(rt, std::move(out));
 }
 

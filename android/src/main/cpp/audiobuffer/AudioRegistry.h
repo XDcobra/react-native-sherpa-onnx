@@ -54,6 +54,11 @@ bool pa_get_live_samples_slice(const std::string &bufferId, int startFrame, int 
                                std::vector<float> *out, std::string *errorCode,
                                std::string *errorMessage);
 
+/** Copy live ring slice into caller-owned dest (non-advancing; mmap/RAM offline twin is pa_copy_offline). */
+bool pa_copy_live_samples_slice(const std::string &bufferId, int startFrame, int frameCount,
+                                float *dest, int maxSamples, int *outCopied,
+                                std::string *errorCode, std::string *errorMessage);
+
 bool pa_append_samples_to_live(const std::string &bufferId, const float *samples, size_t count,
                                int sampleRate, std::string *errorCode, std::string *errorMessage);
 

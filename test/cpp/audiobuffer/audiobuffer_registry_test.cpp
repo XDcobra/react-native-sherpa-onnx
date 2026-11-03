@@ -100,6 +100,76 @@ TEST_F(AudioRegistryFixture, LiveAppendDrainCursor) {
   EXPECT_TRUE(pa_release_buffer(id));
 }
 
+TEST_F(AudioRegistryFixture, CopyLiveSamplesSlice_ParityWithSlice) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &id, &errCode, &errMsg)) << errMsg;
+
+  std::vector<float> pcm(400);
+  for (int i = 0; i < 400; ++i) {
+    pcm[static_cast<size_t>(i)] = static_cast<float>(i) * 0.01f;
+  }
+  ASSERT_TRUE(pa_append_samples_to_live(id, pcm.data(), pcm.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+
+  // Mid-slice parity
+  {
+    std::vector<float> viaGet;
+    ASSERT_TRUE(pa_get_live_samples_slice(id, 50, 80, &viaGet, &errCode, &errMsg));
+    ASSERT_EQ(viaGet.size(), 80u);
+
+    std::vector<float> dest(80, -1.f);
+    int copied = -1;
+    ASSERT_TRUE(
+        pa_copy_live_samples_slice(id, 50, 80, dest.data(), 80, &copied, &errCode, &errMsg));
+    EXPECT_EQ(copied, 80);
+    for (size_t i = 0; i < viaGet.size(); ++i) {
+      EXPECT_FLOAT_EQ(dest[i], viaGet[i]) << "i=" << i;
+    }
+  }
+
+  // EOF clamp
+  {
+    std::vector<float> viaGet;
+    ASSERT_TRUE(pa_get_live_samples_slice(id, 350, 100, &viaGet, &errCode, &errMsg));
+    ASSERT_EQ(viaGet.size(), 50u);
+
+    std::vector<float> dest(100, -1.f);
+    int copied = -1;
+    ASSERT_TRUE(
+        pa_copy_live_samples_slice(id, 350, 100, dest.data(), 100, &copied, &errCode, &errMsg));
+    EXPECT_EQ(copied, 50);
+    for (size_t i = 0; i < viaGet.size(); ++i) {
+      EXPECT_FLOAT_EQ(dest[i], viaGet[i]);
+    }
+  }
+
+  // Past end → zero copied
+  {
+    std::vector<float> dest(8, -1.f);
+    int copied = -1;
+    ASSERT_TRUE(
+        pa_copy_live_samples_slice(id, 400, 8, dest.data(), 8, &copied, &errCode, &errMsg));
+    EXPECT_EQ(copied, 0);
+    EXPECT_FLOAT_EQ(dest[0], -1.f);
+  }
+
+  // Invalid id
+  {
+    float scratch = 0.f;
+    int copied = 99;
+    errCode.clear();
+    EXPECT_FALSE(
+        pa_copy_live_samples_slice("live_missing", 0, 4, &scratch, 4, &copied, &errCode, &errMsg));
+    EXPECT_EQ(errCode, "AUDIO_BUFFER_NOT_FOUND");
+    EXPECT_EQ(copied, 0);
+  }
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
 TEST_F(AudioRegistryFixture, AppendInt16_ParityWithFloat) {
   std::string idFloat;
   std::string idInt16;
