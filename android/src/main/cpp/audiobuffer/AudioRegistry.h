@@ -57,6 +57,11 @@ bool pa_get_live_samples_slice(const std::string &bufferId, int startFrame, int 
 bool pa_append_samples_to_live(const std::string &bufferId, const float *samples, size_t count,
                                int sampleRate, std::string *errorCode, std::string *errorMessage);
 
+/** Convert Int16 PCM (÷32768) then append to live ring — same semantics as float append. */
+bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t *samples,
+                                     size_t count, int sampleRate, std::string *errorCode,
+                                     std::string *errorMessage);
+
 /** Drain live cursor into caller-owned dest; advances cursor like drainCursor. */
 bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,
                           int maxSamples, int *outCopied, std::string *errorCode,

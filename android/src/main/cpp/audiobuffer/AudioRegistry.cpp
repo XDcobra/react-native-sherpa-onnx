@@ -574,6 +574,22 @@ bool pa_append_samples_to_live(const std::string &bufferId, const float *samples
   }
 }
 
+bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t *samples,
+                                     size_t count, int sampleRate, std::string *errorCode,
+                                     std::string *errorMessage) {
+  if (!samples || count == 0 || sampleRate <= 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "Invalid samples or sample rate";
+    return false;
+  }
+  std::vector<float> converted(count);
+  for (size_t i = 0; i < count; ++i) {
+    converted[i] = static_cast<float>(samples[i]) / 32768.0f;
+  }
+  return pa_append_samples_to_live(bufferId, converted.data(), converted.size(), sampleRate,
+                                   errorCode, errorMessage);
+}
+
 bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,
                           int maxSamples, int *outCopied, std::string *errorCode,
                           std::string *errorMessage) {

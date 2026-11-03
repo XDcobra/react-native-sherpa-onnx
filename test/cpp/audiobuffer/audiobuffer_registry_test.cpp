@@ -11,6 +11,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -97,6 +98,65 @@ TEST_F(AudioRegistryFixture, LiveAppendDrainCursor) {
 
   ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
   EXPECT_TRUE(pa_release_buffer(id));
+}
+
+TEST_F(AudioRegistryFixture, AppendInt16_ParityWithFloat) {
+  std::string idFloat;
+  std::string idInt16;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &idFloat, &errCode, &errMsg)) << errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &idInt16, &errCode, &errMsg)) << errMsg;
+
+  const int16_t i16[] = {0, 32767, -32768, -1, 16384, -16384};
+  const size_t n = sizeof(i16) / sizeof(i16[0]);
+  std::vector<float> asFloat(n);
+  for (size_t i = 0; i < n; ++i) {
+    asFloat[i] = static_cast<float>(i16[i]) / 32768.0f;
+  }
+
+  ASSERT_TRUE(
+      pa_append_samples_to_live(idFloat, asFloat.data(), asFloat.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+  ASSERT_TRUE(
+      pa_append_int16_samples_to_live(idInt16, i16, n, 16000, &errCode, &errMsg))
+      << errMsg;
+
+  auto liveF = pa_get_live_entry(idFloat);
+  auto liveI = pa_get_live_entry(idInt16);
+  ASSERT_NE(liveF, nullptr);
+  ASSERT_NE(liveI, nullptr);
+  EXPECT_EQ(liveF->totalSamplesWritten, liveI->totalSamplesWritten);
+  EXPECT_EQ(liveF->totalSamplesWritten, static_cast<int64_t>(n));
+
+  int cF = liveF->createCursorHandle();
+  int cI = liveI->createCursorHandle();
+  auto dF = liveF->drainCursor(cF, static_cast<int>(n));
+  auto dI = liveI->drainCursor(cI, static_cast<int>(n));
+  ASSERT_EQ(dF.size(), n);
+  ASSERT_EQ(dI.size(), n);
+  for (size_t i = 0; i < n; ++i) {
+    EXPECT_FLOAT_EQ(dF[i], asFloat[i]) << "float path i=" << i;
+    EXPECT_FLOAT_EQ(dI[i], asFloat[i]) << "int16 path i=" << i;
+    EXPECT_FLOAT_EQ(dF[i], dI[i]) << "parity i=" << i;
+  }
+  liveF->releaseCursor(cF);
+  liveI->releaseCursor(cI);
+
+  // Invalid id
+  errCode.clear();
+  EXPECT_FALSE(pa_append_int16_samples_to_live("live_missing", i16, n, 16000, &errCode, &errMsg));
+  EXPECT_EQ(errCode, "AUDIO_BUFFER_NOT_FOUND");
+
+  // Empty / null
+  errCode.clear();
+  EXPECT_FALSE(pa_append_int16_samples_to_live(idInt16, i16, 0, 16000, &errCode, &errMsg));
+  EXPECT_EQ(errCode, "AUDIO_INVALID_ARGUMENT");
+
+  ASSERT_TRUE(pa_finalize_live(idFloat, &errCode, &errMsg));
+  ASSERT_TRUE(pa_finalize_live(idInt16, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(idFloat));
+  EXPECT_TRUE(pa_release_buffer(idInt16));
 }
 
 TEST_F(AudioRegistryFixture, DrainCursorInto_ParityWithAllocatingDrain) {

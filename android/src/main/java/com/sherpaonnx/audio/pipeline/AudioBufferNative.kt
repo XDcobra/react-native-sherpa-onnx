@@ -33,6 +33,14 @@ internal object AudioBufferNative {
     sampleRate: Int,
   ): Boolean
 
+  /** Append Int16 PCM; C converts ÷32768 (no Kotlin FloatArray). */
+  @JvmStatic
+  external fun nativeAppendInt16SamplesToLive(
+    bufferId: String,
+    samples: ShortArray,
+    sampleRate: Int,
+  ): Boolean
+
   @JvmStatic external fun nativeFinalizeLive(bufferId: String): Boolean
   @JvmStatic external fun nativeRelease(bufferId: String): Boolean
 

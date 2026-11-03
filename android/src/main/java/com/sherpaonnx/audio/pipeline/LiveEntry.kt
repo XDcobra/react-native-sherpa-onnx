@@ -104,6 +104,25 @@ class LiveEntry(
     return AppendResult.APPENDED
   }
 
+  /** Append Int16 PCM without a Kotlin FloatArray convert (C ÷32768). */
+  fun tryAppendInt16Samples(
+    samples: ShortArray,
+    inputSampleRate: Int = sampleRate,
+    origin: LiveAppendOrigin = LiveAppendOrigin.Ingress(LiveAudioIngressSource.APPEND),
+    backpressure: Boolean = false,
+  ): AppendResult {
+    @Suppress("UNUSED_VARIABLE")
+    val unusedBp = backpressure
+    if (state != State.RECORDING) return AppendResult.BUFFER_FINALIZED
+    if (samples.isEmpty()) return AppendResult.APPENDED
+    val ok = AudioBufferNative.nativeAppendInt16SamplesToLive(bufferId, samples, inputSampleRate)
+    if (!ok) {
+      return AppendResult.BUFFER_FINALIZED
+    }
+    dispatchFramesAppended(samples.size, origin)
+    return AppendResult.APPENDED
+  }
+
   fun appendSamples(
     samples: FloatArray,
     inputSampleRate: Int = sampleRate,

@@ -97,6 +97,24 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendSamplesToLive(
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendInt16SamplesToLive(
+    JNIEnv *env, jclass, jstring bufferId, jshortArray samples, jint sampleRate) {
+  if (!samples) return JNI_FALSE;
+  const jsize n = env->GetArrayLength(samples);
+  if (n <= 0) return JNI_FALSE;
+
+  jshort *elems = static_cast<jshort *>(env->GetPrimitiveArrayCritical(samples, nullptr));
+  if (!elems) return JNI_FALSE;
+  std::string errCode, errMsg;
+  const bool ok =
+      pa_append_int16_samples_to_live(jstringToUtf8(env, bufferId),
+                                      reinterpret_cast<const int16_t *>(elems), (size_t)n,
+                                      sampleRate, &errCode, &errMsg);
+  env->ReleasePrimitiveArrayCritical(samples, elems, JNI_ABORT);
+  return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeFinalizeLive(JNIEnv *env, jclass,
                                                                         jstring bufferId) {
   std::string errCode, errMsg;
