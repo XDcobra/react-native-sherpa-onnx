@@ -129,6 +129,65 @@ Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeLiveSegmentCount(
   return static_cast<jint>(live->segments.size());
 }
 
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeLiveState(JNIEnv *env, jclass,
+                                                                         jstring liveId) {
+  auto live = seg_get_live_entry(jstringToUtf8(env, liveId));
+  if (!live) return -1;
+  std::lock_guard<std::mutex> lock(live->lock);
+  return live->state == SegLiveEntry::FINISHED ? 1 : 0;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeLiveTotalSegmentsWritten(
+    JNIEnv *env, jclass, jstring liveId) {
+  auto live = seg_get_live_entry(jstringToUtf8(env, liveId));
+  if (!live) return -1;
+  std::lock_guard<std::mutex> lock(live->lock);
+  return static_cast<jlong>(live->totalSegmentsWritten);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeCreateSegmentCursor(
+    JNIEnv *env, jclass, jstring liveId) {
+  std::string err;
+  return seg_live_create_cursor(jstringToUtf8(env, liveId), &err);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeDrainSegments(
+    JNIEnv *env, jclass, jstring liveId, jint cursorId, jint maxCount) {
+  int startIndex = -1;
+  std::string err;
+  auto records =
+      seg_live_drain_segments(jstringToUtf8(env, liveId), cursorId, maxCount, &startIndex, &err);
+  // Missing live buffer → null; unknown cursor / empty drain → envelope with empty segments.
+  if (!err.empty() && records.empty() && startIndex < 0 &&
+      err.find("SEGMENT_BUFFER_NOT_FOUND") != std::string::npos) {
+    return nullptr;
+  }
+  std::string body = segment_records_to_json(records);
+  // Inject absolute startIndex: {"startIndex":N,"segments":[...]}
+  std::string out = "{\"startIndex\":";
+  out += std::to_string(startIndex);
+  out += ',';
+  if (!body.empty() && body.front() == '{') {
+    out.append(body.begin() + 1, body.end());
+  } else {
+    out += "\"segments\":[]}";
+  }
+  return utf8ToJstring(env, out);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeReleaseSegmentCursor(
+    JNIEnv *env, jclass, jstring liveId, jint cursorId) {
+  auto live = seg_get_live_entry(jstringToUtf8(env, liveId));
+  if (!live) return JNI_FALSE;
+  seg_live_release_cursor(jstringToUtf8(env, liveId), cursorId);
+  return JNI_TRUE;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeLiveSnapshotJson(
     JNIEnv *env, jclass, jstring liveId, jstring mode) {

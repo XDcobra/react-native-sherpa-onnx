@@ -44,6 +44,14 @@ internal object SegmentBufferNative {
   @JvmStatic external fun nativeIsLive(bufferId: String): Boolean
   @JvmStatic external fun nativeIsOffline(bufferId: String): Boolean
   @JvmStatic external fun nativeLiveSegmentCount(liveId: String): Int
+  /** 0 = recording, 1 = finished, -1 = missing. */
+  @JvmStatic external fun nativeLiveState(liveId: String): Int
+  @JvmStatic external fun nativeLiveTotalSegmentsWritten(liveId: String): Long
   @JvmStatic external fun nativeLiveSnapshotJson(liveId: String, mode: String): String?
   @JvmStatic external fun nativeOfflineSnapshotJson(offlineId: String): String?
+
+  @JvmStatic external fun nativeCreateSegmentCursor(liveId: String): Int
+  /** JSON `{"startIndex":N,"segments":[...]}`; null on missing live buffer. */
+  @JvmStatic external fun nativeDrainSegments(liveId: String, cursorId: Int, maxCount: Int): String?
+  @JvmStatic external fun nativeReleaseSegmentCursor(liveId: String, cursorId: Int): Boolean
 }

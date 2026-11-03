@@ -84,6 +84,111 @@ TEST_F(SegmentRegistryFixture, LinkMap_CreateAddDuplicateReject) {
   EXPECT_TRUE(slm_release(mapId));
 }
 
+TEST_F(SegmentRegistryFixture, LiveCursor_DrainOrderAndEmptySecond) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &id, &err)) << err;
+
+  for (int i = 0; i < 3; ++i) {
+    std::string segId;
+    int segIndex = -1;
+    ASSERT_TRUE(seg_live_append_segment(id, "speech", "a", i * 100, i * 100 + 50, 16000, 3, false,
+                                        0.0, "{}", &segId, &segIndex, &err))
+        << err;
+    EXPECT_EQ(segIndex, i);
+  }
+
+  int cursor = seg_live_create_cursor(id, &err);
+  ASSERT_GE(cursor, 0) << err;
+
+  int start = -1;
+  auto batch1 = seg_live_drain_segments(id, cursor, 10, &start, &err);
+  ASSERT_EQ(batch1.size(), 3u);
+  EXPECT_EQ(start, 0);
+  EXPECT_EQ(batch1[0].startSample, 0);
+  EXPECT_EQ(batch1[1].startSample, 100);
+  EXPECT_EQ(batch1[2].startSample, 200);
+
+  start = -1;
+  auto batch2 = seg_live_drain_segments(id, cursor, 10, &start, &err);
+  EXPECT_TRUE(batch2.empty());
+  EXPECT_EQ(start, -1);
+
+  seg_live_release_cursor(id, cursor);
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
+TEST_F(SegmentRegistryFixture, LiveCursor_UnknownCursorReturnsEmpty) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &id, &err)) << err;
+  std::string segId;
+  int segIndex = -1;
+  ASSERT_TRUE(seg_live_append_segment(id, "speech", "a", 0, 100, 16000, 6, false, 0.0, "{}",
+                                      &segId, &segIndex, &err))
+      << err;
+
+  int start = -1;
+  auto batch = seg_live_drain_segments(id, /*unknown*/ 99999, 10, &start, &err);
+  EXPECT_TRUE(batch.empty());
+  EXPECT_EQ(start, -1);
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
+TEST_F(SegmentRegistryFixture, LiveCursor_EvictionPreservesAbsoluteStartIndex) {
+  // C segment policy: eviction does not rewind cursors (unlike Text). Absolute startIndex
+  // accounts for evictedCount so drained ids stay monotonic with written indices.
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", /*maxSegments*/ 2, "off", "", true, 0, false, 0, &id, &err))
+      << err;
+
+  int cursor = seg_live_create_cursor(id, &err);
+  ASSERT_GE(cursor, 0) << err;
+
+  for (int i = 0; i < 4; ++i) {
+    std::string segId;
+    int segIndex = -1;
+    ASSERT_TRUE(seg_live_append_segment(id, "speech", "a", i * 10, i * 10 + 5, 16000, 1, false, 0.0,
+                                        "{}", &segId, &segIndex, &err))
+        << err;
+    EXPECT_EQ(segIndex, i);
+  }
+
+  auto live = seg_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+  {
+    std::lock_guard<std::mutex> lock(live->lock);
+    EXPECT_EQ(live->segments.size(), 2u);
+    EXPECT_EQ(live->evictedCount, 2);
+    EXPECT_EQ(live->totalSegmentsWritten, 4);
+  }
+
+  int start = -1;
+  auto batch = seg_live_drain_segments(id, cursor, 10, &start, &err);
+  // Cursor still at window pos 0; after two evictions window holds indices 2 and 3.
+  ASSERT_EQ(batch.size(), 2u);
+  EXPECT_EQ(start, 2);
+  EXPECT_EQ(batch[0].startSample, 20);
+  EXPECT_EQ(batch[1].startSample, 30);
+
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
+TEST_F(SegmentRegistryFixture, LiveFinalize_RejectsFurtherAppend) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &id, &err)) << err;
+  ASSERT_TRUE(seg_finalize_live(id, &err)) << err;
+
+  std::string segId;
+  int segIndex = -1;
+  EXPECT_FALSE(seg_live_append_segment(id, "speech", "a", 0, 100, 16000, 6, false, 0.0, "{}",
+                                       &segId, &segIndex, &err));
+  EXPECT_NE(err.find("SEGMENT_ALREADY_FINALIZED"), std::string::npos);
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
 TEST_F(SegmentRegistryFixture, OptInSpool_SkippedWithoutEnv) {
   const char *flag = std::getenv("SHERPA_HOST_SEGMENT_SPOOL");
   if (flag == nullptr || std::string(flag) != "1") {
