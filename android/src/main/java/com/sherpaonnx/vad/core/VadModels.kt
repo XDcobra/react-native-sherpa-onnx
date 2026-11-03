@@ -1,9 +1,6 @@
 package com.sherpaonnx.vad.core
 
-import com.k2fsa.sherpa.onnx.SileroVadModelConfig
-import com.k2fsa.sherpa.onnx.TenVadModelConfig
-import com.k2fsa.sherpa.onnx.Vad
-import com.k2fsa.sherpa.onnx.VadModelConfig
+import com.sherpaonnx.vad.facade.SherpaOnnxVadHelper
 
 sealed class VadRuntimeOptions {
   abstract val scoreThreshold: Double
@@ -29,41 +26,27 @@ sealed class VadRuntimeOptions {
   ) : VadRuntimeOptions()
 }
 
-data class VadDecision(
-  val isSpeech: Boolean,
-  val score: Double? = null,
+data class VadSegment(
+  val startSample: Int,
+  val endSample: Int,
+  val durationMs: Int,
 )
 
+/**
+ * JNI-backed VAD engine (shared C API AcceptWaveform / Flush / Front / Pop).
+ * No Kotlin AAR handle.
+ */
 interface VadRuntime {
-  fun infer(chunk: FloatArray, sampleRate: Int): VadDecision
+  fun acceptWaveform(chunk: FloatArray)
+  fun flush()
   fun reset()
+  fun isSpeechDetected(): Boolean
+  fun popSegments(): List<VadSegment>
   fun close()
 }
 
-class SherpaOnnxVadRuntime(
-  private val vad: Vad,
-  private val options: VadRuntimeOptions,
-) : VadRuntime {
-  @Synchronized
-  override fun infer(chunk: FloatArray, sampleRate: Int): VadDecision {
-    if (chunk.isEmpty()) return VadDecision(isSpeech = false, score = 0.0)
-    val score = vad.compute(chunk).toDouble()
-    return VadDecision(isSpeech = score >= options.scoreThreshold, score = score)
-  }
-
-  @Synchronized
-  override fun reset() {
-    vad.reset()
-    vad.clear()
-  }
-
-  @Synchronized
-  override fun close() {
-    vad.release()
-  }
-}
-
 data class VadInstanceConfig(
+  val instanceId: String,
   val modelType: String,
   val modelDir: String,
   val sampleRate: Int,
@@ -72,49 +55,11 @@ data class VadInstanceConfig(
   val debug: Boolean,
   val runtimeOptions: VadRuntimeOptions,
   val runtime: VadRuntime,
-)
-
-fun buildVadModelConfig(
-  modelType: String,
-  modelPath: String,
-  sampleRate: Int,
-  provider: String,
-  numThreads: Int,
-  debug: Boolean,
-  runtimeOptions: VadRuntimeOptions,
-): VadModelConfig {
-  val silero = when (runtimeOptions) {
-    is VadRuntimeOptions.Silero -> SileroVadModelConfig(
-      model = modelPath,
-      threshold = runtimeOptions.scoreThreshold.toFloat(),
-      minSilenceDuration = runtimeOptions.minSilenceDurationMs / 1000f,
-      minSpeechDuration = runtimeOptions.minSpeechDurationMs / 1000f,
-      windowSize = runtimeOptions.windowSize,
-      maxSpeechDuration = runtimeOptions.maxSpeechDurationMs / 1000f,
-    )
-    else -> SileroVadModelConfig(model = modelPath)
-  }
-  val ten = when (runtimeOptions) {
-    is VadRuntimeOptions.Ten -> TenVadModelConfig(
-      model = modelPath,
-      threshold = runtimeOptions.scoreThreshold.toFloat(),
-      minSilenceDuration = runtimeOptions.minSilenceDurationMs / 1000f,
-      minSpeechDuration = runtimeOptions.minSpeechDurationMs / 1000f,
-      windowSize = runtimeOptions.windowSize,
-      maxSpeechDuration = runtimeOptions.maxSpeechDurationMs / 1000f,
-    )
-    else -> TenVadModelConfig(model = modelPath)
-  }
-  return VadModelConfig(
-    sileroVadModelConfig = silero,
-    tenVadModelConfig = ten,
-    sampleRate = sampleRate,
-    numThreads = numThreads,
-    provider = provider,
-    debug = debug,
-  )
+) {
+  fun gateKey(): String = "vad:$instanceId"
 }
 
+/** Create a JNI-backed VAD runtime (shared C API). Used by segmentation engines. */
 fun createVadRuntime(
   modelType: String,
   modelPath: String,
@@ -123,8 +68,8 @@ fun createVadRuntime(
   numThreads: Int,
   debug: Boolean,
   runtimeOptions: VadRuntimeOptions,
-): VadRuntime {
-  val config = buildVadModelConfig(
+): VadRuntime =
+  SherpaOnnxVadHelper.createVadRuntime(
     modelType = modelType,
     modelPath = modelPath,
     sampleRate = sampleRate,
@@ -133,8 +78,6 @@ fun createVadRuntime(
     debug = debug,
     runtimeOptions = runtimeOptions,
   )
-  return SherpaOnnxVadRuntime(vad = Vad(assetManager = null, config = config), options = runtimeOptions)
-}
 
 fun defaultRuntimeOptions(modelType: String): VadRuntimeOptions {
   return if (modelType == "ten_vad") {
