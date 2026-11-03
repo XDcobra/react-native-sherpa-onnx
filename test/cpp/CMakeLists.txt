@@ -1110,3 +1110,72 @@ else()
   message(STATUS "videobuffer host tests skipped (git submodule update --init third_party/libyuv)")
 endif()
 
+# --- SLID SpokenLanguageIdWrapper host tests (shared C API) ---
+set(SHERPA_ONNX_HOST_LIBDIR "" CACHE PATH
+  "Directory with libsherpa-onnx-c-api (dylib/so) for slid_host_test")
+set(_SLID_HOST_LIBDIR "${SHERPA_ONNX_HOST_LIBDIR}")
+if(_SLID_HOST_LIBDIR STREQUAL "" AND DEFINED ENV{SHERPA_ONNX_HOST_LIBDIR})
+  set(_SLID_HOST_LIBDIR "$ENV{SHERPA_ONNX_HOST_LIBDIR}")
+endif()
+if(_SLID_HOST_LIBDIR STREQUAL "")
+  if(EXISTS "/Volumes/SSD/dev/sherpa-onnx/build/lib/libsherpa-onnx-c-api.dylib"
+      OR EXISTS "/Volumes/SSD/dev/sherpa-onnx/build/lib/libsherpa-onnx-c-api.so")
+    set(_SLID_HOST_LIBDIR "/Volumes/SSD/dev/sherpa-onnx/build/lib")
+  endif()
+endif()
+
+set(_SLID_ORT_LIBDIR "")
+if(DEFINED _ORT_HOST_LIBDIR AND NOT "${_ORT_HOST_LIBDIR}" STREQUAL "")
+  set(_SLID_ORT_LIBDIR "${_ORT_HOST_LIBDIR}")
+elseif(EXISTS
+    "/Volumes/SSD/dev/sherpa-onnx/build/_deps/onnxruntime-src/lib/libonnxruntime.dylib")
+  set(_SLID_ORT_LIBDIR
+    "/Volumes/SSD/dev/sherpa-onnx/build/_deps/onnxruntime-src/lib")
+endif()
+
+set(_SLID_HAS_C_API FALSE)
+if(EXISTS "${_SLID_HOST_LIBDIR}/libsherpa-onnx-c-api.dylib"
+    OR EXISTS "${_SLID_HOST_LIBDIR}/libsherpa-onnx-c-api.so")
+  set(_SLID_HAS_C_API TRUE)
+endif()
+
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(SLID_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/slid")
+  set(SHERPA_ONNX_SRC_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(slid_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/slid/slid_host_test.cpp"
+    "${SLID_CPP_ROOT}/sherpa-onnx-slid-wrapper.cpp"
+  )
+  target_include_directories(slid_host_test PRIVATE
+    "${SLID_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT}"
+  )
+  target_link_directories(slid_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(slid_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(slid_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(slid_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(slid_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(slid_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME slid_host_test COMMAND $<TARGET_FILE:slid_host_test>)
+  set_tests_properties(slid_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "slid_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "slid_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
