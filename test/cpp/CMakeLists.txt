@@ -1454,3 +1454,54 @@ else()
     "stt_online_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
 endif()
 
+# --- TTS TtsWrapper host tests (shared CXX API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(TTS_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/tts")
+  set(TTS_DETECT_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni/model_detect")
+  set(SHERPA_ONNX_SRC_ROOT_TTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(tts_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/tts/tts_host_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tts/tts_host_detect_stubs.cpp"
+    "${TTS_CPP_ROOT}/sherpa-onnx-tts-engine-wrapper.cpp"
+    "${TTS_DETECT_ROOT}/tts/sherpa-onnx-validate-tts.cpp"
+    "${TTS_DETECT_ROOT}/common/sherpa-onnx-model-detect-helper.cpp"
+  )
+  target_include_directories(tts_host_test PRIVATE
+    "${TTS_CPP_ROOT}"
+    "${TTS_DETECT_ROOT}/common"
+    "${TTS_DETECT_ROOT}/tts"
+    "${SHERPA_ONNX_SRC_ROOT_TTS}"
+  )
+  target_link_directories(tts_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(tts_host_test PRIVATE
+    sherpa-onnx-c-api sherpa-onnx-cxx-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(tts_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(tts_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(tts_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(tts_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME tts_host_test COMMAND $<TARGET_FILE:tts_host_test>)
+  set_tests_properties(tts_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "tts_host_test enabled (sherpa C/CXX-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "tts_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
