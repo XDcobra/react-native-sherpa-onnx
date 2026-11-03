@@ -1290,11 +1290,7 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
           body[@"createdAtMs"] = @((int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0));
         }
         if (rec.hasConfidence) body[@"confidence"] = @(rec.confidence);
-        if (!rec.payloadJson.empty()) {
-          NSData *payloadData = [[NSString stringWithUTF8String:rec.payloadJson.c_str()] dataUsingEncoding:NSUTF8StringEncoding];
-          NSDictionary *payloadObj = payloadData ? [NSJSONSerialization JSONObjectWithData:payloadData options:0 error:nil] : nil;
-          if (payloadObj) body[@"payload"] = payloadObj;
-        }
+        // Notify-only: pull payload via getLiveSegmentBufferSegments / readLiveSegment.
         dispatch_async(dispatch_get_main_queue(), ^{
           [module sendEventWithName:@"pipelineLiveSegmentAppended" body:body];
         });
@@ -1946,15 +1942,7 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       if (rec.hasConfidence) {
         body[@"confidence"] = @(rec.confidence);
       }
-      if (!rec.payloadJson.empty()) {
-        NSData *payloadData = [[NSString stringWithUTF8String:rec.payloadJson.c_str()]
-          dataUsingEncoding:NSUTF8StringEncoding];
-        NSDictionary *payloadObj =
-          payloadData ? [NSJSONSerialization JSONObjectWithData:payloadData options:0 error:nil] : nil;
-        if (payloadObj) {
-          body[@"payload"] = payloadObj;
-        }
-      }
+      // Notify-only: pull payload via getLiveSegmentBufferSegments / readLiveSegment.
       dispatch_async(dispatch_get_main_queue(), ^{
         [m sendEventWithName:@"pipelineLiveSegmentAppended" body:body];
       });

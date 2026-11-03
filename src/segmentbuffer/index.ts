@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import type { SpeechSegment } from '../segment/segment';
+import { toSegmentReason, toSegmentSource } from '../segment/utils';
 import { PipelineSegmentErrorCode } from './types';
 import type {
   AlignmentSegmentPayload,
@@ -629,9 +631,31 @@ const segmentErrorCallbacks = new Map<
   string,
   Set<(event: LiveSegmentBufferErrorEvent) => void>
 >();
+const lastSegmentIndexByBuffer = new Map<string, number>();
 
 let segmentAppendedSub: NativeSubscription | null = null;
 let segmentErrorSub: NativeSubscription | null = null;
+
+function dispatchLiveSegmentNotify(
+  event: LiveSegmentBufferSegmentAppendedEvent
+): void {
+  const cbs = segmentAppendedCallbacks.get(event.segmentBufferId);
+  if (!cbs || cbs.size === 0) return;
+
+  const last = lastSegmentIndexByBuffer.get(event.segmentBufferId);
+  if (typeof last === 'number' && event.segmentIndex <= last) {
+    return;
+  }
+  lastSegmentIndexByBuffer.set(event.segmentBufferId, event.segmentIndex);
+
+  for (const cb of cbs) {
+    try {
+      cb(event);
+    } catch {
+      /* swallow callback errors */
+    }
+  }
+}
 
 function ensureLiveSegmentEventSubscriptions(): void {
   if (segmentAppendedSub && segmentErrorSub) return;
@@ -652,37 +676,25 @@ function ensureLiveSegmentEventSubscriptions(): void {
         sampleRate?: number;
         durationMs?: number;
         confidence?: number;
-        payload?: Record<string, unknown>;
       }) => {
         const segmentBufferId = raw?.segmentBufferId;
         if (!segmentBufferId) return;
-        const cbs = segmentAppendedCallbacks.get(segmentBufferId);
-        if (!cbs || cbs.size === 0) return;
-        let candidateKind = raw.kind;
-        if (!candidateKind && raw.payload && typeof raw.payload === 'object') {
-          const src = (raw.payload as Record<string, unknown>).source;
-          if (src === 'diarization') {
-            candidateKind = 'diarization';
-          } else if (src === 'alignment') {
-            candidateKind = 'alignment';
-          }
-        }
+        if (typeof raw.segmentIndex !== 'number') return;
+
         const eventKind = assertValidSegmentKind(
-          candidateKind ?? 'speech',
+          raw.kind ?? 'speech',
           'event.kind'
         );
-        const segmentIndexTrunc =
-          typeof raw.segmentIndex === 'number'
-            ? Math.trunc(raw.segmentIndex)
-            : 0;
-        const eventBase = {
+        const segmentIndex = Math.trunc(raw.segmentIndex);
+        const event: LiveSegmentBufferSegmentAppendedEvent = {
           segmentBufferId,
+          segmentIndex,
           totalSegments:
             typeof raw.totalSegments === 'number'
               ? Math.trunc(raw.totalSegments)
-              : Math.max(1, segmentIndexTrunc + 1),
+              : Math.max(1, segmentIndex + 1),
+          kind: eventKind,
           segmentId: typeof raw.segmentId === 'string' ? raw.segmentId : '',
-          segmentIndex: segmentIndexTrunc,
           sourceAudioBufferId:
             typeof raw.sourceAudioBufferId === 'string'
               ? raw.sourceAudioBufferId
@@ -701,48 +713,7 @@ function ensureLiveSegmentEventSubscriptions(): void {
             ? { confidence: raw.confidence }
             : {}),
         };
-        const event: LiveSegmentBufferSegmentAppendedEvent =
-          eventKind === 'alignment'
-            ? {
-                ...eventBase,
-                kind: 'alignment',
-                ...(raw.payload !== undefined
-                  ? {
-                      payload: assertAlignmentPayload(
-                        raw.payload,
-                        'event.payload'
-                      ),
-                    }
-                  : {}),
-              }
-            : eventKind === 'diarization'
-            ? {
-                ...eventBase,
-                kind: 'diarization',
-                ...(raw.payload !== undefined
-                  ? {
-                      payload: assertDiarizationPayload(
-                        raw.payload,
-                        'event.payload'
-                      ),
-                    }
-                  : {}),
-              }
-            : {
-                ...eventBase,
-                kind: 'speech',
-                ...(raw.payload !== undefined
-                  ? {
-                      payload: assertSpeechPayload(
-                        raw.payload,
-                        'event.payload'
-                      ),
-                    }
-                  : {}),
-              };
-        for (const cb of cbs) {
-          cb(event);
-        }
+        dispatchLiveSegmentNotify(event);
       }
     );
   }
@@ -1198,7 +1169,72 @@ export async function releasePipelineSegmentBuffer(
   buffer: PipelineSegmentBufferIdSource
 ): Promise<void> {
   const id = resolvePipelineSegmentBufferId(buffer);
+  segmentAppendedCallbacks.delete(id);
+  segmentErrorCallbacks.delete(id);
+  lastSegmentIndexByBuffer.delete(id);
   await getNative().releasePipelineSegmentBuffer(id);
+}
+
+/**
+ * Pull one committed segment for a notify-only appended event.
+ */
+export async function readLiveSegment(
+  event: LiveSegmentBufferSegmentAppendedEvent
+): Promise<SegmentMeta | undefined> {
+  const segments = await getLiveSegmentBufferSegments(
+    event.segmentBufferId,
+    event.segmentIndex,
+    1
+  );
+  return segments[0];
+}
+
+/**
+ * Map a notify event (+ optional pulled SegmentMeta) into a domain SpeechSegment
+ * for audio-side product callbacks.
+ */
+export function liveSegmentNotifyToSpeechSegment(
+  event: LiveSegmentBufferSegmentAppendedEvent,
+  meta?: SegmentMeta,
+  annotation?: {
+    reason?: string;
+    source?: string;
+    createdAtMs?: number;
+  }
+): SpeechSegment {
+  const reason = toSegmentReason(
+    annotation?.reason ??
+      (typeof meta?.reason === 'string' ? meta.reason : undefined)
+  );
+  const source = toSegmentSource(
+    annotation?.source ??
+      (typeof meta?.source === 'string' ? meta.source : undefined)
+  );
+  const createdAtMs =
+    typeof annotation?.createdAtMs === 'number'
+      ? Math.trunc(annotation.createdAtMs)
+      : typeof meta?.createdAtMs === 'number'
+      ? Math.trunc(meta.createdAtMs)
+      : Date.now();
+
+  return {
+    segmentId:
+      event.segmentId || `seg_${event.segmentBufferId}_${event.segmentIndex}`,
+    domain: 'speech',
+    startOffset: event.startSample,
+    endOffset: event.endSample,
+    reason,
+    source,
+    createdAtMs,
+    segmentIndex: event.segmentIndex,
+    sourceAudioBufferId: event.sourceAudioBufferId,
+    sampleRate: event.sampleRate,
+    durationMs: event.durationMs,
+    ...(typeof event.confidence === 'number'
+      ? { confidence: event.confidence }
+      : {}),
+    ...(meta?.payload != null ? { meta: { payload: meta.payload } } : {}),
+  };
 }
 
 export type {

@@ -92,14 +92,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           m.putDouble("createdAtMs", System.currentTimeMillis().toDouble())
         }
         rec.confidence?.let { m.putDouble("confidence", it) }
-        if (!rec.payloadJson.isNullOrEmpty()) {
-          try {
-            val jo = org.json.JSONObject(rec.payloadJson)
-            val p = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(jo)
-            m.putMap("payload", p)
-          } catch (_: Exception) {
-          }
-        }
+        // Notify-only: pull payload via getLiveSegmentBufferSegments / readLiveSegment.
         eventEmitter.emit("pipelineLiveSegmentAppended", m)
       } catch (_: Exception) {
       }

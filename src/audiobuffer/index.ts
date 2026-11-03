@@ -408,7 +408,6 @@ function ensureLiveEventSubscriptions(): void {
         sampleRate?: number;
         durationMs?: number;
         confidence?: number;
-        payload?: Record<string, unknown>;
         reason?: string;
         source?: string;
         createdAtMs?: number;
@@ -450,6 +449,8 @@ function ensureLiveEventSubscriptions(): void {
             ? consumeSpeechSegmentAnnotation(segmentId)
             : undefined;
 
+        // Notify-only segment events: payload lives in SegmentMeta — pull via
+        // segmentbuffer `readLiveSegment` when needed (avoid bridge dump).
         const segment = {
           segmentId,
           domain: 'speech' as const,
@@ -474,9 +475,6 @@ function ensureLiveEventSubscriptions(): void {
             typeof rawEvent.durationMs === 'number' ? rawEvent.durationMs : 0,
           ...(typeof rawEvent.confidence === 'number'
             ? { confidence: rawEvent.confidence }
-            : {}),
-          ...(rawEvent.payload != null
-            ? { meta: { payload: rawEvent.payload } }
             : {}),
         };
 
