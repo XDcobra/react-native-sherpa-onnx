@@ -1,5 +1,5 @@
-#ifndef SHERPA_ONNX_IOS_STT_WRAPPER_H
-#define SHERPA_ONNX_IOS_STT_WRAPPER_H
+#ifndef SHERPA_ONNX_STT_ENGINE_WRAPPER_H
+#define SHERPA_ONNX_STT_ENGINE_WRAPPER_H
 
 #include "sherpa-onnx-common.h"
 #include "sherpa-onnx-model-detect.h"
@@ -176,4 +176,4 @@ private:
 
 } // namespace sherpaonnx
 
-#endif // SHERPA_ONNX_IOS_STT_WRAPPER_H
+#endif // SHERPA_ONNX_STT_ENGINE_WRAPPER_H

@@ -69,6 +69,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/vad/*.{h,cpp}",
     # Shared KWS core (C-API KeywordSpotter). JNI excluded below.
     "android/src/main/cpp/kws/*.{h,cpp}",
+    # Shared offline STT core (CXX OfflineRecognizer). JNI excluded below.
+    "android/src/main/cpp/stt/*.{h,cpp}",
     # Shared ImageBuffer core (decode + registry; JNI excluded below).
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared VideoBuffer core (platform/android excluded below).
@@ -112,6 +114,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/punctuation/sherpa-onnx-punctuation-jni.cpp",
     "android/src/main/cpp/jni/vad/sherpa-onnx-vad-jni.cpp",
     "android/src/main/cpp/jni/kws/sherpa-onnx-kws-jni.cpp",
+    "android/src/main/cpp/jni/stt/sherpa-onnx-stt-jni.cpp",
     "android/src/main/cpp/jni/image/**/*",
     "android/src/main/cpp/jni/video/**/*",
     "android/src/main/cpp/video/platform/android/**/*",
@@ -289,6 +292,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/vad\"",
     "\"#{pod_root}/android/src/main/cpp/vad\"",
     "\"#{pod_root}/android/src/main/cpp/kws\"",
+    "\"#{pod_root}/android/src/main/cpp/stt\"",
     "\"#{pod_root}/third_party/onnxruntime/include/onnxruntime/core/session\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",

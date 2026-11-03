@@ -14,7 +14,7 @@
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../pipeline/SttOfflineLivePipelineWorker.h"
-#include "../native/sherpa-onnx-stt-wrapper.h"
+#include "sherpa-onnx-stt-engine-wrapper.h"
 #include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-path-fill.h"
