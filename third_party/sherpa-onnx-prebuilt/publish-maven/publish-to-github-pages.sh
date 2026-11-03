@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Publish sherpa-onnx AAR to GitHub Pages Maven (XDcobra/maven).
 # Requires: MAVEN_VERSION, AAR_SRC, MAVEN_REPO_PAT in environment.
-# Optional: AAR_SRC_JAVA — path to Java API AAR (classifier "java"); if set and file exists, publish as artifactId-version-java.aar.
+# Optional classifiers (same POM, extra AARs):
+#   AAR_SRC_KOTLIN — path to Kotlin API AAR → artifactId-version-kotlin.aar (classifier "kotlin")
+#   AAR_SRC_JAVA   — path to Java API AAR   → artifactId-version-java.aar   (classifier "java")
+# Default AAR (AAR_SRC) is native-only from 2.0.1-2 (jni + c-api; no Kotlin/Java API).
 # Optionally source publish.env.example (or publish.env) for GROUP_ID, ARTIFACT_ID.
-# Optional: DEPENDENCY_GROUP_ID, DEPENDENCY_ARTIFACT_ID, DEPENDENCY_VERSION for POM <dependencies> (modular / Best Practice).
+# Optional: DEPENDENCY_GROUP_ID, DEPENDENCY_ARTIFACT_ID, DEPENDENCY_VERSION for POM <dependencies>.
 # Run from repository root (e.g. in CI after the AAR is built).
 
 set -e
@@ -34,6 +37,7 @@ GROUP_PATH="${GROUP_ID//.//}"
 ARTIFACT_PATH="${GROUP_PATH}/${ARTIFACT_ID}"
 VERSION_PATH="${ARTIFACT_PATH}/${MAVEN_VERSION}"
 AAR_NAME="${ARTIFACT_ID}-${MAVEN_VERSION}.aar"
+AAR_KOTLIN_NAME="${ARTIFACT_ID}-${MAVEN_VERSION}-kotlin.aar"
 AAR_JAVA_NAME="${ARTIFACT_ID}-${MAVEN_VERSION}-java.aar"
 POM_NAME="${ARTIFACT_ID}-${MAVEN_VERSION}.pom"
 
@@ -46,7 +50,13 @@ REPO_ROOT="$(pwd)"
 mkdir -p "$VERSION_PATH"
 cp "../${AAR_SRC}" "$VERSION_PATH/${AAR_NAME}"
 
-# Optional: publish Java API AAR with classifier "java" (same POM, second artifact)
+# Optional: publish Kotlin API AAR with classifier "kotlin"
+if [ -n "${AAR_SRC_KOTLIN:-}" ] && [ -f "../${AAR_SRC_KOTLIN}" ]; then
+  cp "../${AAR_SRC_KOTLIN}" "$VERSION_PATH/${AAR_KOTLIN_NAME}"
+  echo "Including Kotlin API AAR as ${AAR_KOTLIN_NAME} (classifier 'kotlin')"
+fi
+
+# Optional: publish Java API AAR with classifier "java"
 if [ -n "${AAR_SRC_JAVA:-}" ] && [ -f "../${AAR_SRC_JAVA}" ]; then
   cp "../${AAR_SRC_JAVA}" "$VERSION_PATH/${AAR_JAVA_NAME}"
   echo "Including Java API AAR as ${AAR_JAVA_NAME} (classifier 'java')"
@@ -73,7 +83,7 @@ pom = f'''<?xml version=\"1.0\" encoding=\"UTF-8\"?>
   <version>{v}</version>
   <packaging>aar</packaging>
   <name>{a}</name>
-  <description>Sherpa-onnx for Android (QNN). Built from react-native-sherpa-onnx. Depends on com.xdcobra.sherpa:onnxruntime.</description>
+  <description>Sherpa-onnx for Android (QNN). Default artifact is native-only (jni + c-api). Kotlin/Java APIs use classifiers kotlin/java. Depends on com.xdcobra.sherpa:onnxruntime.</description>
 {dep}
 </project>'''
 open(path, 'w').write(pom)
@@ -90,7 +100,7 @@ open(path, 'w').write('''<?xml version=\"1.0\" encoding=\"UTF-8\"?>
   <version>''' + v + '''</version>
   <packaging>aar</packaging>
   <name>''' + a + '''</name>
-  <description>Sherpa-onnx for Android (QNN). Built from react-native-sherpa-onnx.</description>
+  <description>Sherpa-onnx for Android (QNN). Default artifact is native-only (jni + c-api). Kotlin/Java APIs use classifiers kotlin/java.</description>
 </project>''')
 " "$GROUP_ID" "$ARTIFACT_ID" "$MAVEN_VERSION" "$VERSION_PATH/${POM_NAME}"
 fi
@@ -100,12 +110,12 @@ for f in "$AAR_NAME" "$POM_NAME"; do
   md5sum "$f" | cut -d' ' -f1 > "${f}.md5"
   sha1sum "$f" | cut -d' ' -f1 > "${f}.sha1"
 done
-if [ -f "$AAR_JAVA_NAME" ]; then
-  for f in "$AAR_JAVA_NAME"; do
+for f in "$AAR_KOTLIN_NAME" "$AAR_JAVA_NAME"; do
+  if [ -f "$f" ]; then
     md5sum "$f" | cut -d' ' -f1 > "${f}.md5"
     sha1sum "$f" | cut -d' ' -f1 > "${f}.sha1"
-  done
-fi
+  fi
+done
 cd "$REPO_ROOT"
 
 METADATA_FILE="${REPO_ROOT}/${ARTIFACT_PATH}/maven-metadata.xml"
