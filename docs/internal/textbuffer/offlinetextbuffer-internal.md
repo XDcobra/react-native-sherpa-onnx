@@ -2,7 +2,8 @@
 
 **Scope:** Internal implementation details of `offlineTextBuffer` (the offline/immutable text buffer).  
 **Audience:** SDK developers planning engine integrations, text pipeline flows, and post-processing strategies.  
-**Native entry types:** `OfflineTextEntry` (Android/Kotlin), `TxtOfflineEntry` (iOS/C++).
+**Native SoT:** shared C++ `TxtOfflineEntry` / `TextRegistry` under `android/src/main/cpp/textbuffer/` (both platforms).  
+**Android facade:** thin Kotlin `OfflineTextEntry` (spans/tokens mirror; see [buffer-in-c-copy-backlog](../../migration/buffer-in-c-copy-backlog.md) T1/T5).
 
 ---
 
