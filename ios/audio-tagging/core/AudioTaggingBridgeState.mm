@@ -27,7 +27,7 @@ void RemoveAudioTagging(const std::string &id) {
       g_audio_tagging_instances.erase(it);
     }
   }
-  // Destructor destroys handle
+  // Destructor releases wrapper
 }
 
 }  // namespace bridge

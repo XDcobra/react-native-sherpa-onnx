@@ -61,6 +61,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/enhancement/*.{h,cpp}",
     # Shared SLID core (C-API Whisper spoken language ID). JNI excluded below.
     "android/src/main/cpp/slid/*.{h,cpp}",
+    # Shared audio tagging core (C-API). JNI excluded below.
+    "android/src/main/cpp/audio_tagging/*.{h,cpp}",
     # Shared ImageBuffer core (decode + registry; JNI excluded below).
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared VideoBuffer core (platform/android excluded below).
@@ -100,6 +102,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp",
     "android/src/main/cpp/jni/enhancement/sherpa-onnx-enhancement-jni.cpp",
     "android/src/main/cpp/jni/slid/sherpa-onnx-slid-jni.cpp",
+    "android/src/main/cpp/jni/audio_tagging/sherpa-onnx-audio-tagging-jni.cpp",
     "android/src/main/cpp/jni/image/**/*",
     "android/src/main/cpp/jni/video/**/*",
     "android/src/main/cpp/video/platform/android/**/*",
@@ -272,6 +275,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/speaker-embedding\"",
     "\"#{pod_root}/android/src/main/cpp/enhancement\"",
     "\"#{pod_root}/android/src/main/cpp/slid\"",
+    "\"#{pod_root}/android/src/main/cpp/audio_tagging\"",
     "\"#{pod_root}/third_party/onnxruntime/include/onnxruntime/core/session\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
