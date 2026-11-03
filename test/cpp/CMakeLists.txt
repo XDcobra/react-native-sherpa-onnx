@@ -1310,3 +1310,45 @@ else()
     "vad_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
 endif()
 
+# --- KwsEngineWrapper host tests (shared C API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(KWS_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/kws")
+  set(SHERPA_ONNX_SRC_ROOT_KWS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(kws_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/kws/kws_host_test.cpp"
+    "${KWS_CPP_ROOT}/sherpa-onnx-kws-engine-wrapper.cpp"
+  )
+  target_include_directories(kws_host_test PRIVATE
+    "${KWS_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT_KWS}"
+  )
+  target_link_directories(kws_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(kws_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(kws_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(kws_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(kws_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(kws_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME kws_host_test COMMAND $<TARGET_FILE:kws_host_test>)
+  set_tests_properties(kws_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "kws_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "kws_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
