@@ -2,33 +2,24 @@
 
 #ifdef __cplusplus
 
+#include "sherpa-onnx-slid-wrapper.h"
+
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
-
-#if __has_include(<sherpa-onnx/c-api/c-api.h>)
-#include <sherpa-onnx/c-api/c-api.h>
-#elif __has_include("sherpa-onnx/c-api/c-api.h")
-#include "sherpa-onnx/c-api/c-api.h"
-#else
-#include "../../../third_party/sherpa-onnx/sherpa-onnx/c-api/c-api.h"
-#endif
 
 namespace sherpaonnx {
 namespace language_id {
 namespace bridge {
 
 struct LanguageIdInstanceState {
-  const SherpaOnnxSpokenLanguageIdentification *handle = nullptr;
+  std::shared_ptr<sherpaonnx::SpokenLanguageIdWrapper> wrapper;
   int32_t numThreads = 1;
   std::string provider = "cpu";
 
-  ~LanguageIdInstanceState() {
-    if (handle != nullptr) {
-      SherpaOnnxDestroySpokenLanguageIdentification(handle);
-      handle = nullptr;
-    }
+  bool isReady() const {
+    return wrapper != nullptr && wrapper->isInitialized();
   }
 };
 

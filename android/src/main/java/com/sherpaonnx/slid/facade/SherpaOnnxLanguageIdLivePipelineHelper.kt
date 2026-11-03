@@ -34,8 +34,8 @@ internal class SherpaOnnxLanguageIdLivePipelineHelper(
         return
       }
 
-      val slid = languageIdHelper.getInstance(instanceId)
-      if (slid == null) {
+      val slidInstance = languageIdHelper.getInstance(instanceId)
+      if (slidInstance == null || !languageIdHelper.hasInstance(instanceId)) {
         promise.reject(
           LanguageIdErrorCodes.NOT_INITIALIZED,
           "SLID instance not found: $instanceId",
@@ -120,7 +120,8 @@ internal class SherpaOnnxLanguageIdLivePipelineHelper(
           liveSegmentEntry = segmentEntry,
         ),
         audioInBufferId = audioInLiveBufferId,
-        slid = slid,
+        languageIdHelper = languageIdHelper,
+        slidInstance = slidInstance,
         textOutputEntry = textEntry,
         segmentsOutEntry = segmentsOutEntry,
       )

@@ -27,7 +27,7 @@ void RemoveLanguageId(const std::string &id) {
       g_language_id_instances.erase(it);
     }
   }
-  // LanguageIdInstanceState destructor destroys handle
+  // SpokenLanguageIdWrapper destructor / release destroys the C handle.
 }
 
 }  // namespace bridge

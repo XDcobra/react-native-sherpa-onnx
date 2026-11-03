@@ -2,27 +2,27 @@ package com.sherpaonnx.slid.pipeline
 
 import android.os.SystemClock
 import android.util.Log
-import com.k2fsa.sherpa.onnx.OfflineStream
-import com.k2fsa.sherpa.onnx.SpokenLanguageIdentification
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
-import com.sherpaonnx.segment.pipeline.LiveSegmentEntry
 import com.sherpaonnx.lifecycle.NativeInstanceGate
+import com.sherpaonnx.segment.pipeline.LiveSegmentEntry
 import com.sherpaonnx.slid.core.LanguageIdDebug
+import com.sherpaonnx.slid.core.LanguageIdInstance
+import com.sherpaonnx.slid.facade.SherpaOnnxLanguageIdHelper
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import org.json.JSONObject
 
 /**
- * Live-overload worker: on each speech commit, run Whisper SLID and commit the
- * ISO language code to [textOutputEntry]. Optionally also append a
- * LanguageIdSpeechSegmentPayload to [segmentsOutEntry].
+ * Live-overload worker: on each speech commit, run Whisper SLID via shared C API
+ * and commit the ISO language code to [textOutputEntry].
  */
 internal class SlidOfflineLivePipelineWorker(
   pipelineId: String,
   attachedSegmentationEngineId: String,
   private val audioInputRef: AudioInput,
   private val audioInBufferId: String,
-  private val slid: SpokenLanguageIdentification,
+  private val languageIdHelper: SherpaOnnxLanguageIdHelper,
+  private val slidInstance: LanguageIdInstance,
   private val textOutputEntry: LiveTextEntry,
   private val segmentsOutEntry: LiveSegmentEntry?,
 ) : OfflineLivePipelineWorker(
@@ -32,13 +32,13 @@ internal class SlidOfflineLivePipelineWorker(
   textInput = null,
 ) {
 
-  private val slidIdentity = System.identityHashCode(slid)
-  private val gateKey = NativeInstanceGate.keyFor(slid)
+  private val gateKey = slidInstance.gateKey()
+  private val slidIdentity = slidInstance.instanceId.hashCode()
 
   init {
     LanguageIdDebug.lifecycle(
       "worker.created",
-      "pipelineId=$pipelineId audioIn=$audioInBufferId slid=$slidIdentity " +
+      "pipelineId=$pipelineId audioIn=$audioInBufferId instanceId=${slidInstance.instanceId} " +
         "segOut=${segmentsOutEntry?.bufferId ?: "-"}",
     )
   }
@@ -85,7 +85,6 @@ internal class SlidOfflineLivePipelineWorker(
       frameCount = frameCount,
     )
 
-    // Diagnostic only: length if we treated startSample as absolute and mapped into the ring.
     val absMappedLen =
       if (startAbs >= snap.oldestInRing && startAbs < snap.written) {
         val rel = (startAbs - snap.oldestInRing).toInt()
@@ -110,7 +109,7 @@ internal class SlidOfflineLivePipelineWorker(
 
     if (!NativeInstanceGate.beginUse(gateKey)) {
       LanguageIdDebug.warn(
-        "live.skipReleased pipelineId=$pipelineId slid=$slidIdentity " +
+        "live.skipReleased pipelineId=$pipelineId instanceId=${slidInstance.instanceId} " +
           "start=${speech.startSample} end=${speech.endSample}",
       )
       return
@@ -123,31 +122,24 @@ internal class SlidOfflineLivePipelineWorker(
       opId = opId,
       detail = "pipelineId=$pipelineId samples=${samples.size} sr=${speech.sampleRate}",
     )
-    var stream: OfflineStream? = null
-    val lang: String
     val t0 = SystemClock.uptimeMillis()
+    val lang: String
     try {
-      stream = slid.createStream()
-      LanguageIdDebug.lifecycle(
-        "live.streamCreated",
-        "op=$opId pipelineId=$pipelineId streamNull=${stream == null}",
-      )
-      stream.acceptWaveform(samples, speech.sampleRate)
       LanguageIdDebug.lifecycle(
         "live.beforeCompute",
         "op=$opId pipelineId=$pipelineId samples=${samples.size}",
       )
-      lang = slid.compute(stream).trim()
+      lang = languageIdHelper.computeForLive(
+        slidInstance.instanceId,
+        samples,
+        speech.sampleRate,
+      )
     } catch (t: Throwable) {
       LanguageIdDebug.warn(
         "live.computeThrowable op=$opId pipelineId=$pipelineId type=${t.javaClass.name} msg=${t.message}",
       )
       throw t
     } finally {
-      try {
-        stream?.release()
-      } catch (_: Exception) {
-      }
       LanguageIdDebug.computeLeave(
         slidIdentity = slidIdentity,
         where = "live.onSegmentCommitted",

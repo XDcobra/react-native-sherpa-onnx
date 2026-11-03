@@ -186,6 +186,8 @@ set(SOURCES
     jni/model_detect/slid/sherpa-onnx-model-detect-slid.cpp
     jni/model_detect/slid/sherpa-onnx-validate-slid.cpp
     jni/model_detect/slid/sherpa-onnx-slid-detect-wrapper.cpp
+    slid/sherpa-onnx-slid-wrapper.cpp
+    jni/slid/sherpa-onnx-slid-jni.cpp
     jni/model_detect/kws/sherpa-onnx-model-detect-kws.cpp
     jni/model_detect/kws/sherpa-onnx-validate-kws.cpp
     jni/model_detect/kws/sherpa-onnx-kws-detect-wrapper.cpp
@@ -558,6 +560,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/diarization
     ${CMAKE_CURRENT_SOURCE_DIR}/speaker-embedding
     ${CMAKE_CURRENT_SOURCE_DIR}/enhancement
+    ${CMAKE_CURRENT_SOURCE_DIR}/slid
     ${ORT_INCLUDE_DIR}
     # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
     ${ORT_INCLUDE_DIR}/onnxruntime/core/session
