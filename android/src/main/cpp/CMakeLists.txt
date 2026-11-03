@@ -216,6 +216,7 @@ set(SOURCES
     textbuffer/TextRegistry.cpp
     jni/textbuffer/sherpa-onnx-textbuffer-jni.cpp
     segmentbuffer/SegJson.cpp
+    segmentbuffer/SegPayloadValidate.cpp
     segmentbuffer/SegmentRegistry.cpp
     segmentbuffer/SegmentLinkMapRegistry.cpp
     jni/segmentbuffer/sherpa-onnx-segmentbuffer-jni.cpp

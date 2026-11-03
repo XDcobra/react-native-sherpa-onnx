@@ -67,6 +67,11 @@ const ALIGNMENT_PAYLOAD_ALLOWED_KEYS = new Set([
   'wordMetadata',
   'languageHints',
 ]);
+const SPEECH_PAYLOAD_ANNOTATION_KEYS = [
+  '__annotationReason',
+  '__annotationSource',
+  '__annotationCreatedAtMs',
+] as const;
 const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'vad',
   'stt',
@@ -75,18 +80,48 @@ const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'pyannote',
   'languageId',
   'audioTagging',
+  'manual',
 ]);
 const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   SpeechSegmentPayloadSource,
   Set<string>
 > = {
-  vad: new Set(['source', 'engine', 'decision', 'score']),
-  stt: new Set(['source', 'transcript', 'tokenCount', 'isFinal']),
-  tts: new Set(['source', 'text', 'chunkIndex', 'isFinalChunk']),
-  sid: new Set(['source', 'speakerName']),
-  pyannote: new Set(['source']),
-  languageId: new Set(['source', 'lang', 'confidence']),
-  audioTagging: new Set(['source', 'primaryName', 'events']),
+  vad: new Set([
+    'source',
+    'engine',
+    'decision',
+    'score',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  stt: new Set([
+    'source',
+    'transcript',
+    'tokenCount',
+    'isFinal',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  tts: new Set([
+    'source',
+    'text',
+    'chunkIndex',
+    'isFinalChunk',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  sid: new Set(['source', 'speakerName', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
+  pyannote: new Set(['source', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
+  languageId: new Set([
+    'source',
+    'lang',
+    'confidence',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  audioTagging: new Set([
+    'source',
+    'primaryName',
+    'events',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  manual: new Set(['source', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
 };
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
@@ -216,7 +251,7 @@ function assertSpeechPayload(
   const source = obj.source;
   if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
     throw new Error(
-      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging.`
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual.`
     );
   }
   const typedSource = source as SpeechSegmentPayloadSource;

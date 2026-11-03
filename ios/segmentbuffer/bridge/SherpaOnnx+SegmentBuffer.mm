@@ -189,105 +189,6 @@ static NSString *seg_validate_sentence_boundary_chars_field(NSDictionary *policy
   return nil;
 }
 
-bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorMessage) {
-  if (![payload isKindOfClass:[NSDictionary class]]) {
-    if (errorMessage) *errorMessage = @"speech payload is required and must include source";
-    return false;
-  }
-  NSString *source = [payload[@"source"] isKindOfClass:[NSString class]] ? payload[@"source"] : nil;
-  if (source.length == 0) {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual";
-    return false;
-  }
-  NSSet<NSString *> *allowed = nil;
-  if ([source isEqualToString:@"vad"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"engine", @"decision", @"score", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"stt"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"transcript", @"tokenCount", @"isFinal", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"tts"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"text", @"chunkIndex", @"isFinalChunk", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"sid"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"speakerName", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"pyannote"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"languageId"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"lang", @"confidence", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"audioTagging"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"primaryName", @"events", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"manual"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual";
-    return false;
-  }
-
-  for (NSString *key in payload) {
-    if (![allowed containsObject:key]) {
-      if (errorMessage) *errorMessage = [NSString stringWithFormat:@"speech payload.%@ is not allowed for source=%@", key, source];
-      return false;
-    }
-  }
-
-  if ([source isEqualToString:@"vad"] && payload[@"engine"] != nil) {
-    NSString *engine = [payload[@"engine"] isKindOfClass:[NSString class]] ? payload[@"engine"] : nil;
-    if (!(engine && [engine isEqualToString:@"vad"])) {
-      if (errorMessage) *errorMessage = @"speech payload.engine must be vad";
-      return false;
-    }
-  }
-  if ([source isEqualToString:@"vad"] && payload[@"decision"] != nil) {
-    NSString *decision = [payload[@"decision"] isKindOfClass:[NSString class]] ? payload[@"decision"] : nil;
-    if (!(decision && [decision isEqualToString:@"model"])) {
-      if (errorMessage) *errorMessage = @"speech payload.decision must be model";
-      return false;
-    }
-  }
-  if ([source isEqualToString:@"sid"]) {
-    if (![[payload allKeys] containsObject:@"speakerName"]) {
-      if (errorMessage) *errorMessage = @"speech payload.speakerName is required for source=sid (string or null)";
-      return false;
-    }
-    id speakerName = payload[@"speakerName"];
-    if (!(speakerName == [NSNull null] || [speakerName isKindOfClass:[NSString class]])) {
-      if (errorMessage) *errorMessage = @"speech payload.speakerName must be a string or null";
-      return false;
-    }
-  }
-  if ([source isEqualToString:@"languageId"]) {
-    id langValue = payload[@"lang"];
-    if (![langValue isKindOfClass:[NSString class]] || [(NSString *)langValue length] == 0) {
-      if (errorMessage) *errorMessage = @"speech payload.lang is required for source=languageId (non-empty string)";
-      return false;
-    }
-    if (payload[@"confidence"] != nil && payload[@"confidence"] != [NSNull null]) {
-      if (![payload[@"confidence"] isKindOfClass:[NSNumber class]]) {
-        if (errorMessage) *errorMessage = @"speech payload.confidence must be a finite number when provided";
-        return false;
-      }
-      double confidence = [(NSNumber *)payload[@"confidence"] doubleValue];
-      if (!std::isfinite(confidence)) {
-        if (errorMessage) *errorMessage = @"speech payload.confidence must be a finite number when provided";
-        return false;
-      }
-    }
-  }
-  if ([source isEqualToString:@"audioTagging"]) {
-    if (payload[@"primaryName"] != nil && payload[@"primaryName"] != [NSNull null]) {
-      if (![payload[@"primaryName"] isKindOfClass:[NSString class]]) {
-        if (errorMessage) *errorMessage = @"speech payload.primaryName must be a string when provided";
-        return false;
-      }
-    }
-    if (payload[@"events"] != nil && payload[@"events"] != [NSNull null]) {
-      if (![payload[@"events"] isKindOfClass:[NSArray class]]) {
-        if (errorMessage) *errorMessage = @"speech payload.events must be an array when provided";
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 } // namespace
 
 namespace {
@@ -354,23 +255,6 @@ static NSDictionary *segRecordToDict(const SegRecord &r) {
   return dict;
 }
 
-static void seg_notify_segment_appended(
-  const std::shared_ptr<SegLiveEntry> &entry,
-  const SegRecord &seg,
-  int segmentIndex
-) {
-  if (!entry->emitSegmentAppended || !entry->segmentAppendedEmitter) {
-    return;
-  }
-  const int64_t now = (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
-  if (entry->segmentEventMinIntervalMs > 0 &&
-      now - entry->lastSegmentEmitWallMs < entry->segmentEventMinIntervalMs) {
-    return;
-  }
-  entry->lastSegmentEmitWallMs = now;
-  const int totalSegCount = static_cast<int>(entry->segments.size());
-  entry->segmentAppendedEmitter(entry->bufferId, seg, segmentIndex, totalSegCount);
-}
 } // namespace
 
 namespace {
@@ -2153,96 +2037,63 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
                    reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
-  std::shared_ptr<SegLiveEntry> entry;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto it = g_seg_live.find(liveBufferId.UTF8String);
-    if (it == g_seg_live.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
-      return;
-    }
-    entry = it->second;
+  std::string payloadJson;
+  if ([payload isKindOfClass:[NSDictionary class]]) {
+    NSData *pd = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+    if (pd) payloadJson.assign((const char *)pd.bytes, (size_t)pd.length);
   }
-  try {
-    SegRecord seg;
-    seg.id = "seg_" + seg_uuid();
-    seg.kind = kind.length > 0 ? kind.UTF8String : "speech";
-    if (!seg_is_valid_kind(seg.kind)) {
-      reject(@"SEGMENT_INVALID_ARGUMENT", @"kind must be one of speech, alignment, or diarization", nil);
-      return;
-    }
-    if (seg.kind == "speech") {
-      NSString *validationError = nil;
-      if (!seg_validate_strict_speech_payload(payload, &validationError)) {
-        reject(@"SEGMENT_INVALID_ARGUMENT", validationError ?: @"Invalid speech payload", nil);
-        return;
-      }
-    }
-    if ((int)sampleRate <= 0) {
-      reject(@"SEGMENT_INVALID_ARGUMENT", @"sampleRate must be > 0", nil);
-      return;
-    }
-    seg.sourceAudioBufferId = sourceAudioBufferId.length > 0 ? sourceAudioBufferId.UTF8String : entry->sourceAudioBufferId;
-    seg.startSample = (int)startSample;
-    seg.endSample = (int)endSample;
-    seg.sampleRate = (int)sampleRate;
-    seg.durationMs = durationMs != nil ? durationMs.intValue : (int)(((seg.endSample - seg.startSample) * 1000.0) / std::max(1, seg.sampleRate));
-    if (confidence != nil) {
-      seg.hasConfidence = true;
-      seg.confidence = confidence.doubleValue;
-    }
-    if ([payload isKindOfClass:[NSDictionary class]]) {
-      NSData *pd = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
-      if (pd) seg.payloadJson = std::string((const char *)pd.bytes, pd.length);
-    }
-    std::string checkpointSnapshot;
-    int segmentIndex = 0;
-    {
-      std::lock_guard<std::mutex> lock(entry->lock);
-      if (entry->state == SegLiveEntry::FINISHED) {
-        throw std::runtime_error("SEGMENT_ALREADY_FINALIZED: Live segment buffer is finalized");
-      }
-      segmentIndex = (int)(entry->evictedCount + (int64_t)entry->segments.size());
-      entry->segments.push_back(seg);
-      if ((int)entry->segments.size() > entry->maxSegments) {
-        entry->segments.erase(entry->segments.begin());
-        entry->evictedCount++;
-      }
-      entry->totalSegmentsWritten++;
-      checkpointSnapshot = entry->snapshotForSpoolLocked();
-    }
-    entry->maybeAppendSegmentToSpool(seg, true, checkpointSnapshot);
-
-    if ([payload isKindOfClass:[NSDictionary class]]) {
-      NSString *annReason = [payload[@"__annotationReason"] isKindOfClass:[NSString class]] ? payload[@"__annotationReason"] : nil;
-      NSString *annSource = [payload[@"__annotationSource"] isKindOfClass:[NSString class]] ? payload[@"__annotationSource"] : nil;
-      if (annReason.length > 0 && annSource.length > 0) {
-        int64_t annCreatedAtMs = [payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]
-          ? ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue
-          : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
-        std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
-        g_seg_engine_annotation_by_segment[seg.id] = SegEngineAnnotation{
-          annReason.UTF8String,
-          annSource.UTF8String,
-          annCreatedAtMs,
-          segmentIndex,
-        };
-      }
-    }
-
-    seg_notify_segment_appended(entry, seg, segmentIndex);
-    entry->notifyCommitListeners(seg.id, segmentIndex, seg);
-    resolve(@{ @"segmentId": [NSString stringWithUTF8String:seg.id.c_str()], @"segmentIndex": @(segmentIndex) });
-  } catch (const std::exception &e) {
-    NSString *msg = [NSString stringWithUTF8String:e.what()];
+  const std::string kindStr = kind.length > 0 ? kind.UTF8String : "speech";
+  const int duration =
+      durationMs != nil
+          ? durationMs.intValue
+          : (int)((((int)endSample - (int)startSample) * 1000.0) / std::max(1, (int)sampleRate));
+  std::string segmentId;
+  int segmentIndex = -1;
+  std::string err;
+  if (!seg_live_append_segment(
+          liveBufferId.UTF8String, kindStr,
+          sourceAudioBufferId.length > 0 ? sourceAudioBufferId.UTF8String : "", (int)startSample,
+          (int)endSample, (int)sampleRate, duration, confidence != nil,
+          confidence != nil ? confidence.doubleValue : 0.0, payloadJson, &segmentId, &segmentIndex,
+          &err)) {
+    NSString *msg = err.empty() ? @"appendLiveSegment failed" : [NSString stringWithUTF8String:err.c_str()];
     NSString *code = @"SEGMENT_INTERNAL_ERROR";
     NSRange idx = [msg rangeOfString:@":"];
     if (idx.location != NSNotFound) {
       code = [msg substringToIndex:idx.location];
-      msg = [[msg substringFromIndex:idx.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+      msg = [[msg substringFromIndex:idx.location + 1]
+          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     }
     reject(code, msg, nil);
+    return;
   }
+
+  if ([payload isKindOfClass:[NSDictionary class]]) {
+    NSString *annReason =
+        [payload[@"__annotationReason"] isKindOfClass:[NSString class]] ? payload[@"__annotationReason"]
+                                                                        : nil;
+    NSString *annSource =
+        [payload[@"__annotationSource"] isKindOfClass:[NSString class]] ? payload[@"__annotationSource"]
+                                                                        : nil;
+    if (annReason.length > 0 && annSource.length > 0) {
+      int64_t annCreatedAtMs =
+          [payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]
+              ? ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue
+              : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+      std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
+      g_seg_engine_annotation_by_segment[segmentId] = SegEngineAnnotation{
+          annReason.UTF8String,
+          annSource.UTF8String,
+          annCreatedAtMs,
+          segmentIndex,
+      };
+    }
+  }
+
+  resolve(@{
+    @"segmentId": [NSString stringWithUTF8String:segmentId.c_str()],
+    @"segmentIndex": @(segmentIndex),
+  });
 #else
   reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
 #endif

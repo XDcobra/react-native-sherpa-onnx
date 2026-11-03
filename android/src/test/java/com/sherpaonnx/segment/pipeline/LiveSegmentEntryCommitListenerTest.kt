@@ -36,7 +36,7 @@ class LiveSegmentEntryCommitListenerTest {
       sampleRate = 16000,
       durationMs = 100,
       confidence = null,
-      payloadJson = "{}",
+      payloadJson = "{"source":"manual"}",
     )
 
     assertEquals(1, callbacks.get())
@@ -61,7 +61,7 @@ class LiveSegmentEntryCommitListenerTest {
       sampleRate = 16000,
       durationMs = 100,
       confidence = null,
-      payloadJson = "{}",
+      payloadJson = "{"source":"manual"}",
     )
     entry.removeCommitListener(token)
     entry.appendSegment(
@@ -72,7 +72,7 @@ class LiveSegmentEntryCommitListenerTest {
       sampleRate = 16000,
       durationMs = 100,
       confidence = null,
-      payloadJson = "{}",
+      payloadJson = "{"source":"manual"}",
     )
 
     assertEquals(1, callbacks.get())
@@ -95,7 +95,7 @@ class LiveSegmentEntryCommitListenerTest {
       sampleRate = 16000,
       durationMs = 100,
       confidence = null,
-      payloadJson = "{}",
+      payloadJson = "{"source":"manual"}",
     )
     entry.finalize_()
 
@@ -108,7 +108,7 @@ class LiveSegmentEntryCommitListenerTest {
         sampleRate = 16000,
         durationMs = 100,
         confidence = null,
-        payloadJson = "{}",
+        payloadJson = "{"source":"manual"}",
       )
     }.isFailure
 

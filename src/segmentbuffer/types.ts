@@ -29,7 +29,8 @@ export type SpeechSegmentPayloadSource =
   | 'sid'
   | 'pyannote'
   | 'languageId'
-  | 'audioTagging';
+  | 'audioTagging'
+  | 'manual';
 
 export interface VadSpeechSegmentPayload {
   source: 'vad';
@@ -78,6 +79,10 @@ export interface AudioTaggingSpeechSegmentPayload {
   events?: Array<{ name: string; index: number; prob: number }>;
 }
 
+export interface ManualSpeechSegmentPayload {
+  source: 'manual';
+}
+
 export type SpeechSegmentPayload =
   | VadSpeechSegmentPayload
   | SttSpeechSegmentPayload
@@ -85,7 +90,8 @@ export type SpeechSegmentPayload =
   | SidSpeechSegmentPayload
   | PyannoteSpeechSegmentPayload
   | LanguageIdSpeechSegmentPayload
-  | AudioTaggingSpeechSegmentPayload;
+  | AudioTaggingSpeechSegmentPayload
+  | ManualSpeechSegmentPayload;
 
 export interface AlignmentSegmentPayload {
   [key: string]: unknown;

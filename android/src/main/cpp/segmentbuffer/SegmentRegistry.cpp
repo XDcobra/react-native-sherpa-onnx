@@ -1,5 +1,7 @@
 #include "SegmentRegistry.h"
 
+#include "SegPayloadValidate.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -221,6 +223,15 @@ bool seg_live_append_segment(const std::string &liveBufferId, const std::string 
       if (entry->state == SegLiveEntry::FINISHED) {
         if (error) *error = "SEGMENT_ALREADY_FINALIZED: Live segment buffer is finalized";
         return false;
+      }
+      if (seg.kind == "speech") {
+        std::string payloadErr;
+        if (!seg_validate_speech_payload_json(payloadJson, &payloadErr)) {
+          if (error)
+            *error = payloadErr.empty() ? "SEGMENT_INVALID_ARGUMENT: Invalid speech payload"
+                                        : payloadErr;
+          return false;
+        }
       }
       idx = static_cast<int>(entry->evictedCount + static_cast<int64_t>(entry->segments.size()));
       entry->segments.push_back(seg);
