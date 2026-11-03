@@ -1179,3 +1179,48 @@ else()
     "slid_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
 endif()
 
+# --- AudioTaggingWrapper host tests (shared C API) ---
+# Reuses SHERPA_ONNX_HOST_LIBDIR / ORT discovery from slid_host_test above.
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(AUDIO_TAGGING_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/audio_tagging")
+  set(SHERPA_ONNX_SRC_ROOT_AT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(audio_tagging_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_tagging/audio_tagging_host_test.cpp"
+    "${AUDIO_TAGGING_CPP_ROOT}/sherpa-onnx-audio-tagging-wrapper.cpp"
+  )
+  target_include_directories(audio_tagging_host_test PRIVATE
+    "${AUDIO_TAGGING_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT_AT}"
+  )
+  target_link_directories(audio_tagging_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(audio_tagging_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(audio_tagging_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(audio_tagging_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(audio_tagging_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(audio_tagging_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME audio_tagging_host_test
+    COMMAND $<TARGET_FILE:audio_tagging_host_test>)
+  set_tests_properties(audio_tagging_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "audio_tagging_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "audio_tagging_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+

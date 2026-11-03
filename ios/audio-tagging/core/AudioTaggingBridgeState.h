@@ -2,41 +2,27 @@
 
 #ifdef __cplusplus
 
+#include "sherpa-onnx-audio-tagging-wrapper.h"
+
 #include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
-
-#if __has_include(<sherpa-onnx/c-api/c-api.h>)
-#include <sherpa-onnx/c-api/c-api.h>
-#elif __has_include("sherpa-onnx/c-api/c-api.h")
-#include "sherpa-onnx/c-api/c-api.h"
-#else
-#include "../../../third_party/sherpa-onnx/sherpa-onnx/c-api/c-api.h"
-#endif
 
 namespace sherpaonnx {
 namespace audio_tagging {
 namespace bridge {
 
 struct AudioTaggingInstanceState {
-  const SherpaOnnxAudioTagging *handle = nullptr;
+  std::shared_ptr<sherpaonnx::AudioTaggingWrapper> wrapper;
   int32_t defaultTopK = 5;
   int32_t numThreads = 1;
   std::string provider = "cpu";
   std::string modelType;
   std::string activeLivePipelineId;
 
-  // Keep path strings alive for the lifetime of the C-API handle (c_str pointers).
-  std::string modelPath;
-  std::string labelsPath;
-  std::string providerStorage;
-
-  ~AudioTaggingInstanceState() {
-    if (handle != nullptr) {
-      SherpaOnnxDestroyAudioTagging(handle);
-      handle = nullptr;
-    }
+  bool isReady() const {
+    return wrapper != nullptr && wrapper->isInitialized();
   }
 };
 

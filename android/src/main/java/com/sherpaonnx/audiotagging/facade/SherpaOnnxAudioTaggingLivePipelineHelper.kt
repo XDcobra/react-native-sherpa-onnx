@@ -35,7 +35,7 @@ internal class SherpaOnnxAudioTaggingLivePipelineHelper(
       }
 
       val instance = audioTaggingHelper.getInstance(instanceId)
-      if (instance == null) {
+      if (instance == null || !audioTaggingHelper.hasInstance(instanceId)) {
         promise.reject(
           AudioTaggingErrorCodes.NOT_INITIALIZED,
           "Audio tagging instance not found: $instanceId",
@@ -130,7 +130,8 @@ internal class SherpaOnnxAudioTaggingLivePipelineHelper(
           liveSegmentEntry = segmentEntry,
         ),
         audioInBufferId = audioInLiveBufferId,
-        tagger = instance.tagger,
+        audioTaggingHelper = audioTaggingHelper,
+        taggingInstance = instance,
         topK = effectiveTopK,
         textOutputEntry = textEntry,
         segmentsOutEntry = segmentsOutEntry,

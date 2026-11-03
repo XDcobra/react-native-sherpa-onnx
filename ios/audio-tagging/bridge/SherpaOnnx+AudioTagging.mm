@@ -178,46 +178,30 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
     return;
   }
 
-  const auto kind = ParseKind(resolvedModelType);
-
   dispatch_async(AudioTaggingSerialQueue(), ^{
     @try {
-      auto state = std::make_shared<sherpaonnx::audio_tagging::bridge::AudioTaggingInstanceState>();
-      state->defaultTopK = topK;
-      state->numThreads = numThreads;
-      state->providerStorage = provider;
-      state->provider = state->providerStorage;
-      state->modelType = resolvedModelType;
-      state->modelPath = modelPath;
-      state->labelsPath = labelsPath;
-
-      SherpaOnnxAudioTaggingConfig config;
-      std::memset(&config, 0, sizeof(config));
-      config.model.num_threads = numThreads;
-      config.model.debug = debug ? 1 : 0;
-      config.model.provider = state->providerStorage.c_str();
-      config.labels = state->labelsPath.c_str();
-      config.top_k = topK;
-
-      if (kind == sherpaonnx::AudioTaggingModelKind::kCed) {
-        config.model.ced = state->modelPath.c_str();
-      } else {
-        config.model.zipformer.model = state->modelPath.c_str();
-      }
-
       RCTLogInfo(@"[SherpaOnnx:audioTagging] init branch=%@ instanceId=%@ modelType=%@ topK=%d model=%s",
                  initMode, instanceId,
                  [NSString stringWithUTF8String:resolvedModelType.c_str()],
-                 (int)topK, state->modelPath.c_str());
+                 (int)topK, modelPath.c_str());
 
-      const SherpaOnnxAudioTagging *handle = SherpaOnnxCreateAudioTagging(&config);
-      if (handle == nullptr) {
-        reject(@"AUDIO_TAGGING_INIT_ERROR",
-               @"Failed to create native SherpaOnnxAudioTagging instance",
-               nil);
+      auto wrapper = std::make_shared<sherpaonnx::AudioTaggingWrapper>();
+      const auto init = wrapper->initialize(
+          resolvedModelType, modelPath, labelsPath, topK, numThreads, provider, debug);
+      if (!init.success) {
+        NSString *msg = init.error.empty()
+            ? @"Failed to create AudioTaggingWrapper"
+            : [NSString stringWithUTF8String:init.error.c_str()];
+        reject(@"AUDIO_TAGGING_INIT_ERROR", msg, nil);
         return;
       }
-      state->handle = handle;
+
+      auto state = std::make_shared<sherpaonnx::audio_tagging::bridge::AudioTaggingInstanceState>();
+      state->wrapper = std::move(wrapper);
+      state->defaultTopK = topK;
+      state->numThreads = numThreads;
+      state->provider = provider;
+      state->modelType = resolvedModelType;
 
       sherpaonnx::audio_tagging::bridge::RemoveAudioTagging(instanceIdStr);
       {
@@ -275,7 +259,7 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
   }
 
   auto state = sherpaonnx::audio_tagging::bridge::LookupAudioTagging(instanceIdStr);
-  if (!state || state->handle == nullptr) {
+  if (!state || !state->isReady()) {
     reject(@"AUDIO_TAGGING_NOT_INITIALIZED",
            [NSString stringWithFormat:@"Audio tagging instance not found: %@", instanceId],
            nil);
@@ -354,37 +338,24 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
       RCTLogInfo(@"[SherpaOnnx:audioTagging] tagOffline instanceId=%@ bufferId=%@ sampleRate=%d numSamples=%zu topK=%d",
                  instanceId, audioBufferId, sampleRate, samples.size(), (int)effectiveTopK);
 
-      const SherpaOnnxOfflineStream *stream =
-          SherpaOnnxAudioTaggingCreateOfflineStream(state->handle);
-      if (stream == nullptr) {
-        reject(@"AUDIO_TAGGING_TAG_FAILED", @"Failed to create offline stream", nil);
+      const auto computed = state->wrapper->compute(
+          samples, sampleRate, std::optional<int32_t>(effectiveTopK));
+      if (!computed.success) {
+        NSString *msg = computed.error.empty()
+            ? @"Audio tagging compute failed"
+            : [NSString stringWithUTF8String:computed.error.c_str()];
+        reject(@"AUDIO_TAGGING_TAG_FAILED", msg, nil);
         return;
       }
 
-      SherpaOnnxAcceptWaveformOffline(
-          stream,
-          sampleRate,
-          samples.data(),
-          static_cast<int32_t>(samples.size()));
-
-      const SherpaOnnxAudioEvent *const *results =
-          SherpaOnnxAudioTaggingCompute(state->handle, stream, effectiveTopK);
-
-      NSMutableArray *events = [NSMutableArray array];
-      if (results != nullptr) {
-        for (int32_t i = 0; results[i] != nullptr; ++i) {
-          const SherpaOnnxAudioEvent *ev = results[i];
-          [events addObject:@{
-            @"name": ev->name != nullptr
-                ? [NSString stringWithUTF8String:ev->name]
-                : @"",
-            @"index": @(ev->index),
-            @"prob": @(ev->prob),
-          }];
-        }
-        SherpaOnnxAudioTaggingFreeResults(results);
+      NSMutableArray *events = [NSMutableArray arrayWithCapacity:computed.events.size()];
+      for (const auto &ev : computed.events) {
+        [events addObject:@{
+          @"name": [NSString stringWithUTF8String:ev.name.c_str()] ?: @"",
+          @"index": @(ev.index),
+          @"prob": @(ev.prob),
+        }];
       }
-      SherpaOnnxDestroyOfflineStream(stream);
 
       const auto t1 = std::chrono::steady_clock::now();
       const double elapsedMs =
