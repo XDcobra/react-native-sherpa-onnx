@@ -49,15 +49,7 @@ object TextPipelineRegistry {
     val id =
       TextBufferNative.nativeCreateOfflineFromText(text, lang, emotion, event)
         ?: throw IllegalStateException("Failed to create offline text buffer")
-    val entry =
-      OfflineTextEntry(
-        bufferId = id,
-        text = text,
-        lang = lang,
-        emotion = emotion,
-        event = event,
-        populated = true,
-      )
+    val entry = OfflineTextEntry(bufferId = id)
     offlineEntries[id] = entry
     return entry
   }
@@ -69,7 +61,7 @@ object TextPipelineRegistry {
           TextErrorCodes.INVALID_ARGUMENT,
           "createOfflineFromLive failed for $liveBufferId mode=$mode",
         )
-    val entry = OfflineTextEntry.wrap(id) ?: OfflineTextEntry(bufferId = id, populated = true)
+    val entry = OfflineTextEntry.wrap(id) ?: OfflineTextEntry(bufferId = id)
     offlineEntries[id] = entry
     return entry
   }

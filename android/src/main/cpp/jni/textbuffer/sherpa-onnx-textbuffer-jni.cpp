@@ -1,6 +1,7 @@
 #include <jni.h>
 
 #include "TextRegistry.h"
+#include "TxtSpatialSpanJson.h"
 
 #include <cstdio>
 #include <sstream>
@@ -264,15 +265,108 @@ Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeReadOfflineText(JNIEnv 
 
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativePopulateIfEmpty(
-    JNIEnv *env, jclass, jstring bufferId, jstring text, jstring lang, jstring emotion,
-    jstring event) {
+    JNIEnv *env, jclass, jstring bufferId, jstring text, jobjectArray tokens,
+    jfloatArray timestamps, jfloatArray durations, jstring lang, jstring emotion, jstring event,
+    jstring spatialSpansJson) {
+  std::vector<TxtSpatialSpan> spans;
+  const std::string spansRaw = jstringToUtf8(env, spatialSpansJson);
+  if (!spansRaw.empty() && !txt_span_json::decode(spansRaw, &spans)) {
+    return JNI_FALSE;
+  }
   std::string err;
-  return txt_populate_offline_if_empty(jstringToUtf8(env, bufferId), jstringToUtf8(env, text), {},
-                                       {}, {}, jstringToUtf8(env, lang),
-                                       jstringToUtf8(env, emotion), jstringToUtf8(env, event),
-                                       &err)
+  return txt_populate_offline_if_empty(
+             jstringToUtf8(env, bufferId), jstringToUtf8(env, text),
+             jstringArrayToUtf8(env, tokens), jfloatArrayToVector(env, timestamps),
+             jfloatArrayToVector(env, durations), jstringToUtf8(env, lang),
+             jstringToUtf8(env, emotion), jstringToUtf8(env, event), spans, &err)
              ? JNI_TRUE
              : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineTokensSlice(JNIEnv *env, jclass,
+                                                                            jstring bufferId,
+                                                                            jint start,
+                                                                            jint maxCount) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  if (!off) return nullptr;
+  return utf8ToJstring(env, txt_span_json::encodeTokensSlice(off->tokens, start, maxCount));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineTimestampsSlice(
+    JNIEnv *env, jclass, jstring bufferId, jint start, jint maxCount) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  if (!off) return nullptr;
+  return utf8ToJstring(env, txt_span_json::encodeFloatSlice(off->timestamps, start, maxCount));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineDurationsSlice(
+    JNIEnv *env, jclass, jstring bufferId, jint start, jint maxCount) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  if (!off) return nullptr;
+  return utf8ToJstring(env, txt_span_json::encodeFloatSlice(off->durations, start, maxCount));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineSpatialSpansSlice(
+    JNIEnv *env, jclass, jstring bufferId, jint start, jint maxCount) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  if (!off) return nullptr;
+  return utf8ToJstring(env, txt_span_json::encodeSlice(off->spatialSpans, start, maxCount));
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineTokenCount(JNIEnv *env, jclass,
+                                                                           jstring bufferId) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  return off ? off->tokenCount() : -1;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineTimestampCount(JNIEnv *env, jclass,
+                                                                               jstring bufferId) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  return off ? off->timestampCount() : -1;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineDurationCount(JNIEnv *env, jclass,
+                                                                              jstring bufferId) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  return off ? off->durationCount() : -1;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineSpatialSpanCount(
+    JNIEnv *env, jclass, jstring bufferId) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  return off ? off->spatialSpanCount() : -1;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineLang(JNIEnv *env, jclass,
+                                                                     jstring bufferId) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  if (!off) return nullptr;
+  return utf8ToJstring(env, off->lang);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineEmotion(JNIEnv *env, jclass,
+                                                                        jstring bufferId) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  if (!off) return nullptr;
+  return utf8ToJstring(env, off->emotion);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeOfflineEvent(JNIEnv *env, jclass,
+                                                                      jstring bufferId) {
+  auto off = txt_get_offline_entry(jstringToUtf8(env, bufferId));
+  if (!off) return nullptr;
+  return utf8ToJstring(env, off->event);
 }
 
 JNIEXPORT jstring JNICALL

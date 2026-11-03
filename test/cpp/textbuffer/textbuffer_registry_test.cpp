@@ -7,6 +7,7 @@
  * Build: cmake -S test/cpp -B test/cpp/build && cmake --build test/cpp/build --target textbuffer_host_test
  */
 #include "TextRegistry.h"
+#include "TxtSpatialSpanJson.h"
 #include "TxtUtf16.h"
 
 #include <gtest/gtest.h>
@@ -15,6 +16,7 @@
 #include <filesystem>
 #include <string>
 #include <unistd.h>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -57,6 +59,110 @@ TEST_F(TextRegistryFixture, CreateEmptyOffline_Populate_Release) {
   EXPECT_EQ(text, "hello");
   EXPECT_TRUE(txt_release_buffer(id));
   EXPECT_FALSE(txt_read_offline_text(id, &text, &err));
+}
+
+TEST_F(TextRegistryFixture, OfflinePopulateTokensTimestampsDurations) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_empty_offline(&id, &err)) << err;
+  auto off = txt_get_offline_entry(id);
+  ASSERT_NE(off, nullptr);
+  std::vector<std::string> tokens = {"hel", "lo"};
+  std::vector<float> timestamps = {0.1f, 0.2f};
+  std::vector<float> durations = {0.05f, 0.06f};
+  ASSERT_TRUE(txt_populate_offline_if_empty(id, "hello", tokens, timestamps, durations, "en", "neutral",
+                                            "speech", &err))
+      << err;
+  EXPECT_TRUE(off->populated);
+  EXPECT_EQ(off->tokenCount(), 2);
+  EXPECT_EQ(off->tokens[0], "hel");
+  EXPECT_EQ(off->tokens[1], "lo");
+  ASSERT_EQ(off->timestampCount(), 2);
+  EXPECT_FLOAT_EQ(off->timestamps[0], 0.1f);
+  EXPECT_FLOAT_EQ(off->timestamps[1], 0.2f);
+  ASSERT_EQ(off->durationCount(), 2);
+  EXPECT_FLOAT_EQ(off->durations[1], 0.06f);
+  EXPECT_EQ(off->lang, "en");
+  EXPECT_EQ(off->emotion, "neutral");
+  EXPECT_EQ(off->event, "speech");
+}
+
+TEST_F(TextRegistryFixture, OfflinePopulateSpatialSpan) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_empty_offline(&id, &err)) << err;
+  auto off = txt_get_offline_entry(id);
+  ASSERT_NE(off, nullptr);
+  TxtSpatialSpan span;
+  span.utf16Start = 0;
+  span.utf16End = 5;
+  span.level = "word";
+  span.sourceImageBufferId = "img_1";
+  span.frameIndex = 2;
+  for (int i = 0; i < 8; ++i) span.quad[i] = (float)i;
+  span.hasConfidence = true;
+  span.confidence = 0.9f;
+  span.origin = "ocr";
+  span.hasPageNumber = true;
+  span.pageNumber = 3;
+  ASSERT_TRUE(txt_populate_offline_if_empty(id, "hello", {}, {}, {}, "", "", "", {span}, &err))
+      << err;
+  ASSERT_EQ(off->spatialSpanCount(), 1);
+  EXPECT_EQ(off->spatialSpans[0].utf16Start, 0);
+  EXPECT_EQ(off->spatialSpans[0].utf16End, 5);
+  EXPECT_EQ(off->spatialSpans[0].level, "word");
+  EXPECT_EQ(off->spatialSpans[0].sourceImageBufferId, "img_1");
+  EXPECT_EQ(off->spatialSpans[0].frameIndex, 2);
+  EXPECT_FLOAT_EQ(off->spatialSpans[0].quad[7], 7.f);
+  EXPECT_TRUE(off->spatialSpans[0].hasConfidence);
+  EXPECT_FLOAT_EQ(off->spatialSpans[0].confidence, 0.9f);
+  EXPECT_TRUE(off->spatialSpans[0].hasPageNumber);
+  EXPECT_EQ(off->spatialSpans[0].pageNumber, 3);
+}
+
+TEST_F(TextRegistryFixture, OfflineSecondPopulateIsNoOpFailure) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_empty_offline(&id, &err)) << err;
+  ASSERT_TRUE(txt_populate_offline_if_empty(id, "first", {}, {}, {}, "", "", "", &err)) << err;
+  EXPECT_FALSE(txt_populate_offline_if_empty(id, "second", {}, {}, {}, "", "", "", &err));
+  std::string text;
+  ASSERT_TRUE(txt_read_offline_text(id, &text, &err)) << err;
+  EXPECT_EQ(text, "first");
+}
+
+TEST_F(TextRegistryFixture, SpatialSpanJsonRoundTrip) {
+  TxtSpatialSpan span;
+  span.utf16Start = 1;
+  span.utf16End = 4;
+  span.level = "line";
+  span.sourceImageBufferId = "buf";
+  span.frameIndex = 0;
+  span.quad[0] = 1.5f;
+  span.quad[1] = 2.5f;
+  span.origin = "textLayer";
+  span.hasPtsMs = true;
+  span.ptsMs = 12.5;
+  span.href = "https://example.com";
+  std::string json = txt_span_json::encode({span});
+  std::vector<TxtSpatialSpan> decoded;
+  ASSERT_TRUE(txt_span_json::decode(json, &decoded));
+  ASSERT_EQ(decoded.size(), 1u);
+  EXPECT_EQ(decoded[0].utf16Start, 1);
+  EXPECT_EQ(decoded[0].utf16End, 4);
+  EXPECT_EQ(decoded[0].level, "line");
+  EXPECT_EQ(decoded[0].sourceImageBufferId, "buf");
+  EXPECT_FLOAT_EQ(decoded[0].quad[0], 1.5f);
+  EXPECT_FLOAT_EQ(decoded[0].quad[1], 2.5f);
+  EXPECT_EQ(decoded[0].origin, "textLayer");
+  EXPECT_TRUE(decoded[0].hasPtsMs);
+  EXPECT_DOUBLE_EQ(decoded[0].ptsMs, 12.5);
+  EXPECT_EQ(decoded[0].href, "https://example.com");
+
+  EXPECT_EQ(txt_span_json::encodeSlice({span}, 0, 1), json);
+  EXPECT_EQ(txt_span_json::encodeSlice({span}, 1, 1), "[]");
+  EXPECT_EQ(txt_span_json::encodeTokensSlice({"a", "b"}, 0, 1), "[\"a\"]");
+  EXPECT_EQ(txt_span_json::encodeFloatSlice({1.f, 2.f}, 1, 1), "[2]");
 }
 
 TEST_F(TextRegistryFixture, LivePartialCommitFinalize) {
