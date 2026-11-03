@@ -1352,3 +1352,54 @@ else()
     "kws_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
 endif()
 
+# --- Offline SttWrapper host tests (shared CXX API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(STT_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/stt")
+  set(STT_DETECT_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni/model_detect")
+  set(SHERPA_ONNX_SRC_ROOT_STT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(stt_offline_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/stt/stt_offline_host_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stt/stt_offline_host_detect_stubs.cpp"
+    "${STT_CPP_ROOT}/sherpa-onnx-stt-engine-wrapper.cpp"
+    "${STT_DETECT_ROOT}/stt/sherpa-onnx-validate-stt.cpp"
+  )
+  target_include_directories(stt_offline_host_test PRIVATE
+    "${STT_CPP_ROOT}"
+    "${STT_DETECT_ROOT}/common"
+    "${STT_DETECT_ROOT}/stt"
+    "${SHERPA_ONNX_SRC_ROOT_STT}"
+  )
+  target_link_directories(stt_offline_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(stt_offline_host_test PRIVATE
+    sherpa-onnx-c-api sherpa-onnx-cxx-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(stt_offline_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(stt_offline_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(stt_offline_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(stt_offline_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME stt_offline_host_test
+    COMMAND $<TARGET_FILE:stt_offline_host_test>)
+  set_tests_properties(stt_offline_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "stt_offline_host_test enabled (sherpa C/CXX-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "stt_offline_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+

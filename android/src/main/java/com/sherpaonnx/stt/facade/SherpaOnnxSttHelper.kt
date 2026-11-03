@@ -6,15 +6,11 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
-import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
-import com.k2fsa.sherpa.onnx.OfflineStream
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
+import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.stt.config.SttInitOptionsParser
-import com.sherpaonnx.stt.core.OfflineSttRecognizerConfigFactory
-import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.core.SttPathResolver
 import com.sherpaonnx.stt.core.normalizeQwen3HotwordsCsv
@@ -36,10 +32,8 @@ internal class SherpaOnnxSttHelper(
 ) {
 
   private data class SttEngineInstance(
-    @Volatile var recognizer: OfflineRecognizer? = null,
-    @Volatile var lastRecognizerConfig: OfflineRecognizerConfig? = null,
+    @Volatile var ready: Boolean = false,
     @Volatile var currentSttModelType: String? = null,
-    @Volatile var qwen3HotwordsForStream: String = ""
   )
 
   private val instances = ConcurrentHashMap<String, SttEngineInstance>()
@@ -49,11 +43,10 @@ internal class SherpaOnnxSttHelper(
 
   private fun getInstance(instanceId: String): SttEngineInstance? = instances[instanceId]
 
-  fun getRecognizer(instanceId: String): OfflineRecognizer? =
-    getInstance(instanceId)?.recognizer
+  fun hasNativeInstance(instanceId: String): Boolean =
+    getInstance(instanceId)?.ready == true && nativeHasInstance(instanceId)
 
   private val pathResolver = SttPathResolver(context)
-  private val configFactory = OfflineSttRecognizerConfigFactory()
 
   fun initializeStt(
     instanceId: String,
@@ -90,16 +83,11 @@ internal class SherpaOnnxSttHelper(
     try {
       val modelDirFile = File(modelDir)
       if (!modelDirFile.exists()) {
-        val errorMsg = "Model directory does not exist: $modelDir"
-        Log.e(logTag, errorMsg)
-        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
+        promise.reject(SttErrorCodes.INIT_FAILED, "Model directory does not exist: $modelDir")
         return
       }
-
       if (!modelDirFile.isDirectory) {
-        val errorMsg = "Model path is not a directory: $modelDir"
-        Log.e(logTag, errorMsg)
-        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
+        promise.reject(SttErrorCodes.INIT_FAILED, "Model path is not a directory: $modelDir")
         return
       }
 
@@ -112,9 +100,7 @@ internal class SherpaOnnxSttHelper(
       )
 
       if (result == null) {
-        val errorMsg = "Failed to detect STT model. Check native logs for details."
-        Log.e(logTag, "Detection returned null for modelDir: $modelDir")
-        promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
+        promise.reject(SttErrorCodes.INIT_FAILED, "Failed to detect STT model. Check native logs for details.")
         return
       }
 
@@ -129,7 +115,6 @@ internal class SherpaOnnxSttHelper(
         } else {
           "Failed to initialize sherpa-onnx. Check native logs for details."
         }
-        Log.e(logTag, "Detection failed for modelDir: $modelDir")
         promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
         return
       }
@@ -226,51 +211,73 @@ internal class SherpaOnnxSttHelper(
     val resolvedRuleFsts = try {
       pathResolver.resolveFilePaths(parsed.ruleFsts.orEmpty().trim(), "stt_rule_fst")
     } catch (e: Exception) {
-      val errorMsg = e.message ?: "Rule FST path(s) could not be resolved"
-      Log.e(logTag, errorMsg, e)
-      promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
+      promise.reject(SttErrorCodes.INIT_FAILED, e.message ?: "Rule FST path(s) could not be resolved", e)
       return
     }
     val resolvedRuleFars = try {
       pathResolver.resolveFilePaths(parsed.ruleFars.orEmpty().trim(), "stt_rule_far")
     } catch (e: Exception) {
-      val errorMsg = e.message ?: "Rule FAR path(s) could not be resolved"
-      Log.e(logTag, errorMsg, e)
-      promise.reject(SttErrorCodes.INIT_FAILED, errorMsg, e)
+      promise.reject(SttErrorCodes.INIT_FAILED, e.message ?: "Rule FAR path(s) could not be resolved", e)
       return
     }
 
+    val paths = HashMap(pathStrings)
+    val bpe = parsed.bpeVocab?.trim().orEmpty()
+    if (bpe.isNotEmpty() && paths["bpeVocab"].isNullOrEmpty()) {
+      paths["bpeVocab"] = bpe
+    }
+
+    val whisper = stringOptionsMap(parsed.modelOptions?.getMap("whisper"))
+    val senseVoice = stringOptionsMap(parsed.modelOptions?.getMap("senseVoice"))
+    val canary = stringOptionsMap(parsed.modelOptions?.getMap("canary"))
+    val funasr = stringOptionsMap(parsed.modelOptions?.getMap("funasrNano"))
+    val qwen3 = stringOptionsMap(parsed.modelOptions?.getMap("qwen3Asr"))
+    val cohere = stringOptionsMap(parsed.modelOptions?.getMap("cohereTranscribe"))
+    if (modelTypeStr == "qwen3_asr" && qwen3 != null) {
+      val hw = normalizeQwen3HotwordsCsv(qwen3["hotwords"].orEmpty())
+      if (hw.isNotEmpty()) qwen3["hotwords"] = hw
+    }
+
     val inst = instances.getOrPut(instanceId) { SttEngineInstance() }
-    releaseRecognizerSafely(inst.recognizer)
-    inst.recognizer = null
-    val config = configFactory.buildRecognizerConfig(
-      pathStrings,
-      modelTypeStr,
-      hotwordsFile = resolvedHotwordsPath,
-      hotwordsScore = parsed.hotwordsScore?.toFloat() ?: 1.5f,
-      numThreads = parsed.numThreads?.toInt(),
-      provider = parsed.provider,
-      ruleFsts = resolvedRuleFsts,
-      ruleFars = resolvedRuleFars,
-      dither = parsed.dither?.toFloat() ?: 0f,
-      modelOptions = parsed.modelOptions,
-      modelingUnit = parsed.modelingUnit?.trim().orEmpty(),
-      bpeVocab = parsed.bpeVocab?.trim().orEmpty()
-    )
-    inst.lastRecognizerConfig = config
+    inst.ready = false
     inst.currentSttModelType = modelTypeStr
-    inst.qwen3HotwordsForStream = if (modelTypeStr == "qwen3_asr") {
-      normalizeQwen3HotwordsCsv(parsed.modelOptions?.getMap("qwen3Asr")?.getString("hotwords")?.trim().orEmpty())
-    } else ""
+
     initHandler.post {
       try {
         Log.i(logTag, "[SherpaOnnx:init] stt Create start")
-        inst.recognizer = OfflineRecognizer(config = config)
+        @Suppress("UNCHECKED_CAST")
+        val raw = nativeInitializeCustom(
+          instanceId,
+          modelTypeStr,
+          paths,
+          parsed.debug ?: false,
+          resolvedHotwordsPath.ifEmpty { null },
+          parsed.hotwordsScore?.toFloat() ?: -1f,
+          parsed.numThreads?.toInt() ?: 0,
+          parsed.provider,
+          resolvedRuleFsts.ifEmpty { null },
+          resolvedRuleFars.ifEmpty { null },
+          parsed.dither?.toFloat() ?: -1f,
+          whisper,
+          senseVoice,
+          canary,
+          funasr,
+          qwen3,
+          cohere,
+        ) as? HashMap<String, Any>
+        val ok = raw?.get("success") as? Boolean ?: false
+        if (!ok) {
+          val err = raw?.get("error") as? String ?: "Exception creating recognizer"
+          Log.e(logTag, "[SherpaOnnx:init] stt Create branch=reject $err")
+          promise.reject(SttErrorCodes.INIT_FAILED, err)
+          return@post
+        }
+        inst.ready = true
         Log.i(logTag, "[SherpaOnnx:init] stt Create ok")
         val resultMap = Arguments.createMap()
         resultMap.putBoolean("success", true)
-        resultMap.putString("modelType", modelTypeStr)
-        resultMap.putString("decodingMethod", config.decodingMethod)
+        resultMap.putString("modelType", raw?.get("modelType") as? String ?: modelTypeStr)
+        resultMap.putString("decodingMethod", raw?.get("decodingMethod") as? String ?: "")
         val detectedModelsArray = Arguments.createArray()
         for (model in detectedModels) {
           val modelMap = model as? HashMap<*, *>
@@ -297,8 +304,7 @@ internal class SherpaOnnxSttHelper(
         promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
         return
       }
-      val rec = inst.recognizer
-      if (rec == null) {
+      if (!inst.ready || !nativeHasInstance(instanceId)) {
         promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
         return
       }
@@ -324,21 +330,13 @@ internal class SherpaOnnxSttHelper(
         return
       }
       val samples = entry.readAllSamples()
-      val gateKey = NativeInstanceGate.keyFor(rec)
+      val gateKey = "stt:$instanceId"
       if (!NativeInstanceGate.beginUse(gateKey)) {
         promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT instance released: $instanceId")
         return
       }
-      var stream: OfflineStream? = null
       try {
-        stream = rec.createStream()
-        if (inst.currentSttModelType == "qwen3_asr") {
-          val hw = inst.qwen3HotwordsForStream
-          if (hw.isNotEmpty()) stream.setOption("hotwords", hw)
-        }
-        stream.acceptWaveform(samples, entry.sampleRate)
-        rec.decode(stream)
-        val result = rec.getResult(stream)
+        val result = transcribeSamplesInternal(instanceId, samples, entry.sampleRate)
         textEntry.populate(
           text = result.text,
           tokens = result.tokens,
@@ -350,10 +348,6 @@ internal class SherpaOnnxSttHelper(
         )
         promise.resolve(null)
       } finally {
-        try {
-          stream?.release()
-        } catch (_: Exception) {
-        }
         NativeInstanceGate.endUse(gateKey)
       }
     } catch (e: OutOfMemoryError) {
@@ -370,81 +364,126 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
+  /** Used by offline-live pipeline worker. */
+  fun transcribeSamplesInternal(
+    instanceId: String,
+    samples: FloatArray,
+    sampleRate: Int,
+  ): TranscribeResult {
+    @Suppress("UNCHECKED_CAST")
+    val raw = nativeTranscribeSamples(instanceId, samples, sampleRate) as? HashMap<String, Any>
+      ?: throw IllegalStateException("nativeTranscribeSamples returned null")
+    val ok = raw["success"] as? Boolean ?: false
+    if (!ok) {
+      throw IllegalStateException(raw["error"] as? String ?: "Recognition failed")
+    }
+    @Suppress("UNCHECKED_CAST")
+    val tokenList = raw["tokens"] as? ArrayList<*>
+    val tokens = tokenList?.map { it?.toString().orEmpty() }?.toTypedArray() ?: emptyArray()
+    val timestamps = raw["timestamps"] as? FloatArray ?: floatArrayOf()
+    val durations = raw["durations"] as? FloatArray ?: floatArrayOf()
+    return TranscribeResult(
+      text = raw["text"] as? String ?: "",
+      tokens = tokens,
+      timestamps = timestamps,
+      durations = durations,
+      lang = raw["lang"] as? String ?: "",
+      emotion = raw["emotion"] as? String ?: "",
+      event = raw["event"] as? String ?: "",
+    )
+  }
+
+  data class TranscribeResult(
+    val text: String,
+    val tokens: Array<String>,
+    val timestamps: FloatArray,
+    val durations: FloatArray,
+    val lang: String,
+    val emotion: String,
+    val event: String,
+  )
+
   fun setSttConfig(instanceId: String, options: ReadableMap, promise: Promise) {
     try {
       val inst = getInstance(instanceId) ?: run {
         promise.reject(SttErrorCodes.INSTANCE_NOT_FOUND, "STT instance not found: $instanceId")
         return
       }
-      val rec = inst.recognizer
-      val current = inst.lastRecognizerConfig
-      if (rec == null || current == null) {
+      if (!inst.ready || !nativeHasInstance(instanceId)) {
         promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT not initialized. Call initializeStt first.")
         return
       }
-      val merged = current.copy(
-        decodingMethod = if (options.hasKey("decodingMethod")) options.getString("decodingMethod") ?: current.decodingMethod else current.decodingMethod,
-        maxActivePaths = if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else current.maxActivePaths,
-        hotwordsFile = if (options.hasKey("hotwordsFile")) options.getString("hotwordsFile") ?: current.hotwordsFile else current.hotwordsFile,
-        hotwordsScore = if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore").toFloat() else current.hotwordsScore,
-        blankPenalty = if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty").toFloat() else current.blankPenalty,
-        ruleFsts = if (options.hasKey("ruleFsts")) options.getString("ruleFsts") ?: current.ruleFsts else current.ruleFsts,
-        ruleFars = if (options.hasKey("ruleFars")) options.getString("ruleFars") ?: current.ruleFars else current.ruleFars
-      )
-      val resolvedRuleFsts = try {
-        pathResolver.resolveFilePaths(merged.ruleFsts.trim(), "stt_rule_fst")
-      } catch (e: Exception) {
-        val errorMsg = e.message ?: "Rule FST path(s) could not be resolved"
-        Log.e(logTag, errorMsg, e)
-        promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
-        return
-      }
-      val resolvedRuleFars = try {
-        pathResolver.resolveFilePaths(merged.ruleFars.trim(), "stt_rule_far")
-      } catch (e: Exception) {
-        val errorMsg = e.message ?: "Rule FAR path(s) could not be resolved"
-        Log.e(logTag, errorMsg, e)
-        promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
-        return
-      }
 
-      val newHotwordsFile = merged.hotwordsFile.trim()
-      val resolvedHotwordsPath = if (newHotwordsFile.isNotEmpty()) {
-        val modelType = inst.currentSttModelType
-        if (modelType == null || !supportsHotwords(modelType)) {
-          val errorMsg = "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: ${modelType ?: "unknown"}"
-          Log.e(logTag, errorMsg)
-          promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
-          return
-        }
-        try {
-          pathResolver.resolveHotwordsPath(newHotwordsFile)
-        } catch (e: Exception) {
-          val errorMsg = e.message ?: "Hotwords file could not be resolved"
-          Log.e(logTag, errorMsg, e)
-          promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg, e)
-          return
-        }.also { path ->
-          pathResolver.validateHotwordsFile(path)?.let { errorMsg ->
-            Log.e(logTag, errorMsg)
-            promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
+      val decodingMethod =
+        if (options.hasKey("decodingMethod")) options.getString("decodingMethod") else null
+      val maxActivePaths =
+        if (options.hasKey("maxActivePaths")) options.getDouble("maxActivePaths").toInt() else 0
+      val blankPenalty =
+        if (options.hasKey("blankPenalty")) options.getDouble("blankPenalty").toFloat() else -1f
+      val hotwordsScore =
+        if (options.hasKey("hotwordsScore")) options.getDouble("hotwordsScore").toFloat() else -1f
+
+      var resolvedHotwordsPath: String? = null
+      if (options.hasKey("hotwordsFile")) {
+        val newHotwordsFile = options.getString("hotwordsFile")?.trim().orEmpty()
+        if (newHotwordsFile.isNotEmpty()) {
+          val modelType = inst.currentSttModelType
+          if (modelType == null || !supportsHotwords(modelType)) {
+            promise.reject(
+              SttErrorCodes.CONFIG_FAILED,
+              "Hotwords are only supported for transducer models (transducer, nemo_transducer). Current model type: ${modelType ?: "unknown"}",
+            )
             return
           }
+          resolvedHotwordsPath = try {
+            pathResolver.resolveHotwordsPath(newHotwordsFile)
+          } catch (e: Exception) {
+            promise.reject(SttErrorCodes.CONFIG_FAILED, e.message ?: "Hotwords file could not be resolved", e)
+            return
+          }.also { path ->
+            pathResolver.validateHotwordsFile(path)?.let { errorMsg ->
+              promise.reject(SttErrorCodes.CONFIG_FAILED, errorMsg)
+              return
+            }
+          }
+        } else {
+          resolvedHotwordsPath = ""
         }
-      } else ""
-      val configWithPaths = merged.copy(
-        hotwordsFile = resolvedHotwordsPath,
-        ruleFsts = resolvedRuleFsts,
-        ruleFars = resolvedRuleFars
-      )
-      val configToApply = if (configWithPaths.hotwordsFile.isNotEmpty()) {
-        configWithPaths.copy(
-          decodingMethod = "modified_beam_search",
-          maxActivePaths = maxOf(4, configWithPaths.maxActivePaths)
-        )
-      } else configWithPaths
-      inst.lastRecognizerConfig = configToApply
-      rec.setConfig(configToApply)
+      }
+
+      val resolvedRuleFsts = if (options.hasKey("ruleFsts")) {
+        try {
+          pathResolver.resolveFilePaths(options.getString("ruleFsts")?.trim().orEmpty(), "stt_rule_fst")
+        } catch (e: Exception) {
+          promise.reject(SttErrorCodes.CONFIG_FAILED, e.message ?: "Rule FST path(s) could not be resolved", e)
+          return
+        }
+      } else null
+      val resolvedRuleFars = if (options.hasKey("ruleFars")) {
+        try {
+          pathResolver.resolveFilePaths(options.getString("ruleFars")?.trim().orEmpty(), "stt_rule_far")
+        } catch (e: Exception) {
+          promise.reject(SttErrorCodes.CONFIG_FAILED, e.message ?: "Rule FAR path(s) could not be resolved", e)
+          return
+        }
+      } else null
+
+      @Suppress("UNCHECKED_CAST")
+      val raw = nativeSetConfig(
+        instanceId,
+        decodingMethod,
+        maxActivePaths,
+        resolvedHotwordsPath,
+        hotwordsScore,
+        blankPenalty,
+        resolvedRuleFsts,
+        resolvedRuleFars,
+      ) as? HashMap<String, Any>
+      val ok = raw?.get("success") as? Boolean ?: false
+      if (!ok) {
+        promise.reject(SttErrorCodes.CONFIG_FAILED, raw?.get("error") as? String ?: "Failed to set STT config")
+        return
+      }
       promise.resolve(null)
     } catch (e: Exception) {
       val message = e.message?.takeIf { it.isNotBlank() } ?: "Failed to set STT config"
@@ -457,9 +496,15 @@ internal class SherpaOnnxSttHelper(
     try {
       val inst = instances.remove(instanceId)
       if (inst != null) {
-        releaseRecognizerSafely(inst.recognizer)
-        inst.recognizer = null
-        inst.lastRecognizerConfig = null
+        val gateKey = "stt:$instanceId"
+        NativeInstanceGate.releaseWhenIdle(gateKey) {
+          try {
+            nativeUnload(instanceId)
+          } catch (e: Exception) {
+            Log.w(logTag, "Error releasing SttWrapper: ${e.message}")
+          }
+        }
+        inst.ready = false
         inst.currentSttModelType = null
       }
       promise.resolve(null)
@@ -468,15 +513,73 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
-  private fun releaseRecognizerSafely(recognizer: OfflineRecognizer?) {
-    if (recognizer == null) return
-    val gateKey = NativeInstanceGate.keyFor(recognizer)
-    NativeInstanceGate.releaseWhenIdle(gateKey) {
-      try {
-        recognizer.release()
-      } catch (e: Exception) {
-        Log.w(logTag, "Error releasing OfflineRecognizer: ${e.message}")
+  companion object {
+    private fun stringOptionsMap(map: ReadableMap?): HashMap<String, String>? {
+      if (map == null) return null
+      val out = HashMap<String, String>()
+      val it = map.keySetIterator()
+      while (it.hasNextKey()) {
+        val key = it.nextKey()
+        when {
+          map.isNull(key) -> Unit
+          map.getType(key) == com.facebook.react.bridge.ReadableType.String ->
+            out[key] = map.getString(key).orEmpty()
+          map.getType(key) == com.facebook.react.bridge.ReadableType.Boolean ->
+            out[key] = if (map.getBoolean(key)) "true" else "false"
+          map.getType(key) == com.facebook.react.bridge.ReadableType.Number ->
+            out[key] = map.getDouble(key).toString()
+        }
       }
+      return if (out.isEmpty()) null else out
     }
+
+    @JvmStatic
+    private external fun nativeInitializeCustom(
+      instanceId: String,
+      modelType: String,
+      paths: HashMap<String, String>,
+      debug: Boolean,
+      hotwordsFile: String?,
+      hotwordsScore: Float,
+      numThreads: Int,
+      provider: String?,
+      ruleFsts: String?,
+      ruleFars: String?,
+      dither: Float,
+      whisper: HashMap<String, String>?,
+      senseVoice: HashMap<String, String>?,
+      canary: HashMap<String, String>?,
+      funasr: HashMap<String, String>?,
+      qwen3: HashMap<String, String>?,
+      cohere: HashMap<String, String>?,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    internal external fun nativeTranscribeSamples(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeSetConfig(
+      instanceId: String,
+      decodingMethod: String?,
+      maxActivePaths: Int,
+      hotwordsFile: String?,
+      hotwordsScore: Float,
+      blankPenalty: Float,
+      ruleFsts: String?,
+      ruleFars: String?,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeHasInstance(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativeUnload(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAll()
   }
 }

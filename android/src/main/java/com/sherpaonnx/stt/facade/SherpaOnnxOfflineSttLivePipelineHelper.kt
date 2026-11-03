@@ -28,8 +28,7 @@ internal class SherpaOnnxOfflineSttLivePipelineHelper(
     promise: Promise,
   ) {
     try {
-      val recognizer = sttHelper.getRecognizer(instanceId)
-      if (recognizer == null) {
+      if (!sttHelper.hasNativeInstance(instanceId)) {
         promise.reject("STT_INSTANCE_NOT_FOUND", "Offline STT instance not found: $instanceId")
         return
       }
@@ -71,7 +70,8 @@ internal class SherpaOnnxOfflineSttLivePipelineHelper(
           liveAudioEntry = audioEntry,
           liveSegmentEntry = segmentEntry,
         ),
-        recognizer = recognizer,
+        instanceId = instanceId,
+        sttHelper = sttHelper,
         textOutputEntry = textEntry,
       )
 

@@ -1,11 +1,11 @@
 /**
- * sherpa-onnx-stt-wrapper.mm
+ * sherpa-onnx-stt-engine-wrapper.cpp
  *
- * Purpose: Wraps the sherpa-onnx C++ OfflineRecognizer for iOS. Builds config from SttModelPaths,
+ * Purpose: Wraps the sherpa-onnx C++ OfflineRecognizer . Builds config from SttModelPaths,
  * creates/destroys recognizer and streams, runs recognition and returns results. Used by SherpaOnnx+STT.mm.
  */
 
-#include "sherpa-onnx-stt-wrapper.h"
+#include "sherpa-onnx-stt-engine-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-validate-stt.h"
 #include <algorithm>
@@ -18,15 +18,17 @@
 #include <limits>
 #include <vector>
 
-// iOS logging
-#ifdef __APPLE__
-#include <Foundation/Foundation.h>
 #include <cstdio>
-#define LOGI(fmt, ...) NSLog(@"SttWrapper: " fmt, ##__VA_ARGS__)
-#define LOGE(fmt, ...) NSLog(@"SttWrapper ERROR: " fmt, ##__VA_ARGS__)
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, "SherpaOnnx:stt", __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "SherpaOnnx:stt", __VA_ARGS__)
+#elif defined(__APPLE__)
+#define LOGI(...) do { std::fprintf(stderr, "[SherpaOnnx:stt] "); std::fprintf(stderr, __VA_ARGS__); std::fprintf(stderr, "\n"); } while (0)
+#define LOGE(...) LOGI(__VA_ARGS__)
 #else
-#define LOGI(...)
-#define LOGE(...)
+#define LOGI(...) ((void)0)
+#define LOGE(...) ((void)0)
 #endif
 
 // Use C++17 filesystem (podspec enforces C++17)
@@ -91,7 +93,12 @@ static std::optional<std::string> ValidateHotwordsFile(const std::string& filePa
         std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
         f.close();
         if (content.find('\0') != std::string::npos) return "Hotwords file contains null bytes (not a valid text file).";
-        NSCharacterSet *letterSet = [NSCharacterSet letterCharacterSet];
+        auto hasLetter = [](const std::string& s) -> bool {
+            for (unsigned char uc : s) {
+                if (std::isalpha(uc)) return true;
+            }
+            return false;
+        };
         int validLines = 0;
         std::istringstream stream(content);
         std::string line;
@@ -128,12 +135,8 @@ static std::optional<std::string> ValidateHotwordsFile(const std::string& filePa
                 hotwordPart = line;
             }
             if (hotwordPart.empty()) return "Invalid hotword line (empty hotword): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";
-            @autoreleasepool {
-                NSString *hotwordNS = [NSString stringWithUTF8String:hotwordPart.c_str()];
-                if (!hotwordNS) return "Invalid hotword line (invalid UTF-8): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";
-                if ([hotwordNS rangeOfCharacterFromSet:letterSet].location == NSNotFound)
-                    return "Invalid hotword line (must contain at least one letter): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";
-            }
+            if (!hasLetter(hotwordPart))
+                return "Invalid hotword line (must contain at least one letter): " + line.substr(0, std::min(line.size(), size_t(60))) + "…";
             validLines++;
         }
         if (validLines == 0) return "Hotwords file has no valid lines (one hotword or phrase per line, UTF-8 text).";
@@ -298,6 +301,9 @@ SttInitializeResult SttWrapper::initialize(
 
         if (!detect.paths.tokens.empty()) {
             config.model_config.tokens = detect.paths.tokens;
+        }
+        if (!detect.paths.bpeVocab.empty()) {
+            config.model_config.bpe_vocab = detect.paths.bpeVocab;
         }
 
         // Apply model-specific options (only for the loaded model type).
@@ -618,6 +624,9 @@ SttInitializeResult SttWrapper::initializeCustom(
 
         if (!detect.paths.tokens.empty()) {
             config.model_config.tokens = detect.paths.tokens;
+        }
+        if (!detect.paths.bpeVocab.empty()) {
+            config.model_config.bpe_vocab = detect.paths.bpeVocab;
         }
 
         switch (detect.selectedKind) {
