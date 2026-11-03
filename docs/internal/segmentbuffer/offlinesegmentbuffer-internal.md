@@ -2,7 +2,8 @@
 
 **Scope:** Internal implementation details of `offlineSegmentBuffer` (the offline/immutable segment buffer).  
 **Audience:** SDK developers planning batch processing, export, and deterministic replay flows.  
-**Native entry types:** `OfflineSegmentEntry` (Android/Kotlin), `PaOfflineSegmentEntry` (iOS/C++).
+**Native SoT:** shared C++ `SegOfflineEntry` / `SegmentRegistry` under `android/src/main/cpp/segmentbuffer/` (both platforms).  
+**Android facade:** thin Kotlin `OfflineSegmentEntry` (snapshot mirror; see [buffer-in-c-copy-backlog](../../migration/buffer-in-c-copy-backlog.md) S1/S6).
 
 ---
 

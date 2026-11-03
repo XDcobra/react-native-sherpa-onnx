@@ -2,7 +2,7 @@
 #import <React/RCTLog.h>
 
 #include "AudioRegistry.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "../core/SpeakerEmbeddingBridgeState.h"
 #include "../core/SpeakerEmbeddingBridgeUtils.h"
 #include "sherpa-onnx-speaker-embedding-wrapper.h"

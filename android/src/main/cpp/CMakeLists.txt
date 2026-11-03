@@ -215,6 +215,10 @@ set(SOURCES
     jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp
     textbuffer/TextRegistry.cpp
     jni/textbuffer/sherpa-onnx-textbuffer-jni.cpp
+    segmentbuffer/SegJson.cpp
+    segmentbuffer/SegmentRegistry.cpp
+    segmentbuffer/SegmentLinkMapRegistry.cpp
+    jni/segmentbuffer/sherpa-onnx-segmentbuffer-jni.cpp
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp
     jni/audio/AudioVisualization.cpp
@@ -587,6 +591,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/audiobuffer
     ${CMAKE_CURRENT_SOURCE_DIR}/textbuffer
+    ${CMAKE_CURRENT_SOURCE_DIR}/segmentbuffer
     ${ORT_INCLUDE_DIR}
     # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
     ${ORT_INCLUDE_DIR}/onnxruntime/core/session

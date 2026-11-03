@@ -1,6 +1,6 @@
 #include "SlidOfflineLivePipelineWorker.h"
 
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "TextRegistry.h"
 
 #include <algorithm>

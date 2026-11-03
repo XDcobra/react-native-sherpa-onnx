@@ -5,7 +5,7 @@
 #include "sherpa-onnx-enhancement-wrapper.h"
 #include "../core/EnhancementBridgeState.h"
 #include "../EnhancementOfflineLivePipelineWorker.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 

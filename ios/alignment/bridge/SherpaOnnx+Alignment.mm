@@ -1,6 +1,6 @@
 #import "../../SherpaOnnx.h"
 #include "AudioRegistry.h"
-#import "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "TextRegistry.h"
 
 #include "../core/AlignmentBridgeUtils.h"

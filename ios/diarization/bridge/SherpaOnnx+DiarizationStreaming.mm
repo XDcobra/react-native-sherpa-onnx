@@ -3,7 +3,7 @@
 
 #include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "../core/DiarizationBridgeState.h"
 #include "../pipeline/DiarizationStreamingPipelineWorker.h"
 #include "sherpa-onnx-streaming-diarization-wrapper.h"

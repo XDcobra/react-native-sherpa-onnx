@@ -5,7 +5,7 @@
 #include "sherpa-onnx-separation-wrapper.h"
 #include "../core/SeparationBridgeState.h"
 #include "../SeparationOfflineLivePipelineWorker.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "sherpa-onnx-model-path-fill.h"

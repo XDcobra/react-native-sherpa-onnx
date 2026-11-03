@@ -1,26 +1,26 @@
 package com.sherpaonnx.segment.core
 
-import java.util.LinkedHashMap
-import java.util.UUID
+import com.sherpaonnx.SherpaOnnxNativeLoader
 import java.util.concurrent.ConcurrentHashMap
 
-private data class SegmentLinkMapStore(
-  val linkMapId: String,
-  val textBufferId: String? = null,
-  val audioBufferId: String? = null,
-  val links: LinkedHashMap<String, SegmentLink> = LinkedHashMap(),
-  val textIndex: MutableMap<String, LinkedHashSet<String>> = mutableMapOf(),
-  val speechIndex: MutableMap<String, LinkedHashSet<String>> = mutableMapOf(),
-  val pairTypeIndex: MutableSet<String> = mutableSetOf(),
-)
-
+/**
+ * Facade over shared C++ SegmentLinkMapRegistry (`slm_*`).
+ * Kotlin keeps a mirror of links for query APIs until S3 closed fully via JNI getters.
+ */
 object SegmentLinkMapRegistry {
-  private val stores = ConcurrentHashMap<String, SegmentLinkMapStore>()
+  init {
+    SherpaOnnxNativeLoader.ensureLoaded()
+  }
 
-  private fun newLinkMapId(): String = "lnkmap_${UUID.randomUUID()}"
-  private fun newLinkId(): String = "lnk_${UUID.randomUUID()}"
+  private data class Mirror(
+    val textBufferId: String?,
+    val audioBufferId: String?,
+    val links: LinkedHashMap<String, SegmentLink> = LinkedHashMap(),
+    val textIndex: MutableMap<String, LinkedHashSet<String>> = mutableMapOf(),
+    val speechIndex: MutableMap<String, LinkedHashSet<String>> = mutableMapOf(),
+  )
 
-  private fun SegmentLinkType.raw(): String = name.lowercase()
+  private val mirrors = ConcurrentHashMap<String, Mirror>()
 
   private fun parseLinkType(raw: String): SegmentLinkType {
     return when (raw.trim().lowercase()) {
@@ -35,8 +35,8 @@ object SegmentLinkMapRegistry {
     }
   }
 
-  private fun requireStore(linkMapId: String): SegmentLinkMapStore {
-    return stores[linkMapId]
+  private fun requireMirror(linkMapId: String): Mirror {
+    return mirrors[linkMapId]
       ?: throw IllegalArgumentException("SEGMENT_LINK_MAP_NOT_FOUND: link map not found: $linkMapId")
   }
 
@@ -44,12 +44,10 @@ object SegmentLinkMapRegistry {
     textBufferId: String? = null,
     audioBufferId: String? = null,
   ): SegmentLinkMapRef {
-    val linkMapId = newLinkMapId()
-    stores[linkMapId] = SegmentLinkMapStore(
-      linkMapId = linkMapId,
-      textBufferId = textBufferId,
-      audioBufferId = audioBufferId,
-    )
+    val linkMapId =
+      SegmentLinkMapNative.nativeCreate(textBufferId, audioBufferId)
+        ?: throw IllegalStateException("Failed to create segment link map")
+    mirrors[linkMapId] = Mirror(textBufferId, audioBufferId)
     return SegmentLinkMapRef(linkMapId)
   }
 
@@ -62,48 +60,35 @@ object SegmentLinkMapRegistry {
     confidence: Float? = null,
     metaJson: String? = null,
   ): SegmentLink {
-    if (textSegmentId.isBlank()) {
-      throw IllegalArgumentException("SEGMENT_LINK_INVALID: textSegmentId must be non-empty")
-    }
-    if (speechSegmentId.isBlank()) {
-      throw IllegalArgumentException("SEGMENT_LINK_INVALID: speechSegmentId must be non-empty")
-    }
-
-    val store = requireStore(linkMapId)
-    val linkType = parseLinkType(linkTypeRaw)
-    val duplicateKey = "${textSegmentId}::${speechSegmentId}::${linkType.raw()}"
-    if (store.pairTypeIndex.contains(duplicateKey)) {
-      throw IllegalArgumentException(
-        "SEGMENT_LINK_INVALID: duplicate (textSegmentId, speechSegmentId, linkType) is not allowed"
+    val linkId =
+      SegmentLinkMapNative.nativeAddLink(
+        linkMapId,
+        textSegmentId,
+        speechSegmentId,
+        linkTypeRaw,
+        confidence != null,
+        confidence ?: 0f,
+        metaJson,
       )
-    }
-
-    val link = SegmentLink(
-      linkId = newLinkId(),
-      textSegmentId = textSegmentId,
-      speechSegmentId = speechSegmentId,
-      linkType = linkType,
-      confidence = confidence,
-      metaJson = metaJson,
-    )
-
+        ?: throw IllegalArgumentException("SEGMENT_LINK_INVALID: addLink failed")
+    val store = requireMirror(linkMapId)
+    val link =
+      SegmentLink(
+        linkId = linkId,
+        textSegmentId = textSegmentId,
+        speechSegmentId = speechSegmentId,
+        linkType = parseLinkType(linkTypeRaw),
+        confidence = confidence,
+        metaJson = metaJson,
+      )
     store.links[link.linkId] = link
-    store.pairTypeIndex.add(duplicateKey)
-
-    val textSet = store.textIndex.getOrPut(textSegmentId) { linkedSetOf() }
-    textSet.add(link.linkId)
-
-    val speechSet = store.speechIndex.getOrPut(speechSegmentId) { linkedSetOf() }
-    speechSet.add(link.linkId)
-
+    store.textIndex.getOrPut(textSegmentId) { linkedSetOf() }.add(link.linkId)
+    store.speechIndex.getOrPut(speechSegmentId) { linkedSetOf() }.add(link.linkId)
     return link
   }
 
   @Synchronized
-  fun addLinks(
-    linkMapId: String,
-    links: List<SegmentLinkInput>,
-  ): List<SegmentLink> {
+  fun addLinks(linkMapId: String, links: List<SegmentLinkInput>): List<SegmentLink> {
     val out = ArrayList<SegmentLink>(links.size)
     for (input in links) {
       out.add(
@@ -114,7 +99,7 @@ object SegmentLinkMapRegistry {
           linkTypeRaw = input.linkType,
           confidence = input.confidence,
           metaJson = input.metaJson,
-        )
+        ),
       )
     }
     return out
@@ -122,18 +107,13 @@ object SegmentLinkMapRegistry {
 
   @Synchronized
   fun removeLink(linkMapId: String, linkId: String) {
-    val store = requireStore(linkMapId)
+    SegmentLinkMapNative.nativeRemoveLink(linkMapId, linkId)
+    val store = mirrors[linkMapId] ?: return
     val removed = store.links.remove(linkId) ?: return
-
-    val duplicateKey =
-      "${removed.textSegmentId}::${removed.speechSegmentId}::${removed.linkType.name.lowercase()}"
-    store.pairTypeIndex.remove(duplicateKey)
-
     store.textIndex[removed.textSegmentId]?.let { set ->
       set.remove(linkId)
       if (set.isEmpty()) store.textIndex.remove(removed.textSegmentId)
     }
-
     store.speechIndex[removed.speechSegmentId]?.let { set ->
       set.remove(linkId)
       if (set.isEmpty()) store.speechIndex.remove(removed.speechSegmentId)
@@ -141,32 +121,22 @@ object SegmentLinkMapRegistry {
   }
 
   @Synchronized
-  fun getSpeechSegmentsForText(
-    linkMapId: String,
-    textSegmentId: String,
-  ): List<SegmentLink> {
-    val store = requireStore(linkMapId)
+  fun getSpeechSegmentsForText(linkMapId: String, textSegmentId: String): List<SegmentLink> {
+    val store = requireMirror(linkMapId)
     val ids = store.textIndex[textSegmentId] ?: return emptyList()
     return ids.mapNotNull { id -> store.links[id] }
   }
 
   @Synchronized
-  fun getTextSegmentsForSpeech(
-    linkMapId: String,
-    speechSegmentId: String,
-  ): List<SegmentLink> {
-    val store = requireStore(linkMapId)
+  fun getTextSegmentsForSpeech(linkMapId: String, speechSegmentId: String): List<SegmentLink> {
+    val store = requireMirror(linkMapId)
     val ids = store.speechIndex[speechSegmentId] ?: return emptyList()
     return ids.mapNotNull { id -> store.links[id] }
   }
 
   @Synchronized
-  fun getAllLinks(
-    linkMapId: String,
-    startIndex: Int,
-    maxCount: Int,
-  ): List<SegmentLink> {
-    val store = requireStore(linkMapId)
+  fun getAllLinks(linkMapId: String, startIndex: Int, maxCount: Int): List<SegmentLink> {
+    val store = requireMirror(linkMapId)
     if (maxCount <= 0 || startIndex < 0) return emptyList()
     val all = store.links.values.toList()
     if (startIndex >= all.size) return emptyList()
@@ -175,11 +145,14 @@ object SegmentLinkMapRegistry {
   }
 
   @Synchronized
-  fun getCount(linkMapId: String): Int = requireStore(linkMapId).links.size
+  fun getCount(linkMapId: String): Int {
+    val n = SegmentLinkMapNative.nativeGetCount(linkMapId)
+    return if (n >= 0) n else requireMirror(linkMapId).links.size
+  }
 
   @Synchronized
   fun getInfo(linkMapId: String): SegmentLinkMapInfo {
-    val store = requireStore(linkMapId)
+    val store = requireMirror(linkMapId)
     return SegmentLinkMapInfo(
       linkMapId = linkMapId,
       linkCount = store.links.size,
@@ -189,11 +162,14 @@ object SegmentLinkMapRegistry {
   }
 
   fun release(linkMapId: String) {
-    stores.remove(linkMapId)
+    mirrors.remove(linkMapId)
+    SegmentLinkMapNative.nativeRelease(linkMapId)
   }
 
   fun releaseAll() {
-    stores.clear()
+    for (id in mirrors.keys.toList()) {
+      release(id)
+    }
   }
 }
 

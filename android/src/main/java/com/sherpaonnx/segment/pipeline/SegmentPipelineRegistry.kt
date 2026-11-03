@@ -1,26 +1,38 @@
 package com.sherpaonnx.segment.pipeline
 
+import com.sherpaonnx.SherpaOnnxNativeLoader
 import java.io.File
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Facade over shared C++ SegmentRegistry.
+ * Handle maps keep Kotlin listeners; segment/spool SoT is in C++.
+ */
 object SegmentPipelineRegistry {
+  init {
+    SherpaOnnxNativeLoader.ensureLoaded()
+  }
+
   private val offlineMap = ConcurrentHashMap<String, OfflineSegmentEntry>()
   private val liveMap = ConcurrentHashMap<String, LiveSegmentEntry>()
   private var cacheDir: File? = null
 
   fun initializeWithCacheDir(cacheDir: File) {
     this.cacheDir = cacheDir
+    SegmentBufferNative.nativeInit(cacheDir.absolutePath)
   }
 
   private fun requireCacheDir(): File {
     return cacheDir ?: throw SegmentPipelineException(
       SegmentErrorCodes.INTERNAL_ERROR,
-      "SegmentPipelineRegistry not initialized with cacheDir"
+      "SegmentPipelineRegistry not initialized with cacheDir",
     )
   }
 
-  private fun newId(prefix: String): String = "${prefix}_${UUID.randomUUID()}"
+  private fun defaultSpoolPath(): String {
+    val dir = requireCacheDir()
+    return File(dir, "seg_spool_${System.nanoTime()}.bin").absolutePath
+  }
 
   fun createLive(
     sourceAudioBufferId: String?,
@@ -32,32 +44,41 @@ object SegmentPipelineRegistry {
     emitSegmentAppendedEvents: Boolean = false,
     segmentEventMinIntervalMs: Long = 0L,
   ): LiveSegmentEntry {
-    val id = newId("seg_live")
     val mode = SegmentSpoolingMode.fromRaw(spoolingModeRaw)
-    val tempDir = requireCacheDir()
-    val effectivePath = if (mode == SegmentSpoolingMode.OFF) {
-      null
-    } else {
-      spoolingPath ?: File(tempDir, "seg_spool_${System.currentTimeMillis()}_${UUID.randomUUID()}.json").absolutePath
-    }
+    val effectivePath =
+      if (mode == SegmentSpoolingMode.OFF) null else (spoolingPath ?: defaultSpoolPath())
     val temporary = spoolingTemporary ?: spoolingPath.isNullOrEmpty()
-    val entry = LiveSegmentEntry(
-      bufferId = id,
-      sourceAudioBufferId = sourceAudioBufferId,
-      maxSegments = maxSegments.coerceAtLeast(1),
-      spoolingMode = mode,
-      spoolPath = effectivePath,
-      spoolTemporary = temporary,
-      spoolThresholdBytes = spoolingThresholdBytes ?: 0L,
-      emitSegmentAppendedEvents = emitSegmentAppendedEvents,
-      segmentEventMinIntervalMs = segmentEventMinIntervalMs,
-    )
+    val id =
+      SegmentBufferNative.nativeCreateLive(
+        sourceAudioBufferId,
+        maxSegments.coerceAtLeast(1),
+        mode.rawValue(),
+        effectivePath,
+        temporary,
+        spoolingThresholdBytes ?: 0L,
+        emitSegmentAppendedEvents,
+        segmentEventMinIntervalMs,
+      ) ?: throw IllegalStateException("Failed to create live segment buffer")
+    val entry =
+      LiveSegmentEntry(
+        bufferId = id,
+        sourceAudioBufferId = sourceAudioBufferId,
+        maxSegments = maxSegments.coerceAtLeast(1),
+        spoolingMode = mode,
+        spoolPath = effectivePath,
+        spoolTemporary = temporary,
+        spoolThresholdBytes = spoolingThresholdBytes ?: 0L,
+        emitSegmentAppendedEvents = emitSegmentAppendedEvents,
+        segmentEventMinIntervalMs = segmentEventMinIntervalMs,
+      )
     liveMap[id] = entry
     return entry
   }
 
   fun createEmptyOffline(sourceAudioBufferId: String?): OfflineSegmentEntry {
-    val id = newId("seg_off")
+    val id =
+      SegmentBufferNative.nativeCreateEmptyOffline(sourceAudioBufferId)
+        ?: throw IllegalStateException("Failed to create empty offline segment buffer")
     val entry = OfflineSegmentEntry(id, sourceAudioBufferId)
     offlineMap[id] = entry
     return entry
@@ -67,22 +88,13 @@ object SegmentPipelineRegistry {
     liveBufferId: String,
     mode: String = "fullIfSpooled",
   ): OfflineSegmentEntry {
-    val live = getLive(liveBufferId) ?: throw SegmentPipelineException(
-      SegmentErrorCodes.BUFFER_NOT_FOUND,
-      "Live segment buffer not found: $liveBufferId"
-    )
-    val records = when (mode) {
-      "windowSnapshot" -> live.snapshotWindow()
-      "fullIfSpooled" -> live.snapshotFullIfSpooled()
-      else -> throw SegmentPipelineException(
-        SegmentErrorCodes.INVALID_ARGUMENT,
-        "Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'."
-      )
-    }
-
-    val id = newId("seg_off")
-    val entry = OfflineSegmentEntry(id, live.sourceAudioBufferId)
-    entry.populate(records)
+    val id =
+      SegmentBufferNative.nativeCreateOfflineFromLive(liveBufferId, mode)
+        ?: throw SegmentPipelineException(
+          SegmentErrorCodes.INVALID_ARGUMENT,
+          "createOfflineFromLive failed for $liveBufferId mode=$mode",
+        )
+    val entry = OfflineSegmentEntry.wrap(id) ?: OfflineSegmentEntry(id, null)
     offlineMap[id] = entry
     return entry
   }
@@ -92,44 +104,47 @@ object SegmentPipelineRegistry {
     liveBufferId: String,
     mode: String = "fullIfSpooled",
   ) {
-    val live = getLive(liveBufferId) ?: throw SegmentPipelineException(
-      SegmentErrorCodes.BUFFER_NOT_FOUND,
-      "Live segment buffer not found: $liveBufferId"
-    )
-    val target = getOffline(targetOfflineId) ?: throw SegmentPipelineException(
-      SegmentErrorCodes.BUFFER_NOT_FOUND,
-      "Offline segment buffer not found: $targetOfflineId"
-    )
-
-    val records = when (mode) {
-      "windowSnapshot" -> live.snapshotWindow()
-      "fullIfSpooled" -> live.snapshotFullIfSpooled()
-      else -> throw SegmentPipelineException(
+    if (!SegmentBufferNative.nativePopulateOfflineFromLive(targetOfflineId, liveBufferId, mode)) {
+      throw SegmentPipelineException(
         SegmentErrorCodes.INVALID_ARGUMENT,
-        "Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'."
+        "populateOfflineFromLiveIfEmpty failed target=$targetOfflineId live=$liveBufferId",
       )
     }
-
-    target.populate(records)
+    offlineMap[targetOfflineId]?.refreshFromNative()
   }
 
-  fun getOffline(bufferId: String): OfflineSegmentEntry? = offlineMap[bufferId]
-  fun getLive(bufferId: String): LiveSegmentEntry? = liveMap[bufferId]
+  fun getOffline(bufferId: String): OfflineSegmentEntry? {
+    offlineMap[bufferId]?.let { return it }
+    val wrapped = OfflineSegmentEntry.wrap(bufferId) ?: return null
+    offlineMap[bufferId] = wrapped
+    return wrapped
+  }
+
+  fun getLive(bufferId: String): LiveSegmentEntry? {
+    liveMap[bufferId]?.let { return it }
+    val wrapped = LiveSegmentEntry.wrap(bufferId) ?: return null
+    liveMap[bufferId] = wrapped
+    return wrapped
+  }
 
   fun release(bufferId: String) {
-    liveMap.remove(bufferId)?.release()
-    offlineMap.remove(bufferId)
-  }
-
-  fun releaseAll() {
-    val liveEntries = liveMap.values.toList()
-    liveMap.clear()
-    offlineMap.clear()
-    liveEntries.forEach {
+    liveMap.remove(bufferId)?.let {
       try {
         it.release()
       } catch (_: Exception) {
       }
+      return
+    }
+    offlineMap.remove(bufferId)
+    SegmentBufferNative.nativeRelease(bufferId)
+  }
+
+  fun releaseAll() {
+    for (id in liveMap.keys.toList()) {
+      release(id)
+    }
+    for (id in offlineMap.keys.toList()) {
+      release(id)
     }
   }
 }

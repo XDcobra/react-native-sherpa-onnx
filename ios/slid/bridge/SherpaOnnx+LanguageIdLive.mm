@@ -4,7 +4,7 @@
 #include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "TextRegistry.h"
 #include "../core/LanguageIdBridgeState.h"
 #include "../pipeline/SlidOfflineLivePipelineWorker.h"

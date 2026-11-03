@@ -2,7 +2,7 @@
 #import <React/RCTLog.h>
 
 #include "AudioRegistry.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "sherpa-onnx-diarization-wrapper.h"
 #include "../core/DiarizationBridgeState.h"
 
