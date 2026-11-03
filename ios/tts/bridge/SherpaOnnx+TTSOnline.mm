@@ -5,7 +5,7 @@
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "AudioRegistry.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "PaLiveEntry.h"
 

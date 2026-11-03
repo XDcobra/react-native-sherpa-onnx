@@ -1,7 +1,8 @@
 #import "../../SherpaOnnx.h"
 #import <Foundation/Foundation.h>
 #include "../core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
+#include "TxtMetaBridge.h"
 #include "AudioRegistry.h"
 #include "PaLiveEntry.h"
 #include "sherpa-onnx-vad-engine-wrapper.h"
@@ -1690,7 +1691,7 @@ static void seg_engine_flush_text(const std::shared_ptr<SegEngine> &engine) {
     @"__segmentSource": @"segmentation_engine",
     @"__segmentCreatedAtMs": @(seg_now_ms()),
   };
-  int segmentIndex = entry->commitSegment(partial, {}, {}, "stt_stream", meta);
+  int segmentIndex = entry->commitSegment(partial, {}, {}, "stt_stream", txtMetaJsonFromDict(meta));
   entry->writePartial("");
   engine->totalSegmentsCommitted += 1;
   engine->lastSegmentId = "txtseg_" + engine->attachedBufferId + "_" + std::to_string(segmentIndex);

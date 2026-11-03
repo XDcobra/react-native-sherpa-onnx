@@ -213,6 +213,8 @@ set(SOURCES
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
     jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp
+    textbuffer/TextRegistry.cpp
+    jni/textbuffer/sherpa-onnx-textbuffer-jni.cpp
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp
     jni/audio/AudioVisualization.cpp
@@ -584,6 +586,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stt
     ${CMAKE_CURRENT_SOURCE_DIR}/tts
     ${CMAKE_CURRENT_SOURCE_DIR}/audiobuffer
+    ${CMAKE_CURRENT_SOURCE_DIR}/textbuffer
     ${ORT_INCLUDE_DIR}
     # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
     ${ORT_INCLUDE_DIR}/onnxruntime/core/session
@@ -708,7 +711,7 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor yuv mediandk)
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor yuv mediandk z)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

@@ -2,7 +2,7 @@
 
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "PaLiveEntry.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 #include "sherpa-onnx-online-stt-engine-wrapper.h"
 #include <condition_variable>
 #include <deque>

@@ -5,7 +5,7 @@
 #include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 #include "sherpa-onnx-kws-engine-wrapper.h"
 #include "../pipeline/KwsStreamingPipelineWorker.h"
 

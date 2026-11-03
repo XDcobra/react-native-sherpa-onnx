@@ -14,7 +14,7 @@
 #include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 #include "../pipeline/SttPipelineWorker.h"
 #include "sherpa-onnx-online-stt-engine-wrapper.h"
 #include "sherpa-onnx-model-path-fill.h"

@@ -1,7 +1,7 @@
 #import "../../SherpaOnnx.h"
 #import "../../fileio/FileIOResolver.h"
 #import "../../fileio/FileIOSeekable.h"
-#import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 #import "PdfLazyIo.h"
 
 #include "ImageRegistry.h"

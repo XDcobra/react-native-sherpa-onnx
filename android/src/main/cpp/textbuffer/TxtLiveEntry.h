@@ -1,9 +1,10 @@
 #pragma once
 
-#ifdef __cplusplus
-#ifdef __OBJC__
-#import <Foundation/Foundation.h>
-#endif
+/**
+ * Shared TextBuffer live/offline types — lifted from ios/textbuffer.
+ * ObjC-free core; RN meta packing stays in bridges (metaJson string).
+ */
+
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -15,36 +16,23 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 #include <zlib.h>
 
-// Segmentation engine hooks are implemented in segmentbuffer bridge.
+#include "TxtUtf16.h"
+
+// Segmentation / partial-event hooks (weak stubs on Android host tests).
 void seg_engine_on_text_write(const std::string &liveBufferId);
 void seg_engine_on_buffer_finalized(const std::string &bufferId);
 void seg_engine_on_buffer_released(const std::string &bufferId);
-
-// Emits pipelineLiveTextPartial when partial events are enabled (throttled). Called after live partial text updates.
 void txt_dispatch_pipeline_live_text_partial(
-	const std::string &bufferId,
-	const char *source,
-	const std::string &partialText,
-	int64_t revisionValue,
-	int64_t partialEventMinIntervalMs);
-
-#ifdef __OBJC__
-@class SherpaOnnx;
-#ifdef __cplusplus
-extern "C" {
-#endif
-void txt_set_partial_event_module(SherpaOnnx *module);
-#ifdef __cplusplus
-}
-#endif
-#endif
-
-// Forward declarations of pipeline text entry structs (defined below or in textbuffer/bridge/SherpaOnnx+TextBuffer.mm).
-struct TxtOfflineEntry;
+    const std::string &bufferId,
+    const char *source,
+    const std::string &partialText,
+    int64_t revisionValue,
+    int64_t partialEventMinIntervalMs);
 
 /** Spatial span linking UTF-16 text range to pixel coords on a source image frame. */
 struct TxtSpatialSpan {
@@ -78,7 +66,7 @@ struct TextSegment {
 	std::vector<float> timestamps;
 	std::string source;
 	int segmentIndex;
-	NSDictionary *meta = nil;
+	std::string metaJson;
 };
 
 struct TxtLiveEntry {
@@ -460,13 +448,14 @@ struct TxtLiveEntry {
 			throwSpoolError("TEXT_SPOOL_UNAVAILABLE", "Text spool path is not configured for " + bufferId);
 		}
 
-		NSString *spoolPathNs = [NSString stringWithUTF8String:spoolPath.c_str()];
-		NSString *parentPath = [spoolPathNs stringByDeletingLastPathComponent];
-		if (parentPath.length > 0) {
-			[[NSFileManager defaultManager] createDirectoryAtPath:parentPath
-											withIntermediateDirectories:YES
-													 attributes:nil
-													  error:nil];
+		{
+			std::string parent = spoolPath;
+			auto slash = parent.find_last_of('/');
+			if (slash != std::string::npos && slash > 0) {
+				parent.resize(slash);
+				// best-effort mkdir -p style (single parent level is enough for cache paths)
+				::mkdir(parent.c_str(), 0755);
+			}
 		}
 
 		spoolFile = fopen(journalPath().c_str(), "ab+");
@@ -551,11 +540,9 @@ struct TxtLiveEntry {
 			if (state == FINISHED) {
 				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
 			}
-			NSString *ns = [NSString stringWithUTF8String:text.c_str()];
-			int len = ns ? (int)[ns length] : 0;
+			int len = txt_utf16_length(text);
 			if (len > windowMaxChars) {
-				NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-				currentText = [trimmed UTF8String] ?: "";
+				currentText = txt_utf16_suffix(text, windowMaxChars);
 			} else {
 				currentText = text;
 			}
@@ -586,13 +573,10 @@ struct TxtLiveEntry {
 				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
 			}
 			std::string combined = currentText + text;
-			NSString *ns = [NSString stringWithUTF8String:combined.c_str()];
-			int len = ns ? (int)[ns length] : 0;
-			NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
-			int appendLen = textNs ? (int)[textNs length] : 0;
+			int len = txt_utf16_length(combined);
+			int appendLen = txt_utf16_length(text);
 			if (len > windowMaxChars) {
-				NSString *trimmed = [ns substringFromIndex:(len - windowMaxChars)];
-				currentText = [trimmed UTF8String] ?: "";
+				currentText = txt_utf16_suffix(combined, windowMaxChars);
 			} else {
 				currentText = combined;
 			}
@@ -615,7 +599,7 @@ struct TxtLiveEntry {
 					  const std::vector<std::string> &tokens = {},
 					  const std::vector<float> &timestamps = {},
 					  const std::string &source = "unknown",
-					  NSDictionary *meta = nil) {
+					  const std::string &metaJsonArg = {}) {
 		int committedSegmentIndex = -1;
 		TextSegment committedSegment;
 		bool hasCommittedSegment = false;
@@ -632,7 +616,7 @@ struct TxtLiveEntry {
 				seg.timestamps = timestamps;
 				seg.source = source;
 				seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
-				seg.meta = meta;
+				seg.metaJson = metaJsonArg;
 				committedSegment = seg;
 				hasCommittedSegment = true;
 				committedSegmentIndex = seg.segmentIndex;
@@ -647,8 +631,7 @@ struct TxtLiveEntry {
 						else pair.second->readPos.store(0);
 					}
 				}
-				NSString *textNs = [NSString stringWithUTF8String:text.c_str()];
-				int charLen = textNs ? (int)[textNs length] : 0;
+				int charLen = txt_utf16_length(text);
 				totalCharsWritten += charLen;
 				revision.fetch_add(1);
 				// Same as Android LiveTextEntry.commitSegment: callers often still
@@ -730,8 +713,7 @@ struct TxtLiveEntry {
 
 		std::string cpPath = path + ".txtc";
 		std::string jPath = path + ".txtj";
-		bool hasSpool = [[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:cpPath.c_str()]] ||
-			[[NSFileManager defaultManager] fileExistsAtPath:[NSString stringWithUTF8String:jPath.c_str()]];
+		bool hasSpool = (::access(cpPath.c_str(), F_OK) == 0) || (::access(jPath.c_str(), F_OK) == 0);
 		if (hasSpool) {
 			std::string latest = "";
 			FILE *cp = fopen(cpPath.c_str(), "rb");
@@ -862,45 +844,6 @@ struct TxtLiveEntry {
 		throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spool files are missing for " + bufferId);
 	}
 
-	NSDictionary *toDict() {
-		std::string stateValue;
-		int64_t totalChars = 0;
-		bool enabled = false;
-		{
-			std::lock_guard<std::mutex> lock(stateMutex);
-			stateValue = state == RECORDING ? "recording" : "finished";
-			totalChars = totalCharsWritten;
-			enabled = spoolEnabled();
-		}
-		std::string spoolModeRaw;
-		bool ready = false;
-		int64_t bytes = 0;
-		std::string path;
-		{
-			std::lock_guard<std::mutex> lock(spoolMutex);
-			spoolModeRaw = spoolingModeRaw(spoolingMode);
-			ready = spoolReady;
-			bytes = spoolBytes;
-			path = spoolPath;
-		}
-		NSMutableDictionary *dict = [@{
-			@"bufferId": [NSString stringWithUTF8String:bufferId.c_str()],
-			@"kind": @"liveTextBuffer",
-			@"state": [NSString stringWithUTF8String:stateValue.c_str()],
-			@"totalCharsWritten": @(totalChars),
-			@"revision": @(revision.load()),
-			@"segmentCount": @(segmentCount()),
-			@"spoolMode": [NSString stringWithUTF8String:spoolModeRaw.c_str()],
-			@"spoolEnabled": @(enabled),
-			@"spoolReady": @(ready),
-			@"spoolBytes": @(bytes),
-		} mutableCopy];
-		if (!path.empty()) {
-			dict[@"spoolPath"] = [NSString stringWithUTF8String:path.c_str()];
-		}
-		return dict;
-	}
-
 	void release() {
 		std::string pathToDelete;
 		bool shouldDelete = false;
@@ -932,70 +875,3 @@ struct TxtLiveEntry {
 	}
 };
 
-// Global pipeline text registry – shared across textbuffer/bridge/SherpaOnnx+TextBuffer.mm and stt/bridge/SherpaOnnx+STT.mm.
-extern std::unordered_map<std::string, std::shared_ptr<TxtOfflineEntry>> g_txt_offline;
-extern std::unordered_map<std::string, std::shared_ptr<TxtLiveEntry>> g_txt_live;
-extern std::mutex g_txt_mutex;
-
-// Helper APIs for cross-file live-text access (keeps TxtLiveEntry internals encapsulated in .mm).
-std::shared_ptr<TxtLiveEntry> txt_get_live_entry(const std::string &bufferId);
-bool txt_live_is_recording(const std::shared_ptr<TxtLiveEntry> &entry);
-bool txt_live_write_partial(
-	const std::shared_ptr<TxtLiveEntry> &entry,
-	const std::string &text,
-	std::string *error = nullptr
-);
-bool txt_live_commit_segment(
-	const std::shared_ptr<TxtLiveEntry> &entry,
-	const std::string &text,
-	const std::vector<std::string> &tokens,
-	const std::vector<float> &timestamps,
-	const std::string &source,
-	NSDictionary *meta = nil,
-	std::string *error = nullptr
-);
-
-// Read an offline text buffer content by id.
-bool txt_read_offline_text(
-	const std::string &bufferId,
-	std::string *text,
-	std::string *error = nullptr
-);
-
-// Like txt_read_offline_text but also returns `lang` for downstream pass-through.
-bool txt_read_offline_text_with_lang(
-	const std::string &bufferId,
-	std::string *text,
-	std::string *lang,
-	std::string *error = nullptr
-);
-
-bool txt_populate_offline_if_empty(
-	const std::string &bufferId,
-	const std::string &text,
-	const std::vector<std::string> &tokens,
-	const std::vector<float> &timestamps,
-	const std::vector<float> &durations,
-	const std::string &lang,
-	const std::string &emotion,
-	const std::string &event,
-	std::string *error = nullptr
-);
-
-/** Like txt_populate_offline_if_empty, also storing spatial spans (OCR / text-layer). */
-bool txt_populate_offline_if_empty(
-	const std::string &bufferId,
-	const std::string &text,
-	const std::vector<std::string> &tokens,
-	const std::vector<float> &timestamps,
-	const std::vector<float> &durations,
-	const std::string &lang,
-	const std::string &emotion,
-	const std::string &event,
-	const std::vector<TxtSpatialSpan> &spatialSpans,
-	std::string *error = nullptr
-);
-
-// Release all text entries and cleanup any temporary spool files.
-void txt_release_all_entries();
-#endif

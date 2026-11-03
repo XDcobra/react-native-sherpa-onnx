@@ -1,4 +1,5 @@
 #include "OfflineLivePipelineWorker.h"
+#include "TxtMetaBridge.h"
 
 #include <algorithm>
 #include <chrono>
@@ -284,7 +285,7 @@ bool OfflineLivePipelineWorker::drainNextSegment(DrainedSegment *out) {
         0,
         static_cast<int>(segment.text.size()),
         segment.source,
-        segment.meta,
+        txtMetaDictFromJson(segment.metaJson),
       };
       out->unitsRead = static_cast<int64_t>(segment.text.size());
       return true;
