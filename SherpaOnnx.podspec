@@ -71,6 +71,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/kws/*.{h,cpp}",
     # Shared offline + online STT core (CXX Offline/OnlineRecognizer). JNI excluded below.
     "android/src/main/cpp/stt/*.{h,cpp}",
+    # Shared TTS core (CXX OfflineTts). JNI excluded below.
+    "android/src/main/cpp/tts/*.{h,cpp}",
     # Shared ImageBuffer core (decode + registry; JNI excluded below).
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared VideoBuffer core (platform/android excluded below).
@@ -292,6 +294,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/vad\"",
     "\"#{pod_root}/android/src/main/cpp/kws\"",
     "\"#{pod_root}/android/src/main/cpp/stt\"",
+    "\"#{pod_root}/android/src/main/cpp/tts\"",
     "\"#{pod_root}/third_party/onnxruntime/include/onnxruntime/core/session\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",

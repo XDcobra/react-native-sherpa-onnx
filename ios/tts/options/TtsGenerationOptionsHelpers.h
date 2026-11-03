@@ -6,7 +6,7 @@
 
 #import <Foundation/Foundation.h>
 
-#include "native/sherpa-onnx-tts-wrapper.h"
+#include "sherpa-onnx-tts-engine-wrapper.h"
 #include <optional>
 #include <string>
 #include <vector>

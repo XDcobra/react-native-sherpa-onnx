@@ -7,15 +7,12 @@ import android.speech.tts.SynthesisCallback
 import android.speech.tts.SynthesisRequest
 import android.speech.tts.TextToSpeech
 import android.util.Log
-import com.k2fsa.sherpa.onnx.GeneratedAudio
-import com.k2fsa.sherpa.onnx.GenerationConfig
-import com.k2fsa.sherpa.onnx.OfflineTts
-import com.sherpaonnx.tts.config.TtsOfflineConfigBuilder
+import com.sherpaonnx.tts.nativeapi.TtsNative
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Synchronous synthesis for Android [android.speech.tts.TextToSpeechService].
- * Loads [OfflineTts] lazily on the binder thread; no React Native bridge.
+ * Loads shared CXX OfflineTts lazily on the binder thread; no React Native bridge.
  */
 class SystemTtsSynthesisController(
   private val appContext: Context,
@@ -26,8 +23,9 @@ class SystemTtsSynthesisController(
     config?.let { SystemTtsVoiceRegistry(it) }
   private val initLock = Any()
   @Volatile
-  private var tts: OfflineTts? = null
+  private var engineReady: Boolean = false
   private val stopRequested = AtomicBoolean(false)
+  private val instanceId = TtsNative.SYSTEM_INSTANCE_ID
 
   fun isModelReady(): Boolean = config != null
 
@@ -101,10 +99,9 @@ class SystemTtsSynthesisController(
 
     val text = request.charSequenceText?.toString()?.trim().orEmpty()
     if (text.isEmpty()) {
-      // Android probes engines with empty text; must start()+done() without error.
       try {
-        val engine = ensureEngine(cfg)
-        val sampleRate = engine.sampleRate()
+        ensureEngine(cfg)
+        val sampleRate = TtsNative.nativeGetSampleRate(instanceId)
         if (sampleRate <= 0) {
           Log.e(TAG, "empty-text probe rejected: invalid sampleRate=$sampleRate")
           callback.error(TextToSpeech.ERROR_SYNTHESIS)
@@ -163,8 +160,8 @@ class SystemTtsSynthesisController(
     )
 
     try {
-      val engine = ensureEngine(cfg)
-      val sampleRate = engine.sampleRate()
+      ensureEngine(cfg)
+      val sampleRate = TtsNative.nativeGetSampleRate(instanceId)
       if (sampleRate <= 0) {
         Log.e(TAG, "synthesis rejected: invalid engine sampleRate=$sampleRate")
         callback.error(TextToSpeech.ERROR_SYNTHESIS)
@@ -175,32 +172,40 @@ class SystemTtsSynthesisController(
       }
 
       val extras = cfg.synthesisExtrasForLangHint(langHint)
-      val audio: GeneratedAudio =
+      val audioPair =
         if (extras.isEmpty()) {
-          engine.generate(text, sid, speed)
+          TtsNative.readAudioResult(
+            TtsNative.nativeGenerate(instanceId, text, sid, speed)
+          )
         } else {
-          engine.generateWithConfig(
-            text,
-            GenerationConfig(
-              speed = speed,
+          TtsNative.readAudioResult(
+            TtsNative.nativeGenerateWithOptions(
+              instanceId = instanceId,
+              text = text,
               sid = sid,
-              extra = extras,
-            ),
+              speed = speed,
+              applyNumSteps = false,
+              numSteps = 5,
+              silenceScale = 0.2f,
+              referenceAudio = null,
+              referenceSampleRate = 0,
+              referenceText = null,
+              extra = HashMap(extras),
+              phonemeCodepoints = null,
+              tokens = null,
+            )
           )
         }
 
-      Log.i(
-        TAG,
-        "synthesis done samples=${audio.samples.size} sampleRate=${audio.sampleRate}",
-      )
-
-      if (audio.samples.isEmpty()) {
+      if (audioPair == null) {
         Log.e(TAG, "Synthesis returned no audio samples")
         callback.error(TextToSpeech.ERROR_SYNTHESIS)
         return
       }
 
-      streamPcm(callback, audio, alreadyStarted = true)
+      val (samples, rate) = audioPair
+      Log.i(TAG, "synthesis done samples=${samples.size} sampleRate=$rate")
+      streamPcm(callback, samples, rate, alreadyStarted = true)
     } catch (e: Exception) {
       Log.e(TAG, "System TTS synthesis failed", e)
       callback.error(TextToSpeech.ERROR_SYNTHESIS)
@@ -213,8 +218,8 @@ class SystemTtsSynthesisController(
 
   fun release() {
     synchronized(initLock) {
-      tts?.release()
-      tts = null
+      TtsNative.nativeUnload(instanceId)
+      engineReady = false
     }
   }
 
@@ -222,7 +227,7 @@ class SystemTtsSynthesisController(
     val cfg = config ?: return
     try {
       ensureEngine(cfg)
-      Log.i(TAG, "Engine warmup complete sampleRate=${tts?.sampleRate()}")
+      Log.i(TAG, "Engine warmup complete sampleRate=${TtsNative.nativeGetSampleRate(instanceId)}")
     } catch (e: Exception) {
       Log.e(TAG, "Engine warmup failed", e)
     }
@@ -230,7 +235,6 @@ class SystemTtsSynthesisController(
 
   private fun resolveSpeechSpeed(request: SynthesisRequest, cfg: SystemTtsConfig): Float {
     val rate = request.speechRate
-    // Android neutral speech rate is 100; some clients send 0 for "default".
     val effectiveRate = if (rate > 0) rate else ANDROID_NEUTRAL_SPEECH_RATE
     return cfg.synthesisSpeed * (effectiveRate / 100f)
   }
@@ -253,46 +257,48 @@ class SystemTtsSynthesisController(
   private fun isDebugBuild(): Boolean =
     (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
 
-  private fun ensureEngine(cfg: SystemTtsConfig): OfflineTts {
+  private fun ensureEngine(cfg: SystemTtsConfig) {
     synchronized(initLock) {
-      val existing = tts
-      if (existing != null) {
-        return existing
+      if (engineReady && TtsNative.nativeHasInstance(instanceId)) {
+        return
       }
-      Log.i(TAG, "Loading OfflineTts modelType=${cfg.modelType} dir=${cfg.modelDir}")
-      val offlineConfig =
-        TtsOfflineConfigBuilder.buildTtsConfig(
-          paths = cfg.paths,
+      Log.i(TAG, "Loading TTS modelType=${cfg.modelType} dir=${cfg.modelDir}")
+      val err = TtsNative.initError(
+        TtsNative.nativeInitializeCustom(
+          instanceId = instanceId,
           modelType = cfg.modelType,
+          paths = HashMap(cfg.paths),
           numThreads = cfg.numThreads,
           debug = isDebugBuild(),
-          noiseScale = null,
-          noiseScaleW = null,
-          lengthScale = null,
+          noiseScale = 0.667f,
+          noiseScaleW = 0.8f,
+          lengthScale = 1.0f,
           ruleFsts = null,
           ruleFars = null,
           maxNumSentences = 1,
-          silenceScale = null,
+          silenceScale = 0.2f,
           provider = "cpu",
           kokoroLang = null,
         )
-      val created = OfflineTts(config = offlineConfig)
-      tts = created
+      )
+      if (err != null) {
+        throw IllegalStateException("System TTS init failed: $err")
+      }
+      engineReady = true
       Log.i(
         TAG,
-        "OfflineTts ready sampleRate=${created.sampleRate()} numSpeakers=${created.numSpeakers()}",
+        "TTS ready sampleRate=${TtsNative.nativeGetSampleRate(instanceId)} " +
+          "numSpeakers=${TtsNative.nativeGetNumSpeakers(instanceId)}",
       )
-      return created
     }
   }
 
   private fun streamPcm(
     callback: SynthesisCallback,
-    audio: GeneratedAudio,
+    samples: FloatArray,
+    sampleRate: Int,
     alreadyStarted: Boolean,
   ) {
-    val samples = audio.samples
-    val sampleRate = audio.sampleRate
     if (!alreadyStarted) {
       if (!startCallback(callback, sampleRate)) {
         return
@@ -325,11 +331,7 @@ class SystemTtsSynthesisController(
 
   companion object {
     private const val TAG = SystemTtsLog.TAG
-
-    /** Android TTS neutral speech rate (100 = 1.0×). */
     private const val ANDROID_NEUTRAL_SPEECH_RATE = 100
-
-    /** ~8 KB of 16-bit mono PCM per chunk. */
     private const val PCM_CHUNK_BYTES = 8192
 
     internal fun floatArrayToPcm16(samples: FloatArray): ByteArray {

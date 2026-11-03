@@ -1,29 +1,38 @@
 /**
- * sherpa-onnx-tts-wrapper.mm
+ * sherpa-onnx-tts-engine-wrapper.cpp
  *
- * Purpose: Wraps the sherpa-onnx C++ OfflineTts for iOS. Builds config from TtsModelPaths, creates
- * TTS instance, generates audio from text. Used by SherpaOnnx+TTS{Init,Batch,Stream,...}.mm.
+ * Shared CXX OfflineTts wrapper for TTS (Android + iOS). Builds config from
+ * TtsModelPaths, creates TTS instance, generates audio from text.
  */
 
-#include "sherpa-onnx-tts-wrapper.h"
+#include "sherpa-onnx-tts-engine-wrapper.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-validate-tts.h"
 #include <cctype>
+#include <cstdio>
 #include <cstring>
 #include <optional>
 #include <sstream>
 
-// iOS logging
-#ifdef __APPLE__
-#include <Foundation/Foundation.h>
-#include <cstdio>
-#define LOGI(fmt, ...) NSLog(@"TtsWrapper: " fmt, ##__VA_ARGS__)
-#define LOGE(fmt, ...) NSLog(@"TtsWrapper ERROR: " fmt, ##__VA_ARGS__)
+#ifdef __ANDROID__
+#include <android/log.h>
+#define LOGI(...) \
+  __android_log_print(ANDROID_LOG_INFO, "SherpaOnnx:tts", __VA_ARGS__)
+#define LOGE(...) \
+  __android_log_print(ANDROID_LOG_ERROR, "SherpaOnnx:tts", __VA_ARGS__)
+#elif defined(__APPLE__)
+#define LOGI(...)                                                       \
+  do {                                                                  \
+    std::fprintf(stderr, "[SherpaOnnx:tts] ");                          \
+    std::fprintf(stderr, __VA_ARGS__);                                  \
+    std::fprintf(stderr, "\n");                                         \
+  } while (0)
+#define LOGE(...) LOGI(__VA_ARGS__)
 #else
-#define LOGI(...)
-#define LOGE(...)
+#define LOGI(...) ((void)0)
+#define LOGE(...) ((void)0)
 #endif
 
 // Use C++17 filesystem (podspec enforces C++17)

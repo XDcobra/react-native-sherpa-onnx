@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../livePipeline/OfflineLivePipelineWorker.h"
-#include "../native/sherpa-onnx-tts-wrapper.h"
+#include "sherpa-onnx-tts-engine-wrapper.h"
 
 #include <memory>
 #include <optional>

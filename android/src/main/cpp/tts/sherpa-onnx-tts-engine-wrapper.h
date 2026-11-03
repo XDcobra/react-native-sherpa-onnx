@@ -1,5 +1,12 @@
-#ifndef SHERPA_ONNX_TTS_WRAPPER_H
-#define SHERPA_ONNX_TTS_WRAPPER_H
+/**
+ * sherpa-onnx-tts-engine-wrapper.h
+ *
+ * Shared CXX OfflineTts wrapper for TTS (Android + iOS).
+ * Distinct from jni/model_detect/tts/sherpa-onnx-tts-wrapper (detect marshalling only).
+ */
+
+#ifndef SHERPA_ONNX_TTS_ENGINE_WRAPPER_H
+#define SHERPA_ONNX_TTS_ENGINE_WRAPPER_H
 
 #include "sherpa-onnx-common.h"
 #include "sherpa-onnx-model-detect.h"
@@ -157,4 +164,4 @@ private:
 
 } // namespace sherpaonnx
 
-#endif // SHERPA_ONNX_TTS_WRAPPER_H
+#endif // SHERPA_ONNX_TTS_ENGINE_WRAPPER_H
