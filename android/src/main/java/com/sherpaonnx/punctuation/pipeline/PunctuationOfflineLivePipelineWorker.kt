@@ -1,17 +1,17 @@
 package com.sherpaonnx.punctuation.pipeline
 
-import com.k2fsa.sherpa.onnx.OfflinePunctuation
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
 import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
+import com.sherpaonnx.punctuation.facade.SherpaOnnxPunctuationHelper
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 
 internal class PunctuationOfflineLivePipelineWorker(
   pipelineId: String,
   attachedSegmentationEngineId: String,
   textInput: OfflineLivePipelineWorker.TextInput,
-  private val punctuator: OfflinePunctuation,
+  private val instanceId: String,
   private val textOutputEntry: LiveTextEntry,
   private val textInputNormalization: String = PunctuationTextInputNormalization.DEFAULT_MODE,
 ) : OfflineLivePipelineWorker(
@@ -21,7 +21,7 @@ internal class PunctuationOfflineLivePipelineWorker(
   textInput = textInput,
 ) {
 
-  private val gateKey = NativeInstanceGate.keyFor(punctuator)
+  private val gateKey = SherpaOnnxPunctuationHelper.gateKey(instanceId)
 
   override fun onSegmentCommitted(segment: CommittedSegmentRef) {
     val text = segment as? CommittedSegmentRef.Text ?: return
@@ -32,7 +32,7 @@ internal class PunctuationOfflineLivePipelineWorker(
     val punctuated = try {
       val normalized =
         PunctuationTextInputNormalization.normalize(text.text, textInputNormalization)
-      punctuator.addPunctuation(normalized)
+      SherpaOnnxPunctuationHelper.addPunctuationOfflineOrThrow(instanceId, normalized)
     } finally {
       NativeInstanceGate.endUse(gateKey)
     }

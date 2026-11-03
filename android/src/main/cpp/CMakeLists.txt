@@ -197,6 +197,8 @@ set(SOURCES
     jni/model_detect/audio_tagging/sherpa-onnx-audio-tagging-detect-wrapper.cpp
     audio_tagging/sherpa-onnx-audio-tagging-wrapper.cpp
     jni/audio_tagging/sherpa-onnx-audio-tagging-jni.cpp
+    punctuation/sherpa-onnx-punct-engine-wrapper.cpp
+    jni/punctuation/sherpa-onnx-punctuation-jni.cpp
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
     jni/audio/audio_f32le_to_format.cpp
@@ -564,6 +566,7 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/enhancement
     ${CMAKE_CURRENT_SOURCE_DIR}/slid
     ${CMAKE_CURRENT_SOURCE_DIR}/audio_tagging
+    ${CMAKE_CURRENT_SOURCE_DIR}/punctuation
     ${ORT_INCLUDE_DIR}
     # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
     ${ORT_INCLUDE_DIR}/onnxruntime/core/session

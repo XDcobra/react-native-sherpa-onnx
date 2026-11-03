@@ -1224,3 +1224,47 @@ else()
     "audio_tagging_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
 endif()
 
+# --- Punctuation Offline+Online wrappers host tests (shared C API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(PUNCTUATION_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/punctuation")
+  set(SHERPA_ONNX_SRC_ROOT_PUNCT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(punctuation_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/punctuation/punctuation_host_test.cpp"
+    "${PUNCTUATION_CPP_ROOT}/sherpa-onnx-punct-engine-wrapper.cpp"
+  )
+  target_include_directories(punctuation_host_test PRIVATE
+    "${PUNCTUATION_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT_PUNCT}"
+  )
+  target_link_directories(punctuation_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(punctuation_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(punctuation_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(punctuation_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(punctuation_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(punctuation_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME punctuation_host_test
+    COMMAND $<TARGET_FILE:punctuation_host_test>)
+  set_tests_properties(punctuation_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "punctuation_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "punctuation_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+

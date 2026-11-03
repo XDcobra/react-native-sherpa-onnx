@@ -1,9 +1,10 @@
 package com.sherpaonnx.punctuation.pipeline
 
-import com.k2fsa.sherpa.onnx.OnlinePunctuation
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
+import com.sherpaonnx.punctuation.facade.SherpaOnnxOnlinePunctuationHelper
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -14,7 +15,7 @@ import kotlin.concurrent.withLock
 
 internal class PunctuationPipelineWorker(
   override val pipelineId: String,
-  private val engine: OnlinePunctuation,
+  private val instanceId: String,
   private val inputEntry: LiveTextEntry,
   private val outputEntry: LiveTextEntry,
   private val textInputNormalization: String = PunctuationTextInputNormalization.DEFAULT_MODE,
@@ -39,14 +40,12 @@ internal class PunctuationPipelineWorker(
   private val dataAvailable = lock.newCondition()
   private val commandQueue = LinkedBlockingQueue<PipelineCommand>()
   private val cmdLock = Any()
+  private val gateKey = SherpaOnnxOnlinePunctuationHelper.gateKey(instanceId)
 
   /**
    * Once the live input is [LiveTextEntry.State.FINISHED], the worker must not
    * shut down until at least one [PipelineCommand.Flush] has completed while
-   * the input is still finished. That way `StreamingPipelineWorker.flush()` remains usable as a
-   * synchronization barrier (avoids races where the JS layer finalizes the
-   * input and then calls flush after a brief segment-drain window).
-   * Single-threaded: only the executor thread touches this flag.
+   * the input is still finished.
    */
   private var postFinishFlushCompleted = false
 
@@ -106,7 +105,14 @@ internal class PunctuationPipelineWorker(
     val normalized =
       PunctuationTextInputNormalization.normalize(text, textInputNormalization)
     unitsRead += normalized.length
-    val punctuated = engine.addPunctuation(normalized)
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      throw IllegalStateException("Online punctuation instance released: $instanceId")
+    }
+    val punctuated = try {
+      SherpaOnnxOnlinePunctuationHelper.addPunctuationOnlineOrThrow(instanceId, normalized)
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
+    }
     val outMeta = mutableMapOf<String, Any?>(
       "__segmentReason" to "punctuation",
       "__segmentSource" to "segmentation_engine",
@@ -159,8 +165,6 @@ internal class PunctuationPipelineWorker(
   }
 
   override fun stop() {
-    // Always join. Early `!isRunning` return raced unload/release against the
-    // worker finally block (isRunning cleared before teardown completes).
     isRunning = false
     lock.withLock { dataAvailable.signal() }
     if (!executor.isShutdown) {
