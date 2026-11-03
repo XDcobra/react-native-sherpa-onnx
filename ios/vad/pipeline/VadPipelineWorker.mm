@@ -37,7 +37,7 @@ void VadPipelineWorker::start() {
   if (!config_.runtime) {
     throw std::runtime_error("VAD runtime is not initialized");
   }
-  config_.runtime->Reset();
+  config_.runtime->reset();
   running.store(true);
   cursorId_ = inputEntry_->createCursorHandle();
   appendListenerToken_ = inputEntry_->addAppendListener([this]() {
@@ -125,11 +125,11 @@ void VadPipelineWorker::processChunk(const std::vector<float> &chunk) {
   pendingVadSamples_.insert(pendingVadSamples_.end(), chunk.begin(), chunk.end());
   const int frameSize = std::max(1, config_.vadFrameSize);
   while ((int)pendingVadSamples_.size() >= frameSize) {
-    config_.runtime->AcceptWaveform(
+    config_.runtime->acceptWaveform(
       pendingVadSamples_.data(),
       frameSize
     );
-    const bool detected = config_.runtime->IsSpeechDetected();
+    const bool detected = config_.runtime->isSpeechDetected();
     const bool prior = speechDetected_.exchange(detected);
     if (prior != detected) {
       emit("vad.stateChanged", {}, {}, {{"isSpeechDetected", detected}});
@@ -166,16 +166,16 @@ void VadPipelineWorker::flushInternal() {
       pendingVadSamples_.end(),
       tail.begin()
     );
-    config_.runtime->AcceptWaveform(tail.data(), frameSize);
+    config_.runtime->acceptWaveform(tail.data(), frameSize);
     pendingVadSamples_.clear();
   }
-  config_.runtime->Flush();
+  config_.runtime->flush();
   appendDetectedSegments();
   emit("pipeline.flushed");
 }
 
 void VadPipelineWorker::appendDetectedSegments() {
-  const auto segments = config_.runtime->PopSegments();
+  const auto segments = config_.runtime->popSegments();
   for (const auto &segment : segments) {
     std::string segmentId;
     int segmentIndex = -1;
@@ -223,7 +223,7 @@ void VadPipelineWorker::processCommands() {
       }
     } else {
       try {
-        config_.runtime->Reset();
+        config_.runtime->reset();
         speechDetected_.store(false);
         {
           std::lock_guard<std::mutex> sLock(statusMutex_);

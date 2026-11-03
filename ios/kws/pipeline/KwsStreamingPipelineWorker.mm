@@ -23,7 +23,7 @@ NSString *NsUtf8(const std::string &s) {
 }  // namespace
 
 KwsStreamingPipelineWorker::KwsStreamingPipelineWorker(
-    sherpaonnx::KwsWrapper *wrapper,
+    sherpaonnx::KwsEngineWrapper *wrapper,
     const std::string &streamId,
     std::shared_ptr<PaLiveEntry> inputEntry,
     std::shared_ptr<TxtLiveEntry> outputEntry,
@@ -132,7 +132,7 @@ void KwsStreamingPipelineWorker::runLoop() {
 }
 
 void KwsStreamingPipelineWorker::maybeCommitHit(
-    const sherpaonnx::KwsStreamResult &result) {
+    const sherpaonnx::KwsEngineStreamResult &result) {
   const std::string keyword = TrimCopy(result.keyword);
   if (keyword.empty()) {
     return;

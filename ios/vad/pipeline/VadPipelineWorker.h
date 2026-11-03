@@ -2,7 +2,7 @@
 
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../audio/pipeline/PaLiveEntry.h"
-#include "../core/VadRuntime.h"
+#include "sherpa-onnx-vad-engine-wrapper.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -24,7 +24,7 @@ public:
     int vadFrameSize = 512;
     std::string sourceAudioBufferId;
     std::string segmentOutBufferId;
-    std::shared_ptr<VadRuntime> runtime;
+    std::shared_ptr<sherpaonnx::VadEngineWrapper> runtime;
   };
 
   using EventEmitter = std::function<void(const std::string &, const std::unordered_map<std::string, double> &, const std::unordered_map<std::string, std::string> &, const std::unordered_map<std::string, bool> &)>;
