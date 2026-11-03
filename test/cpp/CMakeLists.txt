@@ -798,6 +798,32 @@ set_tests_properties(textbuffer_host_test PROPERTIES
 
 
 
+# SegmentBuffer shared registry host tests (always-on + opt-in spool via SHERPA_HOST_SEGMENT_SPOOL=1)
+set(SEGMENTBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/segmentbuffer")
+set(SEGMENTBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/segmentbuffer")
+if(TARGET gtest AND TARGET gtest_main)
+  set(SEGMENTBUFFER_GTEST_LIBS gtest gtest_main)
+else()
+  set(SEGMENTBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+endif()
+find_package(ZLIB REQUIRED)
+add_executable(segmentbuffer_host_test
+  "${SEGMENTBUFFER_TEST_DIR}/segmentbuffer_registry_test.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegJson.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegmentRegistry.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegmentLinkMapRegistry.cpp"
+)
+target_include_directories(segmentbuffer_host_test PRIVATE
+  "${SEGMENTBUFFER_CPP_ROOT}"
+)
+target_link_libraries(segmentbuffer_host_test PRIVATE ${SEGMENTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
+add_test(NAME segmentbuffer_host_test COMMAND $<TARGET_FILE:segmentbuffer_host_test>)
+set_tests_properties(segmentbuffer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+
+
 # PDF text-layer host test (disabled path by default; no PDFium required)
 set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 if(TARGET gtest AND TARGET gtest_main)
