@@ -1,132 +1,70 @@
 #include "VadRuntime.h"
 
-#include "../../../third_party/sherpa-onnx/sherpa-onnx/c-api/c-api.h"
-
-#include <algorithm>
-#include <cstring>
-
-namespace {
-int SamplesToMs(int samples, int sampleRate) {
-  return static_cast<int>((static_cast<int64_t>(samples) * 1000LL) /
-                          std::max(1, sampleRate));
-}
-} // namespace
-
-VadRuntime::VadRuntime(const void *detector, int sampleRate)
-  : detector_(detector), sampleRate_(sampleRate) {}
-
-VadRuntime::~VadRuntime() {
-  if (detector_ != nullptr) {
-    SherpaOnnxDestroyVoiceActivityDetector(
-      reinterpret_cast<const SherpaOnnxVoiceActivityDetector *>(detector_)
-    );
-    detector_ = nullptr;
-  }
-}
+VadRuntime::VadRuntime(std::shared_ptr<sherpaonnx::VadEngineWrapper> engine)
+  : engine_(std::move(engine)) {}
 
 std::shared_ptr<VadRuntime> VadRuntime::Create(
   const VadRuntimeConfig &config,
   std::string *errorOut
 ) {
-  if (config.modelPath.empty()) {
-    if (errorOut) *errorOut = "VAD model path is empty";
+  sherpaonnx::VadEngineConfig cfg;
+  cfg.modelType = config.modelType;
+  cfg.modelPath = config.modelPath;
+  cfg.sampleRate = config.sampleRate;
+  cfg.numThreads = config.numThreads;
+  cfg.provider = config.provider;
+  cfg.debug = config.debug;
+  cfg.scoreThreshold = config.scoreThreshold;
+  cfg.minSilenceDurationMs = config.minSilenceDurationMs;
+  cfg.minSpeechDurationMs = config.minSpeechDurationMs;
+  cfg.maxSpeechDurationMs = config.maxSpeechDurationMs;
+  cfg.windowSize = config.windowSize;
+  cfg.bufferSizeSeconds = config.bufferSizeSeconds;
+
+  auto engine = std::make_shared<sherpaonnx::VadEngineWrapper>();
+  const auto init = engine->initialize(cfg);
+  if (!init.success) {
+    if (errorOut) {
+      *errorOut = init.error.empty()
+          ? "VadEngineWrapper::initialize failed"
+          : init.error;
+    }
     return nullptr;
   }
-
-  SherpaOnnxVadModelConfig modelConfig;
-  std::memset(&modelConfig, 0, sizeof(modelConfig));
-  modelConfig.sample_rate = std::max(1, config.sampleRate);
-  modelConfig.num_threads = std::max(1, config.numThreads);
-  modelConfig.provider = config.provider.c_str();
-  modelConfig.debug = config.debug ? 1 : 0;
-
-  const float threshold = static_cast<float>(std::max(0.0, config.scoreThreshold));
-  const float minSilence =
-      static_cast<float>(std::max(0, config.minSilenceDurationMs)) / 1000.0f;
-  const float minSpeech =
-      static_cast<float>(std::max(0, config.minSpeechDurationMs)) / 1000.0f;
-  const float maxSpeech =
-      static_cast<float>(std::max(0, config.maxSpeechDurationMs)) / 1000.0f;
-  const int windowSize = std::max(1, config.windowSize);
-
-  if (config.modelType == "ten_vad") {
-    modelConfig.ten_vad.model = config.modelPath.c_str();
-    modelConfig.ten_vad.threshold = threshold;
-    modelConfig.ten_vad.min_silence_duration = minSilence;
-    modelConfig.ten_vad.min_speech_duration = minSpeech;
-    modelConfig.ten_vad.window_size = windowSize;
-    modelConfig.ten_vad.max_speech_duration = maxSpeech;
-  } else {
-    modelConfig.silero_vad.model = config.modelPath.c_str();
-    modelConfig.silero_vad.threshold = threshold;
-    modelConfig.silero_vad.min_silence_duration = minSilence;
-    modelConfig.silero_vad.min_speech_duration = minSpeech;
-    modelConfig.silero_vad.window_size = windowSize;
-    modelConfig.silero_vad.max_speech_duration = maxSpeech;
-  }
-
-  const SherpaOnnxVoiceActivityDetector *detector =
-      SherpaOnnxCreateVoiceActivityDetector(
-          &modelConfig,
-          std::max(1.0f, config.bufferSizeSeconds));
-  if (detector == nullptr) {
-    if (errorOut) *errorOut = "SherpaOnnxCreateVoiceActivityDetector returned null";
-    return nullptr;
-  }
-
-  return std::shared_ptr<VadRuntime>(
-      new VadRuntime(detector, modelConfig.sample_rate));
+  return std::shared_ptr<VadRuntime>(new VadRuntime(std::move(engine)));
 }
 
 void VadRuntime::AcceptWaveform(const float *samples, int32_t n) const {
-  if (detector_ == nullptr || samples == nullptr || n <= 0) return;
-  SherpaOnnxVoiceActivityDetectorAcceptWaveform(
-    reinterpret_cast<const SherpaOnnxVoiceActivityDetector *>(detector_),
-    samples,
-    n
-  );
+  if (!engine_ || samples == nullptr || n <= 0) return;
+  engine_->acceptWaveform(samples, n);
 }
 
 void VadRuntime::Flush() const {
-  if (detector_ == nullptr) return;
-  SherpaOnnxVoiceActivityDetectorFlush(
-    reinterpret_cast<const SherpaOnnxVoiceActivityDetector *>(detector_)
-  );
+  if (!engine_) return;
+  engine_->flush();
 }
 
 void VadRuntime::Reset() const {
-  if (detector_ == nullptr) return;
-  SherpaOnnxVoiceActivityDetectorReset(
-    reinterpret_cast<const SherpaOnnxVoiceActivityDetector *>(detector_)
-  );
-  SherpaOnnxVoiceActivityDetectorClear(
-    reinterpret_cast<const SherpaOnnxVoiceActivityDetector *>(detector_)
-  );
+  if (!engine_) return;
+  engine_->reset();
 }
 
 bool VadRuntime::IsSpeechDetected() const {
-  if (detector_ == nullptr) return false;
-  return SherpaOnnxVoiceActivityDetectorDetected(
-             reinterpret_cast<const SherpaOnnxVoiceActivityDetector *>(detector_)) == 1;
+  if (!engine_) return false;
+  return engine_->isSpeechDetected();
 }
 
 std::vector<VadRuntimeSegment> VadRuntime::PopSegments() const {
   std::vector<VadRuntimeSegment> out;
-  if (detector_ == nullptr) return out;
-  const auto *detector =
-    reinterpret_cast<const SherpaOnnxVoiceActivityDetector *>(detector_);
-  while (SherpaOnnxVoiceActivityDetectorEmpty(detector) == 0) {
-    const SherpaOnnxSpeechSegment *segment =
-      SherpaOnnxVoiceActivityDetectorFront(detector);
-    if (segment != nullptr) {
-      VadRuntimeSegment item;
-      item.startSample = segment->start;
-      item.endSample = segment->start + segment->n;
-      item.durationMs = SamplesToMs(segment->n, sampleRate_);
-      out.push_back(item);
-      SherpaOnnxDestroySpeechSegment(segment);
-    }
-    SherpaOnnxVoiceActivityDetectorPop(detector);
+  if (!engine_) return out;
+  const auto segments = engine_->popSegments();
+  out.reserve(segments.size());
+  for (const auto &seg : segments) {
+    VadRuntimeSegment item;
+    item.startSample = seg.startSample;
+    item.endSample = seg.endSample;
+    item.durationMs = seg.durationMs;
+    out.push_back(item);
   }
   return out;
 }

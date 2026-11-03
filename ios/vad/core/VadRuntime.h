@@ -1,5 +1,7 @@
 #pragma once
 
+#include "sherpa-onnx-vad-engine-wrapper.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -26,9 +28,10 @@ struct VadRuntimeSegment {
   int durationMs = 0;
 };
 
+/** Thin iOS facade over shared sherpaonnx::VadEngineWrapper. */
 class VadRuntime {
 public:
-  ~VadRuntime();
+  ~VadRuntime() = default;
 
   static std::shared_ptr<VadRuntime> Create(
     const VadRuntimeConfig &config,
@@ -42,7 +45,6 @@ public:
   std::vector<VadRuntimeSegment> PopSegments() const;
 
 private:
-  VadRuntime(const void *detector, int sampleRate);
-  const void *detector_ = nullptr;
-  int sampleRate_ = 16000;
+  explicit VadRuntime(std::shared_ptr<sherpaonnx::VadEngineWrapper> engine);
+  std::shared_ptr<sherpaonnx::VadEngineWrapper> engine_;
 };

@@ -1,5 +1,6 @@
 package com.sherpaonnx.vad.facade
 
+import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -7,15 +8,17 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
+import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.lifecycle.ActivePipelineStop
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.segment.pipeline.SegmentRecord
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
-import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.vad.config.VadInitOptionsParser
 import com.sherpaonnx.vad.core.VadErrorCodes
 import com.sherpaonnx.vad.core.VadInstanceConfig
+import com.sherpaonnx.vad.core.VadRuntime
 import com.sherpaonnx.vad.core.VadRuntimeOptions
-import com.sherpaonnx.vad.core.createVadRuntime
+import com.sherpaonnx.vad.core.VadSegment
 import com.sherpaonnx.vad.core.defaultRuntimeOptions
 import com.sherpaonnx.vad.core.withRuntimeOverrides
 import com.sherpaonnx.vad.pipeline.VadPipelineWorker
@@ -33,6 +36,164 @@ class SherpaOnnxVadHelper(
   private val instances = ConcurrentHashMap<String, VadInstanceConfig>()
   private val instancePipeline = ConcurrentHashMap<String, String>()
   private val workers = ConcurrentHashMap<String, VadPipelineWorker>()
+
+  companion object {
+    private const val TAG = "SherpaOnnx:vad"
+
+    /**
+     * Ephemeral JNI VAD for segmentation engines (speech_vad_model policy).
+     * Caller must [VadRuntime.close] which unloads the native instance.
+     */
+    fun createVadRuntime(
+      modelType: String,
+      modelPath: String,
+      sampleRate: Int,
+      provider: String,
+      numThreads: Int,
+      debug: Boolean,
+      runtimeOptions: VadRuntimeOptions,
+    ): VadRuntime {
+      val instanceId = "vad_seg_${java.util.UUID.randomUUID()}"
+      @Suppress("UNCHECKED_CAST")
+      val raw = nativeInitialize(
+        instanceId,
+        modelType,
+        modelPath,
+        sampleRate,
+        numThreads,
+        provider,
+        debug,
+        runtimeOptions.scoreThreshold,
+        runtimeOptions.minSilenceDurationMs,
+        runtimeOptions.minSpeechDurationMs,
+        runtimeOptions.maxSpeechDurationMs,
+        runtimeOptions.windowSize,
+        30.0f,
+      ) as? HashMap<String, Any>
+      val ok = raw?.get("success") as? Boolean ?: false
+      if (!ok) {
+        val err = raw?.get("error") as? String ?: "Failed to initialize VAD runtime"
+        throw IllegalStateException(err)
+      }
+      return NativeVadRuntime(instanceId, unloadOnClose = true)
+    }
+
+    @JvmStatic
+    private external fun nativeInitialize(
+      instanceId: String,
+      modelType: String,
+      modelPath: String,
+      sampleRate: Int,
+      numThreads: Int,
+      provider: String,
+      debug: Boolean,
+      threshold: Double,
+      minSilenceMs: Int,
+      minSpeechMs: Int,
+      maxSpeechMs: Int,
+      windowSize: Int,
+      bufferSizeSeconds: Float,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeAcceptWaveform(instanceId: String, samples: FloatArray)
+
+    @JvmStatic
+    private external fun nativeFlush(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeReset(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeIsSpeechDetected(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativePopSegments(instanceId: String): ArrayList<HashMap<String, Any>>?
+
+    @JvmStatic
+    private external fun nativeHasInstance(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativeUnload(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAll()
+  }
+
+  private class NativeVadRuntime(
+    private val instanceId: String,
+    private val unloadOnClose: Boolean = false,
+  ) : VadRuntime {
+    @Volatile private var closed = false
+
+    @Synchronized
+    override fun acceptWaveform(chunk: FloatArray) {
+      if (closed) return
+      nativeAcceptWaveform(instanceId, chunk)
+    }
+
+    @Synchronized
+    override fun flush() {
+      if (closed) return
+      nativeFlush(instanceId)
+    }
+
+    @Synchronized
+    override fun reset() {
+      if (closed) return
+      nativeReset(instanceId)
+    }
+
+    @Synchronized
+    override fun isSpeechDetected(): Boolean {
+      if (closed) return false
+      return nativeIsSpeechDetected(instanceId)
+    }
+
+    @Synchronized
+    override fun popSegments(): List<VadSegment> {
+      if (closed) return emptyList()
+      val raw = nativePopSegments(instanceId) ?: return emptyList()
+      val out = ArrayList<VadSegment>(raw.size)
+      for (item in raw) {
+        val start = (item["startSample"] as? Number)?.toInt() ?: 0
+        val end = (item["endSample"] as? Number)?.toInt() ?: start
+        val durationMs = (item["durationMs"] as? Number)?.toInt() ?: 0
+        out.add(VadSegment(startSample = start, endSample = end, durationMs = durationMs))
+      }
+      return out
+    }
+
+    @Synchronized
+    override fun close() {
+      if (closed) return
+      closed = true
+      if (unloadOnClose) {
+        try {
+          nativeUnload(instanceId)
+        } catch (_: Exception) {
+        }
+      }
+    }
+  }
+
+  private fun releaseRuntimeSafely(cfg: VadInstanceConfig, where: String) {
+    val gateKey = cfg.gateKey()
+    val inFlight = NativeInstanceGate.inFlight(gateKey)
+    if (inFlight > 0) {
+      Log.w(TAG, "UNLOAD_DURING_COMPUTE where=$where instanceId=${cfg.instanceId} inFlight=$inFlight")
+    }
+    NativeInstanceGate.releaseWhenIdle(gateKey) {
+      try {
+        nativeUnload(cfg.instanceId)
+      } catch (_: Exception) {
+      }
+      try {
+        cfg.runtime.close()
+      } catch (_: Exception) {
+      }
+    }
+  }
 
   private fun stopAndRemovePipelineInternal(pipelineId: String): String? {
     val worker = workers[pipelineId]
@@ -113,8 +274,8 @@ class SherpaOnnxVadHelper(
         }
         map.putArray("languages", arr)
       }
-      val quantization = result["quantization"] as? String
-      if (!quantization.isNullOrBlank()) map.putString("quantization", quantization)
+      val quantizationOut = result["quantization"] as? String
+      if (!quantizationOut.isNullOrBlank()) map.putString("quantization", quantizationOut)
       val detectionSources = result["detectionSources"] as? ArrayList<*>
       if (!detectionSources.isNullOrEmpty()) {
         val arr = Arguments.createArray()
@@ -264,16 +425,37 @@ class SherpaOnnxVadHelper(
       )
       return
     }
-    val runtime = createVadRuntime(
-      modelType = resolvedModelType,
-      modelPath = modelPath,
-      sampleRate = parsed.sampleRate,
-      provider = parsed.provider,
-      numThreads = parsed.numThreads,
-      debug = parsed.debug,
-      runtimeOptions = strictRuntimeOptions,
-    )
+
+    instances.remove(instanceId)?.let { old ->
+      stopAndRemovePipelineForInstance(instanceId)
+      releaseRuntimeSafely(old, where = "reinit:$instanceId")
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val raw = nativeInitialize(
+      instanceId,
+      resolvedModelType,
+      modelPath,
+      parsed.sampleRate,
+      parsed.numThreads,
+      parsed.provider,
+      parsed.debug,
+      strictRuntimeOptions.scoreThreshold,
+      strictRuntimeOptions.minSilenceDurationMs,
+      strictRuntimeOptions.minSpeechDurationMs,
+      strictRuntimeOptions.maxSpeechDurationMs,
+      strictRuntimeOptions.windowSize,
+      30.0f,
+    ) as? HashMap<String, Any>
+    val ok = raw?.get("success") as? Boolean ?: false
+    if (!ok) {
+      val err = raw?.get("error") as? String ?: "Failed to initialize VAD runtime"
+      promise.reject(VadErrorCodes.MODEL_INIT_FAILED, err)
+      return
+    }
+
     instances[instanceId] = VadInstanceConfig(
+      instanceId = instanceId,
       modelType = resolvedModelType,
       modelDir = modelDir,
       sampleRate = parsed.sampleRate,
@@ -281,14 +463,14 @@ class SherpaOnnxVadHelper(
       numThreads = parsed.numThreads,
       debug = parsed.debug,
       runtimeOptions = strictRuntimeOptions,
-      runtime = runtime,
+      runtime = NativeVadRuntime(instanceId),
     )
     promise.resolve(null)
   }
 
   fun startVadPipeline(instanceId: String, audioInBufferId: String, segmentOutBufferId: String, options: ReadableMap?, promise: Promise) {
     val cfg = instances[instanceId]
-    if (cfg == null) {
+    if (cfg == null || !nativeHasInstance(instanceId)) {
       promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "VAD instance not initialized: $instanceId")
       return
     }
@@ -322,7 +504,6 @@ class SherpaOnnxVadHelper(
       emitEvent = { type, payload -> emitVadEvent(instanceId, workerRef?.pipelineId ?: "", type, payload) }
     )
     workerRef = worker
-    // Register instance->pipeline before startup so early events are correlated.
     instancePipeline[instanceId] = worker.pipelineId
     val pipelineId = StreamingPipelineRegistry.registerAndStart(worker)
     workers[pipelineId] = worker
@@ -342,7 +523,7 @@ class SherpaOnnxVadHelper(
     promise: Promise,
   ) {
     val cfg = instances[instanceId]
-    if (cfg == null) {
+    if (cfg == null || !nativeHasInstance(instanceId)) {
       promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "VAD instance not initialized: $instanceId")
       return
     }
@@ -363,16 +544,23 @@ class SherpaOnnxVadHelper(
     }
     val records = mutableListOf<SegmentRecord>()
     val samples = audio.readAllSamples()
-    cfg.runtime.reset()
-    val stats = runModelInferenceSegmentation(
-      cfg = cfg,
-      samples = samples,
-      sourceAudioBufferId = audioInBufferId,
-      liveOut = liveOut,
-      records = records,
-    )
+    val gateKey = cfg.gateKey()
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "VAD instance released: $instanceId")
+      return
+    }
+    val stats = try {
+      runAcceptFlushPopSegmentation(
+        cfg = cfg,
+        samples = samples,
+        sourceAudioBufferId = audioInBufferId,
+        liveOut = liveOut,
+        records = records,
+      )
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
+    }
     if (offlineOut != null) {
-      // Fill exactly once for empty offline output buffers.
       offlineOut.populate(records)
     }
     val out = Arguments.createMap().apply {
@@ -391,85 +579,46 @@ class SherpaOnnxVadHelper(
     val speechDurationMs: Long,
   )
 
-  private fun runModelInferenceSegmentation(
+  /** iOS-aligned offline path: windowed AcceptWaveform → Flush → PopSegments. */
+  private fun runAcceptFlushPopSegmentation(
     cfg: VadInstanceConfig,
     samples: FloatArray,
     sourceAudioBufferId: String,
     liveOut: com.sherpaonnx.segment.pipeline.LiveSegmentEntry?,
     records: MutableList<SegmentRecord>,
   ): OfflineInferenceStats {
-    // ONNX VAD expects a fixed window (Silero/Ten: cfg.runtimeOptions.windowSize).
-    // The last slice of the file is often shorter than one full window (e.g. 228 samples) which
-    // crashes compute — mirror VadPipelineWorker: pad the final partial window with zeros.
     val frameSize = cfg.runtimeOptions.windowSize.coerceAtLeast(1)
+    cfg.runtime.reset()
     var idx = 0
-    var inSpeech = false
-    var segStart = 0
-    var speechSamples = 0
-    var silenceSamples = 0
-    var speechDurationMs = 0L
-    var segmentCount = 0
     var chunksProcessed = 0
-    var speechScoreSum = 0.0
-    var speechScoreCount = 0
     while (idx < samples.size) {
       val end = minOf(idx + frameSize, samples.size)
-      val effectiveLen = end - idx
       var chunk = samples.copyOfRange(idx, end)
       if (chunk.size < frameSize) {
         chunk = chunk.copyOf(frameSize)
       }
+      cfg.runtime.acceptWaveform(chunk)
       chunksProcessed += 1
-      val decision = cfg.runtime.infer(chunk, cfg.sampleRate)
-      if (decision.isSpeech) {
-        if (!inSpeech) {
-          inSpeech = true
-          segStart = idx
-          speechSamples = 0
-          silenceSamples = 0
-          speechScoreSum = 0.0
-          speechScoreCount = 0
-        }
-        speechSamples += effectiveLen
-        silenceSamples = 0
-        if (decision.score != null) {
-          speechScoreSum += decision.score
-          speechScoreCount += 1
-        }
-      } else if (inSpeech) {
-        silenceSamples += effectiveLen
-        val silenceMs = ((silenceSamples.toLong() * 1000L) / cfg.sampleRate.toLong()).toInt()
-        if (silenceMs >= cfg.runtimeOptions.minSilenceDurationMs) {
-          val segmentEnd = segStart + speechSamples
-          val dMs = ((speechSamples.toLong() * 1000L) / cfg.sampleRate.toLong())
-          if (dMs >= cfg.runtimeOptions.minSpeechDurationMs.toLong()) {
-            val confidence = if (speechScoreCount > 0) speechScoreSum / speechScoreCount.toDouble() else 1.0
-            appendSegmentRecord(records, liveOut, sourceAudioBufferId, cfg, segStart, segmentEnd, confidence)
-            speechDurationMs += dMs
-            segmentCount += 1
-          }
-          inSpeech = false
-          speechSamples = 0
-          silenceSamples = 0
-          speechScoreSum = 0.0
-          speechScoreCount = 0
-        }
-      }
       idx = end
     }
-    if (inSpeech && speechSamples > 0) {
-      val segmentEnd = segStart + speechSamples
-      val dMs = ((speechSamples.toLong() * 1000L) / cfg.sampleRate.toLong())
-      if (dMs >= cfg.runtimeOptions.minSpeechDurationMs.toLong()) {
-        val confidence = if (speechScoreCount > 0) speechScoreSum / speechScoreCount.toDouble() else 1.0
-        appendSegmentRecord(records, liveOut, sourceAudioBufferId, cfg, segStart, segmentEnd, confidence)
-        speechDurationMs += dMs
-        segmentCount += 1
-      }
+    cfg.runtime.flush()
+    val segments = cfg.runtime.popSegments()
+    var speechDurationMs = 0L
+    for (segment in segments) {
+      appendSegmentRecord(
+        records,
+        liveOut,
+        sourceAudioBufferId,
+        cfg,
+        segment.startSample,
+        segment.endSample,
+        1.0,
+      )
+      speechDurationMs += segment.durationMs.toLong()
     }
     return OfflineInferenceStats(
       chunksProcessed = chunksProcessed,
-      segmentCount = segmentCount,
+      segmentCount = segments.size,
       speechDurationMs = speechDurationMs,
     )
   }
@@ -552,15 +701,24 @@ class SherpaOnnxVadHelper(
   fun isVadSpeechDetected(instanceId: String, promise: Promise) {
     val pipelineId = instancePipeline[instanceId]
     val worker = if (pipelineId == null) null else workers[pipelineId]
-    promise.resolve(worker?.isSpeechDetectedNow() ?: false)
+    if (worker != null) {
+      promise.resolve(worker.isSpeechDetectedNow())
+      return
+    }
+    if (nativeHasInstance(instanceId)) {
+      promise.resolve(nativeIsSpeechDetected(instanceId))
+      return
+    }
+    promise.resolve(false)
   }
 
   fun unloadVad(instanceId: String, promise: Promise) {
     stopAndRemovePipelineForInstance(instanceId)
     val instance = instances.remove(instanceId)
-    try {
-      instance?.runtime?.close()
-    } catch (_: Exception) {
+    if (instance != null) {
+      releaseRuntimeSafely(instance, where = "unload:$instanceId")
+    } else {
+      nativeUnload(instanceId)
     }
     promise.resolve(null)
   }
@@ -570,15 +728,13 @@ class SherpaOnnxVadHelper(
     pipelineIds.addAll(instancePipeline.values)
     pipelineIds.addAll(workers.keys)
     pipelineIds.forEach { stopAndRemovePipelineInternal(it) }
-    instances.values.forEach {
-      try {
-        it.runtime.close()
-      } catch (_: Exception) {
-      }
+    for ((id, cfg) in instances) {
+      releaseRuntimeSafely(cfg, where = "shutdown:$id")
     }
     instances.clear()
     instancePipeline.clear()
     workers.clear()
+    nativeShutdownAll()
   }
 
   private fun emitVadEvent(instanceId: String, pipelineId: String, type: String, payload: Map<String, Any?>) {
