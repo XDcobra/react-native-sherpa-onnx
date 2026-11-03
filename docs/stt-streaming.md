@@ -317,17 +317,38 @@ More end-to-end patterns: [feature-pipelines.md#stt-streaming-patterns](feature-
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onSegment` | `LiveTextBufferSegmentEvent` | text segment committed to output buffer | Prefer over polling `getLiveTextBufferSegmentCount` in a timer |
+| `onPartial` | `LiveTextBufferPartialEvent` (notify scalars) | hypothesis / endpoint update on `textOut` | set on `createLiveTextBuffer`; **no text on the event** — pull with `readLiveTextPartial` |
+| `onSegment` | `LiveTextBufferSegmentEvent` (notify scalars) | text segment committed to `textOut` | Prefer over polling; **no text/`meta` on the event** — pull with `readLiveTextSegment` |
 
-Committed transcripts are **text segments** on the output `LiveTextBuffer`. Use **`onSegment`** on `createLiveTextBuffer` (or `subscribeLiveTextBufferEvents`). See **[Pipeline text buffers — live / Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling)**.
+Committed transcripts are **text segments** on the output `LiveTextBuffer`. Live text events are **notify + pull**. Canonical detail: [textbuffer-streaming — Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling).
 
 Live **audio** segment commits (`onSegment` on `createEmptyLiveAudioBuffer`) are a separate concern — they carry **speech** metadata, not STT text. See **[Pipeline audio buffers — live / `onSegment`](audiobuffer-streaming.md#live-buffer-callbacks-onframesappended-vs-onsegment)**.
 
 ```ts
+import {
+  createLiveTextBuffer,
+  readLiveTextPartial,
+  readLiveTextSegment,
+} from 'react-native-sherpa-onnx/textbuffer';
+
 const textOut = await createLiveTextBuffer({
+  streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
+  onPartial: async (e) => {
+    // cheap: enough to know a hypothesis changed / endpoint fired
+    if (!e.isEndpoint) {
+      // only when you need the hypothesis text:
+      console.log('[partial]', await readLiveTextPartial(e));
+      return;
+    }
+    console.log('[endpoint]', e.utf16Length);
+  },
   onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness (transcript body / meta):
     const seg = await readLiveTextSegment(e);
-    console.log(`[committed ${e.segmentIndex}]`, seg?.text);
+    console.log(seg?.text);
   },
 });
 ```
@@ -379,7 +400,11 @@ import {
   finalizeLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const engine = await createStreamingSTT({
   modelSource: { kind: 'fs', path: '/path/to/streaming-stt' },
@@ -389,7 +414,13 @@ const engine = await createStreamingSTT({
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({
   maxSegments: 2048,
-  onSegment: (e) => console.log(e.segment.isFinal ? '[final]' : '[partial]', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('[final]', seg?.text);
+  },
 });
 
 const pipeline = await engine.transcribe(audioIn, textOut, { chunkSize: 3200 });
@@ -423,7 +454,11 @@ import {
   finalizeLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const engine = await createStreamingSTT({
   modelSource: { kind: 'fs', path: '/path/to/streaming-stt' },
@@ -432,7 +467,13 @@ const engine = await createStreamingSTT({
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({
   maxSegments: 4096,
-  onSegment: (e) => { if (e.segment.isFinal) console.log(e.segment.text); },
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log(seg?.text);
+  },
 });
 
 const pipeline = await engine.transcribe(audioIn, textOut);
@@ -459,7 +500,12 @@ Point punctuation at the same `LiveTextBuffer` STT writes. Punctuated segments a
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
 import { createStreamingPunctuation } from 'react-native-sherpa-onnx/punctuation';
 import { createEmptyLiveAudioBuffer, startMicToLiveAudioBuffer, finalizeLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-import { createLiveTextBuffer, finalizeLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createLiveTextBuffer,
+  finalizeLiveTextBuffer,
+  readLiveTextSegment,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const stt = await createStreamingSTT({ modelSource: { kind: 'fs', path: '/path/to/streaming-stt' }, modelType: 'auto' });
 const punct = await createStreamingPunctuation({ modelSource: { kind: 'fs', path: '/path/to/punct-cnn-bilstm' }, modelType: 'auto' });
@@ -468,7 +514,13 @@ const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCou
 const asrText = await createLiveTextBuffer({ maxSegments: 2048 });
 const punctText = await createLiveTextBuffer({
   maxSegments: 2048,
-  onSegment: (e) => console.log('[punct]', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`punct #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('[punct]', seg?.text);
+  },
 });
 
 const sttPipe = await stt.transcribe(audioIn, asrText);

@@ -458,7 +458,7 @@ Out of scope: public JS packet-append of VP8 / AV1; camera MIME is not a JS API.
 
 ## JS Events
 
-Live video does **not** push pixels to JS. Native emits metadata on `SherpaOnnxVideoEvent`; subscribe with `subscribeLiveVideoBufferEvents`. Events for other live ids are ignored. Call the returned function to unsubscribe.
+Live video does **not** push pixels to JS (notify scalars only). Native emits metadata on `SherpaOnnxVideoEvent`; subscribe with `subscribeLiveVideoBufferEvents`. Events for other live ids are ignored. Call the returned function to unsubscribe.
 
 `LiveVideoBufferRef.unsubscribeEvents` is currently a no-op (create does not attach listeners). Always keep the unsubscribe from `subscribeLiveVideoBufferEvents`.
 
@@ -477,6 +477,7 @@ Shared on every event: `liveBufferId`.
 ```ts
 const stop = subscribeLiveVideoBufferEvents(live, (e) => {
   if (e.type === 'packetsAppended') {
+    // cheap: enough for UI timing / meters (no pixel materialize on the bridge)
     console.log(e.liveEdgeUs, e.totalFramesWritten);
   }
 });

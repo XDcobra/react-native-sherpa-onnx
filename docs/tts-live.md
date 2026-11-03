@@ -159,16 +159,35 @@ More patterns: [feature-pipelines.md](feature-pipelines.md) · shared lifecycle:
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onSegment` | `TtsLiveSegmentEvent` | after each committed text span is synthesized | no `onProgress` on the live path |
+| `onSegment` | `TtsLiveSegmentEvent` | after each committed text span is synthesized | feature callback — already includes span indexes / ranges (no buffer pull) |
+
+`synthesize(..., { onSegment })` is the usual product path. Live **audio** output progress uses `audioOut` buffer events (`onFramesAppended` — scalar metadata, no PCM dump). If you also observe `textIn` commits, that path is **notify + pull** (`readLiveTextSegment`). Canonical detail: [textbuffer-streaming — Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling) · [audiobuffer-streaming](audiobuffer-streaming.md).
 
 Shapes: [Types](#types) · offline progress fields: [tts-offline.md](tts-offline.md#types).
 
 ```ts
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const textIn = await createLiveTextBuffer({
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`textIn #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness (committed text body):
+    const seg = await readLiveTextSegment(e);
+    console.log(seg?.text);
+  },
+});
+
 const handle = await tts.synthesize(textIn, audioOut, {
   segmentation: {
     mode: 'auto',
     policy: { evaluator: 'text_synthetic_auto', maxLengthChars: 500 },
   },
+  // feature callback — already includes segmentIndex (no pull):
   onSegment: (e) => console.log(e.segmentIndex),
 });
 ```

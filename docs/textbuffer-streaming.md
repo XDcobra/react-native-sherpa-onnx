@@ -59,14 +59,15 @@ const liveText = await createLiveTextBuffer({
   streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
   // Notify-only partials: pull text when needed (no payload dump on the bridge).
   onPartial: async (event) => {
-    const partial = await readLiveTextPartial(event);
-    if (partial.length > 0) {
-      console.log('[partial]', partial);
+    // cheap: enough to know a hypothesis changed / endpoint fired
+    if (!event.isEndpoint) {
+      // only when you need the hypothesis text:
+      const partial = await readLiveTextPartial(event);
+      if (partial.length > 0) console.log('[partial]', partial);
+      return;
     }
 
     // Endpoint is a good checkpoint to pull newly committed segments.
-    if (!event.isEndpoint) return;
-
     const total = await getLiveTextBufferSegmentCount(liveText);
     if (total <= lastSegmentIndex) return;
 
@@ -82,6 +83,10 @@ const liveText = await createLiveTextBuffer({
   },
   // Notify-only commits — pull body/meta with readLiveTextSegment.
   onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness:
     const seg = await readLiveTextSegment(e);
     console.log(`[onSegment ${e.segmentIndex}]`, seg?.text);
   },
@@ -134,12 +139,12 @@ const liveText = await createLiveTextBuffer({
   windowMaxChars: 65536,
   maxSegments: 2048,
   onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness:
     const seg = await readLiveTextSegment(e, { includeMeta: true });
-    console.log(
-      `[segment ${e.segmentIndex}]`,
-      seg?.text,
-      `(total=${e.totalSegments})`
-    );
+    console.log(seg?.text, seg?.meta);
   },
 });
 ```

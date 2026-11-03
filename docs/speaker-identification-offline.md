@@ -374,8 +374,8 @@ More end-to-end patterns: [feature-pipelines.md#speaker-identification-offline-p
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
 | `onProgress` | `OrchestrationProgress` | start of each offline segment step | `enrollOfflineSegments` / `labelOfflineSegments` / `verifyOfflineSegments` only; whole-buffer APIs: none |
-| `onLabeled` | `SidLabeledSegmentEvent` | after each span is identified and appended | `labelOfflineSegments` only; order: progress → identify/append → `onLabeled` |
-| `onVerified` | `SidVerifiedSegmentEvent` | after each span is verified | `verifyOfflineSegments` only; order: progress → verify → `onVerified` |
+| `onLabeled` | `SidLabeledSegmentEvent` | after each span is identified and appended | feature callback — already includes `speakerName` / ranges (no buffer pull); `labelOfflineSegments` only |
+| `onVerified` | `SidVerifiedSegmentEvent` | after each span is verified | feature callback — already includes match fields (no buffer pull); `verifyOfflineSegments` only |
 
 Shapes: [Types](#types).
 
@@ -383,6 +383,7 @@ Shapes: [Types](#types).
 await sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
   threshold: 0.5,
   onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+  // feature callback — already includes speakerName (no pull):
   onLabeled: (e) => console.log(e.segmentIndex, e.speakerName),
 });
 ```

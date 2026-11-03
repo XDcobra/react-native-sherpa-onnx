@@ -204,13 +204,32 @@ Shared lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onSegment` | `AudioTaggingLiveSegmentEvent` | after each committed span is tagged | no `onProgress` on the live path |
+| `onSegment` | `AudioTaggingLiveSegmentEvent` | after each committed span is tagged | feature callback — already includes `result` / ranges (no buffer pull) |
+
+`tag(..., { onSegment })` is the usual product path. Raw `LiveTextBuffer` observation on `textOut` is **notify + pull** (`readLiveTextSegment`). Canonical detail: [textbuffer-streaming — Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling).
 
 Shapes: [Types](#types) · offline result fields: [audio-tagging-offline.md](audio-tagging-offline.md#types).
 
 ```ts
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const textOut = await createLiveTextBuffer({
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`textOut #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness (primary name / meta on the buffer):
+    const seg = await readLiveTextSegment(e, { includeMeta: true });
+    console.log(seg?.text, seg?.meta);
+  },
+});
+
 await tagger.tag(audioIn, textOut, {
   segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
+  // feature callback — already includes result (no pull):
   onSegment: (e) => console.log(e.segmentIndex, e.result.primary?.name),
 });
 ```
@@ -269,7 +288,8 @@ const textOut = await createLiveTextBuffer({ maxSegments: 512 });
 const pipeline = await tagger.tag(audioIn, textOut, {
   topK: 5,
   segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
-  onSegment: (e) => console.log('tags', e.segment.text),
+  // feature callback — already includes result (no pull):
+  onSegment: (e) => console.log('tags', e.segmentIndex, e.result.primary?.name),
 });
 const mic = await startMicToLiveAudioBuffer(audioIn);
 
@@ -302,13 +322,23 @@ import {
   finalizeLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const tagger = await createAudioTagging({ modelSource: { kind: 'fs', path: '/path/to/audio-tagging' } });
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({
   maxSegments: 512,
-  onSegment: (e) => console.log(e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`textOut #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log(seg?.text);
+  },
 });
 
 const pipeline = await tagger.tag(audioIn, textOut, {

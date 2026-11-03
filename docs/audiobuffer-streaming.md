@@ -146,19 +146,24 @@ const textOut = await createLiveTextBuffer({
   maxSegments: 2048,
   streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
   onPartial: async (event) => {
+    // cheap: enough to know a hypothesis changed / endpoint fired
+    if (event.isEndpoint === true) {
+      console.log('[endpoint]');
+    }
+    // only when you need the hypothesis text:
     const partial = await readLiveTextPartial(event);
     if (partial.length > 0) {
       console.log('[partial]', partial);
       // Example output: [partial] hello wor
     }
-    if (event.isEndpoint === true) {
-      console.log('[endpoint]');
-    }
   },
   onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`, `total=${e.totalSegments}`);
+    // only when you need richness (transcript body):
     const seg = await readLiveTextSegment(e);
-    console.log(`[committed ${e.segmentIndex}]`, seg?.text);
-    // Example output: [committed 0] hello world
+    console.log(seg?.text);
+    // Example output: hello world
   },
 });
 
@@ -169,6 +174,7 @@ const live = await createEmptyLiveAudioBuffer({
   windowSeconds: 120,
   streamEvents: { framesAppended: { enabled: true, minIntervalMs: 0 } },
   onFramesAppended: (e) => {
+    // cheap: enough for meters / progress (no PCM on the bridge)
     if (e.appendKind === 'ingress') {
       console.log(`[${e.ingressSource}] +${e.frameCount} frames`);
       // Example output: [mic] +320 frames
@@ -644,7 +650,13 @@ The previous **`react-native-sherpa-onnx/audio`** helper **`createPcmLiveStream`
 const live = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({
   maxSegments: 2048,
-  onSegment: (e) => console.log('[stt segment]', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`stt #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('[stt segment]', seg?.text);
+  },
 });
 const stt = await createStreamingSTT({
   modelSource: { kind: 'app', base: 'apkAsset', path: 'models/streaming-stt' },

@@ -45,8 +45,9 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
-  createEmptyLiveSegmentBuffer,
+  createLiveSegmentBuffer,
   getLiveSegmentBufferSegments,
+  readLiveSegment,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 
@@ -81,10 +82,15 @@ console.log('Model properties:', {
 
 // 3. Set up pipeline buffers
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: engine.sampleRate });
-const segmentOut = await createEmptyLiveSegmentBuffer({
+const segmentOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
-  onSegmentAppended: (e) => {
-    console.log(`Speaker ${e.segment.payload?.speaker}: ${e.segment.startSample} -> ${e.segment.endSample}`);
+  onSegmentAppended: async (e) => {
+    const meta = await readLiveSegment(e);
+    const speaker =
+      meta?.kind === 'diarization'
+        ? (meta.payload as { speaker?: number } | undefined)?.speaker
+        : undefined;
+    console.log(`Speaker ${speaker ?? '?'}: ${e.startSample} -> ${e.endSample}`);
   },
 });
 
@@ -373,13 +379,30 @@ flowchart LR
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onSegmentAppended` | `{ segment, index }` | native worker appends a speaker turn to `LiveSegmentBuffer` | set on `createEmptyLiveSegmentBuffer`; `segment.payload.speaker` is cluster index |
+| `onSegmentAppended` | `LiveSegmentBufferSegmentAppendedEvent` (notify scalars) | native worker appends a speaker turn to `LiveSegmentBuffer` | set on `createLiveSegmentBuffer`; **no `payload` on the event** — pull with `readLiveSegment` |
+
+Live segment commits are **notify + pull**. Timing/routing fields come on the event; `payload.speaker` (cluster index) only after pull. Canonical detail: [segmentbuffer-streaming — Committed segments](segmentbuffer-streaming.md#committed-segments-onsegmentappended-notify--pull).
 
 ```ts
-const segmentOut = await createEmptyLiveSegmentBuffer({
+import {
+  createLiveSegmentBuffer,
+  readLiveSegment,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+const segmentOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
-  onSegmentAppended: (e) => {
-    console.log(`Speaker ${e.segment.payload?.speaker}: ${e.segment.startSample} -> ${e.segment.endSample}`);
+  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  onSegmentAppended: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`#${e.segmentIndex}`, e.startSample, e.endSample, `${e.durationMs}ms`);
+
+    // only when you need richness (speaker cluster):
+    const meta = await readLiveSegment(e);
+    const speaker =
+      meta?.kind === 'diarization'
+        ? (meta.payload as { speaker?: number } | undefined)?.speaker
+        : undefined;
+    console.log(`Speaker ${speaker ?? '?'}`);
   },
 });
 ```
@@ -490,7 +513,8 @@ import {
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
-  createEmptyLiveSegmentBuffer,
+  createLiveSegmentBuffer,
+  readLiveSegment,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 
@@ -499,10 +523,15 @@ const engine = await createStreamingDiarization({
   modelType: 'sortformer',
 });
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: engine.sampleRate });
-const segmentOut = await createEmptyLiveSegmentBuffer({
+const segmentOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
-  onSegmentAppended: (e) => {
-    console.log(`spk ${e.segment.payload?.speaker}`, e.segment.startSample, e.segment.endSample);
+  onSegmentAppended: async (e) => {
+    const meta = await readLiveSegment(e);
+    const speaker =
+      meta?.kind === 'diarization'
+        ? (meta.payload as { speaker?: number } | undefined)?.speaker
+        : undefined;
+    console.log(`spk ${speaker ?? '?'}`, e.startSample, e.endSample);
   },
 });
 

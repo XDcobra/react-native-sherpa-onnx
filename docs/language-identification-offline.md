@@ -260,7 +260,7 @@ flowchart LR
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
 | `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented / `labelOfflineSegments` only; oneshot: none |
-| `onSegment` | `LanguageIdSegmentEvent` | after each committed span is identified | order: progress → identify → optional segment append → `onSegment` |
+| `onSegment` | `LanguageIdSegmentEvent` | after each committed span is identified | feature callback — already includes `lang` / ranges (no buffer pull); order: progress → identify → optional segment append → `onSegment` |
 | `onLanguageChanged` | `LanguageChangedEvent` | predicted `lang` differs from previous non-empty language | includes first span (`previousLang: null`); same list as result `switches` |
 
 Shapes: [Types](#types).
@@ -269,6 +269,7 @@ Shapes: [Types](#types).
 await slid.identify(audio, {
   segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
   onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+  // feature callback — already includes lang (no pull):
   onSegment: (e) => console.log(e.segmentIndex, e.lang, e.durationMs),
   onLanguageChanged: (e) => console.log(e.previousLang ?? '—', '→', e.currentLang),
 });

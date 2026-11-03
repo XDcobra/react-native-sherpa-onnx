@@ -31,6 +31,7 @@ import {
 import {
   createEmptyOfflineSegmentBuffer,
   createLiveSegmentBuffer,
+  readLiveSegment,
   getPipelineSegmentBufferInfo,
   getLiveSegmentBufferSegmentCount,
   getLiveSegmentBufferSegments,
@@ -634,39 +635,15 @@ export default function VADScreen() {
             'segment.appended',
             `#${event.segmentIndex} ${event.startSample}-${event.endSample} (${event.durationMs}ms)`
           );
-          setSegments((prev) => {
-            const base = {
-              id: event.segmentId,
-              sourceAudioBufferId: event.sourceAudioBufferId,
-              startSample: event.startSample,
-              endSample: event.endSample,
-              sampleRate: event.sampleRate,
-              durationMs: event.durationMs,
-              ...(typeof event.confidence === 'number'
-                ? { confidence: event.confidence }
-                : {}),
-            };
-            const next: SegmentMeta =
-              event.kind === 'alignment'
-                ? {
-                    ...base,
-                    kind: 'alignment',
-                    ...(event.payload ? { payload: event.payload } : {}),
-                  }
-                : event.kind === 'diarization'
-                ? {
-                    ...base,
-                    kind: 'diarization',
-                    ...(event.payload ? { payload: event.payload } : {}),
-                  }
-                : {
-                    ...base,
-                    kind: 'speech',
-                    ...(event.payload ? { payload: event.payload } : {}),
-                  };
-            const merged = [...prev, next];
-            return merged.slice(-SEGMENT_PREVIEW_LIMIT);
-          });
+          readLiveSegment(event)
+            .then((meta) => {
+              if (!meta) return;
+              setSegments((prev) => {
+                const merged = [...prev, meta];
+                return merged.slice(-SEGMENT_PREVIEW_LIMIT);
+              });
+            })
+            .catch(() => undefined);
         },
         onError: (event: LiveSegmentBufferErrorEvent) => {
           logLiveLifecycle('segment.error', event.message);

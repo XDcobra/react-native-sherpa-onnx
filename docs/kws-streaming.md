@@ -322,17 +322,28 @@ Shared lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onKeyword` | `KeywordDetection` | keyword detected in audio stream | convenience over `onSegment`; fires when `meta.source === 'kws_stream'` |
-| `onSegment` | `LiveTextBufferSegmentEvent` | committed text segment on output buffer | raw live-text commit; filter `meta.source` if other writers share the buffer |
+| `onKeyword` | `KeywordDetection` | keyword detected in audio stream | feature callback — already includes keyword / tokens (no buffer pull) |
+| `onSegment` | `LiveTextBufferSegmentEvent` (notify scalars) | committed text segment on `textOut` | raw live-text commit; **no text/`meta` on the event** — pull with `readLiveTextSegment`; filter `meta.source` if other writers share the buffer |
 
 Prefer **callbacks**, not polling. `onKeyword` is convenience over the same commit as `onSegment` — use either or both.
+
+`onKeyword` already materializes the product fields. Raw buffer `onSegment` is **notify + pull**. Canonical detail: [textbuffer-streaming — Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling).
 
 Committed segment text is the keyword **label**. `KeywordDetection` also exposes `tokens`, `timestamps`, and optional `startTime` (usually present on **iOS** via sherpa C-API `start_time`; usually **omitted on Android** because the Kotlin `KeywordSpotterResult` has no start-time field).
 
 ```ts
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+} from 'react-native-sherpa-onnx/textbuffer';
+
 const textOut = await createLiveTextBuffer({
   spooling: { mode: 'off' },
   onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness (keyword label / meta):
     const seg = await readLiveTextSegment(e, { includeMeta: true });
     if (seg?.meta?.source !== 'kws_stream') return;
     console.log('[onSegment]', seg.text, seg.meta);
@@ -340,6 +351,7 @@ const textOut = await createLiveTextBuffer({
 });
 
 const pipeline = await engine.spot(audioIn, textOut, {
+  // feature callback — already includes keyword (no pull):
   onKeyword: (e) => {
     console.log('[onKeyword]', e.keyword, e.segmentIndex, e.startTime);
   },
@@ -461,7 +473,11 @@ import {
   finalizeLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const engine = await createKeywordSpotting({
   modelSource: { kind: 'fs', path: '/path/to/kws-models' },
@@ -469,7 +485,13 @@ const engine = await createKeywordSpotting({
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const hits = await createLiveTextBuffer({
   maxSegments: 128,
-  onSegment: (e) => console.log('hit segment:', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`hit #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('hit segment:', seg?.text);
+  },
 });
 
 const pipeline = await engine.spot(audioIn, hits, {

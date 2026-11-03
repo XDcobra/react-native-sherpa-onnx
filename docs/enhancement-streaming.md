@@ -237,7 +237,23 @@ More end-to-end patterns: [feature-pipelines.md#enhancement-streaming-patterns](
 
 ## JS Events
 
-No pipeline-level JS event callbacks. Buffer-level `onFramesAppended` fires on the output buffer when denoised frames are written — see [audiobuffer-streaming.md](audiobuffer-streaming.md).
+No pipeline-level JS event callbacks. Observe the output live audio buffer:
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onFramesAppended` | live-audio chunk notify (scalars) | denoised frames written to `audioOut` | set on `createEmptyLiveAudioBuffer`; **no PCM on the event** — metadata only (`frameCount`, `totalSamplesWritten`, …) |
+
+```ts
+const audioOut = await createEmptyLiveAudioBuffer({
+  sampleRate: 16000,
+  onFramesAppended: (e) => {
+    // cheap: enough for meters / progress (no PCM materialize on the bridge)
+    console.log(e.frameCount, e.totalSamplesWritten, e.appendKind);
+  },
+});
+```
+
+Canonical detail: [audiobuffer-streaming](audiobuffer-streaming.md).
 
 ## Types
 
@@ -336,7 +352,11 @@ import {
   finalizeLiveAudioBuffer,
   releasePipelineAudioBuffer,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const denoiser = await createStreamingEnhancement({
   modelSource: { kind: 'fs', path: '/path/to/gtcrn' },
@@ -352,7 +372,13 @@ const noisyIn = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount:
 const cleanOut = await createEmptyLiveAudioBuffer({ sampleRate: sr, channelCount: 1 });
 const textOut = await createLiveTextBuffer({
   maxSegments: 2048,
-  onSegment: (e) => console.log('[stt]', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`stt #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('[stt]', seg?.text);
+  },
 });
 
 const enhPipe = await denoiser.enhance(noisyIn.bufferId, cleanOut.bufferId);
