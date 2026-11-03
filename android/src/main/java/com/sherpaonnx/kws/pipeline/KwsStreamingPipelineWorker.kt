@@ -1,12 +1,12 @@
 package com.sherpaonnx.kws.pipeline
 
 import android.util.Log
-import com.k2fsa.sherpa.onnx.KeywordSpotter
-import com.k2fsa.sherpa.onnx.OnlineStream
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
+import com.sherpaonnx.kws.facade.SherpaOnnxKwsHelper
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -16,16 +16,15 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * Native streaming worker for Keyword Spotting.
+ * Native streaming worker for Keyword Spotting (shared C API via JNI).
  *
- * Mirrors [com.sherpaonnx.stt.pipeline.SttPipelineWorker] but commits on keyword
- * hit. Upstream contract: after each decode, getResult → on hit commit +
- * reset(stream) before further decode (getResult is one-shot per hit).
+ * After each decode, getResult → on hit commit + reset(stream) before further
+ * decode (getResult is one-shot per hit).
  */
 class KwsStreamingPipelineWorker(
   override val pipelineId: String,
-  private val spotter: KeywordSpotter,
-  private val stream: OnlineStream,
+  private val instanceId: String,
+  private val streamId: String,
   private val inputEntry: LiveEntry,
   private val outputEntry: LiveTextEntry,
   private val sampleRate: Int,
@@ -41,6 +40,8 @@ class KwsStreamingPipelineWorker(
     private const val TAIL_PADDING_SECONDS = 0.66f
     const val DEFAULT_CHUNK_SIZE = 1600
   }
+
+  private val gateKey = "kws:$instanceId"
 
   @Volatile
   override var isRunning: Boolean = false
@@ -89,6 +90,12 @@ class KwsStreamingPipelineWorker(
   }
 
   private fun runLoop() {
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      error = "KWS instance unavailable"
+      Log.e(LOG_TAG, "$PREFIX beginUse failed pipelineId=$pipelineId")
+      finishCleanup()
+      return
+    }
     try {
       while (isRunning) {
         processCommands()
@@ -110,25 +117,24 @@ class KwsStreamingPipelineWorker(
           continue
         }
 
-        stream.acceptWaveform(chunk, sampleRate)
+        SherpaOnnxKwsHelper.nativeAcceptWaveform(instanceId, streamId, sampleRate, chunk)
         unitsRead += chunk.size
 
         var decodeSteps = 0
         var commitsThisChunk = 0
-        while (spotter.isReady(stream)) {
-          spotter.decode(stream)
+        while (SherpaOnnxKwsHelper.nativeIsReady(instanceId, streamId)) {
+          SherpaOnnxKwsHelper.nativeDecode(instanceId, streamId)
           decodeSteps++
           decodeStepsTotal++
-          // One getResult per decode — do not call getResult again before reset.
-          val result = spotter.getResult(stream)
-          val kw = result.keyword?.trim().orEmpty()
+          val result = readResult()
+          val kw = result.keyword
           if (kw.isNotEmpty()) {
             Log.i(
               LOG_TAG,
               "$PREFIX decodeHit pipelineId=$pipelineId chunk=$chunksProcessed " +
                 "decodeStep=$decodeSteps keyword=$kw " +
-                "tokens=${result.tokens?.size ?: 0} " +
-                "ts0=${result.timestamps?.firstOrNull()}",
+                "tokens=${result.tokens.size} " +
+                "ts0=${result.timestamps.firstOrNull()} startTime=${result.startTime}",
             )
             val before = hitCount
             maybeCommitHit(result)
@@ -154,66 +160,50 @@ class KwsStreamingPipelineWorker(
       error = e.message ?: "Unknown error in KWS pipeline"
       Log.e(LOG_TAG, "$PREFIX worker error pipelineId=$pipelineId: $error", e)
     } finally {
-      inputEntry.releaseCursor(audioCursorId)
-      appendListener?.let { inputEntry.removeAppendListener(it) }
-      appendListener = null
-      try {
-        stream.release()
-      } catch (e: Exception) {
-        Log.w(LOG_TAG, "$PREFIX stream release failed pipelineId=$pipelineId: ${e.message}")
-      }
-      synchronized(cmdLock) {
-        while (true) {
-          val cmd = commandQueue.poll() ?: break
-          when (cmd) {
-            is PipelineCommand.Flush -> cmd.completion.complete(Unit)
-            is PipelineCommand.Reset -> cmd.completion.complete(Unit)
-          }
-        }
-        isRunning = false
-      }
-      val audioSec =
-        if (sampleRate > 0) unitsRead.toDouble() / sampleRate.toDouble() else 0.0
-      Log.i(
-        LOG_TAG,
-        "$PREFIX sessionSummary pipelineId=$pipelineId hits=$hitCount " +
-          "chunks=$chunksProcessed unitsRead=$unitsRead audioSec=${"%.2f".format(audioSec)} " +
-          "decodeSteps=$decodeStepsTotal emptyGetResults=$emptyGetResults " +
-          "unitsWritten=$unitsWritten " +
-          "verdict=${
-            when {
-              unitsRead <= 0L -> "no_audio"
-              decodeStepsTotal <= 0L -> "no_decode"
-              hitCount <= 0 -> "model_no_match"
-              else -> "ok_hits"
-            }
-          }",
-      )
-      executor.shutdown()
+      NativeInstanceGate.endUse(gateKey)
+      finishCleanup()
     }
   }
 
-  private fun maybeCommitHit(result: com.k2fsa.sherpa.onnx.KeywordSpotterResult) {
-    val keyword = result.keyword?.trim().orEmpty()
+  private data class HitResult(
+    val keyword: String,
+    val tokens: Array<String>,
+    val timestamps: FloatArray,
+    val startTime: Float,
+  )
+
+  private fun readResult(): HitResult {
+    val raw = SherpaOnnxKwsHelper.nativeGetResult(instanceId, streamId)
+    val keyword = (raw?.get("keyword") as? String)?.trim().orEmpty()
+    @Suppress("UNCHECKED_CAST")
+    val tokenList = raw?.get("tokens") as? ArrayList<*>
+    val tokens = tokenList
+      ?.map { it?.toString().orEmpty() }
+      ?.toTypedArray()
+      ?: emptyArray()
+    val tsArr = raw?.get("timestamps") as? FloatArray ?: floatArrayOf()
+    val startTime = (raw?.get("startTime") as? Number)?.toFloat() ?: 0f
+    return HitResult(keyword, tokens, tsArr.copyOf(), startTime)
+  }
+
+  private fun maybeCommitHit(result: HitResult) {
+    val keyword = result.keyword
     if (keyword.isEmpty()) {
       return
     }
 
     hitCount++
     val createdAtMs = System.currentTimeMillis()
-    // Copy tokens/timestamps before reset — emit is posted async to the main looper.
-    val tokens = (result.tokens ?: emptyArray()).map { it.orEmpty() }.toTypedArray()
-    val timestamps = (result.timestamps ?: floatArrayOf()).copyOf()
+    val tokens = result.tokens
+    val timestamps = result.timestamps
     val segmentMeta = mapOf<String, Any>(
       "__segmentReason" to "endpoint",
       "__segmentSource" to SOURCE,
       "__segmentCreatedAtMs" to createdAtMs.toDouble(),
-      // Public meta (survives JS toPublicTextMeta) so onKeyword can filter kws_stream.
       "source" to SOURCE,
       "keyword" to keyword,
+      "startTime" to result.startTime.toDouble(),
     )
-    // RN notify comes from LiveTextEntry commit listeners registered at
-    // createLiveTextBuffer (single emit, main-looper posted) — do not emit here.
     val segmentIndex = outputEntry.commitSegment(
       text = keyword,
       tokens = tokens,
@@ -226,9 +216,9 @@ class KwsStreamingPipelineWorker(
       LOG_TAG,
       "$PREFIX hit pipelineId=$pipelineId keyword=$keyword segmentIndex=$segmentIndex " +
         "hitCount=$hitCount tokens=${tokens.size} ts0=${timestamps.firstOrNull()} " +
-        "→ reset(stream)",
+        "startTime=${result.startTime} → reset(stream)",
     )
-    spotter.reset(stream)
+    SherpaOnnxKwsHelper.nativeResetStream(instanceId, streamId)
   }
 
   private fun appendTailPaddingIfNeeded(endOfAudio: Boolean) {
@@ -237,7 +227,7 @@ class KwsStreamingPipelineWorker(
     }
     val padSamples = (sampleRate * TAIL_PADDING_SECONDS).toInt().coerceAtLeast(1)
     val tail = FloatArray(padSamples)
-    stream.acceptWaveform(tail, sampleRate)
+    SherpaOnnxKwsHelper.nativeAcceptWaveform(instanceId, streamId, sampleRate, tail)
     unitsRead += padSamples
     Log.i(
       LOG_TAG,
@@ -248,21 +238,20 @@ class KwsStreamingPipelineWorker(
   private fun autoFlushAndCommit(endOfAudio: Boolean) {
     appendTailPaddingIfNeeded(endOfAudio)
     if (endOfAudio) {
-      stream.inputFinished()
+      SherpaOnnxKwsHelper.nativeInputFinished(instanceId, streamId)
     }
     var decodeSteps = 0
     var commits = 0
-    while (spotter.isReady(stream)) {
-      spotter.decode(stream)
+    while (SherpaOnnxKwsHelper.nativeIsReady(instanceId, streamId)) {
+      SherpaOnnxKwsHelper.nativeDecode(instanceId, streamId)
       decodeSteps++
       decodeStepsTotal++
-      val result = spotter.getResult(stream)
-      val kw = result.keyword?.trim().orEmpty()
-      if (kw.isNotEmpty()) {
+      val result = readResult()
+      if (result.keyword.isNotEmpty()) {
         Log.i(
           LOG_TAG,
           "$PREFIX flushHit pipelineId=$pipelineId endOfAudio=$endOfAudio " +
-            "decodeStep=$decodeSteps keyword=$kw",
+            "decodeStep=$decodeSteps keyword=${result.keyword}",
         )
         val before = hitCount
         maybeCommitHit(result)
@@ -294,7 +283,7 @@ class KwsStreamingPipelineWorker(
         }
         is PipelineCommand.Reset -> {
           try {
-            spotter.reset(stream)
+            SherpaOnnxKwsHelper.nativeResetStream(instanceId, streamId)
             cmd.completion.complete(Unit)
           } catch (e: Exception) {
             cmd.completion.completeExceptionally(e)
@@ -304,9 +293,48 @@ class KwsStreamingPipelineWorker(
     }
   }
 
+  private fun finishCleanup() {
+    inputEntry.releaseCursor(audioCursorId)
+    appendListener?.let { inputEntry.removeAppendListener(it) }
+    appendListener = null
+    try {
+      SherpaOnnxKwsHelper.nativeReleaseStream(instanceId, streamId)
+    } catch (e: Exception) {
+      Log.w(LOG_TAG, "$PREFIX stream release failed pipelineId=$pipelineId: ${e.message}")
+    }
+    synchronized(cmdLock) {
+      while (true) {
+        val cmd = commandQueue.poll() ?: break
+        when (cmd) {
+          is PipelineCommand.Flush -> cmd.completion.complete(Unit)
+          is PipelineCommand.Reset -> cmd.completion.complete(Unit)
+        }
+      }
+      isRunning = false
+    }
+    val audioSec =
+      if (sampleRate > 0) unitsRead.toDouble() / sampleRate.toDouble() else 0.0
+    Log.i(
+      LOG_TAG,
+      "$PREFIX sessionSummary pipelineId=$pipelineId hits=$hitCount " +
+        "chunks=$chunksProcessed unitsRead=$unitsRead audioSec=${"%.2f".format(audioSec)} " +
+        "decodeSteps=$decodeStepsTotal emptyGetResults=$emptyGetResults " +
+        "unitsWritten=$unitsWritten " +
+        "verdict=${
+          when {
+            unitsRead <= 0L -> "no_audio"
+            decodeStepsTotal <= 0L -> "no_decode"
+            hitCount <= 0 -> "model_no_match"
+            else -> "ok_hits"
+          }
+        }",
+    )
+    executor.shutdown()
+  }
+
   override fun stop() {
     // Always awaitTermination: isRunning=false in finally can race stream.release
-    // with spotter.release() during unload if stop() returns early.
+    // with spotter unload during unload if stop() returns early.
     isRunning = false
     lock.withLock { dataAvailable.signal() }
     if (!executor.isShutdown) {

@@ -1,36 +1,56 @@
-#include "sherpa-onnx-kws-wrapper.h"
+#include "sherpa-onnx-kws-engine-wrapper.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
+
+#ifdef __ANDROID__
+#include <android/log.h>
+#define KWS_LOGI(...) \
+  __android_log_print(ANDROID_LOG_INFO, "SherpaOnnx:kws", __VA_ARGS__)
+#define KWS_LOGE(...) \
+  __android_log_print(ANDROID_LOG_ERROR, "SherpaOnnx:kws", __VA_ARGS__)
+#elif defined(__APPLE__)
+#define KWS_LOGI(...)                                          \
+  do {                                                         \
+    std::fprintf(stderr, "[SherpaOnnx:kws] ");                 \
+    std::fprintf(stderr, __VA_ARGS__);                         \
+    std::fprintf(stderr, "\n");                                \
+  } while (0)
+#define KWS_LOGE(...) KWS_LOGI(__VA_ARGS__)
+#else
+#define KWS_LOGI(...) ((void)0)
+#define KWS_LOGE(...) ((void)0)
+#endif
 
 namespace sherpaonnx {
 
-KwsWrapper::~KwsWrapper() {
-  unload();
-}
+KwsEngineWrapper::~KwsEngineWrapper() { unload(); }
 
-KwsInitResult KwsWrapper::initialize(
-    const std::string &encoder,
-    const std::string &decoder,
-    const std::string &joiner,
-    const std::string &tokens,
-    const std::string &keywords,
+KwsEngineInitResult KwsEngineWrapper::initialize(
+    const std::string& encoder,
+    const std::string& decoder,
+    const std::string& joiner,
+    const std::string& tokens,
+    const std::string& keywordsFile,
     float keywordsScore,
     float keywordsThreshold,
     int32_t numTrailingBlanks,
     int32_t maxActivePaths,
     int32_t numThreads,
-    const std::string &provider,
+    const std::string& provider,
     bool debug) {
-  KwsInitResult result;
+  KwsEngineInitResult result;
   if (spotter_ != nullptr) {
     result.error = "Keyword spotter is already initialized";
+    KWS_LOGE("init fail: %s", result.error.c_str());
     return result;
   }
-  if (encoder.empty() || decoder.empty() || joiner.empty() ||
-      tokens.empty() || keywords.empty()) {
+  if (encoder.empty() || decoder.empty() || joiner.empty() || tokens.empty() ||
+      keywordsFile.empty()) {
     result.error =
         "encoder, decoder, joiner, tokens, and keywords paths are required";
+    KWS_LOGE("init fail: %s", result.error.c_str());
     return result;
   }
 
@@ -50,20 +70,22 @@ KwsInitResult KwsWrapper::initialize(
   config.num_trailing_blanks = numTrailingBlanks;
   config.keywords_score = keywordsScore;
   config.keywords_threshold = keywordsThreshold;
-  config.keywords_file = keywords.c_str();
+  config.keywords_file = keywordsFile.c_str();
 
   spotter_ = SherpaOnnxCreateKeywordSpotter(&config);
   if (spotter_ == nullptr) {
     result.error = "SherpaOnnxCreateKeywordSpotter returned null";
+    KWS_LOGE("init fail: %s", result.error.c_str());
     return result;
   }
 
+  KWS_LOGI("initialized zipformer2 sr=%d", sampleRate_);
   result.success = true;
   return result;
 }
 
-void KwsWrapper::unload() {
-  for (auto &entry : streams_) {
+void KwsEngineWrapper::unload() {
+  for (auto& entry : streams_) {
     if (entry.second != nullptr) {
       SherpaOnnxDestroyOnlineStream(entry.second);
     }
@@ -75,16 +97,12 @@ void KwsWrapper::unload() {
   }
 }
 
-bool KwsWrapper::isInitialized() const {
-  return spotter_ != nullptr;
-}
+bool KwsEngineWrapper::isInitialized() const { return spotter_ != nullptr; }
 
-int32_t KwsWrapper::getSampleRate() const {
-  return sampleRate_;
-}
+int32_t KwsEngineWrapper::getSampleRate() const { return sampleRate_; }
 
-const SherpaOnnxOnlineStream *KwsWrapper::getStream(
-    const std::string &streamId) const {
+const SherpaOnnxOnlineStream* KwsEngineWrapper::getStream(
+    const std::string& streamId) const {
   auto it = streams_.find(streamId);
   if (it == streams_.end()) {
     return nullptr;
@@ -92,32 +110,34 @@ const SherpaOnnxOnlineStream *KwsWrapper::getStream(
   return it->second;
 }
 
-bool KwsWrapper::createStream(
-    const std::string &streamId,
-    const std::string &keywords) {
+bool KwsEngineWrapper::createStream(
+    const std::string& streamId,
+    const std::string& keywords) {
   if (spotter_ == nullptr || streamId.empty() || streams_.count(streamId) > 0) {
     return false;
   }
-  const SherpaOnnxOnlineStream *stream = nullptr;
+  const SherpaOnnxOnlineStream* stream = nullptr;
   if (keywords.empty()) {
     stream = SherpaOnnxCreateKeywordStream(spotter_);
   } else {
-    stream = SherpaOnnxCreateKeywordStreamWithKeywords(
-        spotter_, keywords.c_str());
+    stream =
+        SherpaOnnxCreateKeywordStreamWithKeywords(spotter_, keywords.c_str());
   }
   if (stream == nullptr) {
+    KWS_LOGE("createStream failed streamId=%s overrideEmpty=%d",
+             streamId.c_str(), keywords.empty() ? 1 : 0);
     return false;
   }
   streams_[streamId] = stream;
   return true;
 }
 
-void KwsWrapper::acceptWaveform(
-    const std::string &streamId,
+void KwsEngineWrapper::acceptWaveform(
+    const std::string& streamId,
     int32_t sampleRate,
-    const float *samples,
+    const float* samples,
     size_t n) {
-  const SherpaOnnxOnlineStream *stream = getStream(streamId);
+  const SherpaOnnxOnlineStream* stream = getStream(streamId);
   if (stream == nullptr || samples == nullptr || n == 0) {
     return;
   }
@@ -125,37 +145,38 @@ void KwsWrapper::acceptWaveform(
       stream, sampleRate, samples, static_cast<int32_t>(n));
 }
 
-void KwsWrapper::inputFinished(const std::string &streamId) {
-  const SherpaOnnxOnlineStream *stream = getStream(streamId);
+void KwsEngineWrapper::inputFinished(const std::string& streamId) {
+  const SherpaOnnxOnlineStream* stream = getStream(streamId);
   if (stream == nullptr) {
     return;
   }
   SherpaOnnxOnlineStreamInputFinished(stream);
 }
 
-bool KwsWrapper::isReady(const std::string &streamId) {
-  const SherpaOnnxOnlineStream *stream = getStream(streamId);
+bool KwsEngineWrapper::isReady(const std::string& streamId) {
+  const SherpaOnnxOnlineStream* stream = getStream(streamId);
   if (spotter_ == nullptr || stream == nullptr) {
     return false;
   }
   return SherpaOnnxIsKeywordStreamReady(spotter_, stream) != 0;
 }
 
-void KwsWrapper::decode(const std::string &streamId) {
-  const SherpaOnnxOnlineStream *stream = getStream(streamId);
+void KwsEngineWrapper::decode(const std::string& streamId) {
+  const SherpaOnnxOnlineStream* stream = getStream(streamId);
   if (spotter_ == nullptr || stream == nullptr) {
     return;
   }
   SherpaOnnxDecodeKeywordStream(spotter_, stream);
 }
 
-KwsStreamResult KwsWrapper::getResult(const std::string &streamId) {
-  KwsStreamResult result;
-  const SherpaOnnxOnlineStream *stream = getStream(streamId);
+KwsEngineStreamResult KwsEngineWrapper::getResult(
+    const std::string& streamId) {
+  KwsEngineStreamResult result;
+  const SherpaOnnxOnlineStream* stream = getStream(streamId);
   if (spotter_ == nullptr || stream == nullptr) {
     return result;
   }
-  const SherpaOnnxKeywordResult *raw =
+  const SherpaOnnxKeywordResult* raw =
       SherpaOnnxGetKeywordResult(spotter_, stream);
   if (raw == nullptr) {
     return result;
@@ -178,15 +199,15 @@ KwsStreamResult KwsWrapper::getResult(const std::string &streamId) {
   return result;
 }
 
-void KwsWrapper::resetStream(const std::string &streamId) {
-  const SherpaOnnxOnlineStream *stream = getStream(streamId);
+void KwsEngineWrapper::resetStream(const std::string& streamId) {
+  const SherpaOnnxOnlineStream* stream = getStream(streamId);
   if (spotter_ == nullptr || stream == nullptr) {
     return;
   }
   SherpaOnnxResetKeywordStream(spotter_, stream);
 }
 
-void KwsWrapper::releaseStream(const std::string &streamId) {
+void KwsEngineWrapper::releaseStream(const std::string& streamId) {
   auto it = streams_.find(streamId);
   if (it == streams_.end()) {
     return;
