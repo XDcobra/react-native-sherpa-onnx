@@ -5,7 +5,8 @@
 #include "sherpa-onnx-validate-punctuation.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
+#include "TxtMetaBridge.h"
 #include "../../punctuation/core/PunctuationBridgeState.h"
 #include "../../punctuation/core/PunctuationTextInputNormalization.hpp"
 
@@ -249,10 +250,13 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
       @"__segmentCreatedAtMs": @((double)std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count()),
     }];
-    if (segment.meta != nil) {
-      [meta addEntriesFromDictionary:segment.meta];
+    if (!segment.metaJson.empty()) {
+      NSDictionary *srcMeta = txtMetaDictFromJson(segment.metaJson);
+      if (srcMeta != nil) {
+        [meta addEntriesFromDictionary:srcMeta];
+      }
     }
-    output_->commitSegment(outText, {}, {}, "punctuation_stream", meta);
+    output_->commitSegment(outText, {}, {}, "punctuation_stream", txtMetaJsonFromDict(meta));
     unitsWritten_ += (int64_t)outText.size();
   }
 

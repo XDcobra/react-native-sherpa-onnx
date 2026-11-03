@@ -3,7 +3,7 @@
 #include "../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "PaLiveEntry.h"
 #include "../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 
 #include <atomic>
 #include <condition_variable>

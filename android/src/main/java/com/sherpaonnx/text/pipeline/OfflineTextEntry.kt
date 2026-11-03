@@ -12,7 +12,6 @@ data class TextSpatialSpan(
   val utf16Start: Int,
   val utf16End: Int,
   val level: String,
-  /** Empty when origin is textLayer (no ImageBuffer). */
   val sourceImageBufferId: String,
   val frameIndex: Int,
   val quad: FloatArray,
@@ -20,7 +19,6 @@ data class TextSpatialSpan(
   val origin: String,
   val pageNumber: Int? = null,
   val ptsMs: Double? = null,
-  /** PDF user-space page size when origin is textLayer. */
   val pageWidth: Float? = null,
   val pageHeight: Float? = null,
   val sectionIndex: Int? = null,
@@ -38,28 +36,14 @@ data class TextSpatialSpan(
       q.pushDouble((quad.getOrNull(i) ?: 0f).toDouble())
     }
     map.putArray("quad", q)
-    if (confidence != null) {
-      map.putDouble("confidence", confidence.toDouble())
-    }
+    if (confidence != null) map.putDouble("confidence", confidence.toDouble())
     map.putString("origin", origin)
-    if (pageNumber != null) {
-      map.putInt("pageNumber", pageNumber)
-    }
-    if (ptsMs != null) {
-      map.putDouble("ptsMs", ptsMs)
-    }
-    if (pageWidth != null) {
-      map.putDouble("pageWidth", pageWidth.toDouble())
-    }
-    if (pageHeight != null) {
-      map.putDouble("pageHeight", pageHeight.toDouble())
-    }
-    if (sectionIndex != null) {
-      map.putInt("sectionIndex", sectionIndex)
-    }
-    if (!href.isNullOrEmpty()) {
-      map.putString("href", href)
-    }
+    if (pageNumber != null) map.putInt("pageNumber", pageNumber)
+    if (ptsMs != null) map.putDouble("ptsMs", ptsMs)
+    if (pageWidth != null) map.putDouble("pageWidth", pageWidth.toDouble())
+    if (pageHeight != null) map.putDouble("pageHeight", pageHeight.toDouble())
+    if (sectionIndex != null) map.putInt("sectionIndex", sectionIndex)
+    if (!href.isNullOrEmpty()) map.putString("href", href)
     return map
   }
 
@@ -102,28 +86,39 @@ data class TextSpatialSpan(
 }
 
 /**
- * Offline text buffer entry in the pipeline registry.
- * Immutable once populated (either empty on creation, then filled by STT, or seeded from live snapshot).
- *
- * Holds the recognition result: text, tokens, timestamps, durations, lang, emotion, event,
- * and optional spatial spans (OCR / text-layer).
+ * Thin handle over shared C++ TxtOfflineEntry.
+ * Local fields mirror C for Kotlin consumers; populate syncs into C.
  */
 class OfflineTextEntry(
   val bufferId: String,
-  @Volatile var text: String = "",
-  @Volatile var tokens: Array<String> = emptyArray(),
-  @Volatile var timestamps: FloatArray = floatArrayOf(),
-  @Volatile var durations: FloatArray = floatArrayOf(),
-  @Volatile var spatialSpans: List<TextSpatialSpan> = emptyList(),
-  @Volatile var lang: String = "",
-  @Volatile var emotion: String = "",
-  @Volatile var event: String = "",
-  @Volatile var populated: Boolean = false
+  text: String = "",
+  tokens: Array<String> = emptyArray(),
+  timestamps: FloatArray = floatArrayOf(),
+  durations: FloatArray = floatArrayOf(),
+  spatialSpans: List<TextSpatialSpan> = emptyList(),
+  lang: String = "",
+  emotion: String = "",
+  event: String = "",
+  populated: Boolean = false,
 ) {
+  @Volatile var text: String = text
+  @Volatile var tokens: Array<String> = tokens
+  @Volatile var timestamps: FloatArray = timestamps
+  @Volatile var durations: FloatArray = durations
+  @Volatile var spatialSpans: List<TextSpatialSpan> = spatialSpans
+  @Volatile var lang: String = lang
+  @Volatile var emotion: String = emotion
+  @Volatile var event: String = event
+  @Volatile var populated: Boolean = populated
+
   val kind: String = "offlineTextBuffer"
   val state: String = "immutable"
 
-  val utf16Length: Int get() = text.length
+  val utf16Length: Int
+    get() {
+      val n = TextBufferNative.nativeOfflineUtf16Length(bufferId)
+      return if (n >= 0) n else text.length
+    }
   val tokenCount: Int get() = tokens.size
   val timestampCount: Int get() = timestamps.size
   val durationCount: Int get() = durations.size
@@ -133,10 +128,6 @@ class OfflineTextEntry(
   val hasEvent: Boolean get() = event.isNotEmpty()
   val hasSpatialSpans: Boolean get() = spatialSpans.isNotEmpty()
 
-  /**
-   * Populate the entry with STT/OCR result data. Only allowed once.
-   * @throws IllegalStateException if already populated.
-   */
   @Synchronized
   fun populate(
     text: String,
@@ -149,6 +140,9 @@ class OfflineTextEntry(
     spatialSpans: List<TextSpatialSpan> = emptyList(),
   ) {
     if (populated) throw IllegalStateException("OfflineTextEntry already populated: $bufferId")
+    if (!TextBufferNative.nativePopulateIfEmpty(bufferId, text, lang, emotion, event)) {
+      throw IllegalStateException("Native populate failed for $bufferId")
+    }
     this.text = text
     this.tokens = tokens
     this.timestamps = timestamps
@@ -177,7 +171,6 @@ class OfflineTextEntry(
     return map
   }
 
-  /** Build a WritableArray of spatial span maps for [start, start+maxCount). */
   fun spatialSpansSlice(start: Int, maxCount: Int): WritableArray {
     val arr = Arguments.createArray()
     if (start >= spatialSpans.size) return arr
@@ -186,5 +179,18 @@ class OfflineTextEntry(
       arr.pushMap(spatialSpans[i].toWritableMap())
     }
     return arr
+  }
+
+  companion object {
+    fun wrap(bufferId: String): OfflineTextEntry? {
+      if (!TextBufferNative.nativeIsOffline(bufferId)) return null
+      val text = TextBufferNative.nativeReadOfflineText(bufferId) ?: ""
+      val populated = TextBufferNative.nativeOfflinePopulated(bufferId)
+      return OfflineTextEntry(
+        bufferId = bufferId,
+        text = text,
+        populated = populated,
+      )
+    }
   }
 }

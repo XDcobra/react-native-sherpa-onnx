@@ -8,7 +8,7 @@
 #include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"
 #include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-validate-custom.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 
 #include <map>
 #include <mutex>

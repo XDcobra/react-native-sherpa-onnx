@@ -2,9 +2,12 @@ package com.sherpaonnx.text.pipeline
 
 import org.json.JSONObject
 
+/** One TXT2 journal record (type + UTF-16 payload); used by unit tests / legacy helpers. */
+internal data class TextSpoolJournalRecord(val type: Int, val payload: String)
+
 /**
  * Pure helpers for live-text spool checkpointing and `fullIfSpooled` replay.
- * Extracted for unit tests and shared Android replay semantics.
+ * Production SoT replay lives in shared C++ TextRegistry; these remain for JVM unit tests.
  */
 internal object TextSpoolReplay {
   const val RECORD_PARTIAL_SET = 1

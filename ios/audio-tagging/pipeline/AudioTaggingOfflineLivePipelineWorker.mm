@@ -3,7 +3,7 @@
 #import <Foundation/Foundation.h>
 
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 
 #include <algorithm>
 #include <cmath>

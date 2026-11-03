@@ -1,7 +1,7 @@
 #import "../../SherpaOnnx.h"
 #include "AudioRegistry.h"
 #import "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 
 #include "../core/AlignmentBridgeUtils.h"
 #include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"

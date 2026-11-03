@@ -9,7 +9,7 @@
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "sherpa-onnx-tts-engine-wrapper.h"
 #include "AudioRegistry.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 
 #include <memory>
 #include <optional>

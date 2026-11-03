@@ -2,7 +2,8 @@
 
 **Scope:** Internal implementation details of `liveTextBuffer` (the streaming/live text buffer).  
 **Audience:** SDK developers planning engine integrations, text pipeline flows, and partial/segment-based UI.  
-**Native entry types:** `LiveTextEntry` (Android/Kotlin), `PaLiveTextEntry` (iOS/C++).
+**Native SoT:** shared C++ `TxtLiveEntry` / `TextRegistry` under `android/src/main/cpp/textbuffer/` (both platforms).  
+**Android facade:** thin Kotlin `LiveTextEntry` (segment log + listeners; see [buffer-in-c-copy-backlog](../../migration/buffer-in-c-copy-backlog.md) T1–T5).
 
 ---
 

@@ -6,7 +6,7 @@
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 #include "../pipeline/PunctuationOfflineLivePipelineWorker.h"
 #include "../core/PunctuationBridgeState.h"
 #include "../core/PunctuationTextInputNormalization.hpp"

@@ -8,7 +8,7 @@
 #import "../../SherpaOnnx.h"
 #include "AudioRegistry.h"
 #import "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 #import <React/RCTLog.h>
 
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"

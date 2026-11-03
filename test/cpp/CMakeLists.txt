@@ -774,6 +774,30 @@ set_tests_properties(audiobuffer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+# TextBuffer shared registry host tests (always-on + opt-in spool via SHERPA_HOST_TEXT_SPOOL=1)
+set(TEXTBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/textbuffer")
+set(TEXTBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/textbuffer")
+if(TARGET gtest AND TARGET gtest_main)
+  set(TEXTBUFFER_GTEST_LIBS gtest gtest_main)
+else()
+  set(TEXTBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+endif()
+find_package(ZLIB REQUIRED)
+add_executable(textbuffer_host_test
+  "${TEXTBUFFER_TEST_DIR}/textbuffer_registry_test.cpp"
+  "${TEXTBUFFER_CPP_ROOT}/TextRegistry.cpp"
+)
+target_include_directories(textbuffer_host_test PRIVATE
+  "${TEXTBUFFER_CPP_ROOT}"
+)
+target_link_libraries(textbuffer_host_test PRIVATE ${TEXTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
+add_test(NAME textbuffer_host_test COMMAND $<TARGET_FILE:textbuffer_host_test>)
+set_tests_properties(textbuffer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+
+
 # PDF text-layer host test (disabled path by default; no PDFium required)
 set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 if(TARGET gtest AND TARGET gtest_main)
