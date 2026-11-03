@@ -183,16 +183,16 @@ class LiveSegmentEntry(
   }
 
   fun getSegments(startIndex: Int, maxCount: Int): List<SegmentRecord> {
-    val all = snapshotWindow()
     if (startIndex < 0 || maxCount < 0) {
       throw SegmentPipelineException(
         SegmentErrorCodes.SLICE_INVALID,
         "Invalid segment slice range start=$startIndex maxCount=$maxCount",
       )
     }
-    if (startIndex >= all.size) return emptyList()
-    val end = minOf(startIndex + maxCount, all.size)
-    return all.subList(startIndex, end)
+    val json =
+      SegmentBufferNative.nativeLiveSegmentsSlice(bufferId, startIndex, maxCount)
+        ?: return emptyList()
+    return OfflineSegmentEntry.segmentsFromJson(json)
   }
 
   fun createSegmentCursor(): Int {

@@ -110,7 +110,6 @@ object SegmentPipelineRegistry {
         "populateOfflineFromLiveIfEmpty failed target=$targetOfflineId live=$liveBufferId",
       )
     }
-    offlineMap[targetOfflineId]?.refreshFromNative()
   }
 
   fun getOffline(bufferId: String): OfflineSegmentEntry? {

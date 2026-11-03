@@ -189,6 +189,68 @@ TEST_F(SegmentRegistryFixture, LiveFinalize_RejectsFurtherAppend) {
   EXPECT_TRUE(seg_release_buffer(id));
 }
 
+TEST_F(SegmentRegistryFixture, OfflineFromLive_WindowSnapshotAndSlice) {
+  std::string liveId;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &liveId, &err)) << err;
+  for (int i = 0; i < 3; ++i) {
+    std::string segId;
+    int segIndex = -1;
+    ASSERT_TRUE(seg_live_append_segment(liveId, "speech", "a", i * 100, i * 100 + 50, 16000, 3,
+                                        false, 0.0, "{}", &segId, &segIndex, &err))
+        << err;
+  }
+
+  auto window = seg_live_get_window_segments(liveId, 1, 1);
+  ASSERT_EQ(window.size(), 1u);
+  EXPECT_EQ(window[0].startSample, 100);
+
+  auto oob = seg_live_get_window_segments(liveId, 10, 5);
+  EXPECT_TRUE(oob.empty());
+  auto neg = seg_live_get_window_segments(liveId, -1, 5);
+  EXPECT_TRUE(neg.empty());
+
+  std::string offlineId;
+  ASSERT_TRUE(seg_create_offline_from_live(liveId, "windowSnapshot", &offlineId, &err)) << err;
+  EXPECT_EQ(seg_offline_segment_count(offlineId), 3);
+
+  auto slice = seg_offline_get_segments(offlineId, 1, 2);
+  ASSERT_EQ(slice.size(), 2u);
+  EXPECT_EQ(slice[0].startSample, 100);
+  EXPECT_EQ(slice[1].startSample, 200);
+
+  EXPECT_TRUE(seg_release_buffer(liveId));
+  EXPECT_TRUE(seg_release_buffer(offlineId));
+}
+
+TEST_F(SegmentRegistryFixture, OfflinePopulate_ThenSlice_SecondFails) {
+  std::string offlineId;
+  std::string err;
+  ASSERT_TRUE(seg_create_empty_offline("audio_src", &offlineId, &err)) << err;
+  EXPECT_EQ(seg_offline_segment_count(offlineId), 0);
+
+  SegRecord r;
+  r.id = "seg_manual_1";
+  r.kind = "speech";
+  r.sourceAudioBufferId = "audio_src";
+  r.startSample = 0;
+  r.endSample = 1600;
+  r.sampleRate = 16000;
+  r.durationMs = 100;
+  ASSERT_TRUE(seg_offline_populate(offlineId, {r}, &err)) << err;
+  EXPECT_EQ(seg_offline_segment_count(offlineId), 1);
+
+  auto slice = seg_offline_get_segments(offlineId, 0, 10);
+  ASSERT_EQ(slice.size(), 1u);
+  EXPECT_EQ(slice[0].id, "seg_manual_1");
+
+  err.clear();
+  EXPECT_FALSE(seg_offline_populate(offlineId, {r}, &err));
+  EXPECT_NE(err.find("SEGMENT_INVALID_STATE"), std::string::npos);
+
+  EXPECT_TRUE(seg_release_buffer(offlineId));
+}
+
 TEST_F(SegmentRegistryFixture, OptInSpool_SkippedWithoutEnv) {
   const char *flag = std::getenv("SHERPA_HOST_SEGMENT_SPOOL");
   if (flag == nullptr || std::string(flag) != "1") {

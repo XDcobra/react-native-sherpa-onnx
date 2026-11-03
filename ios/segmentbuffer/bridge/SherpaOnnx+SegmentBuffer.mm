@@ -2287,44 +2287,11 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
                                     reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
-  std::shared_ptr<SegLiveEntry> live;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto it = g_seg_live.find(liveBufferId.UTF8String);
-    if (it == g_seg_live.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
-      return;
-    }
-    live = it->second;
-  }
-  try {
-    std::vector<SegRecord> records;
-    if ([mode isEqualToString:@"windowSnapshot"]) records = live->snapshotWindow();
-    else if (mode == nil || [mode isEqualToString:@"fullIfSpooled"]) records = live->snapshotFullIfSpooled();
-    else {
-      reject(@"SEGMENT_INVALID_ARGUMENT", [NSString stringWithFormat:@"Unknown mode: %@", mode], nil);
-      return;
-    }
-
-    std::shared_ptr<SegOfflineEntry> off;
-    {
-      std::lock_guard<std::mutex> lock(g_seg_mutex);
-      off = std::make_shared<SegOfflineEntry>();
-      off->bufferId = seg_generate_id("seg_off");
-      off->segments = records;
-      off->sourceAudioBufferId = live->sourceAudioBufferId;
-      g_seg_offline[off->bufferId] = off;
-    }
-    NSMutableDictionary *out = [@{
-      @"bufferId": [NSString stringWithUTF8String:off->bufferId.c_str()],
-      @"kind": @"offlineSegmentBuffer",
-      @"state": @"immutable",
-      @"segmentCount": @((int)off->segments.size()),
-    } mutableCopy];
-    if (!off->sourceAudioBufferId.empty()) out[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:off->sourceAudioBufferId.c_str()];
-    resolve(out);
-  } catch (const std::exception &e) {
-    NSString *msg = [NSString stringWithUTF8String:e.what()];
+  std::string offlineId;
+  std::string err;
+  const std::string modeStr = mode != nil ? mode.UTF8String : "fullIfSpooled";
+  if (!seg_create_offline_from_live(liveBufferId.UTF8String, modeStr, &offlineId, &err)) {
+    NSString *msg = err.empty() ? @"createOfflineFromLive failed" : [NSString stringWithUTF8String:err.c_str()];
     NSString *code = @"SEGMENT_INTERNAL_ERROR";
     NSRange idx = [msg rangeOfString:@":"];
     if (idx.location != NSNotFound) {
@@ -2332,7 +2299,23 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       msg = [[msg substringFromIndex:idx.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     }
     reject(code, msg, nil);
+    return;
   }
+  auto off = seg_get_offline_entry(offlineId);
+  if (!off) {
+    reject(@"SEGMENT_INTERNAL_ERROR", @"Offline segment buffer missing after create", nil);
+    return;
+  }
+  NSMutableDictionary *out = [@{
+    @"bufferId": [NSString stringWithUTF8String:off->bufferId.c_str()],
+    @"kind": @"offlineSegmentBuffer",
+    @"state": @"immutable",
+    @"segmentCount": @(seg_offline_segment_count(offlineId)),
+  } mutableCopy];
+  if (!off->sourceAudioBufferId.empty()) {
+    out[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:off->sourceAudioBufferId.c_str()];
+  }
+  resolve(out);
 #else
   reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
 #endif
@@ -2345,50 +2328,11 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
                                       reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
-  std::shared_ptr<SegLiveEntry> live;
-  std::shared_ptr<SegOfflineEntry> off;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto liveIt = g_seg_live.find(liveBufferId.UTF8String);
-    if (liveIt == g_seg_live.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
-      return;
-    }
-    live = liveIt->second;
-    auto offIt = g_seg_offline.find(targetBufferId.UTF8String);
-    if (offIt == g_seg_offline.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", targetBufferId], nil);
-      return;
-    }
-    off = offIt->second;
-    if (!off->segments.empty()) {
-      reject(@"SEGMENT_INVALID_STATE", [NSString stringWithFormat:@"Offline segment buffer already populated: %@", targetBufferId], nil);
-      return;
-    }
-  }
-
-  try {
-    std::vector<SegRecord> records;
-    if ([mode isEqualToString:@"windowSnapshot"]) {
-      records = live->snapshotWindow();
-    } else if (mode == nil || [mode isEqualToString:@"fullIfSpooled"]) {
-      records = live->snapshotFullIfSpooled();
-    } else {
-      reject(@"SEGMENT_INVALID_ARGUMENT", [NSString stringWithFormat:@"Unknown mode: %@", mode], nil);
-      return;
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(g_seg_mutex);
-      if (!off->segments.empty()) {
-        reject(@"SEGMENT_INVALID_STATE", [NSString stringWithFormat:@"Offline segment buffer already populated: %@", targetBufferId], nil);
-        return;
-      }
-      off->segments = records;
-    }
-    resolve(nil);
-  } catch (const std::exception &e) {
-    NSString *msg = [NSString stringWithUTF8String:e.what()];
+  std::string err;
+  const std::string modeStr = mode != nil ? mode.UTF8String : "fullIfSpooled";
+  if (!seg_populate_offline_from_live_if_empty(targetBufferId.UTF8String, liveBufferId.UTF8String,
+                                               modeStr, &err)) {
+    NSString *msg = err.empty() ? @"populateOfflineFromLiveIfEmpty failed" : [NSString stringWithUTF8String:err.c_str()];
     NSString *code = @"SEGMENT_INTERNAL_ERROR";
     NSRange idx = [msg rangeOfString:@":"];
     if (idx.location != NSNotFound) {
@@ -2396,7 +2340,9 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       msg = [[msg substringFromIndex:idx.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     }
     reject(code, msg, nil);
+    return;
   }
+  resolve(nil);
 #else
   reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
 #endif
@@ -2479,39 +2425,25 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       return;
     }
 
-    std::vector<SegRecord> snap;
-    {
-      std::lock_guard<std::mutex> lock(g_seg_mutex);
-      const char *bufferKey = bufferId.UTF8String;
-      if (bufferKey == nullptr) {
-        reject(@"SEGMENT_BUFFER_NOT_FOUND", @"Offline segment buffer not found", nil);
-        return;
-      }
-      auto it = g_seg_offline.find(bufferKey);
-      if (it == g_seg_offline.end()) {
-        seg_debug_log([NSString stringWithFormat:
-          @"getOfflineSegmentBufferSegments reject not found bufferId=%@",
-          bufferId ?: @"<nil>"]);
-        reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", bufferId], nil);
-        return;
-      }
-      auto &segments = it->second->segments;
-      const int64_t total = static_cast<int64_t>(segments.size());
-      const int64_t end64 = std::min<int64_t>(total, s64 + c64);
-#if DEBUG
+    const char *bufferKey = bufferId.UTF8String;
+    if (bufferKey == nullptr || !seg_get_offline_entry(bufferKey)) {
       seg_debug_log([NSString stringWithFormat:
-        @"getOfflineSegmentBufferSegments slice total=%lld s=%lld c=%lld end=%lld",
-        (long long)total,
-        (long long)s64,
-        (long long)c64,
-        (long long)end64]);
-#endif
-      if (s64 < total && end64 > s64) {
-        const size_t from = static_cast<size_t>(s64);
-        const size_t to = static_cast<size_t>(end64);
-        snap.assign(segments.begin() + from, segments.begin() + to);
-      }
+        @"getOfflineSegmentBufferSegments reject not found bufferId=%@",
+        bufferId ?: @"<nil>"]);
+      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", bufferId], nil);
+      return;
     }
+    const int total = seg_offline_segment_count(bufferKey);
+    std::vector<SegRecord> snap =
+        seg_offline_get_segments(bufferKey, static_cast<int>(s64), static_cast<int>(c64));
+#if DEBUG
+    seg_debug_log([NSString stringWithFormat:
+      @"getOfflineSegmentBufferSegments slice total=%d s=%lld c=%lld snap=%lu",
+      total,
+      (long long)s64,
+      (long long)c64,
+      (unsigned long)snap.size()]);
+#endif
 
     NSArray *segmentsOut = nil;
     if (snap.empty()) {
@@ -2558,21 +2490,6 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
     [NSThread isMainThread] ? @"main" : @"background"]);
 #endif
   @try {
-    std::shared_ptr<SegLiveEntry> entry;
-    {
-      std::lock_guard<std::mutex> lock(g_seg_mutex);
-      const char *bufferKey = liveBufferId.UTF8String;
-      if (bufferKey == nullptr) {
-        reject(@"SEGMENT_BUFFER_NOT_FOUND", @"Live segment buffer not found", nil);
-        return;
-      }
-      auto it = g_seg_live.find(bufferKey);
-      if (it == g_seg_live.end()) {
-        reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
-        return;
-      }
-      entry = it->second;
-    }
     if (!std::isfinite(startIndex) || !std::isfinite(maxCount)) {
       seg_debug_log(@"getLiveSegmentBufferSegments reject invalid finite slice");
       reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
@@ -2585,17 +2502,13 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
       return;
     }
-    std::vector<SegRecord> snap;
-    {
-      std::lock_guard<std::mutex> guard(entry->lock);
-      const int64_t total = static_cast<int64_t>(entry->segments.size());
-      const int64_t end64 = std::min<int64_t>(total, s64 + c64);
-      if (s64 < total && end64 > s64) {
-        const size_t from = static_cast<size_t>(s64);
-        const size_t to = static_cast<size_t>(end64);
-        snap.assign(entry->segments.begin() + from, entry->segments.begin() + to);
-      }
+    const char *bufferKey = liveBufferId.UTF8String;
+    if (bufferKey == nullptr || !seg_get_live_entry(bufferKey)) {
+      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
+      return;
     }
+    std::vector<SegRecord> snap =
+        seg_live_get_window_segments(bufferKey, static_cast<int>(s64), static_cast<int>(c64));
     NSArray *segmentsOut = nil;
     if (snap.empty()) {
       segmentsOut = @[];

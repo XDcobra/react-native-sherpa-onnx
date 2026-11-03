@@ -1,5 +1,6 @@
 #include "SegmentRegistry.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -405,6 +406,53 @@ bool seg_populate_offline_from_live_if_empty(const std::string &offlineBufferId,
     if (error) *error = e.what();
     return false;
   }
+}
+
+int seg_offline_segment_count(const std::string &offlineBufferId) {
+  auto off = seg_get_offline_entry(offlineBufferId);
+  if (!off) return -1;
+  return static_cast<int>(off->segments.size());
+}
+
+std::vector<SegRecord> seg_offline_get_segments(const std::string &offlineBufferId, int start,
+                                                int maxCount) {
+  auto off = seg_get_offline_entry(offlineBufferId);
+  if (!off || start < 0 || maxCount < 0) return {};
+  const int total = static_cast<int>(off->segments.size());
+  if (start >= total || maxCount == 0) return {};
+  const int64_t end64 = std::min<int64_t>(static_cast<int64_t>(start) + maxCount, total);
+  const int end = static_cast<int>(end64);
+  return std::vector<SegRecord>(off->segments.begin() + start, off->segments.begin() + end);
+}
+
+std::vector<SegRecord> seg_live_get_window_segments(const std::string &liveBufferId, int start,
+                                                    int maxCount) {
+  auto live = seg_get_live_entry(liveBufferId);
+  if (!live || start < 0 || maxCount < 0) return {};
+  std::lock_guard<std::mutex> lock(live->lock);
+  const int total = static_cast<int>(live->segments.size());
+  if (start >= total || maxCount == 0) return {};
+  const int64_t end64 = std::min<int64_t>(static_cast<int64_t>(start) + maxCount, total);
+  const int end = static_cast<int>(end64);
+  return std::vector<SegRecord>(live->segments.begin() + start, live->segments.begin() + end);
+}
+
+bool seg_offline_populate(const std::string &offlineBufferId,
+                          const std::vector<SegRecord> &records, std::string *error) {
+  auto off = seg_get_offline_entry(offlineBufferId);
+  if (!off) {
+    if (error)
+      *error = "SEGMENT_BUFFER_NOT_FOUND: Offline segment buffer not found: " + offlineBufferId;
+    return false;
+  }
+  if (off->populated || !off->segments.empty()) {
+    if (error)
+      *error = "SEGMENT_INVALID_STATE: Offline segment buffer already populated: " + offlineBufferId;
+    return false;
+  }
+  off->segments = records;
+  off->populated = true;
+  return true;
 }
 
 void seg_release_all_entries() {

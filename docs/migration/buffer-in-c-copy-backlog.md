@@ -91,7 +91,7 @@ Buffer behavior must stay as today (append/drain/cursor/finalize/spool/overflow/
 | S3 | Segment | Link-map dual SoT | — | Shared `SegmentLinkMapRegistry` in `cpp/segmentbuffer/` | **done** (this branch) |
 | S4 | Segment | Duplicate payload validation (TS + iOS ObjC strict speech schema) | C append validates kind/samples only; bridge keeps ObjC strict checks | Single shared validator in C++ | **open** |
 | S5 | Segment | `pipelineLiveSegmentAppended` ships full segment payloads | Event contract unchanged | Optional truncated/delta events or handle id without payload dump | **open** |
-| S6 | Segment | Offline-from-live / snapshots copy full `vector`/`List` of records | SoT cutover preserved snapshot APIs | Shared readers / bounded drain without full materialize | **open** |
+| S6 | Segment | Offline-from-live / snapshots copy full `vector`/`List` of records | SoT cutover preserved snapshot APIs | Shared readers / bounded drain without full materialize | **done** (`refactor/close-segmentbuffer-copy-backlog`: `seg_*_get_*_segments` + thin OfflineSegmentEntry; offline-from-live still one C SoT copy) |
 | S7 | Segment | Android text/audio still notify Kotlin `SegmentationEngineRegistry` while C `seg_engine_on_*` are weak no-ops | Engine remains Kotlin on Android; iOS strong SegEngine overrides weak | Single-path hooks when engine SoT moves to C (S2) | **open** |
 | S8 | Segment | Kotlin `LiveSegmentEntry` mirrors segment log + cursors/listeners alongside C spool/window | Preserve worker drain/listener APIs without rewriting every consumer | Cursor/drain from C store; Kotlin handle only | **done** (`refactor/close-segmentbuffer-copy-backlog`; unknown cursor → empty like C, not former Kotlin throw) |
 

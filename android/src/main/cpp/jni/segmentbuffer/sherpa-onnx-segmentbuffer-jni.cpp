@@ -215,6 +215,38 @@ Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeOfflineSnapshotJs
   return utf8ToJstring(env, segment_records_to_json(off->segments));
 }
 
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeOfflineSegmentCount(
+    JNIEnv *env, jclass, jstring offlineId) {
+  return seg_offline_segment_count(jstringToUtf8(env, offlineId));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeOfflineSegmentsSlice(
+    JNIEnv *env, jclass, jstring offlineId, jint start, jint maxCount) {
+  const std::string id = jstringToUtf8(env, offlineId);
+  if (!seg_get_offline_entry(id)) return nullptr;
+  auto records = seg_offline_get_segments(id, start, maxCount);
+  return utf8ToJstring(env, segment_records_to_json(records));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativeLiveSegmentsSlice(
+    JNIEnv *env, jclass, jstring liveId, jint start, jint maxCount) {
+  const std::string id = jstringToUtf8(env, liveId);
+  if (!seg_get_live_entry(id)) return nullptr;
+  auto records = seg_live_get_window_segments(id, start, maxCount);
+  return utf8ToJstring(env, segment_records_to_json(records));
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_segment_pipeline_SegmentBufferNative_nativePopulateOffline(
+    JNIEnv *env, jclass, jstring offlineId, jstring segmentsJson) {
+  std::string err;
+  auto records = segment_records_from_json(jstringToUtf8(env, segmentsJson));
+  return seg_offline_populate(jstringToUtf8(env, offlineId), records, &err) ? JNI_TRUE : JNI_FALSE;
+}
+
 // --- Link map ---
 
 JNIEXPORT jstring JNICALL

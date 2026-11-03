@@ -59,6 +59,15 @@ bool seg_populate_offline_from_live_if_empty(const std::string &offlineBufferId,
                                              const std::string &liveBufferId,
                                              const std::string &mode, std::string *error = nullptr);
 
+/** Offline SoT: count / bounded slice / one-shot populate (engine finalize). */
+int seg_offline_segment_count(const std::string &offlineBufferId);
+std::vector<SegRecord> seg_offline_get_segments(const std::string &offlineBufferId, int start,
+                                                int maxCount);
+std::vector<SegRecord> seg_live_get_window_segments(const std::string &liveBufferId, int start,
+                                                    int maxCount);
+bool seg_offline_populate(const std::string &offlineBufferId,
+                          const std::vector<SegRecord> &records, std::string *error = nullptr);
+
 void seg_release_all_entries();
 
 /** Optional: bridge installs callback for pipelineLiveSegmentAppended. */

@@ -50,6 +50,15 @@ internal object SegmentBufferNative {
   @JvmStatic external fun nativeLiveSnapshotJson(liveId: String, mode: String): String?
   @JvmStatic external fun nativeOfflineSnapshotJson(offlineId: String): String?
 
+  @JvmStatic external fun nativeOfflineSegmentCount(offlineId: String): Int
+  /** JSON `{"segments":[...]}` for a bounded offline slice; null if missing. */
+  @JvmStatic
+  external fun nativeOfflineSegmentsSlice(offlineId: String, start: Int, maxCount: Int): String?
+  /** JSON `{"segments":[...]}` for a bounded live window slice; null if missing. */
+  @JvmStatic
+  external fun nativeLiveSegmentsSlice(liveId: String, start: Int, maxCount: Int): String?
+  @JvmStatic external fun nativePopulateOffline(offlineId: String, segmentsJson: String): Boolean
+
   @JvmStatic external fun nativeCreateSegmentCursor(liveId: String): Int
   /** JSON `{"startIndex":N,"segments":[...]}`; null on missing live buffer. */
   @JvmStatic external fun nativeDrainSegments(liveId: String, cursorId: Int, maxCount: Int): String?
