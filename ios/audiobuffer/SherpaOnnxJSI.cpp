@@ -1,6 +1,6 @@
 #include "SherpaOnnxJSI.h"
 
-#include "../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "AudioVisualization.h"
 
 #include <cstring>

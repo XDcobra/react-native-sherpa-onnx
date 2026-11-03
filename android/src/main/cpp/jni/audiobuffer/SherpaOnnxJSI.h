@@ -1,6 +1,5 @@
 #pragma once
 
-#include <jni.h>
 #include <jsi/jsi.h>
 
 #include <cstddef>
@@ -20,7 +19,6 @@ class OwnedBuffer : public facebook::jsi::MutableBuffer {
   std::vector<uint8_t> buf_;
 };
 
-bool cacheJNIReferences(JNIEnv *env, jobject registry);
 void installJSIBindings(facebook::jsi::Runtime &rt);
 
 }  // namespace sherpa

@@ -73,6 +73,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/stt/*.{h,cpp}",
     # Shared TTS core (CXX OfflineTts). JNI excluded below.
     "android/src/main/cpp/tts/*.{h,cpp}",
+    # Shared AudioBuffer registry (Pa* offline/live; JNI excluded below).
+    "android/src/main/cpp/audiobuffer/*.{h,cpp}",
     # Shared ImageBuffer core (decode + registry; JNI excluded below).
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared VideoBuffer core (platform/android excluded below).
@@ -118,6 +120,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/kws/sherpa-onnx-kws-jni.cpp",
     "android/src/main/cpp/jni/stt/sherpa-onnx-stt-jni.cpp",
     "android/src/main/cpp/jni/image/**/*",
+    "android/src/main/cpp/jni/audiobuffer/**/*",
     "android/src/main/cpp/jni/video/**/*",
     "android/src/main/cpp/video/platform/android/**/*",
     "android/src/main/cpp/image/platform/android/**/*",
@@ -295,6 +298,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/kws\"",
     "\"#{pod_root}/android/src/main/cpp/stt\"",
     "\"#{pod_root}/android/src/main/cpp/tts\"",
+    "\"#{pod_root}/android/src/main/cpp/audiobuffer\"",
     "\"#{pod_root}/third_party/onnxruntime/include/onnxruntime/core/session\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",

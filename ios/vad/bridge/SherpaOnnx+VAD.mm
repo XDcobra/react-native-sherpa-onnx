@@ -1,6 +1,6 @@
 #import "../../SherpaOnnx.h"
 
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #include "sherpa-onnx-vad-engine-wrapper.h"
 #include "../pipeline/VadPipelineWorker.h"

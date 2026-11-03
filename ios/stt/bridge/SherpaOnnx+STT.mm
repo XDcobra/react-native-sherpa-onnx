@@ -6,7 +6,7 @@
  */
 
 #import "../../SherpaOnnx.h"
-#import "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #import "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
 #import "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #import <React/RCTLog.h>

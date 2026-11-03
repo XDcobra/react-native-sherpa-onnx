@@ -9,8 +9,8 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 
-#include "../pipeline/PaLiveEntry.h"
-#include "../pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "PaLiveEntry.h"
+#include "AudioRegistry.h"
 #import "../session/PaAudioSessionCoordinator.h"
 
 #include <algorithm>

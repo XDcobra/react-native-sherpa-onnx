@@ -5,6 +5,7 @@
 #include "codec/CodecEvents.h"
 #include "codec/CodecRuntime.h"
 #include "codec/CodecTypes.h"
+#include "AudioRegistry.h"
 #include "audio/LiveAudioTap.h"
 #include "audio/VideoAudioExtractor.h"
 #include "core/Uuid.h"
@@ -607,32 +608,15 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeStartLiveAudioTap(
     PutString(env, map, put, "errorCode", "VIDEO_BUFFER_NOT_FOUND");
     return map;
   }
-  env->GetJavaVM(&gVm);
-  jclass regCls = env->FindClass(
-      "com/sherpaonnx/audio/pipeline/PipelineAudioRegistry");
-  if (regCls == nullptr) {
-    PutString(env, map, put, "errorCode", "VIDEO_INTERNAL");
-    return map;
-  }
-  jmethodID appendMid = env->GetStaticMethodID(
-      regCls, "appendSamplesToLiveJni", "(Ljava/lang/String;[FI)V");
-  jclass gReg = static_cast<jclass>(env->NewGlobalRef(regCls));
-  env->DeleteLocalRef(regCls);
   auto tap = std::make_unique<sherpa_onnx::video::LiveAudioTap>();
   auto st = tap->Start(
       entry, targetRate,
-      [gReg, appendMid, audioId](const float* samples, int n, int sr) {
-        if (gVm == nullptr || samples == nullptr || n <= 0) return;
-        bool attached = false;
-        JNIEnv* je = EnvOrAttach(&attached);
-        if (je == nullptr) return;
-        jfloatArray arr = je->NewFloatArray(n);
-        je->SetFloatArrayRegion(arr, 0, n, samples);
-        jstring jid = je->NewStringUTF(audioId.c_str());
-        je->CallStaticVoidMethod(gReg, appendMid, jid, arr, sr);
-        je->DeleteLocalRef(arr);
-        je->DeleteLocalRef(jid);
-        if (attached) gVm->DetachCurrentThread();
+      [audioId](const float* samples, int n, int sr) {
+        if (samples == nullptr || n <= 0) return;
+        std::string errCode;
+        std::string errMsg;
+        pa_append_samples_to_live(audioId, samples, static_cast<size_t>(n), sr,
+                                  &errCode, &errMsg);
       });
   if (!st.ok) {
     PutString(env, map, put, "errorCode", st.errorCode);

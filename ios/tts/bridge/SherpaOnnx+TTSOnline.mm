@@ -4,10 +4,10 @@
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../audio/pipeline/PaLiveEntry.h"
+#include "PaLiveEntry.h"
 
 // Instance → active pipeline tracking
 static std::unordered_map<std::string, std::string> g_tts_instance_to_pipeline;

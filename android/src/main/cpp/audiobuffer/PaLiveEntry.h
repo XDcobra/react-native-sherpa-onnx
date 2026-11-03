@@ -9,7 +9,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -24,6 +26,16 @@
 #import <Foundation/Foundation.h>
 #include <CoreFoundation/CoreFoundation.h>
 #endif
+
+inline uint64_t pa_now_ms() {
+#ifdef __OBJC__
+  return (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
+#else
+  return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+#endif
+}
 
 // ==================== Append origin types ====================
 
@@ -541,11 +553,7 @@ struct PaLiveEntry {
       pendingFrames += (int)appendedCount;
       mergePendingOrigin(origin);
 
-#ifdef __OBJC__
-      uint64_t nowMs = (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
-#else
-      uint64_t nowMs = 0;
-#endif
+      uint64_t nowMs = pa_now_ms();
       bool intervalReached = appendEventMinIntervalMs <= 0 ||
                              lastAppendEventAtMs == 0 ||
                              (nowMs - lastAppendEventAtMs) >= (uint64_t)appendEventMinIntervalMs;
@@ -575,9 +583,7 @@ struct PaLiveEntry {
 
       payload = buildPendingPayloadLocked();
       resetPendingAppendStateLocked();
-#ifdef __OBJC__
-      lastAppendEventAtMs = (uint64_t)(CFAbsoluteTimeGetCurrent() * 1000.0);
-#endif
+      lastAppendEventAtMs = pa_now_ms();
       shouldEmit = true;
     }
 
