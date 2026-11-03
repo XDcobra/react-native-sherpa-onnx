@@ -4990,13 +4990,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_TOO_LARGE, "maxUtf16 $m exceeds max ${com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT}")
         return
       }
-      val text = entry.text
-      if (s >= text.length) {
-        promise.resolve("")
-        return
-      }
-      val end = minOf(s + m, text.length)
-      promise.resolve(text.substring(s, end))
+      val slice =
+        com.sherpaonnx.text.pipeline.TextBufferNative.nativeReadOfflineTextSlice(bufferId, s, m)
+      promise.resolve(slice ?: "")
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -5170,13 +5166,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args")
         return
       }
-      val text = entry.currentText
-      if (s >= text.length) {
-        promise.resolve("")
-        return
-      }
-      val end = minOf(s + m, text.length)
-      promise.resolve(text.substring(s, end))
+      val slice =
+        com.sherpaonnx.text.pipeline.TextBufferNative.nativeSnapshotTextSlice(liveBufferId, s, m)
+      promise.resolve(slice ?: "")
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }

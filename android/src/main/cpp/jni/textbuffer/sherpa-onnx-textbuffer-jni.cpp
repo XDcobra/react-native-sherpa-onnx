@@ -263,6 +263,28 @@ Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeReadOfflineText(JNIEnv 
   return utf8ToJstring(env, text);
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeReadOfflineTextSlice(
+    JNIEnv *env, jclass, jstring bufferId, jint startUtf16, jint maxUtf16) {
+  std::string text, err;
+  if (!txt_copy_offline_text_utf16_slice(jstringToUtf8(env, bufferId), startUtf16, maxUtf16, &text,
+                                         &err)) {
+    return nullptr;
+  }
+  return utf8ToJstring(env, text);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeSnapshotTextSlice(
+    JNIEnv *env, jclass, jstring liveId, jint startUtf16, jint maxUtf16) {
+  std::string text, err;
+  if (!txt_copy_live_snapshot_utf16_slice(jstringToUtf8(env, liveId), startUtf16, maxUtf16, &text,
+                                          &err)) {
+    return nullptr;
+  }
+  return utf8ToJstring(env, text);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativePopulateIfEmpty(
     JNIEnv *env, jclass, jstring bufferId, jstring text, jobjectArray tokens,

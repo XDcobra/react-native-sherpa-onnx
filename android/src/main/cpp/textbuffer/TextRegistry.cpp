@@ -188,6 +188,44 @@ bool txt_read_offline_text_with_lang(const std::string &bufferId, std::string *t
   return true;
 }
 
+bool txt_copy_offline_text_utf16_slice(const std::string &bufferId, int startUtf16, int maxUtf16,
+                                       std::string *out, std::string *error) {
+  if (!out) {
+    if (error) *error = "Output string is null";
+    return false;
+  }
+  auto entry = txt_get_offline_entry(bufferId);
+  if (!entry) {
+    if (error) *error = "Offline text buffer not found";
+    return false;
+  }
+  *out = txt_utf16_slice(entry->text, startUtf16, maxUtf16);
+  return true;
+}
+
+bool txt_copy_live_snapshot_utf16_slice(const std::string &liveBufferId, int startUtf16,
+                                        int maxUtf16, std::string *out, std::string *error) {
+  if (!out) {
+    if (error) *error = "Output string is null";
+    return false;
+  }
+  auto live = txt_get_live_entry(liveBufferId);
+  if (!live) {
+    if (error) *error = "Live text buffer not found";
+    return false;
+  }
+  try {
+    *out = txt_utf16_slice(live->snapshotText(), startUtf16, maxUtf16);
+    return true;
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return false;
+  } catch (...) {
+    if (error) *error = "Unknown live text snapshot slice error";
+    return false;
+  }
+}
+
 bool txt_populate_offline_if_empty(const std::string &bufferId, const std::string &text,
                                    const std::vector<std::string> &tokens,
                                    const std::vector<float> &timestamps,

@@ -61,6 +61,58 @@ TEST_F(TextRegistryFixture, CreateEmptyOffline_Populate_Release) {
   EXPECT_FALSE(txt_read_offline_text(id, &text, &err));
 }
 
+TEST_F(TextRegistryFixture, Utf16Slice_AsciiMidAndPastEnd) {
+  EXPECT_EQ(txt_utf16_slice("abcdef", 2, 3), "cde");
+  EXPECT_EQ(txt_utf16_slice("abcdef", 6, 1), "");
+  EXPECT_EQ(txt_utf16_slice("abcdef", 0, 0), "");
+  EXPECT_EQ(txt_utf16_slice("", 0, 4), "");
+}
+
+TEST_F(TextRegistryFixture, Utf16Slice_MultibyteAndEmoji) {
+  // "ä" is one UTF-16 unit
+  EXPECT_EQ(txt_utf16_slice("xäy", 1, 1), "ä");
+  EXPECT_EQ(txt_utf16_slice("xäy", 0, 2), "xä");
+  // U+1F600 😀 = two UTF-16 units; maxUnits=1 omits the whole codepoint
+  const std::string emoji = "\xF0\x9F\x98\x80";
+  EXPECT_EQ(txt_utf16_length(emoji), 2);
+  EXPECT_EQ(txt_utf16_slice(emoji, 0, 2), emoji);
+  EXPECT_EQ(txt_utf16_slice(emoji, 0, 1), "");
+  const std::string mixed = std::string("a") + emoji + "b";
+  EXPECT_EQ(txt_utf16_slice(mixed, 1, 2), emoji);
+  EXPECT_EQ(txt_utf16_slice(mixed, 3, 1), "b");
+}
+
+TEST_F(TextRegistryFixture, OfflineUtf16Slice_MatchesFullOverlap) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_empty_offline(&id, &err)) << err;
+  ASSERT_TRUE(txt_populate_offline_if_empty(id, "hello world", {}, {}, {}, "", "", "", &err))
+      << err;
+  std::string full;
+  ASSERT_TRUE(txt_read_offline_text(id, &full, &err)) << err;
+  std::string slice;
+  ASSERT_TRUE(txt_copy_offline_text_utf16_slice(id, 6, 5, &slice, &err)) << err;
+  EXPECT_EQ(slice, "world");
+  EXPECT_EQ(slice, full.substr(6, 5));
+  ASSERT_TRUE(txt_copy_offline_text_utf16_slice(id, 100, 5, &slice, &err)) << err;
+  EXPECT_EQ(slice, "");
+}
+
+TEST_F(TextRegistryFixture, LiveSnapshotUtf16Slice_AfterAppend) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_live(1024, 100, false, 0, "off", "", true, &id, &err)) << err;
+  auto live = txt_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+  ASSERT_TRUE(txt_live_write_partial(live, "abcdef", &err)) << err;
+  std::string slice;
+  ASSERT_TRUE(txt_copy_live_snapshot_utf16_slice(id, 2, 3, &slice, &err)) << err;
+  EXPECT_EQ(slice, "cde");
+  ASSERT_TRUE(txt_live_append_text(live, "gh", &err)) << err;
+  ASSERT_TRUE(txt_copy_live_snapshot_utf16_slice(id, 5, 10, &slice, &err)) << err;
+  EXPECT_EQ(slice, "fgh");
+}
+
 TEST_F(TextRegistryFixture, OfflinePopulateTokensTimestampsDurations) {
   std::string id;
   std::string err;

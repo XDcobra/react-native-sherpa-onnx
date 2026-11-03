@@ -60,6 +60,12 @@ internal object TextBufferNative {
   @JvmStatic external fun nativeReadOfflineText(bufferId: String): String?
 
   @JvmStatic
+  external fun nativeReadOfflineTextSlice(bufferId: String, startUtf16: Int, maxUtf16: Int): String?
+
+  @JvmStatic
+  external fun nativeSnapshotTextSlice(liveId: String, startUtf16: Int, maxUtf16: Int): String?
+
+  @JvmStatic
   external fun nativePopulateIfEmpty(
     bufferId: String,
     text: String,
