@@ -28,15 +28,24 @@ std::shared_ptr<TxtOfflineEntry> txt_get_offline_entry(const std::string &buffer
 bool txt_live_is_recording(const std::shared_ptr<TxtLiveEntry> &entry);
 bool txt_live_write_partial(const std::shared_ptr<TxtLiveEntry> &entry, const std::string &text,
                             std::string *error = nullptr);
+bool txt_live_append_text(const std::shared_ptr<TxtLiveEntry> &entry, const std::string &text,
+                          std::string *error = nullptr);
 bool txt_live_commit_segment(const std::shared_ptr<TxtLiveEntry> &entry, const std::string &text,
                              const std::vector<std::string> &tokens,
                              const std::vector<float> &timestamps, const std::string &source,
                              const std::string &metaJson = {}, std::string *error = nullptr);
+bool txt_live_snapshot_text(const std::shared_ptr<TxtLiveEntry> &entry, std::string *textOut,
+                            std::string *error = nullptr);
 
 bool txt_read_offline_text(const std::string &bufferId, std::string *text,
                            std::string *error = nullptr);
 bool txt_read_offline_text_with_lang(const std::string &bufferId, std::string *text,
                                      std::string *lang, std::string *error = nullptr);
+bool txt_copy_offline_text_utf16_slice(const std::string &bufferId, int startUtf16, int maxUtf16,
+                                       std::string *out, std::string *error = nullptr);
+bool txt_copy_live_snapshot_utf16_slice(const std::string &liveBufferId, int startUtf16,
+                                        int maxUtf16, std::string *out,
+                                        std::string *error = nullptr);
 
 bool txt_populate_offline_if_empty(const std::string &bufferId, const std::string &text,
                                    const std::vector<std::string> &tokens,

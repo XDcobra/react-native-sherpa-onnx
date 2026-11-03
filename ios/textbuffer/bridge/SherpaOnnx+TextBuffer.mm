@@ -716,23 +716,14 @@ static void txt_emit_live_text_segment_event(
             return;
         }
 
-        std::lock_guard<std::mutex> lock(g_txt_mutex);
-        auto it = g_txt_offline.find(bid);
-        if (it == g_txt_offline.end()) {
+        std::string slice;
+        std::string err;
+        if (!txt_copy_offline_text_utf16_slice(bid, s, m, &slice, &err)) {
             reject(kTxtErrBufferNotFound,
                    [NSString stringWithFormat:@"Offline text buffer not found: %@", bufferId], nil);
             return;
         }
-
-        NSString *full = [NSString stringWithUTF8String:it->second->text.c_str()] ?: @"";
-        int totalLen = (int)[full length];
-        if (s >= totalLen) {
-            resolve(@"");
-            return;
-        }
-        int end = MIN(s + m, totalLen);
-        NSRange range = NSMakeRange(s, end - s);
-        resolve([full substringWithRange:range]);
+        resolve([NSString stringWithUTF8String:slice.c_str()] ?: @"");
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
     }
@@ -993,28 +984,14 @@ static void txt_emit_live_text_segment_event(
             return;
         }
 
-        std::shared_ptr<TxtLiveEntry> entry;
-        {
-            std::lock_guard<std::mutex> lock(g_txt_mutex);
-            auto it = g_txt_live.find(lid);
-            if (it == g_txt_live.end()) {
-                reject(kTxtErrBufferNotFound,
-                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
-                return;
-            }
-            entry = it->second;
-        }
-
-        std::string current = entry->snapshotText();
-        NSString *full = [NSString stringWithUTF8String:current.c_str()] ?: @"";
-        int totalLen = (int)[full length];
-        if (s >= totalLen) {
-            resolve(@"");
+        std::string slice;
+        std::string err;
+        if (!txt_copy_live_snapshot_utf16_slice(lid, s, m, &slice, &err)) {
+            reject(kTxtErrBufferNotFound,
+                   [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
             return;
         }
-        int end = MIN(s + m, totalLen);
-        NSRange range = NSMakeRange(s, end - s);
-        resolve([full substringWithRange:range]);
+        resolve([NSString stringWithUTF8String:slice.c_str()] ?: @"");
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
     }
