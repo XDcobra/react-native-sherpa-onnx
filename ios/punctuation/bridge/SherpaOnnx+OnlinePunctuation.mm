@@ -3,10 +3,10 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-validate-punctuation.h"
-#include "sherpa-onnx/c-api/cxx-api.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "../../punctuation/core/PunctuationBridgeState.h"
 #include "../../punctuation/core/PunctuationTextInputNormalization.hpp"
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -18,13 +18,11 @@
 #include <mutex>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
 namespace {
-
-std::mutex g_punct_online_mutex;
-std::map<std::string, std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation>> g_punct_online;
 
 static NSString *kInitErr = @"PUNCTUATION_INIT_ERROR";
 static NSString *kPunctErr = @"PUNCTUATION_ERROR";
@@ -119,7 +117,7 @@ std::string punct_uuid() {
 class PunctuationPipelineWorker final : public StreamingPipelineWorker {
  public:
   PunctuationPipelineWorker(
-      std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation> engine,
+      std::shared_ptr<sherpaonnx::OnlinePunctuationWrapper> engine,
       std::shared_ptr<TxtLiveEntry> input,
       std::shared_ptr<TxtLiveEntry> output,
       std::string textInputNormalization)
@@ -239,7 +237,12 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
     const std::string normalized =
         punct_normalize_input_text(segment.text, textInputNormalization_);
     unitsRead_ += (int64_t)normalized.size();
-    std::string outText = engine_->AddPunctuation(normalized);
+    const auto result = engine_->addPunctuation(normalized);
+    if (!result.success) {
+      throw std::runtime_error(
+          result.error.empty() ? "Online punctuation failed" : result.error);
+    }
+    std::string outText = result.text;
     NSMutableDictionary *meta = [NSMutableDictionary dictionaryWithDictionary:@{
       @"__segmentReason": @"punctuation",
       @"__segmentSource": @"segmentation_engine",
@@ -298,7 +301,7 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
     }
   }
 
-  std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation> engine_;
+  std::shared_ptr<sherpaonnx::OnlinePunctuationWrapper> engine_;
   std::shared_ptr<TxtLiveEntry> input_;
   std::shared_ptr<TxtLiveEntry> output_;
   std::string textInputNormalization_;
@@ -320,35 +323,37 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
 }  // namespace
 
 extern "C" void sherpaonnx_punct_online_invalidate_all(void) {
-  std::lock_guard<std::mutex> lock(g_punct_online_mutex);
-  g_punct_online.clear();
+  std::lock_guard<std::mutex> lock(
+      sherpaonnx::punctuation::bridge::g_punct_online_mutex);
+  sherpaonnx::punctuation::bridge::g_punct_online_instances.clear();
 }
 
 extern "C" bool sherpaonnx_punct_online_add_punctuation_if_exists(
     const std::string &instanceId,
     const std::string &text,
     std::string *outText) {
-  std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation> engine;
-  {
-    std::lock_guard<std::mutex> lock(g_punct_online_mutex);
-    auto it = g_punct_online.find(instanceId);
-    if (it == g_punct_online.end()) {
-      return false;
-    }
-    engine = it->second;
+  auto state =
+      sherpaonnx::punctuation::bridge::LookupOnlinePunctuation(instanceId);
+  if (!state || !state->isReady()) {
+    return false;
   }
   if (outText != nullptr) {
     const std::string normalized =
         punct_text_input_normalization::normalize(text, "lower");
-    *outText = engine->AddPunctuation(normalized);
+    const auto result = state->wrapper->addPunctuation(normalized);
+    if (!result.success) {
+      return false;
+    }
+    *outText = result.text;
   }
   return true;
 }
 
 extern "C" bool sherpaonnx_punct_online_has_instance(
     const std::string &instanceId) {
-  std::lock_guard<std::mutex> lock(g_punct_online_mutex);
-  return g_punct_online.find(instanceId) != g_punct_online.end();
+  auto state =
+      sherpaonnx::punctuation::bridge::LookupOnlinePunctuation(instanceId);
+  return state && state->isReady();
 }
 
 @implementation SherpaOnnx (OnlinePunctuation)
@@ -459,24 +464,28 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
     }
 
     std::string idStr = instanceId.UTF8String ?: "";
-    sherpa_onnx::cxx::OnlinePunctuationConfig cfg;
-    cfg.model.cnn_bilstm = cnnPath;
-    cfg.model.bpe_vocab = vocabPath;
-    cfg.model.num_threads = scalars.numThreads;
-    cfg.model.debug = scalars.debug;
-    cfg.model.provider = scalars.provider;
-    auto created = sherpa_onnx::cxx::OnlinePunctuation::Create(cfg);
-    if (created.Get() == nullptr) {
-      NSLog(@"[SherpaOnnx:init] punctuation-online Create Get()==null branch=reject");
-      reject(kInitErr, @"OnlinePunctuation::Create returned null", nil);
+    auto wrapper = std::make_shared<sherpaonnx::OnlinePunctuationWrapper>();
+    const auto init = wrapper->initialize(
+        cnnPath, vocabPath, scalars.numThreads, scalars.provider, scalars.debug);
+    if (!init.success) {
+      NSLog(@"[SherpaOnnx:init] punctuation-online wrapper init failed: %s",
+            init.error.c_str());
+      NSString *msg = init.error.empty()
+          ? @"OnlinePunctuationWrapper::initialize failed"
+          : [NSString stringWithUTF8String:init.error.c_str()];
+      reject(kInitErr, msg, nil);
       return;
     }
-    auto ptr = std::make_shared<sherpa_onnx::cxx::OnlinePunctuation>(std::move(created));
+    auto state =
+        std::make_shared<sherpaonnx::punctuation::bridge::OnlinePunctuationInstanceState>();
+    state->wrapper = wrapper;
+    sherpaonnx::punctuation::bridge::RemoveOnlinePunctuation(idStr);
     {
-      std::lock_guard<std::mutex> lock(g_punct_online_mutex);
-      g_punct_online[idStr] = ptr;
+      std::lock_guard<std::mutex> lock(
+          sherpaonnx::punctuation::bridge::g_punct_online_mutex);
+      sherpaonnx::punctuation::bridge::g_punct_online_instances[idStr] = state;
     }
-    NSLog(@"[SherpaOnnx:init] punctuation-online Create Get() ok");
+    NSLog(@"[SherpaOnnx:init] punctuation-online wrapper init ok");
 
     resolve(@{
       @"success": @YES,
@@ -494,24 +503,27 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
                               resolve:(RCTPromiseResolveBlock)resolve
                                reject:(RCTPromiseRejectBlock)reject
 {
-  std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation> engine;
-  {
-    std::lock_guard<std::mutex> lock(g_punct_online_mutex);
-    auto it = g_punct_online.find(instanceId.UTF8String ?: "");
-    if (it == g_punct_online.end()) {
-      reject(kNotFound, @"Online punctuation instance not found", nil);
-      return;
-    }
-    engine = it->second;
+  auto state = sherpaonnx::punctuation::bridge::LookupOnlinePunctuation(
+      instanceId.UTF8String ?: "");
+  if (!state || !state->isReady()) {
+    reject(kNotFound, @"Online punctuation instance not found", nil);
+    return;
   }
   const std::string mode = punct_resolve_text_input_normalization(textInputNormalization);
   const std::string normalized =
       punct_normalize_input_text(text.UTF8String ?: "", mode);
   CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
-  std::string outText = engine->AddPunctuation(normalized);
+  const auto result = state->wrapper->addPunctuation(normalized);
+  if (!result.success) {
+    NSString *msg = result.error.empty()
+        ? @"Punctuation failed"
+        : [NSString stringWithUTF8String:result.error.c_str()];
+    reject(kPunctErr, msg, nil);
+    return;
+  }
   CFTimeInterval t1 = CFAbsoluteTimeGetCurrent();
   resolve(@{
-    @"punctuatedText": [NSString stringWithUTF8String:outText.c_str()] ?: @"",
+    @"punctuatedText": [NSString stringWithUTF8String:result.text.c_str()] ?: @"",
     @"processingTimeMs": @((t1 - t0) * 1000.0),
   });
 }
@@ -520,8 +532,8 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
                          resolve:(RCTPromiseResolveBlock)resolve
                           reject:(RCTPromiseRejectBlock)reject
 {
-  std::lock_guard<std::mutex> lock(g_punct_online_mutex);
-  g_punct_online.erase(instanceId.UTF8String ?: "");
+  sherpaonnx::punctuation::bridge::RemoveOnlinePunctuation(
+      instanceId.UTF8String ?: "");
   resolve(nil);
 }
 
@@ -532,16 +544,13 @@ extern "C" bool sherpaonnx_punct_online_has_instance(
                          resolve:(RCTPromiseResolveBlock)resolve
                           reject:(RCTPromiseRejectBlock)reject
 {
-  std::shared_ptr<sherpa_onnx::cxx::OnlinePunctuation> engine;
-  {
-    std::lock_guard<std::mutex> lock(g_punct_online_mutex);
-    auto it = g_punct_online.find(instanceId.UTF8String ?: "");
-    if (it == g_punct_online.end()) {
-      reject(kNotFound, @"Online punctuation instance not found", nil);
-      return;
-    }
-    engine = it->second;
+  auto state = sherpaonnx::punctuation::bridge::LookupOnlinePunctuation(
+      instanceId.UTF8String ?: "");
+  if (!state || !state->isReady()) {
+    reject(kNotFound, @"Online punctuation instance not found", nil);
+    return;
   }
+  auto engine = state->wrapper;
 
   auto input = txt_get_live_entry(inputBufferId.UTF8String ?: "");
   auto output = txt_get_live_entry(outputBufferId.UTF8String ?: "");

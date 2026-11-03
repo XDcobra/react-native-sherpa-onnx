@@ -5,9 +5,6 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
-import com.k2fsa.sherpa.onnx.OfflinePunctuation
-import com.k2fsa.sherpa.onnx.OfflinePunctuationConfig
-import com.k2fsa.sherpa.onnx.OfflinePunctuationModelConfig
 import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.punctuation.config.PunctuationInitOptionsParser
@@ -26,43 +23,90 @@ class SherpaOnnxPunctuationHelper(
   ) -> HashMap<String, Any>?
 ) {
   companion object {
-    private val offlineEngines = ConcurrentHashMap<String, OfflinePunctuation>()
+    /** Kotlin-side bookkeeping that an offline instance id was initialized. */
+    private val offlineInstanceIds = ConcurrentHashMap.newKeySet<String>()
+
+    fun gateKey(instanceId: String): String = "punctOffline:$instanceId"
 
     fun processOfflineIfExists(instanceId: String, text: String): String? {
-      val engine = offlineEngines[instanceId] ?: return null
-      val gateKey = NativeInstanceGate.keyFor(engine)
+      if (!offlineInstanceIds.contains(instanceId) || !nativeHasOfflineInstance(instanceId)) {
+        return null
+      }
+      val gateKey = gateKey(instanceId)
       if (!NativeInstanceGate.beginUse(gateKey)) return null
       return try {
         val normalized =
           PunctuationTextInputNormalization.normalize(text, null)
-        engine.addPunctuation(normalized)
+        addPunctuationOfflineOrThrow(instanceId, normalized)
       } finally {
         NativeInstanceGate.endUse(gateKey)
       }
     }
 
     fun hasOfflineInstance(instanceId: String): Boolean {
-      return offlineEngines.containsKey(instanceId)
+      return offlineInstanceIds.contains(instanceId) && nativeHasOfflineInstance(instanceId)
     }
 
-    private fun releasePunctuationSafely(eng: OfflinePunctuation?) {
-      if (eng == null) return
-      NativeInstanceGate.releaseWhenIdle(NativeInstanceGate.keyFor(eng)) {
+    internal fun addPunctuationOfflineOrThrow(instanceId: String, text: String): String {
+      @Suppress("UNCHECKED_CAST")
+      val raw = nativeAddPunctuationOffline(instanceId, text) as? HashMap<String, Any>
+        ?: throw IllegalStateException("nativeAddPunctuationOffline returned null")
+      val success = raw["success"] as? Boolean ?: false
+      if (!success) {
+        throw IllegalStateException(raw["error"] as? String ?: "Punctuation failed")
+      }
+      return raw["text"] as? String ?: ""
+    }
+
+    private fun releaseOfflineSafely(instanceId: String) {
+      val gateKey = gateKey(instanceId)
+      val inFlight = NativeInstanceGate.inFlight(gateKey)
+      if (inFlight > 0) {
+        Log.w(
+          "SherpaOnnxPunct",
+          "UNLOAD_DURING_COMPUTE offline instanceId=$instanceId inFlight=$inFlight",
+        )
+      }
+      NativeInstanceGate.releaseWhenIdle(gateKey) {
         try {
-          eng.release()
+          nativeUnloadOffline(instanceId)
         } catch (_: Exception) {
-          // best-effort
         }
       }
     }
+
+    @JvmStatic
+    private external fun nativeInitializeOffline(
+      instanceId: String,
+      ctPath: String,
+      numThreads: Int,
+      provider: String,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeAddPunctuationOffline(
+      instanceId: String,
+      text: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeHasOfflineInstance(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativeUnloadOffline(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAllOffline()
   }
 
   fun shutdown() {
-    val engines = offlineEngines.values.toList()
-    offlineEngines.clear()
-    for (e in engines) {
-      releasePunctuationSafely(e)
+    val ids = offlineInstanceIds.toList()
+    offlineInstanceIds.clear()
+    for (id in ids) {
+      releaseOfflineSafely(id)
     }
+    nativeShutdownAllOffline()
   }
 
   fun detectPunctuationModel(
@@ -236,7 +280,6 @@ class SherpaOnnxPunctuationHelper(
       return
     }
 
-    // Always resolve **offline CT** for this API (no native `auto` that prefers CNN).
     val detect = nativeDetectPunctuationModel(modelDir, null, "ct_transformer", parsed.quantization)
     if (detect == null) {
       promise.reject(PunctuationErrorCodes.INIT_ERROR, "Punctuation model detection returned null", null)
@@ -297,16 +340,22 @@ class SherpaOnnxPunctuationHelper(
 
     val threads = parsed.numThreads.toInt().coerceAtLeast(1)
     val prov = parsed.provider?.trim().takeIf { !it.isNullOrEmpty() } ?: "cpu"
-    val modelConfig = OfflinePunctuationModelConfig(
-      ctTransformer = ctPath,
-      numThreads = threads,
-      debug = parsed.debug,
-      provider = prov
-    )
-    val config = OfflinePunctuationConfig(model = modelConfig)
-    val eng = OfflinePunctuation(assetManager = null, config = config)
-    releasePunctuationSafely(offlineEngines[instanceId])
-    offlineEngines[instanceId] = eng
+
+    if (offlineInstanceIds.contains(instanceId)) {
+      releaseOfflineSafely(instanceId)
+      offlineInstanceIds.remove(instanceId)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val raw = nativeInitializeOffline(instanceId, ctPath, threads, prov, parsed.debug)
+      as? HashMap<String, Any>
+    val ok = raw?.get("success") as? Boolean ?: false
+    if (!ok) {
+      val err = raw?.get("error") as? String ?: "Failed to initialize offline punctuation"
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, err, null)
+      return
+    }
+    offlineInstanceIds.add(instanceId)
 
     val out = Arguments.createMap()
     out.putBoolean("success", true)
@@ -322,9 +371,8 @@ class SherpaOnnxPunctuationHelper(
     promise.resolve(out)
   }
 
-  private fun getEngine(instanceId: String): OfflinePunctuation? = offlineEngines[instanceId]
-
-  fun getOfflineEngine(instanceId: String): OfflinePunctuation? = getEngine(instanceId)
+  /** True when native offline instance exists (for live pipeline helpers). */
+  fun hasOfflineEngine(instanceId: String): Boolean = hasOfflineInstance(instanceId)
 
   private fun readOfflineText(
     textInBufferId: String,
@@ -355,8 +403,7 @@ class SherpaOnnxPunctuationHelper(
     textInputNormalization: String?,
     promise: Promise
   ) {
-    val eng = getEngine(instanceId)
-    if (eng == null) {
+    if (!hasOfflineInstance(instanceId)) {
       promise.reject(
         PunctuationErrorCodes.NOT_FOUND,
         "Offline punctuation instance not found: $instanceId"
@@ -401,7 +448,7 @@ class SherpaOnnxPunctuationHelper(
       return
     }
     val t0 = SystemClock.elapsedRealtime()
-    val gateKey = NativeInstanceGate.keyFor(eng)
+    val gateKey = gateKey(instanceId)
     if (!NativeInstanceGate.beginUse(gateKey)) {
       promise.reject(
         PunctuationErrorCodes.NOT_FOUND,
@@ -411,7 +458,7 @@ class SherpaOnnxPunctuationHelper(
     }
     val outText: String
     try {
-      outText = eng.addPunctuation(plain)
+      outText = addPunctuationOfflineOrThrow(instanceId, plain)
     } catch (e: Exception) {
       Log.e("SherpaOnnxPunct", "punctuateOfflineTextBuffers", e)
       promise.reject(
@@ -451,8 +498,7 @@ class SherpaOnnxPunctuationHelper(
     textInputNormalization: String?,
     promise: Promise
   ) {
-    val eng = getEngine(instanceId)
-    if (eng == null) {
+    if (!hasOfflineInstance(instanceId)) {
       promise.reject(
         PunctuationErrorCodes.NOT_FOUND,
         "Offline punctuation instance not found: $instanceId"
@@ -484,7 +530,7 @@ class SherpaOnnxPunctuationHelper(
     val normalizedPlain =
       PunctuationTextInputNormalization.normalize(plain, textInputNormalization)
     val t0 = SystemClock.elapsedRealtime()
-    val gateKey = NativeInstanceGate.keyFor(eng)
+    val gateKey = gateKey(instanceId)
     if (!NativeInstanceGate.beginUse(gateKey)) {
       promise.reject(
         PunctuationErrorCodes.NOT_FOUND,
@@ -494,7 +540,7 @@ class SherpaOnnxPunctuationHelper(
     }
     val outText: String
     try {
-      outText = eng.addPunctuation(normalizedPlain)
+      outText = addPunctuationOfflineOrThrow(instanceId, normalizedPlain)
     } catch (e: Exception) {
       Log.e("SherpaOnnxPunct", "punctuateOfflineString", e)
       promise.reject(
@@ -531,8 +577,8 @@ class SherpaOnnxPunctuationHelper(
     instanceId: String,
     promise: Promise
   ) {
-    val eng = offlineEngines.remove(instanceId)
-    releasePunctuationSafely(eng)
+    offlineInstanceIds.remove(instanceId)
+    releaseOfflineSafely(instanceId)
     promise.resolve(null)
   }
 }
