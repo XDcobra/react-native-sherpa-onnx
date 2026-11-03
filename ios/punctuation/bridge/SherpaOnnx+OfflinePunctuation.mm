@@ -5,7 +5,7 @@
 #include "sherpa-onnx-validate-punctuation.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "TextRegistry.h"
 #include "../pipeline/PunctuationOfflineLivePipelineWorker.h"
 #include "../core/PunctuationBridgeState.h"

@@ -2,7 +2,7 @@
 
 #import <Foundation/Foundation.h>
 
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "TextRegistry.h"
 
 #include <algorithm>

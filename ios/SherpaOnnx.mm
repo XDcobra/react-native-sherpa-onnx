@@ -20,7 +20,7 @@
 #include "pcm/PcmPlayerRegistry.h"
 #include "AudioRegistry.h"
 #include "TextRegistry.h"
-#include "segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif

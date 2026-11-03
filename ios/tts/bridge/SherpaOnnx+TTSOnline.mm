@@ -6,7 +6,7 @@
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
 #include "AudioRegistry.h"
 #include "TextRegistry.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "PaLiveEntry.h"
 
 // Instance → active pipeline tracking

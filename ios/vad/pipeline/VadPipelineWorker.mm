@@ -1,6 +1,6 @@
 #include "VadPipelineWorker.h"
 
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 
 #include <algorithm>
 #include <chrono>

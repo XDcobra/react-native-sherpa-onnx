@@ -4,7 +4,7 @@
 #include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "../../speaker-embedding/core/SpeakerEmbeddingBridgeState.h"
 #include "../pipeline/SpeakerIdentificationOfflineLivePipelineWorker.h"
 #include "sherpa-onnx-speaker-embedding-wrapper.h"

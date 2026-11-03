@@ -1,5 +1,5 @@
 #include "DiarizationStreamingPipelineWorker.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 
 #include <chrono>
 #include <cmath>
