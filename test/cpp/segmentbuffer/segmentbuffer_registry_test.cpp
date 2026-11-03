@@ -84,6 +84,227 @@ TEST_F(SegmentRegistryFixture, LinkMap_CreateAddDuplicateReject) {
   EXPECT_TRUE(slm_release(mapId));
 }
 
+TEST_F(SegmentRegistryFixture, LiveCursor_DrainOrderAndEmptySecond) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &id, &err)) << err;
+
+  for (int i = 0; i < 3; ++i) {
+    std::string segId;
+    int segIndex = -1;
+    ASSERT_TRUE(seg_live_append_segment(id, "speech", "a", i * 100, i * 100 + 50, 16000, 3, false,
+                                        0.0, "{\"source\":\"manual\"}", &segId, &segIndex, &err))
+        << err;
+    EXPECT_EQ(segIndex, i);
+  }
+
+  int cursor = seg_live_create_cursor(id, &err);
+  ASSERT_GE(cursor, 0) << err;
+
+  int start = -1;
+  auto batch1 = seg_live_drain_segments(id, cursor, 10, &start, &err);
+  ASSERT_EQ(batch1.size(), 3u);
+  EXPECT_EQ(start, 0);
+  EXPECT_EQ(batch1[0].startSample, 0);
+  EXPECT_EQ(batch1[1].startSample, 100);
+  EXPECT_EQ(batch1[2].startSample, 200);
+
+  start = -1;
+  auto batch2 = seg_live_drain_segments(id, cursor, 10, &start, &err);
+  EXPECT_TRUE(batch2.empty());
+  EXPECT_EQ(start, -1);
+
+  seg_live_release_cursor(id, cursor);
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
+TEST_F(SegmentRegistryFixture, LiveCursor_UnknownCursorReturnsEmpty) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &id, &err)) << err;
+  std::string segId;
+  int segIndex = -1;
+  ASSERT_TRUE(seg_live_append_segment(id, "speech", "a", 0, 100, 16000, 6, false, 0.0,
+                                      "{\"source\":\"manual\"}", &segId, &segIndex, &err))
+      << err;
+
+  int start = -1;
+  auto batch = seg_live_drain_segments(id, /*unknown*/ 99999, 10, &start, &err);
+  EXPECT_TRUE(batch.empty());
+  EXPECT_EQ(start, -1);
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
+TEST_F(SegmentRegistryFixture, LiveCursor_EvictionPreservesAbsoluteStartIndex) {
+  // C segment policy: eviction does not rewind cursors (unlike Text). Absolute startIndex
+  // accounts for evictedCount so drained ids stay monotonic with written indices.
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", /*maxSegments*/ 2, "off", "", true, 0, false, 0, &id, &err))
+      << err;
+
+  int cursor = seg_live_create_cursor(id, &err);
+  ASSERT_GE(cursor, 0) << err;
+
+  for (int i = 0; i < 4; ++i) {
+    std::string segId;
+    int segIndex = -1;
+    ASSERT_TRUE(seg_live_append_segment(id, "speech", "a", i * 10, i * 10 + 5, 16000, 1, false, 0.0,
+                                        "{\"source\":\"manual\"}", &segId, &segIndex, &err))
+        << err;
+    EXPECT_EQ(segIndex, i);
+  }
+
+  auto live = seg_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+  {
+    std::lock_guard<std::mutex> lock(live->lock);
+    EXPECT_EQ(live->segments.size(), 2u);
+    EXPECT_EQ(live->evictedCount, 2);
+    EXPECT_EQ(live->totalSegmentsWritten, 4);
+  }
+
+  int start = -1;
+  auto batch = seg_live_drain_segments(id, cursor, 10, &start, &err);
+  // Cursor still at window pos 0; after two evictions window holds indices 2 and 3.
+  ASSERT_EQ(batch.size(), 2u);
+  EXPECT_EQ(start, 2);
+  EXPECT_EQ(batch[0].startSample, 20);
+  EXPECT_EQ(batch[1].startSample, 30);
+
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
+TEST_F(SegmentRegistryFixture, LiveFinalize_RejectsFurtherAppend) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &id, &err)) << err;
+  ASSERT_TRUE(seg_finalize_live(id, &err)) << err;
+
+  std::string segId;
+  int segIndex = -1;
+  EXPECT_FALSE(seg_live_append_segment(id, "speech", "a", 0, 100, 16000, 6, false, 0.0,
+                                       "{\"source\":\"manual\"}", &segId, &segIndex, &err));
+  EXPECT_NE(err.find("SEGMENT_ALREADY_FINALIZED"), std::string::npos);
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
+TEST_F(SegmentRegistryFixture, TmPageClamp) {
+  EXPECT_EQ(seg_clamp_tm_page_count(-1), 0);
+  EXPECT_EQ(seg_clamp_tm_page_count(0), 0);
+  EXPECT_EQ(seg_clamp_tm_page_count(1), 1);
+  EXPECT_EQ(seg_clamp_tm_page_count(SEG_TM_MAX_PAGE_COUNT), SEG_TM_MAX_PAGE_COUNT);
+  EXPECT_EQ(seg_clamp_tm_page_count(SEG_TM_MAX_PAGE_COUNT + 1), SEG_TM_MAX_PAGE_COUNT);
+  EXPECT_EQ(seg_clamp_tm_page_count(1'000'000), SEG_TM_MAX_PAGE_COUNT);
+  EXPECT_EQ(SEG_TM_DEFAULT_PAGE_COUNT, SEG_TM_MAX_PAGE_COUNT);
+}
+
+TEST_F(SegmentRegistryFixture, OfflineFromLive_WindowSnapshotAndSlice) {
+  std::string liveId;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &liveId, &err)) << err;
+  for (int i = 0; i < 3; ++i) {
+    std::string segId;
+    int segIndex = -1;
+    ASSERT_TRUE(seg_live_append_segment(liveId, "speech", "a", i * 100, i * 100 + 50, 16000, 3,
+                                        false, 0.0, "{\"source\":\"manual\"}", &segId, &segIndex,
+                                        &err))
+        << err;
+  }
+
+  auto window = seg_live_get_window_segments(liveId, 1, 1);
+  ASSERT_EQ(window.size(), 1u);
+  EXPECT_EQ(window[0].startSample, 100);
+
+  auto oob = seg_live_get_window_segments(liveId, 10, 5);
+  EXPECT_TRUE(oob.empty());
+  auto neg = seg_live_get_window_segments(liveId, -1, 5);
+  EXPECT_TRUE(neg.empty());
+
+  std::string offlineId;
+  ASSERT_TRUE(seg_create_offline_from_live(liveId, "windowSnapshot", &offlineId, &err)) << err;
+  EXPECT_EQ(seg_offline_segment_count(offlineId), 3);
+
+  auto slice = seg_offline_get_segments(offlineId, 1, 2);
+  ASSERT_EQ(slice.size(), 2u);
+  EXPECT_EQ(slice[0].startSample, 100);
+  EXPECT_EQ(slice[1].startSample, 200);
+
+  EXPECT_TRUE(seg_release_buffer(liveId));
+  EXPECT_TRUE(seg_release_buffer(offlineId));
+}
+
+TEST_F(SegmentRegistryFixture, OfflinePopulate_ThenSlice_SecondFails) {
+  std::string offlineId;
+  std::string err;
+  ASSERT_TRUE(seg_create_empty_offline("audio_src", &offlineId, &err)) << err;
+  EXPECT_EQ(seg_offline_segment_count(offlineId), 0);
+
+  SegRecord r;
+  r.id = "seg_manual_1";
+  r.kind = "speech";
+  r.sourceAudioBufferId = "audio_src";
+  r.startSample = 0;
+  r.endSample = 1600;
+  r.sampleRate = 16000;
+  r.durationMs = 100;
+  ASSERT_TRUE(seg_offline_populate(offlineId, {r}, &err)) << err;
+  EXPECT_EQ(seg_offline_segment_count(offlineId), 1);
+
+  auto slice = seg_offline_get_segments(offlineId, 0, 10);
+  ASSERT_EQ(slice.size(), 1u);
+  EXPECT_EQ(slice[0].id, "seg_manual_1");
+
+  err.clear();
+  EXPECT_FALSE(seg_offline_populate(offlineId, {r}, &err));
+  EXPECT_NE(err.find("SEGMENT_INVALID_STATE"), std::string::npos);
+
+  EXPECT_TRUE(seg_release_buffer(offlineId));
+}
+
+TEST_F(SegmentRegistryFixture, SpeechPayload_AcceptAndReject) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &id, &err)) << err;
+
+  std::string segId;
+  int segIndex = -1;
+  ASSERT_TRUE(seg_live_append_segment(id, "speech", "a", 0, 100, 16000, 6, false, 0.0,
+                                      "{\"source\":\"manual\"}", &segId, &segIndex, &err))
+      << err;
+  ASSERT_TRUE(seg_live_append_segment(
+      id, "speech", "a", 100, 200, 16000, 6, false, 0.0,
+      "{\"source\":\"vad\",\"engine\":\"vad\",\"decision\":\"model\"}", &segId, &segIndex, &err))
+      << err;
+  ASSERT_TRUE(seg_live_append_segment(id, "speech", "a", 200, 300, 16000, 6, false, 0.0,
+                                      "{\"source\":\"languageId\",\"lang\":\"en\"}", &segId,
+                                      &segIndex, &err))
+      << err;
+
+  err.clear();
+  EXPECT_FALSE(seg_live_append_segment(id, "speech", "a", 300, 400, 16000, 6, false, 0.0, "{}",
+                                       &segId, &segIndex, &err));
+  EXPECT_NE(err.find("SEGMENT_INVALID_ARGUMENT"), std::string::npos);
+
+  err.clear();
+  EXPECT_FALSE(seg_live_append_segment(id, "speech", "a", 300, 400, 16000, 6, false, 0.0,
+                                       "{\"source\":\"nope\"}", &segId, &segIndex, &err));
+  EXPECT_NE(err.find("SEGMENT_INVALID_ARGUMENT"), std::string::npos);
+
+  err.clear();
+  EXPECT_FALSE(seg_live_append_segment(id, "speech", "a", 300, 400, 16000, 6, false, 0.0,
+                                       "{\"source\":\"manual\",\"extra\":1}", &segId, &segIndex,
+                                       &err));
+  EXPECT_NE(err.find("SEGMENT_INVALID_ARGUMENT"), std::string::npos);
+
+  err.clear();
+  EXPECT_FALSE(seg_live_append_segment(id, "speech", "a", 300, 400, 16000, 6, false, 0.0,
+                                       "{\"source\":\"sid\"}", &segId, &segIndex, &err));
+  EXPECT_NE(err.find("speakerName"), std::string::npos);
+
+  EXPECT_TRUE(seg_release_buffer(id));
+}
+
 TEST_F(SegmentRegistryFixture, OptInSpool_SkippedWithoutEnv) {
   const char *flag = std::getenv("SHERPA_HOST_SEGMENT_SPOOL");
   if (flag == nullptr || std::string(flag) != "1") {

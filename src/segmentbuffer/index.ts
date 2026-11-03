@@ -67,6 +67,11 @@ const ALIGNMENT_PAYLOAD_ALLOWED_KEYS = new Set([
   'wordMetadata',
   'languageHints',
 ]);
+const SPEECH_PAYLOAD_ANNOTATION_KEYS = [
+  '__annotationReason',
+  '__annotationSource',
+  '__annotationCreatedAtMs',
+] as const;
 const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'vad',
   'stt',
@@ -75,18 +80,48 @@ const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'pyannote',
   'languageId',
   'audioTagging',
+  'manual',
 ]);
 const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   SpeechSegmentPayloadSource,
   Set<string>
 > = {
-  vad: new Set(['source', 'engine', 'decision', 'score']),
-  stt: new Set(['source', 'transcript', 'tokenCount', 'isFinal']),
-  tts: new Set(['source', 'text', 'chunkIndex', 'isFinalChunk']),
-  sid: new Set(['source', 'speakerName']),
-  pyannote: new Set(['source']),
-  languageId: new Set(['source', 'lang', 'confidence']),
-  audioTagging: new Set(['source', 'primaryName', 'events']),
+  vad: new Set([
+    'source',
+    'engine',
+    'decision',
+    'score',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  stt: new Set([
+    'source',
+    'transcript',
+    'tokenCount',
+    'isFinal',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  tts: new Set([
+    'source',
+    'text',
+    'chunkIndex',
+    'isFinalChunk',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  sid: new Set(['source', 'speakerName', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
+  pyannote: new Set(['source', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
+  languageId: new Set([
+    'source',
+    'lang',
+    'confidence',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  audioTagging: new Set([
+    'source',
+    'primaryName',
+    'events',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  manual: new Set(['source', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
 };
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
@@ -216,7 +251,7 @@ function assertSpeechPayload(
   const source = obj.source;
   if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
     throw new Error(
-      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging.`
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual.`
     );
   }
   const typedSource = source as SpeechSegmentPayloadSource;
@@ -978,8 +1013,12 @@ export async function getPipelineSegmentBufferInfo(
   return mapPipelineInfo(raw);
 }
 
+/** Max segments returned by one TurboModule getter call; paginate for more. */
+const SEGMENT_TM_MAX_PAGE_COUNT = 4096;
+
 /**
  * Read committed segments from an offline segment buffer.
+ * Returns at most {@link SEGMENT_TM_MAX_PAGE_COUNT} records per call — paginate with `start` for more.
  * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid returned payload.
  * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
  * @throws {Error} `SEGMENT_SLICE_INVALID` — start or count is out of range.
@@ -988,13 +1027,17 @@ export async function getPipelineSegmentBufferInfo(
 export async function getOfflineSegmentBufferSegments(
   buffer: OfflineSegmentBufferIdSource,
   start = 0,
-  maxCount = 4096
+  maxCount = SEGMENT_TM_MAX_PAGE_COUNT
 ): Promise<SegmentMeta[]> {
   const id = resolveOfflineSegmentBufferId(buffer);
-  const sliceMaxCount =
+  const requested =
     maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
-      ? 4096
+      ? SEGMENT_TM_MAX_PAGE_COUNT
       : maxCount;
+  const sliceMaxCount = Math.min(
+    Math.max(0, requested),
+    SEGMENT_TM_MAX_PAGE_COUNT
+  );
   const raw = await getNative().getOfflineSegmentBufferSegments(
     id,
     start,
@@ -1055,6 +1098,7 @@ export async function getOfflineSegmentBufferSegments(
 
 /**
  * Read committed segments from a live segment buffer.
+ * Returns at most {@link SEGMENT_TM_MAX_PAGE_COUNT} records per call — paginate with `startIndex` for more.
  * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid returned payload.
  * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
  * @throws {Error} `SEGMENT_SLICE_INVALID` — start or count is out of range.
@@ -1066,10 +1110,14 @@ export async function getLiveSegmentBufferSegments(
   maxCount: number
 ): Promise<SegmentMeta[]> {
   const id = resolveLiveSegmentBufferId(liveBuffer);
-  const sliceMaxCount =
+  const requested =
     maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
-      ? 4096
+      ? SEGMENT_TM_MAX_PAGE_COUNT
       : maxCount;
+  const sliceMaxCount = Math.min(
+    Math.max(0, requested),
+    SEGMENT_TM_MAX_PAGE_COUNT
+  );
   const raw = await getNative().getLiveSegmentBufferSegments(
     id,
     startIndex,

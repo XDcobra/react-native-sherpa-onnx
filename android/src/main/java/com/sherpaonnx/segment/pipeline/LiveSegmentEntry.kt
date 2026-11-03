@@ -2,14 +2,13 @@ package com.sherpaonnx.segment.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
+import org.json.JSONObject
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.atomic.AtomicReference
 
 /**
- * Thin handle over shared C++ SegLiveEntry for spool/window SoT.
- * Kotlin keeps a mirror segment log + listeners for pipeline workers (S8 backlog).
+ * Thin handle over shared C++ SegLiveEntry (window / cursors / spool SoT).
+ * Kotlin keeps commit-listener tokens + optional JS append-event fan-out only (S8).
  */
 class LiveSegmentEntry(
   val bufferId: String,
@@ -39,15 +38,10 @@ class LiveSegmentEntry(
 
   enum class State { RECORDING, FINISHED }
 
-  private val stateRef = AtomicReference(State.RECORDING)
-  val state: State get() = stateRef.get()
+  val state: State
+    get() =
+      if (SegmentBufferNative.nativeLiveState(bufferId) == 1) State.FINISHED else State.RECORDING
 
-  private val segmentLock = Any()
-  private val segments = ArrayList<SegmentRecord>()
-  private var evictedCount: Long = 0
-  private val totalSegmentsWritten = AtomicLong(0)
-  private val cursors = HashMap<Int, AtomicInteger>()
-  private val nextCursorId = AtomicInteger(0)
   private val commitListeners =
     CopyOnWriteArrayList<Pair<Int, (String, Int, SegmentRecord) -> Unit>>()
   private val nextCommitListenerToken = AtomicInteger(0)
@@ -118,16 +112,7 @@ class LiveSegmentEntry(
         confidence = confidence,
         payloadJson = payloadJson,
       )
-    var totalSegmentsInBuffer = 0
-    synchronized(segmentLock) {
-      segments.add(record)
-      if (segments.size > maxSegments) {
-        segments.removeAt(0)
-        evictedCount++
-      }
-      totalSegmentsWritten.incrementAndGet()
-      totalSegmentsInBuffer = segments.size
-    }
+    val totalSegmentsInBuffer = segmentCount().coerceAtLeast(0)
 
     if (annotationReason != null && annotationSource != null) {
       com.sherpaonnx.segment.engine.SegmentationEngineRegistry.recordSegmentAnnotation(
@@ -178,15 +163,13 @@ class LiveSegmentEntry(
         "finalize failed for $bufferId",
       )
     }
-    stateRef.set(State.FINISHED)
   }
 
   fun snapshotWindow(): List<SegmentRecord> {
-    val json = SegmentBufferNative.nativeLiveSnapshotJson(bufferId, "windowSnapshot")
-    if (json != null) return OfflineSegmentEntry.segmentsFromJson(json)
-    synchronized(segmentLock) {
-      return segments.toList()
-    }
+    val json =
+      SegmentBufferNative.nativeLiveSnapshotJson(bufferId, "windowSnapshot")
+        ?: return emptyList()
+    return OfflineSegmentEntry.segmentsFromJson(json)
   }
 
   fun snapshotFullIfSpooled(): List<SegmentRecord> {
@@ -200,54 +183,40 @@ class LiveSegmentEntry(
   }
 
   fun getSegments(startIndex: Int, maxCount: Int): List<SegmentRecord> {
-    val all = snapshotWindow()
     if (startIndex < 0 || maxCount < 0) {
       throw SegmentPipelineException(
         SegmentErrorCodes.SLICE_INVALID,
         "Invalid segment slice range start=$startIndex maxCount=$maxCount",
       )
     }
-    if (startIndex >= all.size) return emptyList()
-    val end = minOf(startIndex + maxCount, all.size)
-    return all.subList(startIndex, end)
+    val json =
+      SegmentBufferNative.nativeLiveSegmentsSlice(bufferId, startIndex, maxCount)
+        ?: return emptyList()
+    return OfflineSegmentEntry.segmentsFromJson(json)
   }
 
   fun createSegmentCursor(): Int {
-    val cursorId = nextCursorId.getAndIncrement()
-    synchronized(segmentLock) { cursors[cursorId] = AtomicInteger(0) }
+    val cursorId = SegmentBufferNative.nativeCreateSegmentCursor(bufferId)
+    if (cursorId < 0) {
+      throw SegmentPipelineException(
+        SegmentErrorCodes.INVALID_STATE,
+        "createSegmentCursor failed for $bufferId",
+      )
+    }
     return cursorId
   }
 
+  /**
+   * Drain via C SegLiveEntry cursor. Unknown cursor → empty list (C semantics; former Kotlin threw).
+   */
   fun drainSegments(cursorId: Int, maxCount: Int): List<CommittedSegment> {
     if (maxCount <= 0) return emptyList()
-    synchronized(segmentLock) {
-      val cursor =
-        cursors[cursorId]
-          ?: throw SegmentPipelineException(
-            SegmentErrorCodes.BUFFER_NOT_FOUND,
-            "Segment cursor not found: $cursorId",
-          )
-      val currentPos = cursor.get()
-      if (currentPos >= segments.size) return emptyList()
-      val end = minOf(currentPos + maxCount, segments.size)
-      val committed = ArrayList<CommittedSegment>(end - currentPos)
-      for (idx in currentPos until end) {
-        val absoluteIndex = (evictedCount + idx).toInt()
-        committed.add(
-          CommittedSegment(
-            segmentId = segments[idx].id,
-            segmentIndex = absoluteIndex,
-            record = segments[idx],
-          ),
-        )
-      }
-      cursor.set(end)
-      return committed
-    }
+    val json = SegmentBufferNative.nativeDrainSegments(bufferId, cursorId, maxCount) ?: return emptyList()
+    return parseDrainJson(json)
   }
 
   fun releaseSegmentCursor(cursorId: Int) {
-    synchronized(segmentLock) { cursors.remove(cursorId) }
+    SegmentBufferNative.nativeReleaseSegmentCursor(bufferId, cursorId)
   }
 
   fun addCommitListener(
@@ -270,16 +239,12 @@ class LiveSegmentEntry(
 
   fun segmentCount(): Int {
     val n = SegmentBufferNative.nativeLiveSegmentCount(bufferId)
-    return if (n >= 0) n else synchronized(segmentLock) { segments.size }
+    return if (n >= 0) n else 0
   }
 
   fun release() {
     SegmentBufferNative.nativeRelease(bufferId)
     commitListeners.clear()
-    synchronized(segmentLock) {
-      cursors.clear()
-      segments.clear()
-    }
   }
 
   fun toWritableMap(): WritableMap {
@@ -288,7 +253,8 @@ class LiveSegmentEntry(
     map.putString("kind", "liveSegmentBuffer")
     map.putString("state", if (state == State.RECORDING) "recording" else "finished")
     map.putInt("segmentCount", segmentCount())
-    map.putDouble("totalSegmentsWritten", totalSegmentsWritten.get().toDouble())
+    val total = SegmentBufferNative.nativeLiveTotalSegmentsWritten(bufferId)
+    map.putDouble("totalSegmentsWritten", if (total >= 0) total.toDouble() else 0.0)
     if (!sourceAudioBufferId.isNullOrEmpty()) {
       map.putString("sourceAudioBufferId", sourceAudioBufferId)
     }
@@ -300,5 +266,24 @@ class LiveSegmentEntry(
       map.putString("spoolPath", spoolPath)
     }
     return map
+  }
+
+  private fun parseDrainJson(json: String): List<CommittedSegment> {
+    val root = JSONObject(json)
+    val startIndex = root.optInt("startIndex", -1)
+    val records = OfflineSegmentEntry.segmentsFromJson(json)
+    if (records.isEmpty() || startIndex < 0) return emptyList()
+    val out = ArrayList<CommittedSegment>(records.size)
+    for (i in records.indices) {
+      val record = records[i]
+      out.add(
+        CommittedSegment(
+          segmentId = record.id,
+          segmentIndex = startIndex + i,
+          record = record,
+        ),
+      )
+    }
+    return out
   }
 }

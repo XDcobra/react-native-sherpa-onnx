@@ -59,6 +59,21 @@ bool seg_populate_offline_from_live_if_empty(const std::string &offlineBufferId,
                                              const std::string &liveBufferId,
                                              const std::string &mode, std::string *error = nullptr);
 
+/** Offline SoT: count / bounded slice / one-shot populate (engine finalize). */
+int seg_offline_segment_count(const std::string &offlineBufferId);
+std::vector<SegRecord> seg_offline_get_segments(const std::string &offlineBufferId, int start,
+                                                int maxCount);
+std::vector<SegRecord> seg_live_get_window_segments(const std::string &liveBufferId, int start,
+                                                    int maxCount);
+bool seg_offline_populate(const std::string &offlineBufferId,
+                          const std::vector<SegRecord> &records, std::string *error = nullptr);
+
+/** TurboModule segment getter page size (align TS / Android / iOS). */
+constexpr int SEG_TM_DEFAULT_PAGE_COUNT = 4096;
+constexpr int SEG_TM_MAX_PAGE_COUNT = 4096;
+/** Clamp requested page size: <=0 → 0; else min(requested, SEG_TM_MAX_PAGE_COUNT). */
+int seg_clamp_tm_page_count(int requested);
+
 void seg_release_all_entries();
 
 /** Optional: bridge installs callback for pipelineLiveSegmentAppended. */

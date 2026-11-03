@@ -189,105 +189,6 @@ static NSString *seg_validate_sentence_boundary_chars_field(NSDictionary *policy
   return nil;
 }
 
-bool seg_validate_strict_speech_payload(NSDictionary *payload, NSString **errorMessage) {
-  if (![payload isKindOfClass:[NSDictionary class]]) {
-    if (errorMessage) *errorMessage = @"speech payload is required and must include source";
-    return false;
-  }
-  NSString *source = [payload[@"source"] isKindOfClass:[NSString class]] ? payload[@"source"] : nil;
-  if (source.length == 0) {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual";
-    return false;
-  }
-  NSSet<NSString *> *allowed = nil;
-  if ([source isEqualToString:@"vad"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"engine", @"decision", @"score", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"stt"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"transcript", @"tokenCount", @"isFinal", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"tts"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"text", @"chunkIndex", @"isFinalChunk", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"sid"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"speakerName", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"pyannote"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"languageId"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"lang", @"confidence", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"audioTagging"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"primaryName", @"events", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else if ([source isEqualToString:@"manual"]) {
-    allowed = [NSSet setWithArray:@[@"source", @"__annotationReason", @"__annotationSource", @"__annotationCreatedAtMs"]];
-  } else {
-    if (errorMessage) *errorMessage = @"speech payload.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual";
-    return false;
-  }
-
-  for (NSString *key in payload) {
-    if (![allowed containsObject:key]) {
-      if (errorMessage) *errorMessage = [NSString stringWithFormat:@"speech payload.%@ is not allowed for source=%@", key, source];
-      return false;
-    }
-  }
-
-  if ([source isEqualToString:@"vad"] && payload[@"engine"] != nil) {
-    NSString *engine = [payload[@"engine"] isKindOfClass:[NSString class]] ? payload[@"engine"] : nil;
-    if (!(engine && [engine isEqualToString:@"vad"])) {
-      if (errorMessage) *errorMessage = @"speech payload.engine must be vad";
-      return false;
-    }
-  }
-  if ([source isEqualToString:@"vad"] && payload[@"decision"] != nil) {
-    NSString *decision = [payload[@"decision"] isKindOfClass:[NSString class]] ? payload[@"decision"] : nil;
-    if (!(decision && [decision isEqualToString:@"model"])) {
-      if (errorMessage) *errorMessage = @"speech payload.decision must be model";
-      return false;
-    }
-  }
-  if ([source isEqualToString:@"sid"]) {
-    if (![[payload allKeys] containsObject:@"speakerName"]) {
-      if (errorMessage) *errorMessage = @"speech payload.speakerName is required for source=sid (string or null)";
-      return false;
-    }
-    id speakerName = payload[@"speakerName"];
-    if (!(speakerName == [NSNull null] || [speakerName isKindOfClass:[NSString class]])) {
-      if (errorMessage) *errorMessage = @"speech payload.speakerName must be a string or null";
-      return false;
-    }
-  }
-  if ([source isEqualToString:@"languageId"]) {
-    id langValue = payload[@"lang"];
-    if (![langValue isKindOfClass:[NSString class]] || [(NSString *)langValue length] == 0) {
-      if (errorMessage) *errorMessage = @"speech payload.lang is required for source=languageId (non-empty string)";
-      return false;
-    }
-    if (payload[@"confidence"] != nil && payload[@"confidence"] != [NSNull null]) {
-      if (![payload[@"confidence"] isKindOfClass:[NSNumber class]]) {
-        if (errorMessage) *errorMessage = @"speech payload.confidence must be a finite number when provided";
-        return false;
-      }
-      double confidence = [(NSNumber *)payload[@"confidence"] doubleValue];
-      if (!std::isfinite(confidence)) {
-        if (errorMessage) *errorMessage = @"speech payload.confidence must be a finite number when provided";
-        return false;
-      }
-    }
-  }
-  if ([source isEqualToString:@"audioTagging"]) {
-    if (payload[@"primaryName"] != nil && payload[@"primaryName"] != [NSNull null]) {
-      if (![payload[@"primaryName"] isKindOfClass:[NSString class]]) {
-        if (errorMessage) *errorMessage = @"speech payload.primaryName must be a string when provided";
-        return false;
-      }
-    }
-    if (payload[@"events"] != nil && payload[@"events"] != [NSNull null]) {
-      if (![payload[@"events"] isKindOfClass:[NSArray class]]) {
-        if (errorMessage) *errorMessage = @"speech payload.events must be an array when provided";
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 } // namespace
 
 namespace {
@@ -354,23 +255,6 @@ static NSDictionary *segRecordToDict(const SegRecord &r) {
   return dict;
 }
 
-static void seg_notify_segment_appended(
-  const std::shared_ptr<SegLiveEntry> &entry,
-  const SegRecord &seg,
-  int segmentIndex
-) {
-  if (!entry->emitSegmentAppended || !entry->segmentAppendedEmitter) {
-    return;
-  }
-  const int64_t now = (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
-  if (entry->segmentEventMinIntervalMs > 0 &&
-      now - entry->lastSegmentEmitWallMs < entry->segmentEventMinIntervalMs) {
-    return;
-  }
-  entry->lastSegmentEmitWallMs = now;
-  const int totalSegCount = static_cast<int>(entry->segments.size());
-  entry->segmentAppendedEmitter(entry->bufferId, seg, segmentIndex, totalSegCount);
-}
 } // namespace
 
 namespace {
@@ -2153,96 +2037,63 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
                    reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
-  std::shared_ptr<SegLiveEntry> entry;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto it = g_seg_live.find(liveBufferId.UTF8String);
-    if (it == g_seg_live.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
-      return;
-    }
-    entry = it->second;
+  std::string payloadJson;
+  if ([payload isKindOfClass:[NSDictionary class]]) {
+    NSData *pd = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+    if (pd) payloadJson.assign((const char *)pd.bytes, (size_t)pd.length);
   }
-  try {
-    SegRecord seg;
-    seg.id = "seg_" + seg_uuid();
-    seg.kind = kind.length > 0 ? kind.UTF8String : "speech";
-    if (!seg_is_valid_kind(seg.kind)) {
-      reject(@"SEGMENT_INVALID_ARGUMENT", @"kind must be one of speech, alignment, or diarization", nil);
-      return;
-    }
-    if (seg.kind == "speech") {
-      NSString *validationError = nil;
-      if (!seg_validate_strict_speech_payload(payload, &validationError)) {
-        reject(@"SEGMENT_INVALID_ARGUMENT", validationError ?: @"Invalid speech payload", nil);
-        return;
-      }
-    }
-    if ((int)sampleRate <= 0) {
-      reject(@"SEGMENT_INVALID_ARGUMENT", @"sampleRate must be > 0", nil);
-      return;
-    }
-    seg.sourceAudioBufferId = sourceAudioBufferId.length > 0 ? sourceAudioBufferId.UTF8String : entry->sourceAudioBufferId;
-    seg.startSample = (int)startSample;
-    seg.endSample = (int)endSample;
-    seg.sampleRate = (int)sampleRate;
-    seg.durationMs = durationMs != nil ? durationMs.intValue : (int)(((seg.endSample - seg.startSample) * 1000.0) / std::max(1, seg.sampleRate));
-    if (confidence != nil) {
-      seg.hasConfidence = true;
-      seg.confidence = confidence.doubleValue;
-    }
-    if ([payload isKindOfClass:[NSDictionary class]]) {
-      NSData *pd = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
-      if (pd) seg.payloadJson = std::string((const char *)pd.bytes, pd.length);
-    }
-    std::string checkpointSnapshot;
-    int segmentIndex = 0;
-    {
-      std::lock_guard<std::mutex> lock(entry->lock);
-      if (entry->state == SegLiveEntry::FINISHED) {
-        throw std::runtime_error("SEGMENT_ALREADY_FINALIZED: Live segment buffer is finalized");
-      }
-      segmentIndex = (int)(entry->evictedCount + (int64_t)entry->segments.size());
-      entry->segments.push_back(seg);
-      if ((int)entry->segments.size() > entry->maxSegments) {
-        entry->segments.erase(entry->segments.begin());
-        entry->evictedCount++;
-      }
-      entry->totalSegmentsWritten++;
-      checkpointSnapshot = entry->snapshotForSpoolLocked();
-    }
-    entry->maybeAppendSegmentToSpool(seg, true, checkpointSnapshot);
-
-    if ([payload isKindOfClass:[NSDictionary class]]) {
-      NSString *annReason = [payload[@"__annotationReason"] isKindOfClass:[NSString class]] ? payload[@"__annotationReason"] : nil;
-      NSString *annSource = [payload[@"__annotationSource"] isKindOfClass:[NSString class]] ? payload[@"__annotationSource"] : nil;
-      if (annReason.length > 0 && annSource.length > 0) {
-        int64_t annCreatedAtMs = [payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]
-          ? ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue
-          : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
-        std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
-        g_seg_engine_annotation_by_segment[seg.id] = SegEngineAnnotation{
-          annReason.UTF8String,
-          annSource.UTF8String,
-          annCreatedAtMs,
-          segmentIndex,
-        };
-      }
-    }
-
-    seg_notify_segment_appended(entry, seg, segmentIndex);
-    entry->notifyCommitListeners(seg.id, segmentIndex, seg);
-    resolve(@{ @"segmentId": [NSString stringWithUTF8String:seg.id.c_str()], @"segmentIndex": @(segmentIndex) });
-  } catch (const std::exception &e) {
-    NSString *msg = [NSString stringWithUTF8String:e.what()];
+  const std::string kindStr = kind.length > 0 ? kind.UTF8String : "speech";
+  const int duration =
+      durationMs != nil
+          ? durationMs.intValue
+          : (int)((((int)endSample - (int)startSample) * 1000.0) / std::max(1, (int)sampleRate));
+  std::string segmentId;
+  int segmentIndex = -1;
+  std::string err;
+  if (!seg_live_append_segment(
+          liveBufferId.UTF8String, kindStr,
+          sourceAudioBufferId.length > 0 ? sourceAudioBufferId.UTF8String : "", (int)startSample,
+          (int)endSample, (int)sampleRate, duration, confidence != nil,
+          confidence != nil ? confidence.doubleValue : 0.0, payloadJson, &segmentId, &segmentIndex,
+          &err)) {
+    NSString *msg = err.empty() ? @"appendLiveSegment failed" : [NSString stringWithUTF8String:err.c_str()];
     NSString *code = @"SEGMENT_INTERNAL_ERROR";
     NSRange idx = [msg rangeOfString:@":"];
     if (idx.location != NSNotFound) {
       code = [msg substringToIndex:idx.location];
-      msg = [[msg substringFromIndex:idx.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+      msg = [[msg substringFromIndex:idx.location + 1]
+          stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     }
     reject(code, msg, nil);
+    return;
   }
+
+  if ([payload isKindOfClass:[NSDictionary class]]) {
+    NSString *annReason =
+        [payload[@"__annotationReason"] isKindOfClass:[NSString class]] ? payload[@"__annotationReason"]
+                                                                        : nil;
+    NSString *annSource =
+        [payload[@"__annotationSource"] isKindOfClass:[NSString class]] ? payload[@"__annotationSource"]
+                                                                        : nil;
+    if (annReason.length > 0 && annSource.length > 0) {
+      int64_t annCreatedAtMs =
+          [payload[@"__annotationCreatedAtMs"] isKindOfClass:[NSNumber class]]
+              ? ((NSNumber *)payload[@"__annotationCreatedAtMs"]).longLongValue
+              : (int64_t)([[NSDate date] timeIntervalSince1970] * 1000.0);
+      std::lock_guard<std::mutex> annLock(g_seg_engine_mutex);
+      g_seg_engine_annotation_by_segment[segmentId] = SegEngineAnnotation{
+          annReason.UTF8String,
+          annSource.UTF8String,
+          annCreatedAtMs,
+          segmentIndex,
+      };
+    }
+  }
+
+  resolve(@{
+    @"segmentId": [NSString stringWithUTF8String:segmentId.c_str()],
+    @"segmentIndex": @(segmentIndex),
+  });
 #else
   reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
 #endif
@@ -2287,44 +2138,11 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
                                     reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
-  std::shared_ptr<SegLiveEntry> live;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto it = g_seg_live.find(liveBufferId.UTF8String);
-    if (it == g_seg_live.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
-      return;
-    }
-    live = it->second;
-  }
-  try {
-    std::vector<SegRecord> records;
-    if ([mode isEqualToString:@"windowSnapshot"]) records = live->snapshotWindow();
-    else if (mode == nil || [mode isEqualToString:@"fullIfSpooled"]) records = live->snapshotFullIfSpooled();
-    else {
-      reject(@"SEGMENT_INVALID_ARGUMENT", [NSString stringWithFormat:@"Unknown mode: %@", mode], nil);
-      return;
-    }
-
-    std::shared_ptr<SegOfflineEntry> off;
-    {
-      std::lock_guard<std::mutex> lock(g_seg_mutex);
-      off = std::make_shared<SegOfflineEntry>();
-      off->bufferId = seg_generate_id("seg_off");
-      off->segments = records;
-      off->sourceAudioBufferId = live->sourceAudioBufferId;
-      g_seg_offline[off->bufferId] = off;
-    }
-    NSMutableDictionary *out = [@{
-      @"bufferId": [NSString stringWithUTF8String:off->bufferId.c_str()],
-      @"kind": @"offlineSegmentBuffer",
-      @"state": @"immutable",
-      @"segmentCount": @((int)off->segments.size()),
-    } mutableCopy];
-    if (!off->sourceAudioBufferId.empty()) out[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:off->sourceAudioBufferId.c_str()];
-    resolve(out);
-  } catch (const std::exception &e) {
-    NSString *msg = [NSString stringWithUTF8String:e.what()];
+  std::string offlineId;
+  std::string err;
+  const std::string modeStr = mode != nil ? mode.UTF8String : "fullIfSpooled";
+  if (!seg_create_offline_from_live(liveBufferId.UTF8String, modeStr, &offlineId, &err)) {
+    NSString *msg = err.empty() ? @"createOfflineFromLive failed" : [NSString stringWithUTF8String:err.c_str()];
     NSString *code = @"SEGMENT_INTERNAL_ERROR";
     NSRange idx = [msg rangeOfString:@":"];
     if (idx.location != NSNotFound) {
@@ -2332,7 +2150,23 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       msg = [[msg substringFromIndex:idx.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     }
     reject(code, msg, nil);
+    return;
   }
+  auto off = seg_get_offline_entry(offlineId);
+  if (!off) {
+    reject(@"SEGMENT_INTERNAL_ERROR", @"Offline segment buffer missing after create", nil);
+    return;
+  }
+  NSMutableDictionary *out = [@{
+    @"bufferId": [NSString stringWithUTF8String:off->bufferId.c_str()],
+    @"kind": @"offlineSegmentBuffer",
+    @"state": @"immutable",
+    @"segmentCount": @(seg_offline_segment_count(offlineId)),
+  } mutableCopy];
+  if (!off->sourceAudioBufferId.empty()) {
+    out[@"sourceAudioBufferId"] = [NSString stringWithUTF8String:off->sourceAudioBufferId.c_str()];
+  }
+  resolve(out);
 #else
   reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
 #endif
@@ -2345,50 +2179,11 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
                                       reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
-  std::shared_ptr<SegLiveEntry> live;
-  std::shared_ptr<SegOfflineEntry> off;
-  {
-    std::lock_guard<std::mutex> lock(g_seg_mutex);
-    auto liveIt = g_seg_live.find(liveBufferId.UTF8String);
-    if (liveIt == g_seg_live.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
-      return;
-    }
-    live = liveIt->second;
-    auto offIt = g_seg_offline.find(targetBufferId.UTF8String);
-    if (offIt == g_seg_offline.end()) {
-      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", targetBufferId], nil);
-      return;
-    }
-    off = offIt->second;
-    if (!off->segments.empty()) {
-      reject(@"SEGMENT_INVALID_STATE", [NSString stringWithFormat:@"Offline segment buffer already populated: %@", targetBufferId], nil);
-      return;
-    }
-  }
-
-  try {
-    std::vector<SegRecord> records;
-    if ([mode isEqualToString:@"windowSnapshot"]) {
-      records = live->snapshotWindow();
-    } else if (mode == nil || [mode isEqualToString:@"fullIfSpooled"]) {
-      records = live->snapshotFullIfSpooled();
-    } else {
-      reject(@"SEGMENT_INVALID_ARGUMENT", [NSString stringWithFormat:@"Unknown mode: %@", mode], nil);
-      return;
-    }
-
-    {
-      std::lock_guard<std::mutex> lock(g_seg_mutex);
-      if (!off->segments.empty()) {
-        reject(@"SEGMENT_INVALID_STATE", [NSString stringWithFormat:@"Offline segment buffer already populated: %@", targetBufferId], nil);
-        return;
-      }
-      off->segments = records;
-    }
-    resolve(nil);
-  } catch (const std::exception &e) {
-    NSString *msg = [NSString stringWithUTF8String:e.what()];
+  std::string err;
+  const std::string modeStr = mode != nil ? mode.UTF8String : "fullIfSpooled";
+  if (!seg_populate_offline_from_live_if_empty(targetBufferId.UTF8String, liveBufferId.UTF8String,
+                                               modeStr, &err)) {
+    NSString *msg = err.empty() ? @"populateOfflineFromLiveIfEmpty failed" : [NSString stringWithUTF8String:err.c_str()];
     NSString *code = @"SEGMENT_INTERNAL_ERROR";
     NSRange idx = [msg rangeOfString:@":"];
     if (idx.location != NSNotFound) {
@@ -2396,7 +2191,9 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       msg = [[msg substringFromIndex:idx.location + 1] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
     }
     reject(code, msg, nil);
+    return;
   }
+  resolve(nil);
 #else
   reject(@"SEGMENT_INTERNAL_ERROR", @"SegmentBuffer unavailable", nil);
 #endif
@@ -2479,39 +2276,27 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       return;
     }
 
-    std::vector<SegRecord> snap;
-    {
-      std::lock_guard<std::mutex> lock(g_seg_mutex);
-      const char *bufferKey = bufferId.UTF8String;
-      if (bufferKey == nullptr) {
-        reject(@"SEGMENT_BUFFER_NOT_FOUND", @"Offline segment buffer not found", nil);
-        return;
-      }
-      auto it = g_seg_offline.find(bufferKey);
-      if (it == g_seg_offline.end()) {
-        seg_debug_log([NSString stringWithFormat:
-          @"getOfflineSegmentBufferSegments reject not found bufferId=%@",
-          bufferId ?: @"<nil>"]);
-        reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", bufferId], nil);
-        return;
-      }
-      auto &segments = it->second->segments;
-      const int64_t total = static_cast<int64_t>(segments.size());
-      const int64_t end64 = std::min<int64_t>(total, s64 + c64);
-#if DEBUG
+    const char *bufferKey = bufferId.UTF8String;
+    if (bufferKey == nullptr || !seg_get_offline_entry(bufferKey)) {
       seg_debug_log([NSString stringWithFormat:
-        @"getOfflineSegmentBufferSegments slice total=%lld s=%lld c=%lld end=%lld",
-        (long long)total,
-        (long long)s64,
-        (long long)c64,
-        (long long)end64]);
-#endif
-      if (s64 < total && end64 > s64) {
-        const size_t from = static_cast<size_t>(s64);
-        const size_t to = static_cast<size_t>(end64);
-        snap.assign(segments.begin() + from, segments.begin() + to);
-      }
+        @"getOfflineSegmentBufferSegments reject not found bufferId=%@",
+        bufferId ?: @"<nil>"]);
+      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Offline segment buffer not found: %@", bufferId], nil);
+      return;
     }
+    const int total = seg_offline_segment_count(bufferKey);
+    const int pageCount =
+        seg_clamp_tm_page_count(c64 > SEG_TM_MAX_PAGE_COUNT ? SEG_TM_MAX_PAGE_COUNT : static_cast<int>(c64));
+    std::vector<SegRecord> snap =
+        seg_offline_get_segments(bufferKey, static_cast<int>(s64), pageCount);
+#if DEBUG
+    seg_debug_log([NSString stringWithFormat:
+      @"getOfflineSegmentBufferSegments slice total=%d s=%lld c=%lld snap=%lu",
+      total,
+      (long long)s64,
+      (long long)c64,
+      (unsigned long)snap.size()]);
+#endif
 
     NSArray *segmentsOut = nil;
     if (snap.empty()) {
@@ -2558,21 +2343,6 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
     [NSThread isMainThread] ? @"main" : @"background"]);
 #endif
   @try {
-    std::shared_ptr<SegLiveEntry> entry;
-    {
-      std::lock_guard<std::mutex> lock(g_seg_mutex);
-      const char *bufferKey = liveBufferId.UTF8String;
-      if (bufferKey == nullptr) {
-        reject(@"SEGMENT_BUFFER_NOT_FOUND", @"Live segment buffer not found", nil);
-        return;
-      }
-      auto it = g_seg_live.find(bufferKey);
-      if (it == g_seg_live.end()) {
-        reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
-        return;
-      }
-      entry = it->second;
-    }
     if (!std::isfinite(startIndex) || !std::isfinite(maxCount)) {
       seg_debug_log(@"getLiveSegmentBufferSegments reject invalid finite slice");
       reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
@@ -2585,17 +2355,15 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       reject(@"SEGMENT_SLICE_INVALID", @"Invalid slice range", nil);
       return;
     }
-    std::vector<SegRecord> snap;
-    {
-      std::lock_guard<std::mutex> guard(entry->lock);
-      const int64_t total = static_cast<int64_t>(entry->segments.size());
-      const int64_t end64 = std::min<int64_t>(total, s64 + c64);
-      if (s64 < total && end64 > s64) {
-        const size_t from = static_cast<size_t>(s64);
-        const size_t to = static_cast<size_t>(end64);
-        snap.assign(entry->segments.begin() + from, entry->segments.begin() + to);
-      }
+    const char *bufferKey = liveBufferId.UTF8String;
+    if (bufferKey == nullptr || !seg_get_live_entry(bufferKey)) {
+      reject(@"SEGMENT_BUFFER_NOT_FOUND", [NSString stringWithFormat:@"Live segment buffer not found: %@", liveBufferId], nil);
+      return;
     }
+    const int pageCount =
+        seg_clamp_tm_page_count(c64 > SEG_TM_MAX_PAGE_COUNT ? SEG_TM_MAX_PAGE_COUNT : static_cast<int>(c64));
+    std::vector<SegRecord> snap =
+        seg_live_get_window_segments(bufferKey, static_cast<int>(s64), pageCount);
     NSArray *segmentsOut = nil;
     if (snap.empty()) {
       segmentsOut = @[];

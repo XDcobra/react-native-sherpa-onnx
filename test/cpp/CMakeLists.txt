@@ -810,6 +810,7 @@ find_package(ZLIB REQUIRED)
 add_executable(segmentbuffer_host_test
   "${SEGMENTBUFFER_TEST_DIR}/segmentbuffer_registry_test.cpp"
   "${SEGMENTBUFFER_CPP_ROOT}/SegJson.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegPayloadValidate.cpp"
   "${SEGMENTBUFFER_CPP_ROOT}/SegmentRegistry.cpp"
   "${SEGMENTBUFFER_CPP_ROOT}/SegmentLinkMapRegistry.cpp"
 )
