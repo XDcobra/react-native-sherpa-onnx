@@ -2,7 +2,7 @@
 
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../core/VadRuntime.h"
+#include "sherpa-onnx-vad-engine-wrapper.h"
 #include "../pipeline/VadPipelineWorker.h"
 
 #include <cmath>
@@ -71,7 +71,7 @@ struct VadInstanceState {
   int maxSpeechDurationMs = 5000;
   int windowSize = 512;
   bool speechDetected = false;
-  std::shared_ptr<VadRuntime> runtime;
+  std::shared_ptr<sherpaonnx::VadEngineWrapper> runtime;
 };
 
 struct VadPipelineState {
@@ -144,7 +144,7 @@ bool FinishVadInitialize(
     RCTPromiseResolveBlock resolve,
     RCTPromiseRejectBlock reject
 ) {
-  VadRuntimeConfig runtimeCfg;
+  sherpaonnx::VadEngineConfig runtimeCfg;
   runtimeCfg.modelType = state.modelType;
   runtimeCfg.modelPath = state.modelPath;
   runtimeCfg.sampleRate = state.sampleRate;
@@ -156,16 +156,19 @@ bool FinishVadInitialize(
   runtimeCfg.minSilenceDurationMs = state.minSilenceDurationMs;
   runtimeCfg.maxSpeechDurationMs = state.maxSpeechDurationMs;
   runtimeCfg.windowSize = state.windowSize;
-  std::string runtimeErr;
-  state.runtime = VadRuntime::Create(runtimeCfg, &runtimeErr);
-  if (!state.runtime) {
+  auto engine = std::make_shared<sherpaonnx::VadEngineWrapper>();
+  const auto init = engine->initialize(runtimeCfg);
+  if (!init.success) {
     reject(
       @"VAD_MODEL_INIT_FAILED",
-      [NSString stringWithUTF8String:(runtimeErr.empty() ? "Failed to create iOS VAD runtime" : runtimeErr.c_str())],
+      [NSString stringWithUTF8String:(init.error.empty()
+                                         ? "Failed to create iOS VAD runtime"
+                                         : init.error.c_str())],
       nil
     );
     return false;
   }
+  state.runtime = std::move(engine);
   std::lock_guard<std::mutex> lock(g_vad_mutex);
   g_vad_instances[instanceIdStr] = state;
   resolve(nil);
@@ -522,14 +525,14 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     reject(@"VAD_MODEL_INIT_FAILED", @"VAD runtime is not initialized", nil);
     return;
   }
-  cfg.runtime->Reset();
+  cfg.runtime->reset();
   int segmentCount = 0;
   int64_t speechDurationMs = 0;
   int chunksProcessed = 0;
   std::vector<SegRecord> records;
   std::vector<float> pending;
   pending.insert(pending.end(), samples.begin(), samples.end());
-  auto appendSegments = [&](const std::vector<VadRuntimeSegment> &segments) {
+  auto appendSegments = [&](const std::vector<sherpaonnx::VadEngineSegment> &segments) {
     for (const auto &segment : segments) {
       SegRecord r;
       r.id = "seg_off_" + std::to_string(segment.startSample) + "_" +
@@ -549,21 +552,21 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     }
   };
   while ((int)pending.size() >= frameSize) {
-    cfg.runtime->AcceptWaveform(pending.data(), frameSize);
+    cfg.runtime->acceptWaveform(pending.data(), frameSize);
     chunksProcessed += 1;
-    appendSegments(cfg.runtime->PopSegments());
+    appendSegments(cfg.runtime->popSegments());
     pending.erase(pending.begin(), pending.begin() + frameSize);
   }
   if (!pending.empty()) {
     std::vector<float> tail(frameSize, 0.0f);
     std::copy(pending.begin(), pending.end(), tail.begin());
-    cfg.runtime->AcceptWaveform(tail.data(), frameSize);
+    cfg.runtime->acceptWaveform(tail.data(), frameSize);
     chunksProcessed += 1;
-    appendSegments(cfg.runtime->PopSegments());
+    appendSegments(cfg.runtime->popSegments());
     pending.clear();
   }
-  cfg.runtime->Flush();
-  const auto finalSegments = cfg.runtime->PopSegments();
+  cfg.runtime->flush();
+  const auto finalSegments = cfg.runtime->popSegments();
   for (const auto &segment : finalSegments) {
     SegRecord r;
     r.id = "seg_off_" + std::to_string(segment.startSample) + "_" +
@@ -803,7 +806,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
       return;
     }
     if (it->second.runtime) {
-      resolve(@(it->second.runtime->IsSpeechDetected()));
+      resolve(@(it->second.runtime->isSpeechDetected()));
       return;
     }
     resolve(@(false));
@@ -817,7 +820,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
   (void)reject;
   std::string iid = [instanceId UTF8String];
   std::vector<std::shared_ptr<VadPipelineWorker>> workersToStop;
-  std::shared_ptr<VadRuntime> runtimeToClose;
+  std::shared_ptr<sherpaonnx::VadEngineWrapper> runtimeToClose;
   {
     std::lock_guard<std::mutex> lock(g_vad_mutex);
     auto instanceIt = g_vad_instances.find(iid);
@@ -850,7 +853,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     if (w) w->stop();
   }
   if (runtimeToClose) {
-    runtimeToClose->Reset();
+    runtimeToClose->reset();
   }
   resolve(nil);
 }

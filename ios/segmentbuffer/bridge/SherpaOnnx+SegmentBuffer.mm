@@ -4,7 +4,7 @@
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../audio/pipeline/PaLiveEntry.h"
-#include "../../vad/core/VadRuntime.h"
+#include "sherpa-onnx-vad-engine-wrapper.h"
 #include "pyannote-segmentation-session.h"
 
 #ifdef __cplusplus
@@ -1225,7 +1225,7 @@ struct SegEngine {
   int64_t segmentStartSample = 0;
   int64_t checkpointStartSample = 0;
   double silenceAccumulatedMs = 0.0;
-  std::shared_ptr<VadRuntime> vadRuntime;
+  std::shared_ptr<sherpaonnx::VadEngineWrapper> vadRuntime;
   int vadFrameSize = 0;
   std::vector<float> pendingVadSamples;
 };
@@ -1313,7 +1313,7 @@ static bool seg_init_vad_runtime(
     return false;
   }
 
-  VadRuntimeConfig cfg;
+  sherpaonnx::VadEngineConfig cfg;
   cfg.modelType = mt;
   cfg.modelPath = onnxPath;
   cfg.sampleRate = std::max(1, sampleRate);
@@ -1326,18 +1326,18 @@ static bool seg_init_vad_runtime(
   cfg.maxSpeechDurationMs = std::max(cfg.minSpeechDurationMs, engine->policy.maxSegmentMs);
   cfg.windowSize = cfg.modelType == "ten_vad" ? 256 : 512;
 
-  std::string runtimeError;
-  auto runtime = VadRuntime::Create(cfg, &runtimeError);
-  if (!runtime) {
+  auto runtime = std::make_shared<sherpaonnx::VadEngineWrapper>();
+  const auto init = runtime->initialize(cfg);
+  if (!init.success) {
     if (errorOut) {
       *errorOut =
         "speech_vad_model failed to initialize runtime: " +
-        (runtimeError.empty() ? std::string("unknown error") : runtimeError);
+        (init.error.empty() ? std::string("unknown error") : init.error);
     }
     return false;
   }
 
-  engine->vadRuntime = runtime;
+  engine->vadRuntime = std::move(runtime);
   engine->vadFrameSize = std::max(1, cfg.windowSize);
   engine->pendingVadSamples.clear();
   return true;
@@ -1535,7 +1535,7 @@ static void seg_append_runtime_vad_segments(
   const std::string &reason
 ) {
   if (!engine || !engine->vadRuntime) return;
-  auto segments = engine->vadRuntime->PopSegments();
+  auto segments = engine->vadRuntime->popSegments();
   for (const auto &segment : segments) {
     seg_append_speech_segment_range(
       engine,
@@ -1729,7 +1729,7 @@ static void seg_engine_evaluate_audio(
       samples + count
     );
     while ((int)engine->pendingVadSamples.size() >= frameSize) {
-      engine->vadRuntime->AcceptWaveform(engine->pendingVadSamples.data(), frameSize);
+      engine->vadRuntime->acceptWaveform(engine->pendingVadSamples.data(), frameSize);
       seg_append_runtime_vad_segments(engine, "vad_boundary");
       engine->pendingVadSamples.erase(
         engine->pendingVadSamples.begin(),
@@ -1778,11 +1778,11 @@ static void seg_engine_flush_audio(const std::shared_ptr<SegEngine> &engine) {
         engine->pendingVadSamples.end(),
         tail.begin()
       );
-      engine->vadRuntime->AcceptWaveform(tail.data(), frameSize);
+      engine->vadRuntime->acceptWaveform(tail.data(), frameSize);
       engine->pendingVadSamples.clear();
       seg_append_runtime_vad_segments(engine, "vad_boundary");
     }
-    engine->vadRuntime->Flush();
+    engine->vadRuntime->flush();
     seg_append_runtime_vad_segments(engine, "finalize");
     return;
   }
@@ -2539,8 +2539,8 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
 
         pending.insert(pending.end(), chunk.begin(), chunk.end());
         while ((int)pending.size() >= frameSize) {
-          tempEngine->vadRuntime->AcceptWaveform(pending.data(), frameSize);
-          auto segments = tempEngine->vadRuntime->PopSegments();
+          tempEngine->vadRuntime->acceptWaveform(pending.data(), frameSize);
+          auto segments = tempEngine->vadRuntime->popSegments();
           for (const auto &segment : segments) {
             appendRecord(segment.startSample, segment.endSample, "vad_boundary");
           }
@@ -2551,16 +2551,16 @@ bool seg_engine_flush(const std::string &engineId, std::string *error) {
       if (!pending.empty()) {
         std::vector<float> tail(frameSize, 0.0f);
         std::copy(pending.begin(), pending.end(), tail.begin());
-        tempEngine->vadRuntime->AcceptWaveform(tail.data(), frameSize);
-        auto segments = tempEngine->vadRuntime->PopSegments();
+        tempEngine->vadRuntime->acceptWaveform(tail.data(), frameSize);
+        auto segments = tempEngine->vadRuntime->popSegments();
         for (const auto &segment : segments) {
           appendRecord(segment.startSample, segment.endSample, "vad_boundary");
         }
       }
 
-      tempEngine->vadRuntime->Flush();
+      tempEngine->vadRuntime->flush();
       {
-        auto segments = tempEngine->vadRuntime->PopSegments();
+        auto segments = tempEngine->vadRuntime->popSegments();
         for (const auto &segment : segments) {
           appendRecord(segment.startSample, segment.endSample, "finalize");
         }
