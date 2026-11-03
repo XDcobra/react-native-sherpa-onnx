@@ -1,6 +1,5 @@
 package com.sherpaonnx.tts.pipeline
 
-import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.sherpaonnx.audio.pipeline.LiveAppendOrigin
 import com.sherpaonnx.audio.pipeline.LiveAudioPipelineWriter
 import com.sherpaonnx.audio.pipeline.LiveEntry
@@ -8,22 +7,10 @@ import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.tts.core.TtsEngineInstance
+import com.sherpaonnx.tts.nativeapi.TtsNative
 
 /**
- * TTS offline live pipeline worker.
- *
- * Extends [OfflineLivePipelineWorker] — all generic pipeline plumbing (threading, cursor
- * management, segmentation-engine drain, flush/stop/completion) is handled by the base class.
- * This class only implements [onSegmentCommitted]: given a committed text segment, it calls
- * the offline TTS engine (batch `generate`) and appends the resulting PCM to the live audio
- * output buffer.
- *
- * Preserves per-segment sid/speed resolution and voice cloning behavior while using
- * the simpler batch-generate API (no streaming callback), because each
- * committed segment is already bounded in length by the segmentation policy.
- *
- * See: docs/migration/liveOverload/sub-05-tts-live-overload.md
- * See: docs/migration/liveOverload/offline-stt-live-pipeline-mandatory-segmentation.md
+ * TTS offline live pipeline worker — batch generate per committed segment via shared CXX.
  */
 internal class TtsOfflineLivePipelineWorker(
   pipelineId: String,
@@ -34,7 +21,6 @@ internal class TtsOfflineLivePipelineWorker(
   private val defaultSid: Int = 0,
   private val defaultSpeed: Float = 1.0f,
   private val defaultLang: String? = null,
-  /** When set (and no [voiceClone]), use GenerationConfig.numSteps for non-clone models. */
   private val defaultNumSteps: Int? = null,
   private val defaultPhonemeCodepoints: Array<IntArray>? = null,
   private val defaultTokens: Array<Array<String>>? = null,
@@ -58,63 +44,93 @@ internal class TtsOfflineLivePipelineWorker(
     val effectiveSid = (text.meta?.get("sid") as? Number)?.toInt() ?: defaultSid
     val effectiveSpeed = (text.meta?.get("speed") as? Number)?.toFloat() ?: defaultSpeed
 
-    val tts = ttsInstance.tts ?: return
-    val gateKey = NativeInstanceGate.keyFor(tts)
+    if (!ttsInstance.hasEngine()) return
+    val gateKey = ttsInstance.gateKey()
     if (!NativeInstanceGate.beginUse(gateKey)) return
 
-    val audio = try {
+    val audioPair = try {
       when {
         voiceClone != null -> {
-          val config = GenerationConfig(
-            sid = effectiveSid,
-            speed = effectiveSpeed,
-            referenceAudio = voiceClone.referenceAudio,
-            referenceSampleRate = voiceClone.referenceSampleRate,
-            referenceText = voiceClone.referenceText,
-            silenceScale = voiceClone.silenceScale,
-            numSteps = voiceClone.numSteps,
-            phonemeCodepoints = voiceClone.phonemeCodepoints ?: defaultPhonemeCodepoints,
-            tokens = voiceClone.tokens ?: defaultTokens,
+          TtsNative.readAudioResult(
+            TtsNative.nativeGenerateWithOptions(
+              instanceId = ttsInstance.instanceId,
+              text = text.text,
+              sid = effectiveSid,
+              speed = effectiveSpeed,
+              applyNumSteps = true,
+              numSteps = voiceClone.numSteps,
+              silenceScale = voiceClone.silenceScale,
+              referenceAudio = voiceClone.referenceAudio,
+              referenceSampleRate = voiceClone.referenceSampleRate,
+              referenceText = voiceClone.referenceText,
+              extra = null,
+              phonemeCodepoints = voiceClone.phonemeCodepoints ?: defaultPhonemeCodepoints,
+              tokens = voiceClone.tokens ?: defaultTokens,
+            )
           )
-          tts.generateWithConfig(text.text, config)
         }
         defaultNumSteps != null -> {
           val extra =
-            if (!defaultLang.isNullOrBlank()) mapOf("lang" to defaultLang) else null
-          val config = GenerationConfig(
-            sid = effectiveSid,
-            speed = effectiveSpeed,
-            numSteps = defaultNumSteps,
-            extra = extra,
-            phonemeCodepoints = defaultPhonemeCodepoints,
-            tokens = defaultTokens,
+            if (!defaultLang.isNullOrBlank()) hashMapOf("lang" to defaultLang) else null
+          TtsNative.readAudioResult(
+            TtsNative.nativeGenerateWithOptions(
+              instanceId = ttsInstance.instanceId,
+              text = text.text,
+              sid = effectiveSid,
+              speed = effectiveSpeed,
+              applyNumSteps = true,
+              numSteps = defaultNumSteps,
+              silenceScale = 0.2f,
+              referenceAudio = null,
+              referenceSampleRate = 0,
+              referenceText = null,
+              extra = extra,
+              phonemeCodepoints = defaultPhonemeCodepoints,
+              tokens = defaultTokens,
+            )
           )
-          tts.generateWithConfig(text.text, config)
         }
         !defaultLang.isNullOrBlank() ||
           defaultPhonemeCodepoints != null ||
           defaultTokens != null -> {
           val extra =
-            if (!defaultLang.isNullOrBlank()) mapOf("lang" to defaultLang) else null
-          val config = GenerationConfig(
-            sid = effectiveSid,
-            speed = effectiveSpeed,
-            extra = extra,
-            phonemeCodepoints = defaultPhonemeCodepoints,
-            tokens = defaultTokens,
+            if (!defaultLang.isNullOrBlank()) hashMapOf("lang" to defaultLang) else null
+          TtsNative.readAudioResult(
+            TtsNative.nativeGenerateWithOptions(
+              instanceId = ttsInstance.instanceId,
+              text = text.text,
+              sid = effectiveSid,
+              speed = effectiveSpeed,
+              applyNumSteps = false,
+              numSteps = 5,
+              silenceScale = 0.2f,
+              referenceAudio = null,
+              referenceSampleRate = 0,
+              referenceText = null,
+              extra = extra,
+              phonemeCodepoints = defaultPhonemeCodepoints,
+              tokens = defaultTokens,
+            )
           )
-          tts.generateWithConfig(text.text, config)
         }
-        else -> tts.generate(text.text, effectiveSid, effectiveSpeed)
+        else -> TtsNative.readAudioResult(
+          TtsNative.nativeGenerate(
+            ttsInstance.instanceId,
+            text.text,
+            effectiveSid,
+            effectiveSpeed,
+          )
+        )
       }
     } finally {
       NativeInstanceGate.endUse(gateKey)
     }
 
-    if (audio.samples.isNotEmpty()) {
+    val (samples, sampleRate) = audioPair ?: return
+    if (samples.isNotEmpty()) {
       val result = audioOutputEntry.tryAppendSamples(
-        audio.samples,
-        audio.sampleRate,
+        samples,
+        sampleRate,
         LiveAppendOrigin.Pipeline(LiveAudioPipelineWriter.TTS),
       )
       if (result == com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.BUFFER_FINALIZED) {
@@ -122,7 +138,7 @@ internal class TtsOfflineLivePipelineWorker(
         return
       }
       if (result == com.sherpaonnx.audio.pipeline.LiveEntry.AppendResult.APPENDED) {
-        addUnitsWritten(audio.samples.size.toLong())
+        addUnitsWritten(samples.size.toLong())
       }
     }
   }

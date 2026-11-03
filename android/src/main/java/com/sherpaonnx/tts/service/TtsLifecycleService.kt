@@ -7,6 +7,7 @@ import com.sherpaonnx.SherpaOnnxModule
 import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.dispatchNumSpeakers
 import com.sherpaonnx.tts.core.dispatchSampleRate
+import com.sherpaonnx.tts.nativeapi.TtsNative
 
 /**
  * Engine lifecycle, metadata, catalog helpers, and init executor shutdown.
@@ -34,6 +35,7 @@ internal class TtsLifecycleService(
       inst.releaseEngines()
     }
     repository.clear()
+    TtsNative.nativeShutdownAll()
   }
 
   fun getTtsSampleRate(instanceId: String, promise: Promise) {

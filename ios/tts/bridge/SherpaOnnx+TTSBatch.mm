@@ -7,7 +7,7 @@
 
 #include "engine/TtsEngineStore.h"
 #include "options/TtsGenerationOptionsHelpers.h"
-#include "native/sherpa-onnx-tts-wrapper.h"
+#include "sherpa-onnx-tts-engine-wrapper.h"
 #include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
 #include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
 
