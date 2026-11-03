@@ -362,33 +362,6 @@ object PipelineAudioRegistry {
   fun getLiveSamplesSlice(liveBufferId: String, startFrame: Int, frameCount: Int): FloatArray =
     AudioBufferNative.nativeReadLiveSlice(liveBufferId, startFrame, frameCount) ?: FloatArray(0)
 
-  fun getOfflineSamplesSliceJni(
-    bufferId: String,
-    startFrame: Int,
-    frameCount: Int,
-  ): FloatArray =
-    AudioBufferNative.nativeReadOfflineSlice(bufferId, startFrame, frameCount) ?: FloatArray(0)
-
-  fun getLiveSamplesSliceJni(
-    bufferId: String,
-    startFrame: Int,
-    frameCount: Int,
-  ): FloatArray = getLiveSamplesSlice(bufferId, startFrame, frameCount)
-
-  fun createOfflineFromFloatArrayJni(
-    samples: FloatArray,
-    sampleRate: Int,
-    channelCount: Int,
-  ): String = createOfflineFromFloatArray(samples, sampleRate, channelCount).bufferId
-
-  fun appendSamplesToLiveJni(
-    bufferId: String,
-    samples: FloatArray,
-    sampleRate: Int,
-  ) {
-    appendSamplesToLive(bufferId, samples, sampleRate)
-  }
-
   fun createLiveCursor(liveBufferId: String): Int = AudioBufferNative.nativeCreateCursor(liveBufferId)
 
   fun peekLiveCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray =

@@ -1,10 +1,48 @@
 # Post–Buffer-in-C copy / performance backlog
 
 **When:** after **Audio + Text + Segment** SoT are all in shared C++ (umbrella Buffer-in-C complete).  
-**What:** revisit copy/handoff performance — SoT-done is **not** zero-copy-done.  
-**How:** focused follow-up PR(s) from the updated umbrella; instrument first (Android logcat).
+**End goal:** Kotlin/ObjC hold **only** Handle + Bridge (IDs, JS events, thin token listeners). Read / write / cursor / drain go **directly** to C (`pa_*` / `txt_*` / `seg_*`) — **no local Kotlin copy of the data structure**. SoT-done is **not** that end state.  
+**How:** focused follow-up PR(s) from the updated umbrella; instrument first (Android logcat); **behavior parity via host buffer tests** (no inference models required).
 
 Append new rows on every buffer migration. Do not delete resolved items — set **Status** `open` → `done` with a short note.
+
+## Priority order (work top → bottom)
+
+| Phase | IDs | Why this order |
+|-------|-----|----------------|
+| **0 — Cutover cleanup** | **A5** | Dead JNI only; unblocks clearer Audio surface; no behavior change if callers are gone |
+| **1 — Audio: C is the only sample SoT for Kotlin consumers** | **A4 → A1 → A3** | A4 restores mmap-friendly `readInto` (encode/viz). A1 rewires features off full `FloatArray` materialize onto shared C readers. A3 removes mic heap hop into the same append path. Together: Kotlin audio handles stop owning sample arrays |
+| **2 — Audio: JS boundary polish** | **A2** | After native readers exist, fix JSI double-copy into `OwnedBuffer`. One JS-boundary copy remains OK |
+| **3 — Text: drop storage mirrors** | **T3 → T5 → T1 → T2** | T3 first (live mirror/cursors = dual SoT). T5 moves offline spans into C. T1 drops full-string default for features. T2 UTF-16 JNI after readers exist |
+| **4 — Segment: drop storage mirrors** | **S8 → S6 → S1 → S4** | S8 mirrors T3 (cursor/log in C). S6/S1 stop full snapshot/getter dumps. S4 single validator in C |
+| **5 — Optional event contracts** | **T4, S5** | May change JS payload shape; do after storage mirrors are gone; keep or version public contract |
+| **6 — Engine in C (separate epic)** | **S7 → S2** | S7 is the dual-hook symptom; S2 is full SegEngine port. **Not** buffer-handle work — schedule after A/T/S mirrors |
+
+**Skip / already done:** A5, A6, A7, S3.
+
+## Per-ID notes (open)
+
+| ID | Role toward end goal | Risk / test focus |
+|----|----------------------|-------------------|
+| A5 | Cleanup | Grep for callers; assembleDebug |
+| A4 | Handle no longer rebuilds FloatArray from mmap slice | Host: mmap offline `readInto` / slice length/offset parity |
+| A1 | Features use `const float*` / shared reader, not `readAllSamples` default | Host + feature compile; drain cursor semantics vs pre-change |
+| A3 | Mic writes C ring without Kotlin `FloatArray` | Host/JNI append path; live ring length/overflow |
+| A2 | JSI one copy into ArrayBuffer | Host/JSI slice content + frame counts |
+| T3 | Live text: no Kotlin window/segment-log mirror | Host: partial/commit/cursor/finalize UTF-16 |
+| T5 | Offline text metadata SoT in C | Host: populate + span slice |
+| T1 | Features don’t default to full-string JNI | Compile + host length/slice |
+| T2 | UTF-16 across JNI without UTF-8 hop | Host: emoji/surrogate indices |
+| S8 | Live segment: cursor/drain from C only | Host: append/cursor/eviction/spool |
+| S6 | No full vector copy for offline-from-live default | Host: fullIfSpooled / windowSnapshot |
+| S1 | Getters don’t dump entire arrays by default | Host + TurboModule contract |
+| S4 | One validator | Host: invalid payload reject codes |
+| T4/S5 | Event payload size | Contract tests; optional |
+| S7/S2 | Engine SoT in C | Engine epic; device smoke after host |
+
+## Test gate (mandatory per closed ID)
+
+Buffer behavior must stay as today (append/drain/cursor/finalize/spool/overflow/UTF-16/SEG2/TXT2). Prefer **host GTests under `test/cpp/{audiobuffer,textbuffer,segmentbuffer}/`** — **no ORT / no feature model**. Extend always-on coverage for the touched contract; opt-in only for large spool/mmap fixtures. `assembleDebug` still required after Android JNI/Kotlin changes.
 
 ## Living backlog
 
@@ -14,7 +52,7 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 | A2 | Audio | JSI slice path: `pa_get_*_slice` → `std::vector` → memcpy → `OwnedBuffer` ArrayBuffer (also iOS) | Same pattern as pre-migration iOS; necessary JS boundary copy, but double native copy | Write slice directly into `OwnedBuffer` / reuse buffer pool | **open** |
 | A3 | Audio | Mic: Int16→`FloatArray` in Kotlin then JNI `GetFloatArrayRegion` into C ring | Capture stays platform; SoT moved to C | Append via critical JNI / short native capture path without intermediate heap `FloatArray` | **open** |
 | A4 | Audio | `MmapBacked.readInto` now `readSlice`→new `FloatArray`→`arraycopy` (was closer to mmap `ByteBuffer`) | Thin handle over C without exposing mmap pointer to Kotlin | JNI `readInto(out, offset, max)` or C pointer path for encode/viz | **open** |
-| A5 | Audio | Dead `PipelineAudioRegistry.*Jni` sample methods (JSI no longer calls them) | Left for compatibility during cutover | Delete once no callers | **open** |
+| A5 | Audio | Dead `PipelineAudioRegistry.*Jni` sample methods (JSI no longer calls them) | Left for compatibility during cutover | Delete once no callers | **done** (`refactor/close-audiobuffer-copy-backlog`, `*Jni` helpers removed) |
 | A6 | Audio | Video live-tap → C append | — | Already fixed in Audio SoT PR (`pa_append_samples_to_live`) | **done** |
 | A7 | Audio | Android JSI → Kotlin `PipelineAudioRegistry` hop | — | Already fixed; JSI → `AudioRegistry` like iOS | **done** |
 | T1 | Text | Feature/Kotlin helpers still materialize full strings via JNI `txt_read_*` / `nativeReadOfflineText` / live `currentText` mirror (TTS, STT, punctuation, OCR populate) | SoT PR kept TurboModule + worker APIs compiling; no text JSI | Shared UTF-16 views / length-bounded readers into feature workers; drop full-string default where safe | **open** |
@@ -38,3 +76,5 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 3. Prefer fixing at the lowest layer (C registry / shared reader) over more Kotlin/JS workarounds.
 4. Keep public TurboModule / TS contracts stable unless an explicit breaking change is requested.
 5. When closing a row: set Status **done**, note the PR/branch, and leave the row for history.
+6. Follow the **Priority order** table unless the user overrides; one ID (or tightly coupled pair) per focused change.
+7. **Behavior parity + host tests:** every closed ID must keep buffer semantics unchanged and ship/extend **model-free** host GTests for the touched path.
