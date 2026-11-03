@@ -55,7 +55,7 @@
   std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
 
   auto slidState = sherpaonnx::language_id::bridge::LookupLanguageId(instanceIdStr);
-  if (!slidState || slidState->handle == nullptr) {
+  if (!slidState || !slidState->isReady()) {
     reject(@"LANGUAGE_ID_NOT_INITIALIZED",
            [NSString stringWithFormat:@"SLID instance not found: %@", instanceId],
            nil);

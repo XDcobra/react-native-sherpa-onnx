@@ -63,27 +63,19 @@ dispatch_queue_t LanguageIdSerialQueue() {
 
   dispatch_async(LanguageIdSerialQueue(), ^{
     @try {
-      SherpaOnnxSpokenLanguageIdentificationConfig config;
-      std::memset(&config, 0, sizeof(config));
-      config.whisper.encoder = encoderStr.c_str();
-      config.whisper.decoder = decoderStr.c_str();
-      config.whisper.tail_paddings = tailPaddings;
-      config.num_threads = numThreads;
-      config.debug = debug ? 1 : 0;
-      config.provider = provider.c_str();
-
-      const SherpaOnnxSpokenLanguageIdentification *handle =
-          SherpaOnnxCreateSpokenLanguageIdentification(&config);
-
-      if (handle == nullptr) {
-        reject(@"LANGUAGE_ID_INIT_ERROR",
-               @"Failed to create native SherpaOnnxSpokenLanguageIdentification instance",
-               nil);
+      auto wrapper = std::make_shared<sherpaonnx::SpokenLanguageIdWrapper>();
+      const auto init = wrapper->initialize(
+          encoderStr, decoderStr, tailPaddings, numThreads, provider, debug);
+      if (!init.success) {
+        NSString *msg = init.error.empty()
+            ? @"Failed to create SpokenLanguageIdWrapper"
+            : [NSString stringWithUTF8String:init.error.c_str()];
+        reject(@"LANGUAGE_ID_INIT_ERROR", msg, nil);
         return;
       }
 
       auto state = std::make_shared<sherpaonnx::language_id::bridge::LanguageIdInstanceState>();
-      state->handle = handle;
+      state->wrapper = std::move(wrapper);
       state->numThreads = numThreads;
       state->provider = provider;
 
@@ -138,7 +130,7 @@ dispatch_queue_t LanguageIdSerialQueue() {
   }
 
   auto state = sherpaonnx::language_id::bridge::LookupLanguageId(instanceIdStr);
-  if (!state || state->handle == nullptr) {
+  if (!state || !state->isReady()) {
     reject(@"LANGUAGE_ID_NOT_INITIALIZED",
            [NSString stringWithFormat:@"SLID instance not found: %@", instanceId],
            nil);
@@ -207,34 +199,16 @@ dispatch_queue_t LanguageIdSerialQueue() {
           ? static_cast<double>(samples.size()) / static_cast<double>(sampleRate)
           : 0.0;
 
-      SherpaOnnxOfflineStream *stream =
-          SherpaOnnxSpokenLanguageIdentificationCreateOfflineStream(state->handle);
-      if (stream == nullptr) {
-        reject(@"LANGUAGE_ID_IDENTIFY_FAILED", @"Failed to create offline stream", nil);
+      const auto computed = state->wrapper->compute(samples, sampleRate);
+      if (!computed.success) {
+        NSString *msg = computed.error.empty()
+            ? @"Language identification compute failed"
+            : [NSString stringWithUTF8String:computed.error.c_str()];
+        reject(@"LANGUAGE_ID_IDENTIFY_FAILED", msg, nil);
         return;
       }
 
-      SherpaOnnxAcceptWaveformOffline(
-          stream,
-          sampleRate,
-          samples.data(),
-          static_cast<int32_t>(samples.size()));
-
-      const SherpaOnnxSpokenLanguageIdentificationResult *result =
-          SherpaOnnxSpokenLanguageIdentificationCompute(state->handle, stream);
-
-      SherpaOnnxDestroyOfflineStream(stream);
-
-      if (result == nullptr || result->lang == nullptr) {
-        if (result != nullptr) {
-          SherpaOnnxDestroySpokenLanguageIdentificationResult(result);
-        }
-        reject(@"LANGUAGE_ID_IDENTIFY_FAILED", @"Language identification compute returned null", nil);
-        return;
-      }
-
-      NSString *langStr = [NSString stringWithUTF8String:result->lang];
-      SherpaOnnxDestroySpokenLanguageIdentificationResult(result);
+      NSString *langStr = [NSString stringWithUTF8String:computed.lang.c_str()];
 
       const auto t1 = std::chrono::steady_clock::now();
       const double elapsedMs =
@@ -317,7 +291,7 @@ dispatch_queue_t LanguageIdSerialQueue() {
   }
 
   auto state = sherpaonnx::language_id::bridge::LookupLanguageId(instanceIdStr);
-  if (!state || state->handle == nullptr) {
+  if (!state || !state->isReady()) {
     reject(@"LANGUAGE_ID_NOT_INITIALIZED",
            [NSString stringWithFormat:@"SLID instance not found: %@", instanceId],
            nil);
@@ -429,18 +403,9 @@ dispatch_queue_t LanguageIdSerialQueue() {
 
         NSString *langStr = @"";
         if (!samples.empty()) {
-          SherpaOnnxOfflineStream *stream =
-              SherpaOnnxSpokenLanguageIdentificationCreateOfflineStream(state->handle);
-          if (stream != nullptr) {
-            SherpaOnnxAcceptWaveformOffline(
-                stream, inSampleRate, samples.data(), static_cast<int32_t>(samples.size()));
-            const SherpaOnnxSpokenLanguageIdentificationResult *result =
-                SherpaOnnxSpokenLanguageIdentificationCompute(state->handle, stream);
-            SherpaOnnxDestroyOfflineStream(stream);
-            if (result != nullptr && result->lang != nullptr) {
-              langStr = [NSString stringWithUTF8String:result->lang];
-              SherpaOnnxDestroySpokenLanguageIdentificationResult(result);
-            }
+          const auto computed = state->wrapper->compute(samples, inSampleRate);
+          if (computed.success && !computed.lang.empty()) {
+            langStr = [NSString stringWithUTF8String:computed.lang.c_str()];
           }
         }
 
