@@ -207,15 +207,14 @@ object PipelineAudioRegistry {
   }
 
   fun populateOfflineIfEmpty(targetBufferId: String, sourceBufferId: String) {
-    val source =
-      getOffline(sourceBufferId) ?: throw IllegalArgumentException("source not found")
-    val target =
-      getOffline(targetBufferId) ?: throw IllegalArgumentException("target not found")
-    if (target.numSamples > 0) {
-      throw IllegalStateException("target not empty")
-    }
-    val ok = AudioBufferNative.nativeAdoptIfEmpty(targetBufferId, source.readAllSamples())
-    if (!ok) throw IllegalStateException("adopt failed")
+    getOffline(sourceBufferId) ?: throw IllegalArgumentException("source not found")
+    getOffline(targetBufferId) ?: throw IllegalArgumentException("target not found")
+    val ok =
+      AudioBufferNative.nativePopulateOfflineIfEmpty(targetBufferId, sourceBufferId)
+    if (!ok) throw IllegalStateException("populate failed")
+    // C moves source SoT into target and erases source id — mirror handle map.
+    offlineEntries.remove(sourceBufferId)
+    OfflineEntry.wrap(targetBufferId)?.let { offlineEntries[targetBufferId] = it }
   }
 
   fun upgradeToMmapIfNeeded(bufferId: String) {

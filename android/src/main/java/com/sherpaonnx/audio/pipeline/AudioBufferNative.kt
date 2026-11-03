@@ -70,6 +70,11 @@ internal object AudioBufferNative {
   ): String?
 
   @JvmStatic external fun nativeAdoptIfEmpty(bufferId: String, samples: FloatArray): Boolean
+
+  /** Move source offline PCM into empty target (C SoT); erases source id. */
+  @JvmStatic
+  external fun nativePopulateOfflineIfEmpty(targetBufferId: String, sourceBufferId: String): Boolean
+
   @JvmStatic external fun nativeUpgradeToMmap(bufferId: String)
   @JvmStatic external fun nativeTransferFromLive(liveBufferId: String, fullIfSpooled: Boolean): String?
 
@@ -77,6 +82,16 @@ internal object AudioBufferNative {
 
   @JvmStatic
   external fun nativeDrainCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray?
+
+  /** Drain live cursor into [out] at [outOffset]; returns samples written. */
+  @JvmStatic
+  external fun nativeDrainCursorInto(
+    liveBufferId: String,
+    cursorId: Int,
+    out: FloatArray,
+    outOffset: Int,
+    maxSamples: Int,
+  ): Int
 
   @JvmStatic
   external fun nativePeekCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray?

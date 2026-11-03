@@ -168,6 +168,23 @@ class LiveEntry(
   fun drainCursor(cursorId: Int, maxSamples: Int): FloatArray =
     AudioBufferNative.nativeDrainCursor(bufferId, cursorId, maxSamples) ?: FloatArray(0)
 
+  /** Drain into [out] at [outOffset]; returns samples written (no new FloatArray). */
+  fun drainCursorInto(
+    cursorId: Int,
+    out: FloatArray,
+    outOffset: Int,
+    maxSamples: Int,
+  ): Int {
+    if (maxSamples <= 0 || outOffset < 0 || outOffset >= out.size) return 0
+    return AudioBufferNative.nativeDrainCursorInto(
+      bufferId,
+      cursorId,
+      out,
+      outOffset,
+      maxSamples,
+    )
+  }
+
   fun peekCursor(cursorId: Int, maxSamples: Int): FloatArray =
     AudioBufferNative.nativePeekCursor(bufferId, cursorId, maxSamples) ?: FloatArray(0)
 

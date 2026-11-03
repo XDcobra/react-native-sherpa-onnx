@@ -38,6 +38,18 @@ sealed class OfflineEntry : Closeable {
   fun readSlice(startSample: Int, count: Int): FloatArray =
     AudioBufferNative.nativeReadOfflineSlice(bufferId, startSample, count) ?: FloatArray(0)
 
+  /** Copy offline samples into [out] at [outOffset]; returns samples written (RAM or mmap). */
+  fun readInto(startSample: Int, out: FloatArray, outOffset: Int, maxSamples: Int): Int {
+    if (maxSamples <= 0 || outOffset < 0 || outOffset >= out.size) return 0
+    return AudioBufferNative.nativeReadOfflineInto(
+      bufferId,
+      startSample,
+      out,
+      outOffset,
+      maxSamples,
+    )
+  }
+
   fun releaseResources() {
     AudioBufferNative.nativeRelease(bufferId)
   }
@@ -84,17 +96,6 @@ sealed class OfflineEntry : Closeable {
       get() = AudioBufferNative.nativeOfflineNumSamples(bufferId).coerceAtLeast(0)
 
     override val storageKind: String = "mmap"
-
-    fun readInto(startSample: Int, out: FloatArray, outOffset: Int, maxSamples: Int): Int {
-      if (maxSamples <= 0 || outOffset < 0 || outOffset >= out.size) return 0
-      return AudioBufferNative.nativeReadOfflineInto(
-        bufferId,
-        startSample,
-        out,
-        outOffset,
-        maxSamples,
-      )
-    }
   }
 
   companion object {

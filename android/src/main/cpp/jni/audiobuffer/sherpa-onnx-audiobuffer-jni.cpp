@@ -231,6 +231,17 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAdoptIfEmpty(JNIEnv *
              : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativePopulateOfflineIfEmpty(
+    JNIEnv *env, jclass, jstring targetBufferId, jstring sourceBufferId) {
+  std::string errCode, errMsg;
+  return pa_populate_offline_from_source_if_empty(jstringToUtf8(env, targetBufferId),
+                                                  jstringToUtf8(env, sourceBufferId), &errCode,
+                                                  &errMsg)
+             ? JNI_TRUE
+             : JNI_FALSE;
+}
+
 JNIEXPORT void JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeUpgradeToMmap(JNIEnv *env, jclass,
                                                                          jstring bufferId) {
@@ -269,6 +280,28 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeDrainCursor(JNIEnv *e
   } catch (...) {
     return nullptr;
   }
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeDrainCursorInto(
+    JNIEnv *env, jclass, jstring liveBufferId, jint cursorId, jfloatArray out, jint outOffset,
+    jint maxSamples) {
+  if (!out || maxSamples <= 0 || outOffset < 0 || cursorId < 0) return 0;
+  const jsize len = env->GetArrayLength(out);
+  if (outOffset >= len) return 0;
+  const int capacity = static_cast<int>(len - outOffset);
+  const int toCopy = maxSamples < capacity ? maxSamples : capacity;
+  if (toCopy <= 0) return 0;
+
+  jfloat *elems = static_cast<jfloat *>(env->GetPrimitiveArrayCritical(out, nullptr));
+  if (!elems) return 0;
+  int copied = 0;
+  std::string errCode, errMsg;
+  const bool ok =
+      pa_drain_cursor_into(jstringToUtf8(env, liveBufferId), cursorId, elems + outOffset, toCopy,
+                           &copied, &errCode, &errMsg);
+  env->ReleasePrimitiveArrayCritical(out, elems, ok ? 0 : JNI_ABORT);
+  return ok ? copied : 0;
 }
 
 JNIEXPORT jfloatArray JNICALL

@@ -99,6 +99,67 @@ TEST_F(AudioRegistryFixture, LiveAppendDrainCursor) {
   EXPECT_TRUE(pa_release_buffer(id));
 }
 
+TEST_F(AudioRegistryFixture, DrainCursorInto_ParityWithAllocatingDrain) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &id, &errCode, &errMsg)) << errMsg;
+
+  std::vector<float> pcm(640);
+  for (int i = 0; i < 640; ++i) {
+    pcm[static_cast<size_t>(i)] = static_cast<float>(i) * 0.001f;
+  }
+  ASSERT_TRUE(pa_append_samples_to_live(id, pcm.data(), pcm.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+
+  auto live = pa_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  // Allocating drain mid-slice
+  int cursorA = live->createCursorHandle();
+  auto viaAlloc = live->drainCursor(cursorA, 200);
+  ASSERT_EQ(viaAlloc.size(), 200u);
+
+  // Into-dest drain from a fresh cursor for same range
+  int cursorB = live->createCursorHandle();
+  std::vector<float> dest(200, -1.f);
+  int copied = -1;
+  ASSERT_TRUE(pa_drain_cursor_into(id, cursorB, dest.data(), 200, &copied, &errCode, &errMsg))
+      << errMsg;
+  EXPECT_EQ(copied, 200);
+  for (size_t i = 0; i < viaAlloc.size(); ++i) {
+    EXPECT_FLOAT_EQ(dest[i], viaAlloc[i]) << "i=" << i;
+  }
+
+  // Remaining via into (EOF clamp)
+  dest.assign(500, -1.f);
+  ASSERT_TRUE(pa_drain_cursor_into(id, cursorB, dest.data(), 500, &copied, &errCode, &errMsg))
+      << errMsg;
+  EXPECT_EQ(copied, 440);
+  auto viaAllocRest = live->drainCursor(cursorA, 500);
+  ASSERT_EQ(viaAllocRest.size(), 440u);
+  for (size_t i = 0; i < viaAllocRest.size(); ++i) {
+    EXPECT_FLOAT_EQ(dest[i], viaAllocRest[i]) << "rest i=" << i;
+  }
+
+  // Empty drain
+  ASSERT_TRUE(pa_drain_cursor_into(id, cursorB, dest.data(), 8, &copied, &errCode, &errMsg));
+  EXPECT_EQ(copied, 0);
+
+  // Invalid live id
+  errCode.clear();
+  copied = 99;
+  EXPECT_FALSE(
+      pa_drain_cursor_into("live_missing", 0, dest.data(), 8, &copied, &errCode, &errMsg));
+  EXPECT_EQ(errCode, "AUDIO_BUFFER_NOT_FOUND");
+  EXPECT_EQ(copied, 0);
+
+  live->releaseCursor(cursorA);
+  live->releaseCursor(cursorB);
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
 TEST_F(AudioRegistryFixture, InvalidId_FailsCleanly) {
   std::vector<float> out;
   std::string errCode;

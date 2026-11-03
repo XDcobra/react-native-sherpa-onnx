@@ -57,6 +57,11 @@ bool pa_get_live_samples_slice(const std::string &bufferId, int startFrame, int 
 bool pa_append_samples_to_live(const std::string &bufferId, const float *samples, size_t count,
                                int sampleRate, std::string *errorCode, std::string *errorMessage);
 
+/** Drain live cursor into caller-owned dest; advances cursor like drainCursor. */
+bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,
+                          int maxSamples, int *outCopied, std::string *errorCode,
+                          std::string *errorMessage);
+
 bool pa_get_offline_metadata(const std::string &bufferId, int *sampleRate, int *numSamples,
                              std::string *errorCode, std::string *errorMessage);
 

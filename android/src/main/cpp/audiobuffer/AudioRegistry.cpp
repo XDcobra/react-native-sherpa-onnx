@@ -574,6 +574,45 @@ bool pa_append_samples_to_live(const std::string &bufferId, const float *samples
   }
 }
 
+bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,
+                          int maxSamples, int *outCopied, std::string *errorCode,
+                          std::string *errorMessage) {
+  if (outCopied) *outCopied = 0;
+  if (!dest) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "dest must be non-null";
+    return false;
+  }
+  if (maxSamples < 0 || cursorId < 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "cursorId/maxSamples must be >= 0";
+    return false;
+  }
+  if (maxSamples == 0) {
+    return true;
+  }
+  auto live = pa_get_live_entry(liveBufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(liveBufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
+  }
+  try {
+    int n = live->drainCursorInto(cursorId, dest, maxSamples);
+    if (outCopied) *outCopied = n;
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
+}
+
 bool pa_get_offline_metadata(const std::string &bufferId, int *sampleRate, int *numSamples,
                              std::string *errorCode, std::string *errorMessage) {
   if (!sampleRate || !numSamples) return false;

@@ -53,6 +53,7 @@ class SttPipelineWorker(
   @Volatile
   private var error: String? = null
   private var audioCursorId: Int = -1
+  private val drainScratch = FloatArray(chunkSize)
 
   private val lock = ReentrantLock()
   private val dataAvailable = lock.newCondition()
@@ -118,8 +119,8 @@ class SttPipelineWorker(
       while (isRunning) {
         processCommands()
 
-        val chunk = inputEntry.drainCursor(audioCursorId, chunkSize)
-        if (chunk.isEmpty()) {
+        val n = inputEntry.drainCursorInto(audioCursorId, drainScratch, 0, chunkSize)
+        if (n <= 0) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
             autoFlushAndCommit(endOfAudio = true)
             break
@@ -129,11 +130,12 @@ class SttPipelineWorker(
           }
           continue
         }
+        val chunk = if (n == drainScratch.size) drainScratch else drainScratch.copyOf(n)
 
         SherpaOnnxOnlineSttHelper.nativeAcceptWaveform(
           instanceId, streamId, sampleRate, chunk
         )
-        unitsRead += chunk.size
+        unitsRead += n
 
         while (SherpaOnnxOnlineSttHelper.nativeIsReady(instanceId, streamId)) {
           SherpaOnnxOnlineSttHelper.nativeDecode(instanceId, streamId)
