@@ -19,6 +19,7 @@ import type {
 import type { OfflinePunctuationEngine } from 'react-native-sherpa-onnx/punctuation';
 import type { AudioTaggingEngine } from 'react-native-sherpa-onnx/audio-tagging';
 import type { LanguageIdentificationEngine } from 'react-native-sherpa-onnx/language-identification';
+import type { KeywordSpottingEngine } from 'react-native-sherpa-onnx/kws';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -254,4 +255,38 @@ export function clearLanguageIdCache(): void {
   languageIdEngine = null;
   languageIdModelFolder = null;
   languageIdInitMessage = null;
+}
+
+// --- KWS cache ---
+
+let kwsEngine: KeywordSpottingEngine | null = null;
+let kwsModelFolder: string | null = null;
+let kwsInitMessage: string | null = null;
+
+export function getKwsCache(): {
+  engine: KeywordSpottingEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: kwsEngine,
+    modelFolder: kwsModelFolder,
+    initMessage: kwsInitMessage,
+  };
+}
+
+export function setKwsCache(
+  engine: KeywordSpottingEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  kwsEngine = engine;
+  kwsModelFolder = modelFolder;
+  kwsInitMessage = initMessage;
+}
+
+export function clearKwsCache(): void {
+  kwsEngine = null;
+  kwsModelFolder = null;
+  kwsInitMessage = null;
 }

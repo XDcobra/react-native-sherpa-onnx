@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   ScrollView,
   Text,
@@ -14,12 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { readFile } from '@dr.pogodin/react-native-fs';
-import {
-  createKeywordSpotting,
-  detectKwsModel,
-  type KeywordDetection,
-  type KeywordSpottingEngine,
-} from 'react-native-sherpa-onnx/kws';
+import type { KeywordDetection } from 'react-native-sherpa-onnx/kws';
 import type { StreamingPipelineHandle } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createEmptyLiveAudioBuffer,
@@ -36,18 +30,9 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import {
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
 import type { RootStackParamList } from '../../types/navigation';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
-import {
-  InitModeSelector,
-  KwsCustomInitForm,
-  ModelFolderGrid,
-  type ModelInitMode,
-} from '../../components/modelInit';
+import { KwsModelInitPanel } from '../../components/KwsModelInitPanel';
 import { ExampleAudioFileList } from '../../components/OfflineAudioBufferWidget';
 import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
 import {
@@ -56,14 +41,9 @@ import {
   type KwsExampleAudio,
 } from '../../audioConfig';
 import {
-  getKwsModelPathConfig,
-  loadKwsModelCatalog,
-  type KwsCatalogSnapshot,
-} from '../../utils/kwsModelCatalog';
-import {
-  emptyKwsCustomInitFormState,
-  fillKwsCustomConfigFromModelFolder,
-} from '../../utils/kwsCustomInitFill';
+  formatKwsInitError,
+  useKwsModelInit,
+} from '../../hooks/useKwsModelInit';
 import { getModelDisplayName } from '../../modelConfig';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import {
@@ -108,20 +88,35 @@ export default function KeywordSpottingScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  const [catalog, setCatalog] = useState<KwsCatalogSnapshot | null>(null);
-  const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(
-    null
-  );
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customForm, setCustomForm] = useState(emptyKwsCustomInitFormState);
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-
   const [keywordsText, setKeywordsText] = useState('');
-  const [keywordsScore, setKeywordsScore] = useState('1.5');
-  const [keywordsThreshold, setKeywordsThreshold] = useState('0.25');
-  const [numTrailingBlanks, setNumTrailingBlanks] = useState('2');
-  const [maxActivePaths, setMaxActivePaths] = useState('4');
+  const keywordsTextRef = useRef(keywordsText);
+  keywordsTextRef.current = keywordsText;
+
+  const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
+    undefined
+  );
+
+  const appendEventRef = useRef<(message: string) => void>(() => {});
+
+  const kws = useKwsModelInit({
+    onBeforeInit: () => onBeforeInitRef.current?.(),
+    onPackKeywordsLoaded: (text) => {
+      setKeywordsText(text);
+      appendEventRef.current('Loaded pack keywords.txt into textarea');
+    },
+    onSelectedModelChanged: (modelId) => {
+      if (!modelId) return;
+      setKeywordsText('');
+      appendEventRef.current(
+        `Model selected: ${getModelDisplayName(
+          modelId
+        )} — cleared keywords (empty = pack keywords.txt)`
+      );
+    },
+    getKeywordsOverrideLineCount: () =>
+      keywordsTextRef.current.split('\n').filter((l) => l.trim()).length,
+  });
+
   const [chunkSize, setChunkSize] =
     useState<(typeof CHUNK_SIZE_OPTIONS)[number]>(1600);
 
@@ -135,18 +130,14 @@ export default function KeywordSpottingScreen() {
   const [customFileUri, setCustomFileUri] = useState<string | null>(null);
   const [customFileName, setCustomFileName] = useState<string | null>(null);
 
-  const [engineReady, setEngineReady] = useState(false);
-  const [engineBusy, setEngineBusy] = useState(false);
   const [streamState, setStreamState] = useState<StreamState>('idle');
   const [status, setStatus] = useState('Pick a KWS pack, then Init engine.');
-  const [error, setError] = useState<string | null>(null);
-  const [initResult, setInitResult] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const [lastHit, setLastHit] = useState<HitRecord | null>(null);
   const [hits, setHits] = useState<HitRecord[]>([]);
   const [events, setEvents] = useState<EventLogItem[]>([]);
 
-  const engineRef = useRef<KeywordSpottingEngine | null>(null);
   const pipelineRef = useRef<
     (StreamingPipelineHandle & { instanceId: string }) | null
   >(null);
@@ -157,6 +148,14 @@ export default function KeywordSpottingScreen() {
   const spotStartLockRef = useRef(false);
   const mountedRef = useRef(true);
 
+  const {
+    engineRef,
+    loading: engineBusy,
+    isEngineInitialized: engineReady,
+    releaseEngine,
+    selectedModelForInit,
+  } = kws;
+
   const appendEvent = useCallback((message: string) => {
     if (!mountedRef.current) return;
     setEvents((prev) =>
@@ -166,83 +165,7 @@ export default function KeywordSpottingScreen() {
       ].slice(0, 80)
     );
   }, []);
-
-  const reloadCatalog = useCallback(async () => {
-    try {
-      const snap = await loadKwsModelCatalog();
-      setCatalog(snap);
-      setSelectedCatalogId((curr) => {
-        if (curr && snap.entries.some((e) => e.id === curr)) {
-          return curr;
-        }
-        return snap.entries[0]?.id ?? null;
-      });
-    } catch (e) {
-      setCatalog({
-        entries: [],
-        padModelIds: [],
-        padModelsPath: null,
-        bundledFolders: [],
-        downloadedIds: [],
-      });
-      appendEvent(
-        `Catalog load error: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  }, [appendEvent]);
-
-  useEffect(() => {
-    reloadCatalog().catch(() => {});
-  }, [reloadCatalog]);
-
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category !== ModelCategory.Kws) return;
-      reloadCatalog().catch(() => {});
-    });
-    return unsubscribe;
-  }, [reloadCatalog]);
-
-  const resolveModelSource = useCallback(() => {
-    if (!catalog || !selectedCatalogId) {
-      throw new Error('Select a KWS model pack first');
-    }
-    return getKwsModelPathConfig(selectedCatalogId, {
-      padModelIds: catalog.padModelIds,
-      padModelsPath: catalog.padModelsPath,
-      bundledFolders: catalog.bundledFolders,
-      downloadedIds: new Set(catalog.downloadedIds),
-    });
-  }, [catalog, selectedCatalogId]);
-
-  const handleFillCustom = useCallback(async () => {
-    if (!selectedCatalogId) return;
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    try {
-      const source = resolveModelSource();
-      const res = await fillKwsCustomConfigFromModelFolder(source);
-      setCustomForm({ modelType: 'transducer', fileSources: res.customConfig });
-      setCustomFillHint(`Filled paths from ${selectedCatalogId}`);
-      appendEvent(`Filled custom slots from ${selectedCatalogId}`);
-      const keywordsPath = res.customConfig.keywords;
-      if (keywordsPath?.kind === 'fs' && keywordsPath.path) {
-        try {
-          const body = await readFile(keywordsPath.path, 'utf8');
-          setKeywordsText(body);
-          appendEvent('Loaded pack keywords.txt into textarea');
-        } catch {
-          // ignore read failures
-        }
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setCustomFillHint(`Fill failed: ${msg}`);
-      appendEvent(`Custom fill failed: ${msg}`);
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [appendEvent, resolveModelSource, selectedCatalogId]);
+  appendEventRef.current = appendEvent;
 
   const cleanupStream = useCallback(async (opts?: { updateUi?: boolean }) => {
     if (cleanupLockRef.current) return;
@@ -298,164 +221,49 @@ export default function KeywordSpottingScreen() {
     }
   }, []);
 
-  const destroyEngine = useCallback(
-    async (opts?: { updateUi?: boolean }) => {
-      const updateUi = opts?.updateUi !== false;
-      await cleanupStream({ updateUi });
-      const eng = engineRef.current;
-      engineRef.current = null;
-      if (updateUi && mountedRef.current) {
-        setEngineReady(false);
-        setInitResult(null);
-      }
-      try {
-        await eng?.destroy();
-      } catch {
-        // ignore
-      }
-    },
-    [cleanupStream]
-  );
+  onBeforeInitRef.current = async () => {
+    await cleanupStream({ updateUi: true });
+    setRunError(null);
+    setHits([]);
+    setLastHit(null);
+    setStatus('Initializing…');
+  };
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      // Avoid setState after unmount.
-      destroyEngine({ updateUi: false }).catch(() => {});
+      cleanupStream({ updateUi: false }).catch(() => {});
     };
-  }, [destroyEngine]);
+  }, [cleanupStream]);
 
-  const initEngine = useCallback(async () => {
-    setError(null);
-    setInitResult(null);
-    setEngineBusy(true);
-    try {
-      await destroyEngine();
-
-      const score = Number.parseFloat(keywordsScore);
-      const threshold = Number.parseFloat(keywordsThreshold);
-      const trailing = Number.parseInt(numTrailingBlanks, 10);
-      const paths = Number.parseInt(maxActivePaths, 10);
-      const tuning = {
-        keywordsScore: Number.isFinite(score) ? score : 1.5,
-        keywordsThreshold: Number.isFinite(threshold) ? threshold : 0.25,
-        numTrailingBlanks: Number.isFinite(trailing) ? trailing : 2,
-        maxActivePaths: Number.isFinite(paths) ? paths : 4,
-      };
-
-      // Init uses pack keywords.txt; textarea overrides go through spot({ keywords }).
-      let engine;
-      let modelLabel: string;
-      let detectedType = 'transducer';
-      let quantNote = '';
-      let streamingNote = 'streaming=true';
-
-      if (initMode === 'custom') {
-        const {
-          encoder,
-          decoder,
-          joiner,
-          tokens,
-          keywords: keywordsFile,
-        } = customForm.fileSources;
-        const missing = (
-          [
-            ['encoder', encoder],
-            ['decoder', decoder],
-            ['joiner', joiner],
-            ['tokens', tokens],
-            ['keywords', keywordsFile],
-          ] as const
-        )
-          .filter(([, src]) => !src)
-          .map(([key]) => key);
-        if (missing.length > 0) {
-          throw new Error(
-            `Custom init missing required paths: ${missing.join(', ')}`
-          );
-        }
-        engine = await createKeywordSpotting({
-          initMode: 'custom',
-          modelType: customForm.modelType,
-          customConfig: {
-            encoder: encoder!,
-            decoder: decoder!,
-            joiner: joiner!,
-            tokens: tokens!,
-            keywords: keywordsFile!,
-          },
-          ...tuning,
-        });
-        modelLabel = selectedCatalogId
-          ? getModelDisplayName(selectedCatalogId)
-          : 'custom paths';
-      } else {
-        const modelSource = resolveModelSource();
-        const det = await detectKwsModel(modelSource);
-        if (!det.success) {
-          throw new Error(det.error ?? 'detectKwsModel failed');
-        }
-        if (!det.isStreaming) {
-          throw new Error('Detected pack is not streaming KWS');
-        }
-        engine = await createKeywordSpotting({
-          modelSource,
-          ...tuning,
-        });
-        modelLabel = selectedCatalogId
-          ? getModelDisplayName(selectedCatalogId)
-          : 'KWS model';
-        detectedType = det.modelType ?? 'transducer';
-        quantNote = det.quantization ? ` · ${det.quantization}` : '';
-        streamingNote = `streaming=${String(det.isStreaming)}`;
-      }
-
-      engineRef.current = engine;
-      setEngineReady(true);
-      const textareaLines = keywordsText
-        .split('\n')
-        .filter((l) => l.trim()).length;
-      const kwNote =
-        textareaLines > 0
-          ? `init=pack keywords.txt; spot override=${textareaLines} lines`
-          : 'init=pack keywords.txt (textarea empty → pack on spot)';
-      const summary =
-        `Initialized (${initMode}): ${modelLabel}\n` +
-        `Detected: ${detectedType} · ${streamingNote}${quantNote}\n` +
-        `instance: ${engine.instanceId}\n` +
-        kwNote;
-      setInitResult(summary);
-      setStatus(`Engine ready (${engine.instanceId})`);
-      appendEvent(`Init OK — ${modelLabel}`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
-      setInitResult(null);
-      setStatus('Init failed');
-      appendEvent(`Init failed: ${msg}`);
-    } finally {
-      setEngineBusy(false);
+  useEffect(() => {
+    if (engineReady && kws.initResult) {
+      setStatus(`Engine ready`);
+      appendEvent('Init OK');
     }
-  }, [
-    appendEvent,
-    customForm.fileSources,
-    customForm.modelType,
-    destroyEngine,
-    initMode,
-    keywordsScore,
-    keywordsText,
-    keywordsThreshold,
-    maxActivePaths,
-    numTrailingBlanks,
-    resolveModelSource,
-    selectedCatalogId,
-  ]);
+  }, [appendEvent, engineReady, kws.initResult]);
+
+  useEffect(() => {
+    if (kws.error && kws.loading === false && !engineReady) {
+      setStatus('Init failed');
+      appendEvent(`Init failed: ${kws.error}`);
+    }
+  }, [appendEvent, engineReady, kws.error, kws.loading]);
+
+  const handleFree = useCallback(async () => {
+    await cleanupStream();
+    await releaseEngine();
+    setStatus('Engine destroyed');
+    appendEvent('Engine destroyed');
+    setRunError(null);
+    setHits([]);
+    setLastHit(null);
+  }, [appendEvent, cleanupStream, releaseEngine]);
 
   const onKeywordHit = useCallback(
     (event: KeywordDetection & { segmentIndex: number }) => {
       if (!mountedRef.current) return;
-      // Plain clones for React state — do not retain host/event object references.
       const record: HitRecord = {
         keyword: String(event.keyword ?? ''),
         tokens: Array.isArray(event.tokens)
@@ -499,7 +307,7 @@ export default function KeywordSpottingScreen() {
     if (streamState !== 'idle' || spotStartLockRef.current) return;
     spotStartLockRef.current = true;
 
-    setError(null);
+    setRunError(null);
     setHits([]);
     setLastHit(null);
     setStatus('Starting spot pipeline…');
@@ -536,7 +344,6 @@ export default function KeywordSpottingScreen() {
       });
       pipelineRef.current = pipeline;
 
-      // Let the previous layout commit finish before flipping controls to running.
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => resolve());
       });
@@ -563,7 +370,6 @@ export default function KeywordSpottingScreen() {
             : ' keywords=init file')
       );
 
-      // Yield so the running-state layout can commit before ingest starts.
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => resolve());
       });
@@ -595,12 +401,11 @@ export default function KeywordSpottingScreen() {
         setStatus('File session completed');
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
+      const msg = formatKwsInitError(e);
+      setRunError(msg);
       appendEvent(`Spot error: ${msg}`);
       setStatus('Spot failed');
     } finally {
-      // Allow hit UI updates to commit before releasing native buffers.
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => {
           requestAnimationFrame(() => resolve());
@@ -615,6 +420,7 @@ export default function KeywordSpottingScreen() {
     cleanupStream,
     customFileName,
     customFileUri,
+    engineRef,
     filePickMode,
     keywordsText,
     onKeywordHit,
@@ -644,7 +450,7 @@ export default function KeywordSpottingScreen() {
         await pipelineRef.current?.stop();
       }
     } catch (e) {
-      appendEvent(`Stop error: ${e instanceof Error ? e.message : String(e)}`);
+      appendEvent(`Stop error: ${formatKwsInitError(e)}`);
     } finally {
       await cleanupStream();
       setStatus('Stopped');
@@ -655,53 +461,39 @@ export default function KeywordSpottingScreen() {
     appendEvent('Unload-while-running: destroy() during active pipeline');
     setStatus('Destroying engine while running…');
     try {
-      await destroyEngine();
+      await cleanupStream();
+      await releaseEngine();
       setStatus('Destroyed during run (regression path)');
       appendEvent('Unload-while-running: OK');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
+      const msg = formatKwsInitError(e);
+      setRunError(msg);
       appendEvent(`Unload-while-running failed: ${msg}`);
     }
-  }, [appendEvent, destroyEngine]);
-
-  const onSelectCatalogModel = useCallback(
-    (modelId: string) => {
-      setSelectedCatalogId(modelId);
-      // Drop stale keywords from another pack (e.g. ZH ppinyin on gigaspeech BPE)
-      // so spot defaults to pack keywords.txt until the user picks an example/file.
-      setKeywordsText('');
-      appendEvent(
-        `Model selected: ${getModelDisplayName(
-          modelId
-        )} — cleared keywords (empty = pack keywords.txt)`
-      );
-    },
-    [appendEvent]
-  );
+  }, [appendEvent, cleanupStream, releaseEngine]);
 
   const onSelectExample = useCallback(
     (file: KwsExampleAudio) => {
       setSelectedExampleId(file.id);
       setCustomFileUri(null);
       setCustomFileName(null);
-      const body = resolveKwsExampleKeywords(file, selectedCatalogId);
+      const body = resolveKwsExampleKeywords(file, selectedModelForInit);
       setKeywordsText(body);
       if (body) {
         appendEvent(
-          `Example selected → keywords for ${selectedCatalogId ?? 'pack'} (${
+          `Example selected → keywords for ${selectedModelForInit ?? 'pack'} (${
             file.name
           })`
         );
       } else {
         appendEvent(
           `Example selected → no pack-matched keywords for ${
-            selectedCatalogId ?? '?'
+            selectedModelForInit ?? '?'
           }; empty = pack keywords.txt (${file.name})`
         );
       }
     },
-    [appendEvent, selectedCatalogId]
+    [appendEvent, selectedModelForInit]
   );
 
   const pickCustomAudio = useCallback(async () => {
@@ -755,15 +547,7 @@ export default function KeywordSpottingScreen() {
       (filePickMode === 'example' && selectedExampleId != null) ||
       (filePickMode === 'custom' && customFileUri != null));
 
-  const gridEntries = useMemo(
-    () =>
-      (catalog?.entries ?? []).map((e) => ({
-        id: e.id,
-        label: e.label,
-        recommended: e.recommended,
-      })),
-    [catalog]
-  );
+  const displayError = runError ?? null;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -773,150 +557,24 @@ export default function KeywordSpottingScreen() {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.card}>
-          <View style={styles.cardTitleRow}>
-            <Text style={styles.cardTitle}>1. Model</Text>
-            {engineReady ? (
-              <TouchableOpacity
-                style={styles.iconButton}
-                onPress={() => {
-                  destroyEngine().catch(() => {});
-                  setStatus('Engine destroyed');
-                  appendEvent('Engine destroyed');
-                }}
-                disabled={streamState !== 'idle'}
-              >
-                <Ionicons name="trash-outline" size={20} color="#DC2626" />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-          <Text style={styles.cardSubtitle}>
-            Dedicated `kws-models` packs (encoder/decoder/joiner/tokens +
-            keywords.txt). Not interchangeable with streaming STT zipformer.
-          </Text>
-
-          <InitModeSelector value={initMode} onChange={setInitMode} />
-
-          {initMode === 'auto' ? (
-            <View>
-              <ModelFolderGrid
-                entries={gridEntries}
-                selectedId={selectedCatalogId}
-                initializedId={engineReady ? selectedCatalogId : null}
-                onSelect={onSelectCatalogModel}
-                loading={catalog == null}
-                emptyMessage="No KWS models found."
-              />
-              {catalog && catalog.entries.length === 0 ? (
-                <View style={styles.noModelsBanner}>
-                  <Text style={styles.noModelsText}>
-                    No KWS packs on device. Download from Download Showcase
-                    (`ModelCategory.Kws` / kws-models).
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.downloadLinkButton}
-                    onPress={() => navigation.navigate('DownloadShowcase')}
-                  >
-                    <Ionicons
-                      name="cloud-download-outline"
-                      size={16}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.downloadLinkText}>
-                      Open Download Screen
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-            </View>
-          ) : (
-            <>
-              <ModelFolderGrid
-                entries={gridEntries}
-                selectedId={selectedCatalogId}
-                initializedId={engineReady ? selectedCatalogId : null}
-                onSelect={onSelectCatalogModel}
-                loading={catalog == null}
-                emptyMessage="No KWS models found."
-              />
-              <KwsCustomInitForm
-                value={customForm}
-                onChange={setCustomForm}
-                selectedCatalogModelId={selectedCatalogId}
-                onFillFromSelectedModel={handleFillCustom}
-                fillLoading={customFillLoading}
-                fillHint={customFillHint}
-                disabled={busy}
-              />
-            </>
-          )}
-
-          <Text style={styles.paramLabel}>Tuning (applied at Init)</Text>
-          <Text style={styles.paramLabel}>keywordsScore</Text>
-          <TextInput
-            style={styles.paramInput}
-            value={keywordsScore}
-            onChangeText={setKeywordsScore}
-            keyboardType="decimal-pad"
-            editable={!busy}
-          />
-          <Text style={styles.paramLabel}>keywordsThreshold</Text>
-          <TextInput
-            style={styles.paramInput}
-            value={keywordsThreshold}
-            onChangeText={setKeywordsThreshold}
-            keyboardType="decimal-pad"
-            editable={!busy}
-          />
-          <Text style={styles.paramLabel}>numTrailingBlanks</Text>
-          <TextInput
-            style={styles.paramInput}
-            value={numTrailingBlanks}
-            onChangeText={setNumTrailingBlanks}
-            keyboardType="number-pad"
-            editable={!busy}
-          />
-          <Text style={styles.paramLabel}>maxActivePaths</Text>
-          <TextInput
-            style={styles.paramInput}
-            value={maxActivePaths}
-            onChangeText={setMaxActivePaths}
-            keyboardType="number-pad"
-            editable={!busy}
-          />
-
+        {engineReady ? (
           <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              styles.marginTop8,
-              (engineBusy || streamState !== 'idle') &&
-                styles.primaryButtonDisabled,
-            ]}
+            style={styles.iconButton}
             onPress={() => {
-              initEngine().catch(() => {});
+              handleFree().catch(() => {});
             }}
-            disabled={engineBusy || streamState !== 'idle'}
+            disabled={streamState !== 'idle'}
           >
-            {engineBusy ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Ionicons name="construct-outline" size={18} color="#FFFFFF" />
-            )}
-            <Text style={styles.primaryButtonText}>
-              {engineReady ? 'Rebuild engine' : 'Init engine'}
-            </Text>
+            <Ionicons name="trash-outline" size={20} color="#DC2626" />
+            <Text style={styles.dangerText}> Release engine</Text>
           </TouchableOpacity>
-          {initResult ? (
-            <View style={styles.initResultBox}>
-              <Text style={styles.initResultLabel}>Result:</Text>
-              <Text style={styles.initResultText}>{initResult}</Text>
-            </View>
-          ) : null}
-          <Text style={styles.hint}>
-            Mid-run keyword edits: Stop → edit textarea → Rebuild engine → Spot
-            again.
-          </Text>
-        </View>
+        ) : null}
+
+        <KwsModelInitPanel
+          kws={kws}
+          disabled={streamState !== 'idle'}
+          onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+        />
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>2. Audio input</Text>
@@ -974,8 +632,10 @@ export default function KeywordSpottingScreen() {
                   audioFiles={KWS_AUDIO_FILES}
                   selectedId={selectedExampleId}
                   onSelect={(file) => {
-                    const kws = KWS_AUDIO_FILES.find((f) => f.id === file.id);
-                    if (kws) onSelectExample(kws);
+                    const example = KWS_AUDIO_FILES.find(
+                      (f) => f.id === file.id
+                    );
+                    if (example) onSelectExample(example);
                   }}
                   disabled={busy}
                 />
@@ -1039,7 +699,6 @@ export default function KeywordSpottingScreen() {
             style={styles.keywordsInput}
             value={keywordsText}
             onChangeText={(text) => {
-              // Keep editable stable while spotting; ignore edits mid-session.
               if (streamState !== 'idle') return;
               setKeywordsText(text);
             }}
@@ -1091,7 +750,9 @@ export default function KeywordSpottingScreen() {
             />
             <Text style={styles.statusText}>{status}</Text>
           </View>
-          {error ? <Text style={styles.errorText}>{error}</Text> : null}
+          {displayError ? (
+            <Text style={styles.errorText}>{displayError}</Text>
+          ) : null}
 
           <View style={styles.rowActions}>
             <TouchableOpacity

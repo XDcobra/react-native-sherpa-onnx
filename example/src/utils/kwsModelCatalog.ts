@@ -88,14 +88,27 @@ function prioritizeEntries(
   return [...recommended, ...remaining];
 }
 
+export type KwsModelPathContext = {
+  padModelIds: string[];
+  padModelsPath: string | null;
+  bundledFolders: string[];
+  downloadedIds: Set<string>;
+};
+
+export function createKwsModelPathContext(
+  snapshot: KwsCatalogSnapshot
+): KwsModelPathContext {
+  return {
+    padModelIds: snapshot.padModelIds,
+    padModelsPath: snapshot.padModelsPath,
+    bundledFolders: snapshot.bundledFolders,
+    downloadedIds: new Set(snapshot.downloadedIds),
+  };
+}
+
 export function getKwsModelPathConfig(
   modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
-  }
+  ctx: KwsModelPathContext
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath
