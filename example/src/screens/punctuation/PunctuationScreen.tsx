@@ -9,7 +9,6 @@ import {
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
@@ -26,14 +25,9 @@ import {
 import {
   createEmptyOfflineTextBuffer,
   createOfflineTextBufferFromText,
-  getOfflineTextBufferTextSlice,
-  getPipelineTextBufferInfo,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
-import type {
-  OfflineTextBufferInfo,
-  OfflineTextBufferRef,
-} from 'react-native-sherpa-onnx/textbuffer';
+import type { OfflineTextBufferRef } from 'react-native-sherpa-onnx/textbuffer';
 import {
   createOfflinePunctuation,
   detectPunctuationModel,
@@ -46,7 +40,12 @@ import {
   type ModelInitMode,
   type PunctuationOfflineCustomInitFormState,
 } from '../../components/modelInit';
+import { OfflineTextBufferResultCard } from '../../components/OfflineTextBufferResultCard';
 import { fillOfflinePunctuationCustomConfigFromModelFolder } from '../../utils/punctuationCustomInitFill';
+import {
+  readOfflineTextBufferSnapshot,
+  type OfflineTextBufferSnapshot,
+} from '../../utils/readOfflineTextBufferSnapshot';
 import {
   getFileModelPath,
   getAssetModelPath,
@@ -126,7 +125,8 @@ export default function PunctuationScreen() {
   const [error, setError] = useState<string | null>(null);
   const [initMessage, setInitMessage] = useState<string | null>(null);
   const [inputText, setInputText] = useState(DEFAULT_INPUT);
-  const [outputText, setOutputText] = useState('');
+  const [outputSnapshot, setOutputSnapshot] =
+    useState<OfflineTextBufferSnapshot | null>(null);
   const [langPassThrough, setLangPassThrough] = useState('en');
   const [numThreads, setNumThreads] = useState('2');
   const [provider, setProvider] = useState('cpu');
@@ -319,7 +319,7 @@ export default function PunctuationScreen() {
     setInitBusy(true);
     setError(null);
     setInitMessage(null);
-    setOutputText('');
+    setOutputSnapshot(null);
     setLastProcessingMs(null);
     setLastSegmentStatus(null);
     setEngineReady(false);
@@ -365,7 +365,7 @@ export default function PunctuationScreen() {
     setInitBusy(true);
     setError(null);
     setInitMessage(null);
-    setOutputText('');
+    setOutputSnapshot(null);
     setLastProcessingMs(null);
     setLastSegmentStatus(null);
     setEngineReady(false);
@@ -420,7 +420,7 @@ export default function PunctuationScreen() {
     setLastSegmentStatus(null);
     try {
       await releaseTextBuffers();
-      setOutputText('');
+      setOutputSnapshot(null);
 
       const lang = langPassThrough.trim();
       const textIn = await createOfflineTextBufferFromText(plain, {
@@ -447,15 +447,10 @@ export default function PunctuationScreen() {
           } segments`
         );
       }
-      const info = (await getPipelineTextBufferInfo(
-        textOut
-      )) as OfflineTextBufferInfo;
-      const out = await getOfflineTextBufferTextSlice(
-        textOut,
-        0,
-        info.utf16Length
+      const snapshot = await readOfflineTextBufferSnapshot(
+        typeof textOut === 'string' ? textOut : textOut.bufferId
       );
-      setOutputText(out);
+      setOutputSnapshot(snapshot);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if ((e as { code?: string })?.code) {
@@ -466,10 +461,6 @@ export default function PunctuationScreen() {
     } finally {
       setPunctuateBusy(false);
     }
-  };
-
-  const onCopyOutput = () => {
-    if (outputText) Clipboard.setString(outputText);
   };
 
   const canShowWorkflow = !loadingModels && availableModels.length > 0;
@@ -721,29 +712,17 @@ export default function PunctuationScreen() {
               </View>
             ) : null}
 
-            <View style={styles.resultSection}>
-              <View style={styles.resultLabelRow}>
-                <Text style={styles.resultLabel}>
-                  Punctuated output (read-only)
-                </Text>
-                <TouchableOpacity
-                  onPress={onCopyOutput}
-                  style={styles.copyIconButton}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  accessibilityLabel="Copy punctuated text"
-                >
-                  <Ionicons name="copy-outline" size={24} color="#2e7d32" />
-                </TouchableOpacity>
-              </View>
-              <TextInput
-                style={puncStyles.outputReadonly}
-                value={outputText}
-                multiline
-                editable={false}
-                scrollEnabled
-                selectTextOnFocus
+            {outputSnapshot ? (
+              <OfflineTextBufferResultCard
+                title="Punctuated output"
+                textLabel="Punctuated text:"
+                result={outputSnapshot}
+                showExpanders={false}
+                showMeta={false}
+                showJsonExport={false}
+                showBufferList={false}
               />
-            </View>
+            ) : null}
           </>
         )}
       </ScrollView>

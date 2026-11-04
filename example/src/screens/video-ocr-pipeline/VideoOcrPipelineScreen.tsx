@@ -30,7 +30,6 @@ import {
 } from 'react-native-sherpa-onnx/imagebuffer';
 import {
   createEmptyOfflineTextBuffer,
-  getOfflineTextBufferTextSlice,
   getPipelineTextBufferInfo,
   releasePipelineTextBuffer,
   type OfflineTextBufferInfo,
@@ -43,11 +42,16 @@ import {
   type PipelineOfflineAudioResultCardHandle,
 } from '../../components/PipelineOfflineAudioResultCard';
 import { OfflineImageBufferFramePager } from '../../components/OfflineImageBufferFramePager';
+import { OfflineTextBufferResultCard } from '../../components/OfflineTextBufferResultCard';
 import { OcrModelInitPanel } from '../../components/OcrModelInitPanel';
 import {
   OcrRecognizeProgressBox,
   type OcrProgressBoxHandle,
 } from '../../components/OcrRecognizeProgressBox';
+import {
+  readOfflineTextBufferSnapshot,
+  type OfflineTextBufferSnapshot,
+} from '../../utils/readOfflineTextBufferSnapshot';
 import { PipelineStepStrip } from '../../components/PipelineStepStrip';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
@@ -149,7 +153,8 @@ export default function VideoOcrPipelineScreen() {
   } | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrRunError, setOcrRunError] = useState<string | null>(null);
-  const [ocrText, setOcrText] = useState('');
+  const [ocrSnapshot, setOcrSnapshot] =
+    useState<OfflineTextBufferSnapshot | null>(null);
   const [ocrTextBufferId, setOcrTextBufferId] = useState<string | null>(null);
   const [spanCount, setSpanCount] = useState(0);
 
@@ -181,7 +186,7 @@ export default function VideoOcrPipelineScreen() {
     const current = ocrTextBufRef.current;
     ocrTextBufRef.current = null;
     setOcrTextBufferId(null);
-    setOcrText('');
+    setOcrSnapshot(null);
     setSpanCount(0);
     if (current) {
       await releasePipelineTextBuffer(current).catch(() => {});
@@ -416,14 +421,11 @@ export default function VideoOcrPipelineScreen() {
           ocrProgressBoxRef.current?.apply(p);
         },
       });
+      const snapshot = await readOfflineTextBufferSnapshot(textOut.bufferId);
+      setOcrSnapshot(snapshot);
       const info = (await getPipelineTextBufferInfo(
-        textOut
+        textOut.bufferId
       )) as OfflineTextBufferInfo;
-      const text =
-        info.utf16Length > 0
-          ? await getOfflineTextBufferTextSlice(textOut, 0, info.utf16Length)
-          : '';
-      setOcrText(text);
       setSpanCount(info.hasSpatialSpans ? info.spatialSpanCount : 0);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -453,10 +455,16 @@ export default function VideoOcrPipelineScreen() {
       {
         id: 'recognize',
         label: 'Recognize',
-        active: ocrText.length > 0 || spanCount > 0,
+        active: (ocrSnapshot?.text.length ?? 0) > 0 || spanCount > 0,
       },
     ],
-    [buffer, images, ocr.isEngineInitialized, ocrText.length, spanCount]
+    [
+      buffer,
+      images,
+      ocr.isEngineInitialized,
+      ocrSnapshot?.text.length,
+      spanCount,
+    ]
   );
 
   const nativeBusy = extractBusy || audioBusy || ocrBusy;
@@ -711,14 +719,24 @@ export default function VideoOcrPipelineScreen() {
             {ocrRunError ? (
               <Text style={styles.errorText}>{ocrRunError}</Text>
             ) : null}
-            {ocrText.length > 0 || spanCount > 0 ? (
-              <View style={styles.resultCard}>
+            {ocrSnapshot || spanCount > 0 ? (
+              <View>
                 <Text style={styles.mono}>
                   spanCount={spanCount}
-                  {ocrText.length > 0 ? `\nutf16Length=${ocrText.length}` : ''}
+                  {ocrSnapshot && ocrSnapshot.utf16Length > 0
+                    ? `\nutf16Length=${ocrSnapshot.utf16Length}`
+                    : ''}
                 </Text>
-                {ocrText.length > 0 ? (
-                  <Text style={styles.resultText}>{ocrText}</Text>
+                {ocrSnapshot && ocrSnapshot.text.length > 0 ? (
+                  <OfflineTextBufferResultCard
+                    title="OCR text"
+                    textLabel="Recognized:"
+                    result={ocrSnapshot}
+                    showExpanders={false}
+                    showMeta={false}
+                    showJsonExport={false}
+                    showBufferList={false}
+                  />
                 ) : (
                   <Text style={styles.sectionHint}>
                     Spans present, empty plaintext slice.
