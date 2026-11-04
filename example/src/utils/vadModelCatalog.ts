@@ -88,17 +88,30 @@ function prioritizeEntries(
   return [...recommended, ...remaining];
 }
 
+export type VadModelPathContext = {
+  padModelIds: string[];
+  padModelsPath: string | null;
+  bundledFolders: string[];
+  downloadedIds: Set<string>;
+};
+
+export function createVadModelPathContext(
+  snapshot: VadCatalogSnapshot
+): VadModelPathContext {
+  return {
+    padModelIds: snapshot.padVadModelIds,
+    padModelsPath: snapshot.padModelsPath,
+    bundledFolders: snapshot.bundledVadFolders,
+    downloadedIds: new Set(snapshot.downloadedVadIds),
+  };
+}
+
 /**
  * Resolve a discovered folder id to the same FileSource shape used by detectVadModel.
  */
 export function getVadModelPathConfig(
   modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
-  }
+  ctx: VadModelPathContext
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath

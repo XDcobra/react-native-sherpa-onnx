@@ -10,37 +10,13 @@ import {
 } from 'react-native';
 import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import {
-  getAssetPackPath,
-  listAssetModels,
-  listModelsAtPath,
-} from 'react-native-sherpa-onnx/utils';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import {
-  listDownloadedModels,
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
-import {
-  createEnhancement,
-  detectEnhancementModel,
-  assertEnhancementCustomConfig,
-  type EnhancementEngine,
-  type EnhancementConcreteModelType,
-} from 'react-native-sherpa-onnx/enhancement';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   createEmptyOfflineAudioBuffer,
   releasePipelineAudioBuffer,
   getPipelineAudioBufferInfo,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { AudioSaveDestinationPicker } from '../../components/AudioSaveDestinationPicker';
-import { formatResolvedLocation } from '../../components/audioSaveUtils';
-import {
-  getAssetModelPath,
-  getFileModelPath,
-  getModelDisplayName,
-  toDetectSource,
-} from '../../modelConfig';
 import { getAudioFilesForEnhancement } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
@@ -51,52 +27,21 @@ import {
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
+import {
+  PipelineOfflineAudioResultCard,
+  type PipelineOfflineAudioResultCardHandle,
+} from '../../components/PipelineOfflineAudioResultCard';
 import { VoxLockReferenceAudioPicker } from '../../components/VoxLockReferenceAudioPicker';
 import {
   SegmentationPolicyControls,
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
-import {
-  InitModeSelector,
-  ModelFolderGrid,
-  EnhancementCustomInitForm,
-  type ModelInitMode,
-  type EnhancementCustomInitFormState,
-} from '../../components/modelInit';
-import {
-  buildEnhancementAutoInitializeOptions,
-  buildEnhancementCustomInitializeOptions,
-  enhancementLoadedKindFromDetect,
-  fillEnhancementCustomConfigFromModelFolder,
-  isEnhancementFolderHint,
-} from '../../utils/enhancementCustomInitFill';
-
-const PAD_PACK_NAME = 'sherpa_models';
-const NUM_THREADS = 2;
-
-const DEFAULT_ENHANCEMENT_CUSTOM_INIT: EnhancementCustomInitFormState = {
-  modelType: 'gtcrn',
-  fileSources: {},
-};
-
-function isEnhancementHint(folder: string, hint: string): boolean {
-  return isEnhancementFolderHint(folder, hint);
-}
+import { EnhancementModelInitPanel } from '../../components/EnhancementModelInitPanel';
+import { useEnhancementModelInit } from '../../hooks/useEnhancementModelInit';
+import type { RootStackParamList } from '../../types/navigation';
 
 const localStyles = StyleSheet.create({
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    marginBottom: 12,
-  },
-  optionLabel: {
-    color: '#333',
-    fontSize: 15,
-    fontWeight: '600',
-  },
   playDisabled: {
     opacity: 0.45,
   },
@@ -106,41 +51,45 @@ const localStyles = StyleSheet.create({
     marginTop: 12,
     alignItems: 'stretch',
   },
-  playHalf: {
+  playOriginal: {
     flex: 1,
     minWidth: 0,
     paddingVertical: 12,
     paddingHorizontal: 8,
   },
+  enhancedCardWrap: {
+    marginTop: 12,
+  },
 });
 
 export default function EnhancementScreen() {
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] =
-    useState<EnhancementCustomInitFormState>(DEFAULT_ENHANCEMENT_CUSTOM_INIT);
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-  const [initializedSummary, setInitializedSummary] = useState<string | null>(
-    null
-  );
-  const [padModelIds, setPadModelIds] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
-  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [initResult, setInitResult] = useState<string | null>(null);
-  const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
-    null
-  );
-  const [selectedModelForInit, setSelectedModelForInit] = useState<
-    string | null
-  >(null);
-  const [detectedModels, setDetectedModels] = useState<
-    Array<{ type: string; modelDir: string }>
-  >([]);
-  const [selectedModelKind, setSelectedModelKind] =
-    useState<EnhancementConcreteModelType | null>(null);
-  const [loading, setLoading] = useState(false);
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  const clearEnhanceRunState = useCallback(() => {
+    setEnhanceResult(null);
+    setLastEnhancedAudio(null);
+  }, []);
+
+  const enhancement = useEnhancementModelInit({
+    onBeforeInit: clearEnhanceRunState,
+    onEngineReady: clearEnhanceRunState,
+  });
+
+  const {
+    engineRef,
+    isEngineInitialized,
+    initMode,
+    customInitForm,
+    selectedModelForInit,
+    currentModelFolder,
+    detectedModels,
+    selectedModelKind,
+    loading,
+    reinitWithKind,
+    releaseEngine,
+  } = enhancement;
+
   const [error, setError] = useState<string | null>(null);
   const [errorSource, setErrorSource] = useState<'init' | 'enhance' | null>(
     null
@@ -157,42 +106,22 @@ export default function EnhancementScreen() {
     sampleRate: number;
     numSamples: number;
   } | null>(null);
-  const [activePlaybackKind, setActivePlaybackKind] = useState<
-    'original' | 'enhanced' | null
-  >(null);
+  const [playingOriginal, setPlayingOriginal] = useState(false);
 
-  const engineRef = useRef<EnhancementEngine | null>(null);
   const originalInputPlayerRef = useRef<PcmPlayer | null>(null);
-  const enhancedOutputPlayerRef = useRef<PcmPlayer | null>(null);
+  const enhancedCardRef = useRef<PipelineOfflineAudioResultCardHandle | null>(
+    null
+  );
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
 
-  const stopActivePlayback = async () => {
+  const stopOriginalPlayback = async () => {
     const original = originalInputPlayerRef.current;
     originalInputPlayerRef.current = null;
     if (original) {
       await original.destroy().catch(() => {});
     }
-    const enhanced = enhancedOutputPlayerRef.current;
-    enhancedOutputPlayerRef.current = null;
-    if (enhanced) {
-      await enhanced.destroy().catch(() => {});
-    }
-    setActivePlaybackKind(null);
+    setPlayingOriginal(false);
   };
-
-  useEffect(() => {
-    loadAvailableModels();
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category !== ModelCategory.Enhancement) return;
-      loadAvailableModels().catch(() => {
-        // ignore refresh errors
-      });
-    });
-    return unsubscribe;
-  }, []);
 
   useEffect(() => {
     return () => {
@@ -201,344 +130,11 @@ export default function EnhancementScreen() {
       if (o) {
         o.destroy().catch(() => {});
       }
-      const p = enhancedOutputPlayerRef.current;
-      enhancedOutputPlayerRef.current = null;
-      if (p) {
-        p.destroy().catch(() => {});
-      }
     };
   }, []);
 
-  const loadAvailableModels = async () => {
-    setLoadingModels(true);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const assetModels = await listAssetModels();
-      const enhancementFolders = assetModels
-        .filter((m) => isEnhancementHint(m.folder, m.hint))
-        .map((m) => m.folder);
-      const downloadedModels = await listDownloadedModels(
-        ModelCategory.Enhancement
-      );
-      const downloadedFolders = downloadedModels.map((model) => model.id);
-
-      let padFolders: string[] = [];
-      let resolvedPadPath: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${DocumentDirectoryPath}/models`;
-        const padPath = padPathFromNative ?? fallbackPath;
-        const padResults = await listModelsAtPath(padPath);
-        padFolders = (padResults || [])
-          .filter((m) => isEnhancementHint(m.folder, m.hint))
-          .map((m) => m.folder);
-        if (padFolders.length > 0) {
-          resolvedPadPath = padPath;
-        }
-      } catch (e) {
-        console.warn('EnhancementScreen: PAD/listModelsAtPath failed', e);
-        padFolders = [];
-      }
-      setPadModelsPath(resolvedPadPath);
-
-      const combined = [
-        ...padFolders,
-        ...enhancementFolders.filter((f) => !padFolders.includes(f)),
-        ...downloadedFolders.filter(
-          (f) => !padFolders.includes(f) && !enhancementFolders.includes(f)
-        ),
-      ];
-      setPadModelIds(padFolders);
-      setDownloadedModelIds(downloadedFolders);
-      setAvailableModels(combined);
-
-      if (combined.length === 0) {
-        setErrorSource('init');
-        setError(
-          'No speech enhancement models found. Add a GTCRN or DPDFNet model as a bundled asset, downloaded model, or PAD model. See docs/speech-enhancement.md.'
-        );
-      }
-    } catch (err) {
-      console.error('EnhancementScreen: Failed to load models:', err);
-      setErrorSource('init');
-      setError('Failed to load available models');
-      setAvailableModels([]);
-    } finally {
-      setLoadingModels(false);
-    }
-  };
-
-  const resolveEnhancementModelPath = useCallback(
-    (modelFolder: string) => {
-      if (padModelIds.includes(modelFolder)) {
-        return padModelsPath
-          ? getFileModelPath(
-              modelFolder,
-              ModelCategory.Enhancement,
-              padModelsPath
-            )
-          : getFileModelPath(modelFolder, ModelCategory.Enhancement);
-      }
-      if (downloadedModelIds.includes(modelFolder)) {
-        return getFileModelPath(modelFolder, ModelCategory.Enhancement);
-      }
-      return getAssetModelPath(modelFolder);
-    },
-    [downloadedModelIds, padModelIds, padModelsPath]
-  );
-
-  const catalogEntries = useMemo(
-    () =>
-      availableModels.map((id) => ({
-        id,
-        label: getModelDisplayName(id),
-      })),
-    [availableModels]
-  );
-
-  const handleFillFromSelectedModel = useCallback(async () => {
-    const modelFolder = selectedModelForInit;
-    if (!modelFolder) {
-      Alert.alert('Select a model', 'Pick a catalog model folder first.');
-      return;
-    }
-
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const modelPath = resolveEnhancementModelPath(modelFolder);
-      const fillResult = await fillEnhancementCustomConfigFromModelFolder(
-        await toDetectSource(modelPath),
-        { modelTypeOverride: customInitForm.modelType }
-      );
-      setCustomInitForm({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-      });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setCustomFillHint(
-        `Filled from ${getModelDisplayName(modelFolder)} (${
-          fillResult.modelDir
-        }).${missing}`
-      );
-    } catch (fillErr) {
-      setCustomFillHint(null);
-      const message =
-        fillErr instanceof Error ? fillErr.message : String(fillErr);
-      setErrorSource('init');
-      setError(message);
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [
-    customInitForm.modelType,
-    resolveEnhancementModelPath,
-    selectedModelForInit,
-  ]);
-
-  const handlePrepareScatteredTest = useCallback(() => {
-    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
-    setCustomFillHint(
-      'Scattered test: pick the model file from a different location, then Initialize.'
-    );
-  }, []);
-
-  const handleInitializeCustom = async () => {
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    setInitResult(null);
-    setDetectedModels([]);
-    setSelectedModelKind(null);
-    setInitializedSummary(null);
-
-    try {
-      const previous = engineRef.current;
-      if (previous) {
-        await previous.destroy();
-        engineRef.current = null;
-      }
-
-      const customConfig = {
-        ...customInitForm.fileSources,
-      };
-      assertEnhancementCustomConfig(
-        customConfig as unknown as Record<string, unknown>
-      );
-
-      const engine = await createEnhancement(
-        buildEnhancementCustomInitializeOptions(
-          customInitForm.modelType,
-          customConfig as Record<string, unknown>,
-          { numThreads: NUM_THREADS }
-        )
-      );
-
-      engineRef.current = engine;
-      setCurrentModelFolder(null);
-      setSelectedModelKind(customInitForm.modelType);
-      setDetectedModels([
-        { type: customInitForm.modelType, modelDir: 'custom' },
-      ]);
-      setInitializedSummary(`custom:${customInitForm.modelType}`);
-      setInitResult(
-        `Initialized (custom): ${customInitForm.modelType}\nFile: model`
-      );
-      setEnhanceResult(null);
-      setLastEnhancedAudio(null);
-    } catch (err) {
-      console.error('Enhancement custom init error:', err);
-      let errorMessage = 'Unknown error';
-      if (err instanceof Error) {
-        errorMessage = err.message;
-        if ('code' in err) {
-          errorMessage = `[${(err as { code?: string }).code}] ${errorMessage}`;
-        }
-      }
-      setErrorSource('init');
-      setError(errorMessage);
-      setInitResult(`Custom initialization failed: ${errorMessage}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleInitialize = async (modelFolder: string) => {
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    setInitResult(null);
-    setDetectedModels([]);
-    setSelectedModelKind(null);
-
-    try {
-      const previous = engineRef.current;
-      if (previous) {
-        await previous.destroy();
-        engineRef.current = null;
-      }
-
-      const modelPath = resolveEnhancementModelPath(modelFolder);
-      const modelSource = await toDetectSource(modelPath);
-
-      const engine = await createEnhancement({
-        modelSource,
-        numThreads: NUM_THREADS,
-        modelType: 'auto',
-      });
-
-      const detectResult = await detectEnhancementModel(modelSource, {
-        modelType: 'auto',
-      });
-      if (!detectResult.success || !detectResult.detectedModels?.length) {
-        await engine.destroy();
-        engineRef.current = null;
-        setErrorSource('init');
-        setError('No enhancement models detected in the directory');
-        setInitResult('Initialization failed: No compatible models found');
-        return;
-      }
-
-      const normalized = detectResult.detectedModels.map((m) => ({
-        type: m.type,
-        modelDir: m.modelDir,
-      }));
-      const loadedKind = enhancementLoadedKindFromDetect(
-        detectResult.modelType,
-        normalized
-      );
-
-      engineRef.current = engine;
-      setDetectedModels(normalized);
-      setCurrentModelFolder(modelFolder);
-      setInitializedSummary(null);
-      setSelectedModelForInit(modelFolder);
-      if (loadedKind) {
-        setSelectedModelKind(loadedKind);
-      }
-
-      const types = normalized.map((m) => m.type).join(', ');
-      setInitResult(
-        `Initialized: ${getModelDisplayName(modelFolder)}\nDetected: ${types}`
-      );
-
-      setEnhanceResult(null);
-      setLastEnhancedAudio(null);
-    } catch (err) {
-      console.error('Enhancement init error:', err);
-      let errorMessage = 'Unknown error';
-      if (err instanceof Error) {
-        errorMessage = err.message;
-        if ('code' in err) {
-          errorMessage = `[${(err as any).code}] ${errorMessage}`;
-        }
-      } else if (typeof err === 'object' && err !== null) {
-        const errorObj = err as any;
-        errorMessage =
-          errorObj.message ||
-          errorObj.userInfo?.NSLocalizedDescription ||
-          JSON.stringify(err);
-      }
-      setErrorSource('init');
-      setError(errorMessage);
-      setInitResult(`Initialization failed: ${errorMessage}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleReinitWithKind = async (kind: EnhancementConcreteModelType) => {
-    if (!currentModelFolder) return;
-    setSelectedModelKind(kind);
-    const folder = currentModelFolder;
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const previous = engineRef.current;
-      if (previous) {
-        await previous.destroy();
-        engineRef.current = null;
-      }
-
-      const modelPath = resolveEnhancementModelPath(folder);
-      const modelSource = await toDetectSource(modelPath);
-
-      const engine = await createEnhancement(
-        buildEnhancementAutoInitializeOptions(modelSource, kind, {
-          numThreads: NUM_THREADS,
-        })
-      );
-      const detectResult = await detectEnhancementModel(modelSource, {
-        modelType: kind,
-      });
-      if (!detectResult.success || !detectResult.detectedModels?.length) {
-        await engine.destroy();
-        setErrorSource('init');
-        setError('No enhancement models detected for the selected type');
-        return;
-      }
-      engineRef.current = engine;
-      setInitResult(
-        `Initialized: ${getModelDisplayName(folder)} (${kind.toUpperCase()})`
-      );
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErrorSource('init');
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleEnhance = async () => {
-    if (!currentModelFolder) {
+    if (!isEngineInitialized || !engineRef.current) {
       setErrorSource('enhance');
       setError('Please initialize a model first');
       return;
@@ -556,15 +152,11 @@ export default function EnhancementScreen() {
     setErrorSource(null);
     setEnhanceResult(null);
     setLastEnhancedAudio(null);
-    await stopActivePlayback();
+    await stopOriginalPlayback();
+    await enhancedCardRef.current?.stop().catch(() => {});
 
     try {
       const engine = engineRef.current;
-      if (!engine) {
-        setErrorSource('enhance');
-        setError('Enhancement engine not initialized');
-        return;
-      }
 
       if (lastEnhancedAudio?.outputBufferId) {
         await releasePipelineAudioBuffer(
@@ -573,7 +165,6 @@ export default function EnhancementScreen() {
       }
 
       const sr = await engine.getSampleRate();
-      // Create empty output buffer at model sample rate
       const outputBuf = await createEmptyOfflineAudioBuffer(sr);
       try {
         const segOption = buildSegmentationOption(segConfig);
@@ -590,7 +181,6 @@ export default function EnhancementScreen() {
               : {}),
           }
         );
-        // Get output info for display
         const outInfo = await getPipelineAudioBufferInfo(outputBuf.bufferId);
         const n = outInfo.numSamples ?? 0;
         const outSr = outInfo.sampleRate ?? sr;
@@ -601,10 +191,9 @@ export default function EnhancementScreen() {
           numSamples: n,
         });
         setEnhanceResult(
-          `Segmentation: ${segConfig.mode}\nStatus: ${result.status}\nSegments: ${result.completedSegments}/${result.totalSegments}\nSkipped: ${result.skippedSegments.length}\nSamples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nUse “Save to” below to export a file.`
+          `Segmentation: ${segConfig.mode}\nStatus: ${result.status}\nSegments: ${result.completedSegments}/${result.totalSegments}\nSkipped: ${result.skippedSegments.length}\nSamples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nUse the result card below to play or save.`
         );
       } catch (enhanceErr) {
-        // Release output buffer on error (input buffer remains cached for retries)
         await releasePipelineAudioBuffer(outputBuf.bufferId).catch(() => {});
         throw enhanceErr;
       }
@@ -613,13 +202,16 @@ export default function EnhancementScreen() {
       if (err instanceof Error) {
         errorMessage = err.message;
         if ('code' in err) {
-          errorMessage = `[${(err as any).code}] ${errorMessage}`;
+          errorMessage = `[${(err as { code?: string }).code}] ${errorMessage}`;
         }
       } else if (typeof err === 'object' && err !== null) {
-        const errorObj = err as any;
+        const errorObj = err as {
+          message?: string;
+          userInfo?: { NSLocalizedDescription?: string };
+        };
         errorMessage =
-          errorObj.message ||
-          errorObj.userInfo?.NSLocalizedDescription ||
+          errorObj.message ??
+          errorObj.userInfo?.NSLocalizedDescription ??
           JSON.stringify(err);
       }
       setErrorSource('enhance');
@@ -629,46 +221,32 @@ export default function EnhancementScreen() {
     }
   };
 
-  const handleFree = async () => {
-    // Release any held output buffer
+  const handleReleaseAll = async () => {
     if (lastEnhancedAudio?.outputBufferId) {
       await releasePipelineAudioBuffer(lastEnhancedAudio.outputBufferId).catch(
         () => {}
       );
     }
-    const engine = engineRef.current;
-    if (engine) {
-      try {
-        await engine.destroy();
-      } catch (e) {
-        console.warn('EnhancementScreen: destroy failed', e);
-      }
-    }
-    engineRef.current = null;
-    setCurrentModelFolder(null);
-    setInitializedSummary(null);
-    setSelectedModelForInit(null);
-    setDetectedModels([]);
-    setSelectedModelKind(null);
-    setInitResult(null);
+    await releaseEngine();
     await offlineWidgetRef.current?.clear();
     setPreparedInputBuffer(null);
-    setEnhanceResult(null);
-    setLastEnhancedAudio(null);
+    clearEnhanceRunState();
     setError(null);
     setErrorSource(null);
-    await stopActivePlayback();
+    await stopOriginalPlayback();
+    await enhancedCardRef.current?.stop().catch(() => {});
   };
 
   const togglePlayOriginalOutput = async () => {
     const bufferId = preparedInputBuffer?.bufferId;
     if (!bufferId) return;
     if (originalInputPlayerRef.current) {
-      await stopActivePlayback();
+      await stopOriginalPlayback();
       return;
     }
     try {
-      await stopActivePlayback();
+      await stopOriginalPlayback();
+      await enhancedCardRef.current?.stop().catch(() => {});
       await setPipelineAudioRoutePreference({
         outputDeviceId: null,
       }).catch(() => {});
@@ -677,56 +255,29 @@ export default function EnhancementScreen() {
           if (originalInputPlayerRef.current === player) {
             originalInputPlayerRef.current = null;
           }
-          setActivePlaybackKind(null);
+          setPlayingOriginal(false);
         },
       });
       originalInputPlayerRef.current = player;
-      setActivePlaybackKind('original');
+      setPlayingOriginal(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
     }
   };
 
-  const togglePlayEnhancedOutput = async () => {
-    const bufferId = lastEnhancedAudio?.outputBufferId;
-    if (!bufferId) return;
-    if (enhancedOutputPlayerRef.current) {
-      await stopActivePlayback();
-      return;
-    }
-    try {
-      await stopActivePlayback();
-      await setPipelineAudioRoutePreference({
-        outputDeviceId: null,
-      }).catch(() => {});
-      const player = await createPcmPlayer(bufferId, {
-        onEnded: () => {
-          if (enhancedOutputPlayerRef.current === player) {
-            enhancedOutputPlayerRef.current = null;
-          }
-          setActivePlaybackKind(null);
-        },
-      });
-      enhancedOutputPlayerRef.current = player;
-      setActivePlaybackKind('enhanced');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Playback failed', msg);
-    }
-  };
+  const applyVoxLockVoiceSample = useCallback(
+    async (bufferId: string) => {
+      const engine = engineRef.current;
+      if (!engine || engine.modelType !== 'voxlock') {
+        throw new Error('VoxLock engine is not initialized');
+      }
+      await engine.setVoiceSample(bufferId);
+    },
+    [engineRef]
+  );
 
-  const applyVoxLockVoiceSample = useCallback(async (bufferId: string) => {
-    const engine = engineRef.current;
-    if (!engine || engine.modelType !== 'voxlock') {
-      throw new Error('VoxLock engine is not initialized');
-    }
-    await engine.setVoiceSample(bufferId);
-  }, []);
-
-  const engineReady =
-    (currentModelFolder != null || initializedSummary != null) &&
-    engineRef.current != null;
+  const engineReady = isEngineInitialized && engineRef.current != null;
   const voxLockEngineId =
     engineReady && engineRef.current?.modelType === 'voxlock'
       ? engineRef.current.instanceId
@@ -753,6 +304,8 @@ export default function EnhancementScreen() {
     ]
   );
 
+  const sectionEnhance = showKindPicker ? 3 : 2;
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.body}>
@@ -762,141 +315,11 @@ export default function EnhancementScreen() {
           style={styles.scrollView}
           keyboardShouldPersistTaps="handled"
         >
-          {currentModelFolder != null || initializedSummary != null ? (
-            <TouchableOpacity
-              style={styles.freeButton}
-              onPress={handleFree}
-              disabled={loading}
-            >
-              <Text style={styles.freeButtonText}>Release model</Text>
-            </TouchableOpacity>
-          ) : null}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>1. Initialize model</Text>
-            <InitModeSelector
-              value={initMode}
-              onChange={setInitMode}
-              disabled={loading || customFillLoading}
-            />
-            <Text style={styles.hint}>
-              {initMode === 'auto'
-                ? 'Offline denoising (GTCRN / DPDFNet / VoxLock). Select a folder, then tap "Use model".'
-                : 'Choose model type, pick the ONNX file (or Fill from catalog), then Initialize custom.'}
-            </Text>
-
-            {(initializedSummary ||
-              currentModelFolder ||
-              selectedModelForInit) && (
-              <View style={styles.currentModelContainer}>
-                <Text style={styles.currentModelText}>
-                  {initializedSummary
-                    ? `Initialized: ${initializedSummary}`
-                    : currentModelFolder
-                    ? `Loaded: ${getModelDisplayName(currentModelFolder)}`
-                    : `Selected: ${
-                        selectedModelForInit
-                          ? getModelDisplayName(selectedModelForInit)
-                          : ''
-                      }`}
-                </Text>
-              </View>
-            )}
-
-            {loadingModels ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#007AFF" />
-                <Text style={styles.loadingText}>
-                  Discovering enhancement models…
-                </Text>
-              </View>
-            ) : availableModels.length === 0 ? (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  No enhancement models in assets or PAD. Add models from the
-                  sherpa-onnx speech-enhancement-models release.
-                </Text>
-              </View>
-            ) : (
-              <ModelFolderGrid
-                entries={catalogEntries}
-                selectedId={selectedModelForInit}
-                initializedId={currentModelFolder}
-                onSelect={setSelectedModelForInit}
-                loading={loadingModels}
-                disabled={loading || customFillLoading}
-                emptyMessage="No enhancement models found."
-              />
-            )}
-
-            {initMode === 'custom' ? (
-              <EnhancementCustomInitForm
-                value={customInitForm}
-                onChange={setCustomInitForm}
-                selectedCatalogModelId={selectedModelForInit}
-                onFillFromSelectedModel={() => {
-                  handleFillFromSelectedModel().catch(() => {});
-                }}
-                onPrepareScatteredTest={handlePrepareScatteredTest}
-                fillLoading={customFillLoading}
-                disabled={loading}
-                fillHint={customFillHint}
-              />
-            ) : null}
-
-            <TouchableOpacity
-              style={[
-                styles.button,
-                styles.applyButton,
-                (loading || customFillLoading) && styles.buttonDisabled,
-              ]}
-              onPress={() => {
-                if (initMode === 'custom') {
-                  handleInitializeCustom();
-                  return;
-                }
-                handleInitialize(
-                  selectedModelForInit ?? currentModelFolder ?? ''
-                );
-              }}
-              disabled={
-                loading ||
-                customFillLoading ||
-                (initMode === 'auto'
-                  ? !selectedModelForInit && !currentModelFolder
-                  : false)
-              }
-            >
-              {loading ? (
-                <View style={styles.applyButtonContent}>
-                  <ActivityIndicator
-                    size="small"
-                    color="#FFFFFF"
-                    style={styles.applyButtonSpinner}
-                  />
-                  <Text style={styles.buttonText}>Initializing…</Text>
-                </View>
-              ) : (
-                <Text style={styles.buttonText}>
-                  {initMode === 'custom' ? 'Initialize custom' : 'Use model'}
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            {initResult && !(error && errorSource === 'init') && (
-              <View style={styles.resultContainer}>
-                <Text style={styles.resultLabel}>Result:</Text>
-                <Text style={styles.resultText}>{initResult}</Text>
-              </View>
-            )}
-
-            {error && errorSource === 'init' && (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorLabel}>Error:</Text>
-                <Text style={styles.errorText}>{error}</Text>
-              </View>
-            )}
-          </View>
+          <EnhancementModelInitPanel
+            enhancement={enhancement}
+            disabled={enhancing}
+            onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+          />
 
           {showKindPicker && engineReady && (
             <View style={styles.section}>
@@ -914,8 +337,8 @@ export default function EnhancementScreen() {
                       selectedModelKind === kind &&
                         styles.detectedModelButtonActive,
                     ]}
-                    onPress={() => handleReinitWithKind(kind)}
-                    disabled={loading}
+                    onPress={() => reinitWithKind(kind)}
+                    disabled={loading || enhancing}
                   >
                     <Text
                       style={[
@@ -935,7 +358,7 @@ export default function EnhancementScreen() {
           {engineReady ? (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>
-                {showKindPicker ? '3. Enhance audio' : '2. Enhance audio'}
+                {sectionEnhance}. Enhance audio
               </Text>
               <Text style={styles.hint}>
                 WAV input (example clips or a file from disk). Enhanced audio
@@ -959,10 +382,10 @@ export default function EnhancementScreen() {
                   setErrorSource(null);
                 }}
                 onBufferReleased={() => {
-                  stopActivePlayback().catch(() => {});
+                  stopOriginalPlayback().catch(() => {});
+                  enhancedCardRef.current?.stop().catch(() => {});
                   setPreparedInputBuffer(null);
-                  setEnhanceResult(null);
-                  setLastEnhancedAudio(null);
+                  clearEnhanceRunState();
                 }}
               />
 
@@ -1001,7 +424,7 @@ export default function EnhancementScreen() {
                     <TouchableOpacity
                       style={[
                         styles.playButton,
-                        localStyles.playHalf,
+                        localStyles.playOriginal,
                         !preparedInputBuffer && localStyles.playDisabled,
                       ]}
                       onPress={() => togglePlayOriginalOutput()}
@@ -1009,57 +432,43 @@ export default function EnhancementScreen() {
                     >
                       <View style={styles.rowAlignCenter}>
                         <Ionicons
-                          name={
-                            activePlaybackKind === 'original' ? 'stop' : 'play'
-                          }
+                          name={playingOriginal ? 'stop' : 'play'}
                           size={16}
                           style={styles.iconInline}
                         />
                         <Text style={styles.playButtonText}>
-                          {activePlaybackKind === 'original'
-                            ? 'Stop'
-                            : 'Original'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.playButton,
-                        localStyles.playHalf,
-                        !lastEnhancedAudio && localStyles.playDisabled,
-                      ]}
-                      onPress={() => togglePlayEnhancedOutput()}
-                      disabled={!lastEnhancedAudio}
-                    >
-                      <View style={styles.rowAlignCenter}>
-                        <Ionicons
-                          name={
-                            activePlaybackKind === 'enhanced' ? 'stop' : 'play'
-                          }
-                          size={16}
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.playButtonText}>
-                          {activePlaybackKind === 'enhanced'
-                            ? 'Stop'
-                            : resultPlaybackLabel}
+                          {playingOriginal ? 'Stop' : 'Original'}
                         </Text>
                       </View>
                     </TouchableOpacity>
                   </View>
                   {lastEnhancedAudio && (
-                    <View style={styles.mt12}>
-                      <AudioSaveDestinationPicker
-                        audioInput={lastEnhancedAudio.outputBufferId}
+                    <View style={localStyles.enhancedCardWrap}>
+                      <PipelineOfflineAudioResultCard
+                        ref={enhancedCardRef}
+                        bufferId={lastEnhancedAudio.outputBufferId}
+                        title={`${resultPlaybackLabel} audio`}
+                        sourceLabel={`${lastEnhancedAudio.numSamples.toLocaleString()} samples`}
+                        sampleRate={lastEnhancedAudio.sampleRate}
+                        durationMs={
+                          lastEnhancedAudio.sampleRate > 0
+                            ? (lastEnhancedAudio.numSamples /
+                                lastEnhancedAudio.sampleRate) *
+                              1000
+                            : 0
+                        }
                         filename={`sherpa_enhanced_${Date.now()}.wav`}
-                        format="wav"
-                        onSaveComplete={(result) => {
-                          const location = formatResolvedLocation(result);
-                          Alert.alert('Saved', `Audio saved to:\n${location}`);
+                        onDismiss={() => {
+                          releasePipelineAudioBuffer(
+                            lastEnhancedAudio.outputBufferId
+                          )
+                            .catch(() => {})
+                            .finally(() => {
+                              setLastEnhancedAudio(null);
+                              setEnhanceResult(null);
+                            });
                         }}
-                        onError={(saveError) => {
-                          Alert.alert('Save failed', saveError.message);
-                        }}
+                        disabled={enhancing || loading}
                       />
                     </View>
                   )}
@@ -1072,6 +481,18 @@ export default function EnhancementScreen() {
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
               )}
+
+              <TouchableOpacity
+                style={[styles.freeButton, styles.mt12]}
+                onPress={() => {
+                  handleReleaseAll().catch(() => {});
+                }}
+                disabled={loading || enhancing}
+              >
+                <Text style={styles.freeButtonText}>
+                  Release model & clear buffers
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : null}
         </ScrollView>

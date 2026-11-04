@@ -1,5 +1,5 @@
 /**
- * Persists STT/TTS/OCR engine instances and UI state across screen navigation.
+ * Persists feature engine instances and UI state across screen navigation.
  * When the user leaves a screen, the instance is not released; when they return,
  * the same state (selected model, Free button visible) is restored.
  *
@@ -10,14 +10,51 @@
  * 'background' or before reloading the bundle) to free native resources.
  */
 
-import type { SttEngine } from 'react-native-sherpa-onnx/stt';
+import type {
+  LiveSttEngine,
+  OnlineSTTModelType,
+  SttEngine,
+} from 'react-native-sherpa-onnx/stt';
 import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
 import type {
   OcrConcreteModelType,
   OcrEngine,
 } from 'react-native-sherpa-onnx/ocr';
+import type {
+  OfflinePunctuationEngine,
+  StreamingPunctuationEngine,
+} from 'react-native-sherpa-onnx/punctuation';
+import type { AudioTaggingEngine } from 'react-native-sherpa-onnx/audio-tagging';
+import type { LanguageIdentificationEngine } from 'react-native-sherpa-onnx/language-identification';
+import type { KeywordSpottingEngine } from 'react-native-sherpa-onnx/kws';
+import type { VADEngine } from 'react-native-sherpa-onnx/vad';
+import type {
+  EnhancementConcreteModelType,
+  EnhancementEngine,
+  StreamingEnhancementEngine,
+} from 'react-native-sherpa-onnx/enhancement';
+import type {
+  SeparationEngine,
+  SeparationModelType,
+} from 'react-native-sherpa-onnx/separation';
+import type {
+  SpeakerIdentificationEngine,
+  SpeakerEmbeddingModelType,
+} from 'react-native-sherpa-onnx/speaker-identification';
+import type {
+  DiarizationEngine,
+  StreamingDiarizationEngine,
+} from 'react-native-sherpa-onnx/diarization';
+import type {
+  AlignmentCustomPathKey,
+  AlignmentEngine,
+  AlignmentModelType,
+} from 'react-native-sherpa-onnx/alignment';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
+import type { VADModelType } from 'react-native-sherpa-onnx/vad';
+import type { ModelInitMode } from './components/modelInit';
 
 // --- STT cache ---
 
@@ -57,6 +94,46 @@ export function clearSttCache(): void {
   sttModelFolder = null;
   sttDetectedModels = [];
   sttSelectedModelType = null;
+}
+
+// --- Streaming (online) STT cache (LiveSttEngine / native OnlineStt) ---
+
+let sttStreamingEngine: LiveSttEngine | null = null;
+let sttStreamingModelFolder: string | null = null;
+let sttStreamingInitMessage: string | null = null;
+let sttStreamingSelectedModelType: OnlineSTTModelType | null = null;
+
+export function getSttStreamingCache(): {
+  engine: LiveSttEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  selectedModelType: OnlineSTTModelType | null;
+} {
+  return {
+    engine: sttStreamingEngine,
+    modelFolder: sttStreamingModelFolder,
+    initMessage: sttStreamingInitMessage,
+    selectedModelType: sttStreamingSelectedModelType,
+  };
+}
+
+export function setSttStreamingCache(
+  engine: LiveSttEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  selectedModelType: OnlineSTTModelType | null
+): void {
+  sttStreamingEngine = engine;
+  sttStreamingModelFolder = modelFolder;
+  sttStreamingInitMessage = initMessage;
+  sttStreamingSelectedModelType = selectedModelType;
+}
+
+export function clearSttStreamingCache(): void {
+  sttStreamingEngine = null;
+  sttStreamingModelFolder = null;
+  sttStreamingInitMessage = null;
+  sttStreamingSelectedModelType = null;
 }
 
 // --- TTS cache ---
@@ -149,4 +226,647 @@ export function clearOcrCache(): void {
   ocrEngineFamily = null;
   ocrInitMessage = null;
   ocrDetectSummary = null;
+}
+
+// --- Offline punctuation cache ---
+
+let punctuationEngine: OfflinePunctuationEngine | null = null;
+let punctuationModelFolder: string | null = null;
+let punctuationInitMessage: string | null = null;
+
+export function getPunctuationCache(): {
+  engine: OfflinePunctuationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: punctuationEngine,
+    modelFolder: punctuationModelFolder,
+    initMessage: punctuationInitMessage,
+  };
+}
+
+export function setPunctuationCache(
+  engine: OfflinePunctuationEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  punctuationEngine = engine;
+  punctuationModelFolder = modelFolder;
+  punctuationInitMessage = initMessage;
+}
+
+export function clearPunctuationCache(): void {
+  punctuationEngine = null;
+  punctuationModelFolder = null;
+  punctuationInitMessage = null;
+}
+
+// --- Streaming (online) punctuation cache ---
+
+let punctuationStreamingEngine: StreamingPunctuationEngine | null = null;
+let punctuationStreamingModelFolder: string | null = null;
+let punctuationStreamingInitMessage: string | null = null;
+
+export function getPunctuationStreamingCache(): {
+  engine: StreamingPunctuationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: punctuationStreamingEngine,
+    modelFolder: punctuationStreamingModelFolder,
+    initMessage: punctuationStreamingInitMessage,
+  };
+}
+
+export function setPunctuationStreamingCache(
+  engine: StreamingPunctuationEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  punctuationStreamingEngine = engine;
+  punctuationStreamingModelFolder = modelFolder;
+  punctuationStreamingInitMessage = initMessage;
+}
+
+export function clearPunctuationStreamingCache(): void {
+  punctuationStreamingEngine = null;
+  punctuationStreamingModelFolder = null;
+  punctuationStreamingInitMessage = null;
+}
+
+// --- Audio tagging cache ---
+
+let audioTaggingEngine: AudioTaggingEngine | null = null;
+let audioTaggingModelFolder: string | null = null;
+let audioTaggingInitMessage: string | null = null;
+
+export function getAudioTaggingCache(): {
+  engine: AudioTaggingEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: audioTaggingEngine,
+    modelFolder: audioTaggingModelFolder,
+    initMessage: audioTaggingInitMessage,
+  };
+}
+
+export function setAudioTaggingCache(
+  engine: AudioTaggingEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  audioTaggingEngine = engine;
+  audioTaggingModelFolder = modelFolder;
+  audioTaggingInitMessage = initMessage;
+}
+
+export function clearAudioTaggingCache(): void {
+  audioTaggingEngine = null;
+  audioTaggingModelFolder = null;
+  audioTaggingInitMessage = null;
+}
+
+// --- Language ID cache ---
+
+let languageIdEngine: LanguageIdentificationEngine | null = null;
+let languageIdModelFolder: string | null = null;
+let languageIdInitMessage: string | null = null;
+
+export function getLanguageIdCache(): {
+  engine: LanguageIdentificationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: languageIdEngine,
+    modelFolder: languageIdModelFolder,
+    initMessage: languageIdInitMessage,
+  };
+}
+
+export function setLanguageIdCache(
+  engine: LanguageIdentificationEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  languageIdEngine = engine;
+  languageIdModelFolder = modelFolder;
+  languageIdInitMessage = initMessage;
+}
+
+export function clearLanguageIdCache(): void {
+  languageIdEngine = null;
+  languageIdModelFolder = null;
+  languageIdInitMessage = null;
+}
+
+// --- KWS cache ---
+
+let kwsEngine: KeywordSpottingEngine | null = null;
+let kwsModelFolder: string | null = null;
+let kwsInitMessage: string | null = null;
+
+export function getKwsCache(): {
+  engine: KeywordSpottingEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: kwsEngine,
+    modelFolder: kwsModelFolder,
+    initMessage: kwsInitMessage,
+  };
+}
+
+export function setKwsCache(
+  engine: KeywordSpottingEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  kwsEngine = engine;
+  kwsModelFolder = modelFolder;
+  kwsInitMessage = initMessage;
+}
+
+export function clearKwsCache(): void {
+  kwsEngine = null;
+  kwsModelFolder = null;
+  kwsInitMessage = null;
+}
+
+// --- VAD cache ---
+
+let vadEngine: VADEngine | null = null;
+let vadModelFolder: string | null = null;
+let vadInitMessage: string | null = null;
+
+export function getVadCache(): {
+  engine: VADEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: vadEngine,
+    modelFolder: vadModelFolder,
+    initMessage: vadInitMessage,
+  };
+}
+
+export function setVadCache(
+  engine: VADEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  vadEngine = engine;
+  vadModelFolder = modelFolder;
+  vadInitMessage = initMessage;
+}
+
+export function clearVadCache(): void {
+  vadEngine = null;
+  vadModelFolder = null;
+  vadInitMessage = null;
+}
+
+// --- Offline enhancement cache ---
+
+let enhancementEngine: EnhancementEngine | null = null;
+let enhancementModelFolder: string | null = null;
+let enhancementInitMessage: string | null = null;
+let enhancementDetectedModels: Array<{ type: string; modelDir: string }> = [];
+let enhancementSelectedModelKind: EnhancementConcreteModelType | null = null;
+
+export function getEnhancementCache(): {
+  engine: EnhancementEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  selectedModelKind: EnhancementConcreteModelType | null;
+} {
+  return {
+    engine: enhancementEngine,
+    modelFolder: enhancementModelFolder,
+    initMessage: enhancementInitMessage,
+    detectedModels: [...enhancementDetectedModels],
+    selectedModelKind: enhancementSelectedModelKind,
+  };
+}
+
+export function setEnhancementCache(
+  engine: EnhancementEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  detectedModels: Array<{ type: string; modelDir: string }>,
+  selectedModelKind: EnhancementConcreteModelType | null
+): void {
+  enhancementEngine = engine;
+  enhancementModelFolder = modelFolder;
+  enhancementInitMessage = initMessage;
+  enhancementDetectedModels = detectedModels;
+  enhancementSelectedModelKind = selectedModelKind;
+}
+
+export function clearEnhancementCache(): void {
+  enhancementEngine = null;
+  enhancementModelFolder = null;
+  enhancementInitMessage = null;
+  enhancementDetectedModels = [];
+  enhancementSelectedModelKind = null;
+}
+
+// --- Streaming enhancement cache ---
+
+let enhancementStreamingEngine: StreamingEnhancementEngine | null = null;
+let enhancementStreamingModelFolder: string | null = null;
+let enhancementStreamingInitMessage: string | null = null;
+let enhancementStreamingDetectedModels: Array<{
+  type: string;
+  modelDir: string;
+}> = [];
+let enhancementStreamingSelectedModelKind: EnhancementConcreteModelType | null =
+  null;
+
+export function getEnhancementStreamingCache(): {
+  engine: StreamingEnhancementEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  selectedModelKind: EnhancementConcreteModelType | null;
+} {
+  return {
+    engine: enhancementStreamingEngine,
+    modelFolder: enhancementStreamingModelFolder,
+    initMessage: enhancementStreamingInitMessage,
+    detectedModels: [...enhancementStreamingDetectedModels],
+    selectedModelKind: enhancementStreamingSelectedModelKind,
+  };
+}
+
+export function setEnhancementStreamingCache(
+  engine: StreamingEnhancementEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  detectedModels: Array<{ type: string; modelDir: string }>,
+  selectedModelKind: EnhancementConcreteModelType | null
+): void {
+  enhancementStreamingEngine = engine;
+  enhancementStreamingModelFolder = modelFolder;
+  enhancementStreamingInitMessage = initMessage;
+  enhancementStreamingDetectedModels = detectedModels;
+  enhancementStreamingSelectedModelKind = selectedModelKind;
+}
+
+export function clearEnhancementStreamingCache(): void {
+  enhancementStreamingEngine = null;
+  enhancementStreamingModelFolder = null;
+  enhancementStreamingInitMessage = null;
+  enhancementStreamingDetectedModels = [];
+  enhancementStreamingSelectedModelKind = null;
+}
+
+// --- Offline separation cache ---
+
+let separationEngine: SeparationEngine | null = null;
+let separationModelFolder: string | null = null;
+let separationInitMessage: string | null = null;
+let separationSelectedModelKind: SeparationModelType | null = null;
+let separationNumStems: number | null = null;
+let separationModelSampleRate: number | null = null;
+
+export function getSeparationCache(): {
+  engine: SeparationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  selectedModelKind: SeparationModelType | null;
+  numStems: number | null;
+  modelSampleRate: number | null;
+} {
+  return {
+    engine: separationEngine,
+    modelFolder: separationModelFolder,
+    initMessage: separationInitMessage,
+    selectedModelKind: separationSelectedModelKind,
+    numStems: separationNumStems,
+    modelSampleRate: separationModelSampleRate,
+  };
+}
+
+export function setSeparationCache(
+  engine: SeparationEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  selectedModelKind: SeparationModelType | null,
+  numStems: number,
+  modelSampleRate: number
+): void {
+  separationEngine = engine;
+  separationModelFolder = modelFolder;
+  separationInitMessage = initMessage;
+  separationSelectedModelKind = selectedModelKind;
+  separationNumStems = numStems;
+  separationModelSampleRate = modelSampleRate;
+}
+
+export function clearSeparationCache(): void {
+  separationEngine = null;
+  separationModelFolder = null;
+  separationInitMessage = null;
+  separationSelectedModelKind = null;
+  separationNumStems = null;
+  separationModelSampleRate = null;
+}
+
+// --- Speaker identification (embedding) cache ---
+
+let speakerIdEngine: SpeakerIdentificationEngine | null = null;
+let speakerIdModelFolder: string | null = null;
+let speakerIdInitMessage: string | null = null;
+let speakerIdSelectedModelKind: SpeakerEmbeddingModelType | null = null;
+let speakerIdModelDim: number | null = null;
+
+export function getSpeakerIdCache(): {
+  engine: SpeakerIdentificationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  selectedModelKind: SpeakerEmbeddingModelType | null;
+  modelDim: number | null;
+} {
+  return {
+    engine: speakerIdEngine,
+    modelFolder: speakerIdModelFolder,
+    initMessage: speakerIdInitMessage,
+    selectedModelKind: speakerIdSelectedModelKind,
+    modelDim: speakerIdModelDim,
+  };
+}
+
+export function setSpeakerIdCache(
+  engine: SpeakerIdentificationEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  selectedModelKind: SpeakerEmbeddingModelType | null,
+  modelDim: number
+): void {
+  speakerIdEngine = engine;
+  speakerIdModelFolder = modelFolder;
+  speakerIdInitMessage = initMessage;
+  speakerIdSelectedModelKind = selectedModelKind;
+  speakerIdModelDim = modelDim;
+}
+
+export function clearSpeakerIdCache(): void {
+  speakerIdEngine = null;
+  speakerIdModelFolder = null;
+  speakerIdInitMessage = null;
+  speakerIdSelectedModelKind = null;
+  speakerIdModelDim = null;
+}
+
+// --- Offline diarization cache ---
+
+export type DiarizationCachedEngineInfo = {
+  sampleRate: number;
+  segId: string;
+  embId: string;
+  numClusters: number;
+  threshold: number;
+  computeConfidence: boolean;
+  numThreads: number;
+  windowShiftRatio: number;
+  minDurationOn: number;
+  minDurationOff: number;
+};
+
+let diarizationEngine: DiarizationEngine | null = null;
+let diarizationSegModelId: string | null = null;
+let diarizationEmbModelId: string | null = null;
+let diarizationInitMessage: string | null = null;
+let diarizationEngineInfo: DiarizationCachedEngineInfo | null = null;
+
+export function getDiarizationCache(): {
+  engine: DiarizationEngine | null;
+  segModelId: string | null;
+  embModelId: string | null;
+  initMessage: string | null;
+  engineInfo: DiarizationCachedEngineInfo | null;
+} {
+  return {
+    engine: diarizationEngine,
+    segModelId: diarizationSegModelId,
+    embModelId: diarizationEmbModelId,
+    initMessage: diarizationInitMessage,
+    engineInfo: diarizationEngineInfo ? { ...diarizationEngineInfo } : null,
+  };
+}
+
+export function setDiarizationCache(
+  engine: DiarizationEngine,
+  segModelId: string,
+  embModelId: string,
+  initMessage: string | null,
+  engineInfo: DiarizationCachedEngineInfo
+): void {
+  diarizationEngine = engine;
+  diarizationSegModelId = segModelId;
+  diarizationEmbModelId = embModelId;
+  diarizationInitMessage = initMessage;
+  diarizationEngineInfo = { ...engineInfo };
+}
+
+export function clearDiarizationCache(): void {
+  diarizationEngine = null;
+  diarizationSegModelId = null;
+  diarizationEmbModelId = null;
+  diarizationInitMessage = null;
+  diarizationEngineInfo = null;
+}
+
+// --- Streaming diarization cache ---
+
+export type DiarizationStreamingCachedEngineInfo = {
+  instanceId: string;
+  sampleRate: number;
+  maxSpeakers: number;
+  feedSamples: number;
+  strideSamples: number;
+  latencySeconds: number;
+};
+
+let diarizationStreamingEngine: StreamingDiarizationEngine | null = null;
+let diarizationStreamingModelFolder: string | null = null;
+let diarizationStreamingInitMessage: string | null = null;
+let diarizationStreamingEngineInfo: DiarizationStreamingCachedEngineInfo | null =
+  null;
+
+export function getDiarizationStreamingCache(): {
+  engine: StreamingDiarizationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  engineInfo: DiarizationStreamingCachedEngineInfo | null;
+} {
+  return {
+    engine: diarizationStreamingEngine,
+    modelFolder: diarizationStreamingModelFolder,
+    initMessage: diarizationStreamingInitMessage,
+    engineInfo: diarizationStreamingEngineInfo
+      ? { ...diarizationStreamingEngineInfo }
+      : null,
+  };
+}
+
+export function setDiarizationStreamingCache(
+  engine: StreamingDiarizationEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  engineInfo: DiarizationStreamingCachedEngineInfo
+): void {
+  diarizationStreamingEngine = engine;
+  diarizationStreamingModelFolder = modelFolder;
+  diarizationStreamingInitMessage = initMessage;
+  diarizationStreamingEngineInfo = { ...engineInfo };
+}
+
+export function clearDiarizationStreamingCache(): void {
+  diarizationStreamingEngine = null;
+  diarizationStreamingModelFolder = null;
+  diarizationStreamingInitMessage = null;
+  diarizationStreamingEngineInfo = null;
+}
+
+// --- Alignment (Generate timestamp) cache ---
+
+export type AlignmentCachedPrepInfo = {
+  initMode: ModelInitMode;
+  modelFolder: string | null;
+  modelPath: string | null;
+  modelType: AlignmentModelType | string | null;
+  customConfig: Partial<Record<AlignmentCustomPathKey, FileSource>> | null;
+};
+
+let alignmentEngine: AlignmentEngine | null = null;
+let alignmentInitMessage: string | null = null;
+let alignmentPrepInfo: AlignmentCachedPrepInfo | null = null;
+
+export function getAlignmentCache(): {
+  engine: AlignmentEngine | null;
+  initMessage: string | null;
+  prepInfo: AlignmentCachedPrepInfo | null;
+} {
+  return {
+    engine: alignmentEngine,
+    initMessage: alignmentInitMessage,
+    prepInfo: alignmentPrepInfo ? { ...alignmentPrepInfo } : null,
+  };
+}
+
+export function setAlignmentCache(
+  engine: AlignmentEngine,
+  prepInfo: AlignmentCachedPrepInfo,
+  initMessage: string | null
+): void {
+  alignmentEngine = engine;
+  alignmentPrepInfo = {
+    ...prepInfo,
+    customConfig: prepInfo.customConfig ? { ...prepInfo.customConfig } : null,
+  };
+  alignmentInitMessage = initMessage;
+}
+
+export function clearAlignmentCache(): void {
+  alignmentEngine = null;
+  alignmentInitMessage = null;
+  alignmentPrepInfo = null;
+}
+
+// --- Generate timestamp: offline VAD anchor prep (detect only, no VADEngine) ---
+
+let generateTimestampVadModelFolder: string | null = null;
+let generateTimestampVadModelPath: string | null = null;
+let generateTimestampVadModelType: VADModelType | null = null;
+let generateTimestampVadInitMessage: string | null = null;
+
+export function getGenerateTimestampVadPrepCache(): {
+  modelFolder: string | null;
+  modelPath: string | null;
+  modelType: VADModelType | null;
+  initMessage: string | null;
+} {
+  return {
+    modelFolder: generateTimestampVadModelFolder,
+    modelPath: generateTimestampVadModelPath,
+    modelType: generateTimestampVadModelType,
+    initMessage: generateTimestampVadInitMessage,
+  };
+}
+
+export function setGenerateTimestampVadPrepCache(
+  modelFolder: string,
+  modelPath: string,
+  modelType: VADModelType,
+  initMessage: string | null
+): void {
+  generateTimestampVadModelFolder = modelFolder;
+  generateTimestampVadModelPath = modelPath;
+  generateTimestampVadModelType = modelType;
+  generateTimestampVadInitMessage = initMessage;
+}
+
+export function clearGenerateTimestampVadPrepCache(): void {
+  generateTimestampVadModelFolder = null;
+  generateTimestampVadModelPath = null;
+  generateTimestampVadModelType = null;
+  generateTimestampVadInitMessage = null;
+}
+
+// --- Generate timestamp STT cache (Whisper token timestamps for asr_mediated) ---
+
+let generateTimestampSttEngine: SttEngine | null = null;
+let generateTimestampSttModelFolder: string | null = null;
+let generateTimestampSttDetectedModels: Array<{
+  type: STTModelType;
+  modelDir: string;
+}> = [];
+let generateTimestampSttSelectedModelType: STTModelType | null = null;
+let generateTimestampSttInitMessage: string | null = null;
+
+export function getGenerateTimestampSttCache(): {
+  engine: SttEngine | null;
+  modelFolder: string | null;
+  detectedModels: Array<{ type: STTModelType; modelDir: string }>;
+  selectedModelType: STTModelType | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: generateTimestampSttEngine,
+    modelFolder: generateTimestampSttModelFolder,
+    detectedModels: [...generateTimestampSttDetectedModels],
+    selectedModelType: generateTimestampSttSelectedModelType,
+    initMessage: generateTimestampSttInitMessage,
+  };
+}
+
+export function setGenerateTimestampSttCache(
+  engine: SttEngine,
+  modelFolder: string,
+  detectedModels: Array<{ type: STTModelType; modelDir: string }>,
+  selectedModelType: STTModelType | null,
+  initMessage: string | null
+): void {
+  generateTimestampSttEngine = engine;
+  generateTimestampSttModelFolder = modelFolder;
+  generateTimestampSttDetectedModels = detectedModels;
+  generateTimestampSttSelectedModelType = selectedModelType;
+  generateTimestampSttInitMessage = initMessage;
+}
+
+export function clearGenerateTimestampSttCache(): void {
+  generateTimestampSttEngine = null;
+  generateTimestampSttModelFolder = null;
+  generateTimestampSttDetectedModels = [];
+  generateTimestampSttSelectedModelType = null;
+  generateTimestampSttInitMessage = null;
 }

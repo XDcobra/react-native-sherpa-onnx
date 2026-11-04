@@ -14,10 +14,12 @@ import {
   type ModelMeta,
 } from 'react-native-sherpa-onnx/download';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import { detectSttModel } from 'react-native-sherpa-onnx/stt';
 import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
+  toDetectSource,
 } from '../modelConfig';
 import { RECOMMENDED_MODEL_IDS } from './recommendedModels';
 
@@ -38,6 +40,13 @@ export type SttCatalogSnapshot = {
   padModelsPath: string | null;
   bundledSttFolders: string[];
   downloadedSttIds: string[];
+};
+
+export type SttStreamingCatalogSnapshot = SttCatalogSnapshot & {
+  detectedModelIds: string[];
+  streamingModelIds: string[];
+  offlineModelIds: string[];
+  filesystemSttIds: string[];
 };
 
 function getModelLabel(model: ModelMeta): string {
@@ -81,6 +90,7 @@ export type SttModelPathContext = {
   padModelsPath: string | null;
   bundledFolders: string[];
   downloadedIds: Set<string>;
+  filesystemSttIds: Set<string>;
 };
 
 /** Resolve a discovered folder id to the FileSource shape used by detectSttModel / createSTT. */
@@ -93,7 +103,7 @@ export function getSttModelPathConfig(
       ? getFileModelPath(modelId, ModelCategory.Stt, ctx.padModelsPath)
       : getFileModelPath(modelId, ModelCategory.Stt);
   }
-  if (ctx.downloadedIds.has(modelId)) {
+  if (ctx.downloadedIds.has(modelId) || ctx.filesystemSttIds.has(modelId)) {
     return getFileModelPath(modelId, ModelCategory.Stt);
   }
   if (ctx.bundledFolders.includes(modelId)) {
@@ -105,11 +115,16 @@ export function getSttModelPathConfig(
 export function createSttModelPathContext(
   snapshot: SttCatalogSnapshot
 ): SttModelPathContext {
+  const filesystemSttIds =
+    'filesystemSttIds' in snapshot
+      ? (snapshot as SttStreamingCatalogSnapshot).filesystemSttIds
+      : [];
   return {
     padModelIds: snapshot.padModelIds,
     padModelsPath: snapshot.padModelsPath,
     bundledFolders: snapshot.bundledSttFolders,
     downloadedIds: new Set(snapshot.downloadedSttIds),
+    filesystemSttIds: new Set(filesystemSttIds),
   };
 }
 
@@ -163,5 +178,76 @@ export async function loadSttModelCatalog(): Promise<SttCatalogSnapshot> {
     padModelsPath,
     bundledSttFolders: bundledIds,
     downloadedSttIds: downloadedIds,
+  };
+}
+
+export async function loadSttStreamingModelCatalog(): Promise<SttStreamingCatalogSnapshot> {
+  const base = await loadSttModelCatalog();
+  const sttFilePath = `${DocumentDirectoryPath}/sherpa-onnx/models/${ModelCategory.Stt}`;
+  const sttFs = await listModelsAtPath(sttFilePath).catch(() => []);
+  const filesystemSttIds = sttFs.map((model) => model.folder);
+
+  const mergedIds = [
+    ...base.entries.map((entry) => entry.id),
+    ...filesystemSttIds.filter(
+      (id) => !base.entries.some((entry) => entry.id === id)
+    ),
+  ];
+
+  const ctx: SttModelPathContext = {
+    padModelIds: base.padModelIds,
+    padModelsPath: base.padModelsPath,
+    bundledFolders: base.bundledSttFolders,
+    downloadedIds: new Set(base.downloadedSttIds),
+    filesystemSttIds: new Set(filesystemSttIds),
+  };
+
+  const metaById = new Map(
+    base.entries.map((entry) => [entry.id, entry] as const)
+  );
+  const detectedOrdered: string[] = [];
+  const streamingIds: string[] = [];
+  const offlineIds: string[] = [];
+
+  for (const modelId of mergedIds) {
+    try {
+      const modelPath = getSttModelPathConfig(modelId, ctx);
+      const detection = await detectSttModel(await toDetectSource(modelPath), {
+        modelType: 'auto',
+      });
+      if (!detection.success) {
+        continue;
+      }
+      detectedOrdered.push(modelId);
+      if (detection.isStreaming) {
+        streamingIds.push(modelId);
+      } else {
+        offlineIds.push(modelId);
+      }
+    } catch {
+      // Ignore models that cannot be detected.
+    }
+  }
+
+  const entries = prioritizeEntries(
+    detectedOrdered.map((id) => {
+      const existing = metaById.get(id);
+      return (
+        existing ?? {
+          id,
+          label: getModelDisplayName(id),
+        }
+      );
+    }),
+    RECOMMENDED_STT_MODEL_IDS
+  );
+
+  return {
+    ...base,
+    entries,
+    filesystemSttIds,
+    detectedModelIds: detectedOrdered,
+    streamingModelIds: streamingIds,
+    offlineModelIds: offlineIds,
   };
 }

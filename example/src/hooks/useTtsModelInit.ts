@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert } from 'react-native';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
+import { DocumentDirectoryPath, exists } from '@dr.pogodin/react-native-fs';
+import { resolveFileSourceForModelInit } from 'react-native-sherpa-onnx/detect';
 import {
   assertTtsCustomConfig,
   createTTS,
@@ -31,6 +32,7 @@ import type {
   TtsCustomInitFormState,
 } from '../components/modelInit';
 import { fillTtsCustomConfigFromModelFolder } from '../utils/ttsCustomInitFill';
+import { ensureEnUsTtsLexiconForFileSource } from '../utils/enUsTtsLexicon';
 
 const PAD_PACK_NAME = 'sherpa_models';
 const TTS_NUM_THREADS = 2;
@@ -258,6 +260,7 @@ export function useTtsModelInit(options: UseTtsModelInitOptions = {}) {
         }
 
         const modelPath = resolveTtsModelPath(modelFolder);
+        await ensureEnUsTtsLexiconForFileSource(modelPath, modelFolder);
 
         let engine: TtsEngine;
         try {
@@ -369,10 +372,35 @@ export function useTtsModelInit(options: UseTtsModelInitOptions = {}) {
         clearTtsCache();
       }
 
-      const customConfig = {
+      const customConfigRecord: Record<string, unknown> = {
         ...customInitForm.fileSources,
-      } as TtsCustomConfig;
-      assertTtsCustomConfig(customConfig as unknown as Record<string, unknown>);
+      };
+
+      if (selectedModelForInit) {
+        const catalogSource = resolveTtsModelPath(selectedModelForInit);
+        await ensureEnUsTtsLexiconForFileSource(
+          catalogSource,
+          selectedModelForInit,
+          customInitForm.modelType
+        );
+        if (customConfigRecord.lexicon == null) {
+          try {
+            const modelDir = await resolveFileSourceForModelInit(catalogSource);
+            const lexiconPath = `${modelDir.replace(
+              /\/+$/,
+              ''
+            )}/lexicon-en-us.txt`;
+            if (await exists(lexiconPath)) {
+              customConfigRecord.lexicon = { kind: 'fs', path: lexiconPath };
+            }
+          } catch {
+            // leave lexicon unset
+          }
+        }
+      }
+
+      assertTtsCustomConfig(customConfigRecord);
+      const customConfig = customConfigRecord as unknown as TtsCustomConfig;
 
       let engine: TtsEngine;
       try {
@@ -444,7 +472,12 @@ export function useTtsModelInit(options: UseTtsModelInitOptions = {}) {
     } finally {
       setLoading(false);
     }
-  }, [customInitForm, resetCommonSynthesis]);
+  }, [
+    customInitForm,
+    resetCommonSynthesis,
+    resolveTtsModelPath,
+    selectedModelForInit,
+  ]);
 
   const fillFromSelectedModel = useCallback(async () => {
     const modelFolder = selectedModelForInit;
@@ -458,6 +491,7 @@ export function useTtsModelInit(options: UseTtsModelInitOptions = {}) {
     setError(null);
     try {
       const modelPath = resolveTtsModelPath(modelFolder);
+      await ensureEnUsTtsLexiconForFileSource(modelPath, modelFolder);
       const fillResult = await fillTtsCustomConfigFromModelFolder(modelPath, {
         modelTypeOverride: customInitForm.modelType,
       });

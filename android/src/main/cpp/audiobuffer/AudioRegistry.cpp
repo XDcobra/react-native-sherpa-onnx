@@ -147,13 +147,17 @@ std::string pa_temp_dir() {
 }
 
 std::string pa_generate_id(const char *prefix) {
+  // Match TS dashed UUID; do not use unpadded std::hex.
   static thread_local std::mt19937_64 rng{std::random_device{}()};
   std::uniform_int_distribution<uint64_t> dist;
-  uint64_t a = dist(rng);
-  uint64_t b = dist(rng);
-  std::ostringstream oss;
-  oss << prefix << '_' << std::hex << a << b;
-  return oss.str();
+  const uint64_t a = dist(rng);
+  const uint64_t b = dist(rng);
+  char buf[64];
+  std::snprintf(buf, sizeof(buf), "%s_%08x-%04x-%04x-%04x-%012llx", prefix,
+                static_cast<unsigned>(a >> 32), static_cast<unsigned>((a >> 16) & 0xffffu),
+                static_cast<unsigned>(a & 0xffffu), static_cast<unsigned>((b >> 48) & 0xffffu),
+                static_cast<unsigned long long>(b & 0xffffffffffffULL));
+  return std::string(buf);
 }
 
 std::shared_ptr<PaOfflineEntry> pa_create_entry_with_threshold(const std::string &bufferId,

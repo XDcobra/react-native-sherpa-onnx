@@ -521,6 +521,9 @@ export const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFFFFF',
   },
+  bufferCardWrap: {
+    marginTop: 12,
+  },
   bufferList: {
     gap: 10,
     marginTop: 4,

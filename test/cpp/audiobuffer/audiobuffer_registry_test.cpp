@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
+#include <regex>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -95,6 +96,24 @@ TEST_F(AudioRegistryFixture, CreateEmptyOffline_AndRelease) {
   EXPECT_EQ(n, 0);
   EXPECT_TRUE(pa_release_buffer(id));
   EXPECT_FALSE(pa_get_offline_metadata(id, &sr, &n, &errCode, &errMsg));
+}
+
+TEST_F(AudioRegistryFixture, GeneratedIds_MatchTsDashedUuidPattern) {
+  static const char *kPattern =
+      "^(off|live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+  std::regex re(kPattern);
+  for (int i = 0; i < 32; ++i) {
+    std::string offId;
+    std::string liveId;
+    std::string errCode;
+    std::string errMsg;
+    ASSERT_TRUE(pa_create_empty_offline(16000, 1, &offId, &errCode, &errMsg)) << errMsg;
+    ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &liveId, &errCode, &errMsg)) << errMsg;
+    EXPECT_TRUE(std::regex_match(offId, re)) << offId;
+    EXPECT_TRUE(std::regex_match(liveId, re)) << liveId;
+    EXPECT_TRUE(pa_release_buffer(offId));
+    EXPECT_TRUE(pa_release_buffer(liveId));
+  }
 }
 
 TEST_F(AudioRegistryFixture, CreateOfflineFromSamples_ReadSlice) {

@@ -1,7 +1,6 @@
 /**
- * Compact “buffer ready” card for an existing offline pipeline audio buffer:
- * output device, play/stop, save-as-file, dismiss (release buffer).
- * Shared by Live Pipeline Showcase and similar flows.
+ * Shared OfflineAudioBuffer result card: output device, play/stop, save-as-file,
+ * dismiss (release buffer). Used by Enhancement, TTS, Separation, pipelines, etc.
  */
 
 import {
@@ -17,7 +16,10 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
 import type { AudioOutputFormat } from 'react-native-sherpa-onnx/audio';
-import type { ResolvedFileRef } from 'react-native-sherpa-onnx/fileio';
+import type {
+  FileDestination,
+  ResolvedFileRef,
+} from 'react-native-sherpa-onnx/fileio';
 import { AudioDeviceDropdown } from './AudioDeviceDropdown';
 import { AudioSaveDestinationPicker } from './AudioSaveDestinationPicker';
 import { formatResolvedLocation } from './audioSaveUtils';
@@ -36,6 +38,17 @@ export type PipelineOfflineAudioResultCardProps = {
   /** Release native buffer and clear parent state. */
   onDismiss: () => void;
   disabled?: boolean;
+  /** Header label above the source line. */
+  title?: string;
+  /** Filename passed to {@link AudioSaveDestinationPicker}. */
+  filename?: string;
+  /** Initial destination kind for the save picker. */
+  defaultDestinationKind?: FileDestination['kind'];
+  /**
+   * Called after a successful save. When omitted, an Alert shows the location.
+   * When provided, the Alert is skipped (caller owns UX, e.g. TTS Share).
+   */
+  onSaveComplete?: (result: ResolvedFileRef) => void;
 };
 
 export type PipelineOfflineAudioResultCardHandle = {
@@ -54,6 +67,10 @@ export const PipelineOfflineAudioResultCard = forwardRef<
     durationMs,
     onDismiss,
     disabled = false,
+    title = 'Captured audio (offline buffer)',
+    filename,
+    defaultDestinationKind,
+    onSaveComplete,
   },
   ref
 ) {
@@ -64,6 +81,10 @@ export const PipelineOfflineAudioResultCard = forwardRef<
     string | null
   >(null);
   const [saveFormat] = useState<AudioOutputFormat>('wav');
+
+  const resolvedFilename =
+    filename ??
+    `pipeline_audio_${Date.now()}.${saveFormat === 'wav' ? 'wav' : 'mp3'}`;
 
   useEffect(() => {
     fetchOutputDevices()
@@ -136,9 +157,7 @@ export const PipelineOfflineAudioResultCard = forwardRef<
     <View style={s.bufferReadyCard}>
       <View style={s.bufferHeaderRow}>
         <View style={s.bufferHeaderTextWrap}>
-          <Text style={s.bufferReadyLabel}>
-            Captured audio (offline buffer)
-          </Text>
+          <Text style={s.bufferReadyLabel}>{title}</Text>
           <Text style={s.bufferSourceLabel}>{sourceLabel}</Text>
           <Text style={s.bufferIdText} selectable>
             {bufferId}
@@ -153,7 +172,7 @@ export const PipelineOfflineAudioResultCard = forwardRef<
             handleDismiss().catch(() => {});
           }}
           disabled={disabled}
-          accessibilityLabel="Dismiss captured audio"
+          accessibilityLabel="Dismiss audio result"
         >
           <Ionicons name="trash-outline" size={18} color="#b71c1c" />
         </TouchableOpacity>
@@ -190,13 +209,16 @@ export const PipelineOfflineAudioResultCard = forwardRef<
         </Text>
         <AudioSaveDestinationPicker
           audioInput={bufferId}
-          filename={`pipeline_tts_${Date.now()}.${
-            saveFormat === 'wav' ? 'wav' : 'mp3'
-          }`}
+          filename={resolvedFilename}
           format={saveFormat}
           options={{ outputSampleRateHz: sampleRate }}
+          defaultDestinationKind={defaultDestinationKind}
           disabled={disabled}
           onSaveComplete={(result: ResolvedFileRef) => {
+            if (onSaveComplete) {
+              onSaveComplete(result);
+              return;
+            }
             Alert.alert('Saved', formatResolvedLocation(result));
           }}
           onError={(err: Error) => Alert.alert('Save failed', err.message)}

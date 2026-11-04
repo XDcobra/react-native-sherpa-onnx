@@ -13,6 +13,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <regex>
 #include <string>
 #include <unistd.h>
 
@@ -48,6 +49,23 @@ TEST_F(SegmentRegistryFixture, CreateEmptyOffline_Release) {
   EXPECT_TRUE(seg_get_offline_entry(id) != nullptr);
   EXPECT_TRUE(seg_release_buffer(id));
   EXPECT_EQ(seg_get_offline_entry(id), nullptr);
+}
+
+TEST_F(SegmentRegistryFixture, GeneratedIds_MatchTsDashedUuidPattern) {
+  static const char *kPattern =
+      "^(seg_off|seg_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+  std::regex re(kPattern);
+  for (int i = 0; i < 16; ++i) {
+    std::string offId;
+    std::string liveId;
+    std::string err;
+    ASSERT_TRUE(seg_create_empty_offline("", &offId, &err)) << err;
+    ASSERT_TRUE(seg_create_live("", 100, "off", "", true, 0, false, 0, &liveId, &err)) << err;
+    EXPECT_TRUE(std::regex_match(offId, re)) << offId;
+    EXPECT_TRUE(std::regex_match(liveId, re)) << liveId;
+    EXPECT_TRUE(seg_release_buffer(offId));
+    EXPECT_TRUE(seg_release_buffer(liveId));
+  }
 }
 
 TEST_F(SegmentRegistryFixture, LiveAppendFinalize) {

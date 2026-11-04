@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <mutex>
+#include <regex>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -78,6 +79,23 @@ TEST_F(TextRegistryFixture, Utf16Length_Basic) {
   EXPECT_EQ(txt_utf16_length("ä"), 1);  // U+00E4
   // U+1F600 😀 encodes as UTF-8 F0 9F 98 80 → two UTF-16 code units
   EXPECT_EQ(txt_utf16_length("\xF0\x9F\x98\x80"), 2);
+}
+
+TEST_F(TextRegistryFixture, GeneratedIds_MatchTsDashedUuidPattern) {
+  static const char *kPattern =
+      "^(txt_off|txt_live)_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
+  std::regex re(kPattern);
+  for (int i = 0; i < 16; ++i) {
+    std::string offId;
+    std::string liveId;
+    std::string err;
+    ASSERT_TRUE(txt_create_empty_offline(&offId, &err)) << err;
+    ASSERT_TRUE(txt_create_live(1024, 100, false, 0, "off", "", true, &liveId, &err)) << err;
+    EXPECT_TRUE(std::regex_match(offId, re)) << offId;
+    EXPECT_TRUE(std::regex_match(liveId, re)) << liveId;
+    EXPECT_TRUE(txt_release_buffer(offId));
+    EXPECT_TRUE(txt_release_buffer(liveId));
+  }
 }
 
 TEST_F(TextRegistryFixture, CreateEmptyOffline_Populate_Release) {

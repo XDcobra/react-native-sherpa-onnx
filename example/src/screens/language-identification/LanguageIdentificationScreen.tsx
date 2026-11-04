@@ -15,12 +15,7 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
-  assertLanguageIdCustomConfig,
-  createLanguageIdentification,
-  detectLanguageIdModel,
   DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY,
-  type LanguageIdCustomConfig,
-  type LanguageIdentificationEngine,
   type LanguageIdentificationPipelineHandle,
   type LanguageIdentificationResult,
   type SegmentedLanguageIdentificationResult,
@@ -40,12 +35,7 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import {
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import { styles as baseStyles } from '../stt/STTScreen.styles';
 import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
@@ -59,14 +49,11 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import { LanguageIdModelInitPanel } from '../../components/LanguageIdModelInitPanel';
 import {
-  InitModeSelector,
-  ModelFolderGrid,
-  LanguageIdentificationCustomInitForm,
-  type ModelInitMode,
-  type LanguageIdentificationCustomInitFormState,
-} from '../../components/modelInit';
-import { getModelDisplayName, toDetectSource } from '../../modelConfig';
+  formatLanguageIdInitError,
+  useLanguageIdModelInit,
+} from '../../hooks/useLanguageIdModelInit';
 import {
   AUDIO_FILES,
   TEST_AUDIO_FILES,
@@ -78,18 +65,9 @@ import {
   toFileSource,
 } from '../../utils/fileSourceFromUri';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
-import { fillLanguageIdCustomConfigFromModelFolder } from '../../utils/languageIdCustomInitFill';
-import {
-  createLanguageIdModelPathContext,
-  getLanguageIdModelPathConfig,
-  loadLanguageIdModelCatalog,
-  type LanguageIdCatalogSnapshot,
-  type LanguageIdModelPathContext,
-} from '../../utils/languageIdModelCatalog';
 import type { RootStackParamList } from '../../types/navigation';
 import { LANG_COLORS, styles } from './LanguageIdentificationScreen.styles';
 
-const NUM_THREADS = 2;
 const LIVE_SAMPLE_RATE = 16000;
 
 type ProcessingMode = 'batch' | 'liveOverload';
@@ -122,35 +100,10 @@ const LIVE_FAVORITE_AUDIO_IDS = ZH_EN_META
   ? ([TEST_AUDIO_FILES.ZH_EN_1] as const)
   : undefined;
 
-const DEFAULT_LANG_ID_CUSTOM_INIT: LanguageIdentificationCustomInitFormState = {
-  modelType: 'whisper',
-  fileSources: {},
-};
-
 const LIVE_SEG_DEFAULT: SegmentationControlConfig = {
   mode: 'auto',
   policy: { ...DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
 };
-
-const EMPTY_CATALOG: LanguageIdCatalogSnapshot = {
-  entries: [],
-  padModelIds: [],
-  padModelsPath: null,
-  bundledFolders: [],
-  downloadedLanguageIdIds: [],
-  downloadedSttIds: [],
-};
-
-function normalizeErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    const code = (error as { code?: string }).code;
-    return code ? `[${code}] ${error.message}` : error.message;
-  }
-  if (typeof error === 'string') {
-    return error;
-  }
-  return String(error);
-}
 
 function formatSeconds(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) {
@@ -196,32 +149,18 @@ export default function LanguageIdentificationScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
+  const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
+    undefined
+  );
+  const languageId = useLanguageIdModelInit({
+    onBeforeInit: () => onBeforeInitRef.current?.(),
+  });
+
   const [processingMode, setProcessingMode] = useState<ProcessingMode>('batch');
-  const [catalog, setCatalog] =
-    useState<LanguageIdCatalogSnapshot>(EMPTY_CATALOG);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] =
-    useState<LanguageIdentificationCustomInitFormState>(
-      DEFAULT_LANG_ID_CUSTOM_INIT
-    );
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-  const [selectedModelForInit, setSelectedModelForInit] = useState<
-    string | null
-  >(null);
-  const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
-    null
-  );
-  const [initializedSummary, setInitializedSummary] = useState<string | null>(
-    null
-  );
-  const [initResult, setInitResult] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [identifying, setIdentifying] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorSource, setErrorSource] = useState<
-    'init' | 'identify' | 'live' | null
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runErrorSource, setRunErrorSource] = useState<
+    'identify' | 'live' | null
   >(null);
 
   const [segBatchConfig, setSegBatchConfig] =
@@ -261,7 +200,6 @@ export default function LanguageIdentificationScreen() {
   const [liveCurrentLang, setLiveCurrentLang] = useState<string | null>(null);
   const [liveLog, setLiveLog] = useState<LiveLogEntry[]>([]);
 
-  const engineRef = useRef<LanguageIdentificationEngine | null>(null);
   const pipelineRef = useRef<LanguageIdentificationPipelineHandle | null>(null);
   const liveInRef = useRef<LiveAudioBufferRef | null>(null);
   const liveTextRef = useRef<LiveTextBufferRef | null>(null);
@@ -269,16 +207,16 @@ export default function LanguageIdentificationScreen() {
   const cleanupLockRef = useRef(false);
   const liveRunEpochRef = useRef(0);
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
-  const pathCtxRef = useRef<LanguageIdModelPathContext | null>(null);
 
-  const pathCtx = useMemo(() => {
-    const ctx = createLanguageIdModelPathContext(catalog);
-    pathCtxRef.current = ctx;
-    return ctx;
-  }, [catalog]);
+  const {
+    engineRef,
+    loading,
+    isEngineInitialized,
+    customFillLoading,
+    releaseEngine,
+  } = languageId;
 
-  const catalogEntries = catalog.entries;
-  const engineReady = !!engineRef.current && !!initializedSummary;
+  const engineReady = isEngineInitialized;
   const liveBusy = liveRunState === 'running' || liveRunState === 'stopping';
   const busy = loading || identifying || liveBusy || customFillLoading;
 
@@ -292,42 +230,16 @@ export default function LanguageIdentificationScreen() {
     segBatchConfig.mode === 'off' &&
     isZhEnPrepared;
 
-  const loadCatalog = useCallback(async () => {
-    setLoadingModels(true);
-    try {
-      const snapshot = await loadLanguageIdModelCatalog();
-      setCatalog(snapshot);
-      setSelectedModelForInit((prev) => {
-        if (prev && snapshot.entries.some((entry) => entry.id === prev)) {
-          return prev;
-        }
-        return snapshot.entries[0]?.id ?? null;
-      });
-    } catch (loadErr) {
-      console.warn(
-        'LanguageIdentificationScreen: catalog load failed',
-        loadErr
-      );
-      setCatalog(EMPTY_CATALOG);
-      setErrorSource('init');
-      setError(normalizeErrorMessage(loadErr));
-    } finally {
-      setLoadingModels(false);
-    }
+  const clearResults = useCallback(() => {
+    setOneshotResult(null);
+    setSegmentedResult(null);
+    setIdentifyProgress(null);
   }, []);
 
-  useEffect(() => {
-    loadCatalog().catch(() => {});
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (
-        category === ModelCategory.LanguageId ||
-        category === ModelCategory.Stt
-      ) {
-        loadCatalog().catch(() => {});
-      }
-    });
-    return unsubscribe;
-  }, [loadCatalog]);
+  const setRunErr = useCallback((source: 'identify' | 'live', e: unknown) => {
+    setRunErrorSource(source);
+    setRunError(formatLanguageIdInitError(e));
+  }, []);
 
   const cleanupLiveRuntime = useCallback(async () => {
     if (cleanupLockRef.current) {
@@ -371,215 +283,49 @@ export default function LanguageIdentificationScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    return () => {
-      cleanupLiveRuntime().catch(() => {});
-      const engine = engineRef.current;
-      engineRef.current = null;
-      if (engine) {
-        engine.destroy().catch(() => {});
-      }
-    };
-  }, [cleanupLiveRuntime]);
-
-  const resolveModelPath = useCallback(
-    (modelId: string): FileSource => {
-      const ctx = pathCtxRef.current ?? pathCtx;
-      return getLanguageIdModelPathConfig(modelId, ctx);
-    },
-    [pathCtx]
-  );
-
-  const handleFillFromSelectedModel = useCallback(async () => {
-    const modelFolder = selectedModelForInit;
-    if (!modelFolder) {
-      Alert.alert('Select a model', 'Pick a catalog Whisper folder first.');
-      return;
-    }
-
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const modelPath = resolveModelPath(modelFolder);
-      const fillResult = await fillLanguageIdCustomConfigFromModelFolder(
-        await toDetectSource(modelPath)
-      );
-      setCustomInitForm({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-      });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setCustomFillHint(
-        `Filled from ${getModelDisplayName(modelFolder)} (${
-          fillResult.modelDir
-        }).${missing}`
-      );
-    } catch (fillErr) {
-      setCustomFillHint(null);
-      setErrorSource('init');
-      setError(normalizeErrorMessage(fillErr));
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [resolveModelPath, selectedModelForInit]);
-
-  const handlePrepareScatteredTest = useCallback(() => {
-    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
-    setCustomFillHint(
-      'Scattered test: pick encoder + decoder ONNX from any location, then Initialize.'
-    );
-  }, []);
-
-  const handleInitialize = useCallback(
-    async (modelFolder: string) => {
-      if (!modelFolder) {
-        setErrorSource('init');
-        setError('Select a Whisper multilingual model folder first.');
-        return;
-      }
-
-      setLoading(true);
-      setError(null);
-      setErrorSource(null);
-      setInitResult(null);
-      setInitializedSummary(null);
-      setOneshotResult(null);
-      setSegmentedResult(null);
-
-      try {
-        await cleanupLiveRuntime();
-        const previous = engineRef.current;
-        if (previous) {
-          await previous.destroy().catch(() => {});
-          engineRef.current = null;
-        }
-
-        const modelPath = resolveModelPath(modelFolder);
-        const modelSource = await toDetectSource(modelPath);
-        const detectResult = await detectLanguageIdModel(modelSource, {
-          modelType: 'auto',
-        });
-        if (!detectResult.success) {
-          setErrorSource('init');
-          setError(
-            detectResult.error?.trim() ||
-              'No multilingual Whisper Language ID model detected'
-          );
-          setInitResult('Initialization failed: detection unsuccessful');
-          return;
-        }
-
-        const engine = await createLanguageIdentification({
-          modelSource,
-          numThreads: NUM_THREADS,
-        });
-
-        engineRef.current = engine;
-        setCurrentModelFolder(modelFolder);
-        setInitializedSummary(getModelDisplayName(modelFolder));
-        setInitResult(
-          `Initialized: ${getModelDisplayName(modelFolder)}\n` +
-            `Detected: whisper multilingual` +
-            (detectResult.modelType ? ` (${detectResult.modelType})` : '')
-        );
-      } catch (initErr) {
-        setErrorSource('init');
-        setError(normalizeErrorMessage(initErr));
-        setInitResult(
-          `Initialization failed: ${normalizeErrorMessage(initErr)}`
-        );
-      } finally {
-        setLoading(false);
-      }
-    },
-    [cleanupLiveRuntime, resolveModelPath]
-  );
-
-  const handleInitializeCustom = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    setInitResult(null);
-    setInitializedSummary(null);
-    setOneshotResult(null);
-    setSegmentedResult(null);
-
-    try {
-      await cleanupLiveRuntime();
-      const previous = engineRef.current;
-      if (previous) {
-        await previous.destroy().catch(() => {});
-        engineRef.current = null;
-      }
-
-      const encoder = customInitForm.fileSources.encoder;
-      const decoder = customInitForm.fileSources.decoder;
-      if (!encoder || !decoder) {
-        throw new Error('Custom init requires both encoder and decoder paths.');
-      }
-
-      const customConfig = { encoder, decoder } as LanguageIdCustomConfig;
-      assertLanguageIdCustomConfig(
-        customConfig as unknown as Record<string, unknown>
-      );
-
-      const engine = await createLanguageIdentification({
-        customConfig,
-        numThreads: NUM_THREADS,
-      });
-
-      engineRef.current = engine;
-      setCurrentModelFolder(null);
-      setInitializedSummary('custom:whisper');
-      setInitResult('Initialized (custom): whisper encoder + decoder');
-    } catch (initErr) {
-      setErrorSource('init');
-      setError(normalizeErrorMessage(initErr));
-      setInitResult(
-        `Custom initialization failed: ${normalizeErrorMessage(initErr)}`
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [cleanupLiveRuntime, customInitForm.fileSources]);
-
-  const handleFree = useCallback(async () => {
+  onBeforeInitRef.current = async () => {
     await cleanupLiveRuntime();
-    const engine = engineRef.current;
-    engineRef.current = null;
-    if (engine) {
-      await engine.destroy().catch(() => {});
-    }
-    setCurrentModelFolder(null);
-    setInitializedSummary(null);
-    setInitResult(null);
-    setOneshotResult(null);
-    setSegmentedResult(null);
-    setIdentifyProgress(null);
+    clearResults();
+    setRunError(null);
+    setRunErrorSource(null);
     setLiveStatus(null);
     setLiveCurrentLang(null);
     setLiveLog([]);
     setLiveRunState('idle');
+  };
+
+  useEffect(() => {
+    return () => {
+      cleanupLiveRuntime().catch(() => {});
+    };
   }, [cleanupLiveRuntime]);
+
+  const handleFree = useCallback(async () => {
+    await cleanupLiveRuntime();
+    await releaseEngine();
+    clearResults();
+    setLiveStatus(null);
+    setLiveCurrentLang(null);
+    setLiveLog([]);
+    setLiveRunState('idle');
+    setRunError(null);
+    setRunErrorSource(null);
+  }, [cleanupLiveRuntime, clearResults, releaseEngine]);
 
   const handleIdentifyBatch = useCallback(async () => {
     const engine = engineRef.current;
     if (!engine || !preparedInputBuffer) {
-      setErrorSource('identify');
-      setError('Initialize a model and prepare an offline audio buffer first.');
+      setRunErr(
+        'identify',
+        'Initialize a model and prepare an offline audio buffer first.'
+      );
       return;
     }
 
     setIdentifying(true);
-    setError(null);
-    setErrorSource(null);
-    setOneshotResult(null);
-    setSegmentedResult(null);
+    setRunError(null);
+    setRunErrorSource(null);
+    clearResults();
     setIdentifyProgress({ label: 'Identifying…', percent: null });
 
     try {
@@ -628,13 +374,12 @@ export default function LanguageIdentificationScreen() {
       }
       setIdentifyProgress({ label: 'Done', percent: 100 });
     } catch (identifyErr) {
-      setErrorSource('identify');
-      setError(normalizeErrorMessage(identifyErr));
+      setRunErr('identify', identifyErr);
       setIdentifyProgress(null);
     } finally {
       setIdentifying(false);
     }
-  }, [preparedInputBuffer, segBatchConfig]);
+  }, [clearResults, engineRef, preparedInputBuffer, segBatchConfig, setRunErr]);
 
   const resolveLiveFileSource = useCallback((): FileSource => {
     if (liveFileSourceType === 'own') {
@@ -670,8 +415,7 @@ export default function LanguageIdentificationScreen() {
   const handleStartLive = useCallback(async () => {
     const engine = engineRef.current;
     if (!engine) {
-      setErrorSource('live');
-      setError('Initialize a Language ID model first.');
+      setRunErr('live', 'Initialize a Language ID model first.');
       return;
     }
 
@@ -683,8 +427,8 @@ export default function LanguageIdentificationScreen() {
       (segOption.policy.evaluator !== 'speech_energy_silence' &&
         segOption.policy.evaluator !== 'speech_vad_model')
     ) {
-      setErrorSource('live');
-      setError(
+      setRunErr(
+        'live',
         'Live overload requires speech_energy_silence or speech_vad_model segmentation (Auto).'
       );
       return;
@@ -692,13 +436,12 @@ export default function LanguageIdentificationScreen() {
 
     setLiveRunState('running');
     const runEpoch = ++liveRunEpochRef.current;
-    setError(null);
-    setErrorSource(null);
+    setRunError(null);
+    setRunErrorSource(null);
     setLiveStatus(null);
     setLiveCurrentLang(null);
     setLiveLog([]);
-    setOneshotResult(null);
-    setSegmentedResult(null);
+    clearResults();
 
     await cleanupLiveRuntime();
     if (runEpoch !== liveRunEpochRef.current) {
@@ -780,8 +523,7 @@ export default function LanguageIdentificationScreen() {
       if (runEpoch !== liveRunEpochRef.current) {
         return;
       }
-      setErrorSource('live');
-      setError(normalizeErrorMessage(err));
+      setRunErr('live', err);
       setLiveRunState('idle');
       setLiveStatus(null);
       await cleanupLiveRuntime().catch(() => {});
@@ -789,9 +531,12 @@ export default function LanguageIdentificationScreen() {
   }, [
     appendLiveLog,
     cleanupLiveRuntime,
+    clearResults,
+    engineRef,
     liveSourceMode,
     resolveLiveFileSource,
     segLiveConfig,
+    setRunErr,
   ]);
 
   const handleStopLive = useCallback(async () => {
@@ -853,11 +598,10 @@ export default function LanguageIdentificationScreen() {
         (pickErr as { code?: string })?.code === 'DOCUMENT_PICKER_CANCELED' ||
         (pickErr as { name?: string })?.name === 'DocumentPickerCanceled';
       if (!isPickCancel) {
-        setErrorSource('live');
-        setError(normalizeErrorMessage(pickErr));
+        setRunErr('live', pickErr);
       }
     }
-  }, []);
+  }, [setRunErr]);
 
   const copySegmentedJson = useCallback(() => {
     if (!segmentedResult) {
@@ -866,13 +610,6 @@ export default function LanguageIdentificationScreen() {
     Clipboard.setString(JSON.stringify(segmentedResult, null, 2));
     Alert.alert('Copied', 'Segmented Language ID result JSON copied.');
   }, [segmentedResult]);
-
-  const canInitAuto = initMode === 'auto' && !!selectedModelForInit && !busy;
-  const canInitCustom =
-    initMode === 'custom' &&
-    !!customInitForm.fileSources.encoder &&
-    !!customInitForm.fileSources.decoder &&
-    !busy;
 
   const canRunBatch =
     processingMode === 'batch' &&
@@ -948,137 +685,23 @@ export default function LanguageIdentificationScreen() {
           </View>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Model</Text>
-          <Text style={styles.sectionHint}>
-            Multilingual Whisper (encoder + decoder). Prefer tiny/base for
-            mobile latency; English-only packs are filtered out.
-          </Text>
-          <InitModeSelector
-            value={initMode}
-            onChange={setInitMode}
+        {engineReady ? (
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => {
+              handleFree().catch(() => {});
+            }}
             disabled={busy}
-          />
+          >
+            <Text style={styles.secondaryButtonText}>Release engine</Text>
+          </TouchableOpacity>
+        ) : null}
 
-          {initMode === 'auto' ? (
-            <>
-              {catalogEntries.length === 0 && !loadingModels ? (
-                <View style={styles.emptyCatalog}>
-                  <Text style={styles.bodyText}>
-                    No Whisper multilingual models found. Download an STT
-                    Whisper pack (or Language ID category) from Download
-                    Showcase.
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.primaryButton}
-                    onPress={() => navigation.navigate('DownloadShowcase')}
-                  >
-                    <Text style={styles.primaryButtonText}>
-                      Open Download Showcase
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <ModelFolderGrid
-                  entries={catalogEntries}
-                  selectedId={selectedModelForInit}
-                  initializedId={currentModelFolder}
-                  onSelect={setSelectedModelForInit}
-                  loading={loadingModels}
-                  disabled={busy}
-                  emptyMessage="No Language ID / Whisper models found."
-                />
-              )}
-              <TouchableOpacity
-                style={[
-                  styles.primaryButton,
-                  !canInitAuto && styles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  if (selectedModelForInit) {
-                    handleInitialize(selectedModelForInit).catch(() => {});
-                  }
-                }}
-                disabled={!canInitAuto}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Initialize model</Text>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              {catalogEntries.length > 0 ? (
-                <ModelFolderGrid
-                  entries={catalogEntries}
-                  selectedId={selectedModelForInit}
-                  initializedId={currentModelFolder}
-                  onSelect={setSelectedModelForInit}
-                  loading={loadingModels}
-                  disabled={busy}
-                  emptyMessage="No catalog models for Fill."
-                />
-              ) : null}
-              <LanguageIdentificationCustomInitForm
-                value={customInitForm}
-                onChange={setCustomInitForm}
-                selectedCatalogModelId={selectedModelForInit}
-                onFillFromSelectedModel={() => {
-                  handleFillFromSelectedModel().catch(() => {});
-                }}
-                onPrepareScatteredTest={handlePrepareScatteredTest}
-                fillLoading={customFillLoading}
-                disabled={busy}
-                fillHint={customFillHint}
-              />
-              <TouchableOpacity
-                style={[
-                  styles.primaryButton,
-                  !canInitCustom && styles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleInitializeCustom().catch(() => {});
-                }}
-                disabled={!canInitCustom}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>
-                    Initialize (custom)
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-
-          {initializedSummary ? (
-            <Text style={baseStyles.currentModelText}>
-              Ready: {initializedSummary}
-            </Text>
-          ) : null}
-          {initResult && !(error && errorSource === 'init') ? (
-            <Text style={styles.bodyText}>{initResult}</Text>
-          ) : null}
-          {error && errorSource === 'init' ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
-          {engineReady ? (
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => {
-                handleFree().catch(() => {});
-              }}
-              disabled={busy}
-            >
-              <Text style={styles.secondaryButtonText}>Release engine</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+        <LanguageIdModelInitPanel
+          languageId={languageId}
+          disabled={identifying || liveBusy}
+          onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+        />
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Segmentation</Text>
@@ -1169,15 +792,11 @@ export default function LanguageIdentificationScreen() {
               disabled={!engineReady || identifying || liveBusy}
               onBufferReady={(info) => {
                 setPreparedInputBuffer(info);
-                setOneshotResult(null);
-                setSegmentedResult(null);
-                setIdentifyProgress(null);
+                clearResults();
               }}
               onBufferReleased={() => {
                 setPreparedInputBuffer(null);
-                setOneshotResult(null);
-                setSegmentedResult(null);
-                setIdentifyProgress(null);
+                clearResults();
               }}
             />
 
@@ -1219,9 +838,9 @@ export default function LanguageIdentificationScreen() {
               )}
             </TouchableOpacity>
 
-            {error && errorSource === 'identify' ? (
+            {runError && runErrorSource === 'identify' ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{error}</Text>
+                <Text style={styles.errorText}>{runError}</Text>
               </View>
             ) : null}
           </View>
@@ -1314,19 +933,8 @@ export default function LanguageIdentificationScreen() {
                     </Text>
                   </TouchableOpacity>
                 ) : (
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 10,
-                      padding: 12,
-                      borderRadius: 12,
-                      borderWidth: 1,
-                      borderColor: '#E5E7EB',
-                      backgroundColor: '#F9FAFB',
-                    }}
-                  >
-                    <View style={{ flex: 1 }}>
+                  <View style={styles.selectedFileRow}>
+                    <View style={styles.selectedFileInfo}>
                       <Text style={styles.sectionHint}>Selected file</Text>
                       <Text style={styles.bodyText} numberOfLines={2}>
                         {selectedFileName ?? selectedFileUri}
@@ -1378,16 +986,7 @@ export default function LanguageIdentificationScreen() {
             ) : null}
 
             {liveLog.length > 0 ? (
-              <View
-                style={{
-                  maxHeight: 220,
-                  borderWidth: 1,
-                  borderColor: '#E5E7EB',
-                  borderRadius: 12,
-                  padding: 10,
-                  backgroundColor: '#F9FAFB',
-                }}
-              >
+              <View style={styles.liveLogBox}>
                 <ScrollView nestedScrollEnabled>
                   {liveLog.map((entry) => (
                     <Text
@@ -1433,9 +1032,9 @@ export default function LanguageIdentificationScreen() {
               </TouchableOpacity>
             )}
 
-            {error && errorSource === 'live' ? (
+            {runError && runErrorSource === 'live' ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{error}</Text>
+                <Text style={styles.errorText}>{runError}</Text>
               </View>
             ) : null}
           </View>

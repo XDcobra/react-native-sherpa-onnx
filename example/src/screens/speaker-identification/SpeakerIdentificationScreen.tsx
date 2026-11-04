@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type ElementRef,
@@ -19,6 +18,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Clipboard from '@react-native-clipboard/clipboard';
 import * as DocumentPicker from '@react-native-documents/picker';
 import {
@@ -30,14 +31,9 @@ import {
 } from '@dr.pogodin/react-native-fs';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  assertSpeakerEmbeddingCustomConfig,
-  createSpeakerIdentification,
-  detectSpeakerEmbeddingModel,
   type SpeakerEnrollmentBundle,
   type SpeakerIdentificationEngine,
   type SpeakerIdentificationPipelineHandle,
-  type SpeakerEmbeddingCustomConfig,
-  type SpeakerEmbeddingModelType,
 } from 'react-native-sherpa-onnx/speaker-identification';
 import {
   createEmptyLiveAudioBuffer,
@@ -57,16 +53,6 @@ import {
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import { segmentOfflineBuffer } from 'react-native-sherpa-onnx/segment';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import {
-  getAssetPackPath,
-  listAssetModels,
-  listModelsAtPath,
-} from 'react-native-sherpa-onnx/utils';
-import {
-  listDownloadedModels,
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
 import { styles as baseStyles } from '../stt/STTScreen.styles';
 import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
@@ -80,40 +66,22 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
-import {
-  InitModeSelector,
-  ModelFolderGrid,
-  SpeakerIdentificationCustomInitForm,
-  type ModelInitMode,
-  type SpeakerIdentificationCustomInitFormState,
-} from '../../components/modelInit';
-import {
-  getAssetModelPath,
-  getFileModelPath,
-  getModelDisplayName,
-  toDetectSource,
-} from '../../modelConfig';
+import { SpeakerIdModelInitPanel } from '../../components/SpeakerIdModelInitPanel';
+import { useSpeakerIdModelInit } from '../../hooks/useSpeakerIdModelInit';
+import type { RootStackParamList } from '../../types/navigation';
 import { AUDIO_FILES } from '../../audioConfig';
 import {
   fileSourceFromBundledPath,
   toFileSource,
 } from '../../utils/fileSourceFromUri';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
-import { fillSidCustomConfigFromModelFolder } from '../../utils/sidCustomInitFill';
 
-const PAD_PACK_NAME = 'sherpa_models';
-const NUM_THREADS = 2;
 const LIVE_SAMPLE_RATE = 16000;
 const DEFAULT_THRESHOLD = 0.5;
 
 type ProcessingMode = 'batch' | 'liveOverload';
 type LiveSourceMode = 'file' | 'mic';
 type LiveFileSourceType = 'example' | 'own';
-
-const DEFAULT_SID_CUSTOM_INIT: SpeakerIdentificationCustomInitFormState = {
-  modelType: 'wespeaker',
-  fileSources: {},
-};
 
 const LIVE_SEG_DEFAULT: SegmentationControlConfig = {
   mode: 'auto',
@@ -138,19 +106,6 @@ function normalizeErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function isSidHint(folder: string, hint: string): boolean {
-  if (hint === 'speakerEmbedding' || hint === 'speaker-embedding') return true;
-  const n = folder.toLowerCase();
-  return (
-    n.includes('wespeaker') ||
-    n.includes('3d-speaker') ||
-    n.includes('3dspeaker') ||
-    n.includes('nemo') ||
-    n.includes('speaker') ||
-    n.includes('embedding')
-  );
-}
-
 const EXPORT_SPEAKER_ALL = '__all__';
 
 function filterEnrollmentBundle(
@@ -167,29 +122,10 @@ function filterEnrollmentBundle(
 }
 
 export default function SpeakerIdentificationScreen() {
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
   const [processingMode, setProcessingMode] = useState<ProcessingMode>('batch');
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [padModelIds, setPadModelIds] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
-  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] =
-    useState<SpeakerIdentificationCustomInitFormState>(DEFAULT_SID_CUSTOM_INIT);
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-  const [selectedModelForInit, setSelectedModelForInit] = useState<
-    string | null
-  >(null);
-  const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
-    null
-  );
-  const [initializedSummary, setInitializedSummary] = useState<string | null>(
-    null
-  );
-  const [modelDim, setModelDim] = useState<number | null>(null);
-  const [initResult, setInitResult] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<
     | 'enroll'
@@ -258,7 +194,6 @@ export default function SpeakerIdentificationScreen() {
     }>
   >([]);
 
-  const engineRef = useRef<SpeakerIdentificationEngine | null>(null);
   const pipelineRef = useRef<SpeakerIdentificationPipelineHandle | null>(null);
   const liveInRef = useRef<LiveAudioBufferRef | null>(null);
   const liveSegOutRef = useRef<string | null>(null);
@@ -282,172 +217,6 @@ export default function SpeakerIdentificationScreen() {
       }, 80);
     });
   }, []);
-
-  const refreshSpeakers = useCallback(async () => {
-    const engine = engineRef.current;
-    if (!engine) {
-      setEnrolledSpeakers([]);
-      return;
-    }
-    try {
-      const names = await engine.listSpeakers();
-      setEnrolledSpeakers(names);
-      setExportSpeakerFilter((prev) =>
-        prev === EXPORT_SPEAKER_ALL || names.includes(prev)
-          ? prev
-          : EXPORT_SPEAKER_ALL
-      );
-    } catch {
-      setEnrolledSpeakers([]);
-    }
-  }, []);
-
-  const resolveThreshold = useCallback((): number => {
-    const parsed = Number.parseFloat(thresholdText);
-    return Number.isFinite(parsed) ? parsed : DEFAULT_THRESHOLD;
-  }, [thresholdText]);
-
-  const formatSecondsToMMSS = useCallback((seconds: number): string => {
-    const clamped = Math.max(0, seconds);
-    const total = Math.floor(clamped);
-    const mm = Math.floor(total / 60);
-    const ss = total % 60;
-    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
-  }, []);
-
-  const showActionError = (
-    source: 'init' | 'action' | 'live',
-    message: string
-  ) => {
-    setActionResult(null);
-    setLabeledLog([]);
-    setSpanLabelNames([]);
-    setErrorSource(source);
-    setError(message);
-    const title =
-      source === 'init'
-        ? 'Initialization failed'
-        : source === 'live'
-        ? 'Live pipeline error'
-        : 'Action failed';
-    Alert.alert(title, message);
-  };
-
-  const showActionSuccess = (
-    message: string,
-    options?: { keepLabeledLog?: boolean }
-  ) => {
-    setError(null);
-    setErrorSource(null);
-    if (!options?.keepLabeledLog) {
-      setLabeledLog([]);
-      setSpanLabelNames([]);
-    }
-    setActionResult(message);
-  };
-
-  const loadAvailableModels = useCallback(async () => {
-    setLoadingModels(true);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const assetModels = await listAssetModels();
-      const sidFolders = assetModels
-        .filter((m) => isSidHint(m.folder, m.hint))
-        .map((m) => m.folder);
-      const downloadedModels = await listDownloadedModels(
-        ModelCategory.SpeakerEmbedding
-      );
-      const downloadedFolders = downloadedModels.map((model) => model.id);
-
-      let padFolders: string[] = [];
-      let resolvedPadPath: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${DocumentDirectoryPath}/models`;
-        const padPath = padPathFromNative ?? fallbackPath;
-        const padResults = await listModelsAtPath(padPath);
-        padFolders = (padResults || [])
-          .filter((m) => isSidHint(m.folder, m.hint))
-          .map((m) => m.folder);
-        if (padFolders.length > 0) {
-          resolvedPadPath = padPath;
-        }
-      } catch (loadPadErr) {
-        console.warn(
-          'SpeakerIdentificationScreen: PAD/listModelsAtPath failed',
-          loadPadErr
-        );
-        padFolders = [];
-      }
-      setPadModelsPath(resolvedPadPath);
-
-      const combined = [
-        ...padFolders,
-        ...sidFolders.filter((f) => !padFolders.includes(f)),
-        ...downloadedFolders.filter(
-          (f) => !padFolders.includes(f) && !sidFolders.includes(f)
-        ),
-      ];
-      setPadModelIds(padFolders);
-      setDownloadedModelIds(downloadedFolders);
-      setAvailableModels(combined);
-
-      if (combined.length === 0) {
-        showActionError(
-          'init',
-          'No speaker-embedding models found. Add a WeSpeaker / 3D-Speaker / NeMo model as a bundled asset, download, or PAD model.'
-        );
-      }
-    } catch (loadErr) {
-      console.error(
-        'SpeakerIdentificationScreen: Failed to load models:',
-        loadErr
-      );
-      showActionError('init', 'Failed to load available models');
-      setAvailableModels([]);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadAvailableModels().catch(() => {});
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category === ModelCategory.SpeakerEmbedding) {
-        loadAvailableModels().catch(() => {});
-      }
-    });
-    return unsubscribe;
-  }, [loadAvailableModels]);
-
-  const resolveSidModelPath = useCallback(
-    (modelFolder: string) => {
-      if (padModelIds.includes(modelFolder)) {
-        return padModelsPath
-          ? getFileModelPath(
-              modelFolder,
-              ModelCategory.SpeakerEmbedding,
-              padModelsPath
-            )
-          : getFileModelPath(modelFolder, ModelCategory.SpeakerEmbedding);
-      }
-      if (downloadedModelIds.includes(modelFolder)) {
-        return getFileModelPath(modelFolder, ModelCategory.SpeakerEmbedding);
-      }
-      return getAssetModelPath(modelFolder);
-    },
-    [downloadedModelIds, padModelIds, padModelsPath]
-  );
-
-  const catalogEntries = useMemo(
-    () =>
-      availableModels.map((id) => ({
-        id,
-        label: getModelDisplayName(id),
-      })),
-    [availableModels]
-  );
 
   const cleanupLiveRuntime = useCallback(async () => {
     if (cleanupLockRef.current) {
@@ -491,186 +260,62 @@ export default function SpeakerIdentificationScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    return () => {
-      cleanupLiveRuntime().catch(() => {});
-      const engine = engineRef.current;
-      engineRef.current = null;
-      if (engine) {
-        engine.destroy().catch(() => {});
-      }
-    };
-  }, [cleanupLiveRuntime]);
-
-  const handleFillFromSelectedModel = useCallback(async () => {
-    const modelFolder = selectedModelForInit;
-    if (!modelFolder) {
-      Alert.alert('Select a model', 'Pick a catalog model folder first.');
-      return;
-    }
-
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const modelPath = resolveSidModelPath(modelFolder);
-      const fillResult = await fillSidCustomConfigFromModelFolder(
-        await toDetectSource(modelPath),
-        { modelTypeOverride: customInitForm.modelType }
-      );
-      setCustomInitForm({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-      });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setCustomFillHint(
-        `Filled from ${getModelDisplayName(modelFolder)} (${
-          fillResult.modelDir
-        }).${missing}`
-      );
-    } catch (fillErr) {
-      setCustomFillHint(null);
-      showActionError('init', normalizeErrorMessage(fillErr));
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [customInitForm.modelType, resolveSidModelPath, selectedModelForInit]);
-
-  const handlePrepareScatteredTest = useCallback(() => {
-    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
-    setCustomFillHint(
-      'Scattered test: pick the embedding ONNX from any location, then Initialize.'
-    );
+  const clearRunStateOnInit = useCallback(() => {
+    setActionResult(null);
+    setLabeledLog([]);
+    setSpanLabelNames([]);
   }, []);
 
-  const handleInitializeCustom = async () => {
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    setInitResult(null);
-    setInitializedSummary(null);
-
-    try {
-      const previous = engineRef.current;
-      if (previous) {
-        await previous.destroy();
-        engineRef.current = null;
-      }
-
-      const customConfig = { ...customInitForm.fileSources };
-      assertSpeakerEmbeddingCustomConfig(
-        customConfig as unknown as Record<string, unknown>
-      );
-
-      const engine = await createSpeakerIdentification({
-        initMode: 'custom',
-        modelType: customInitForm.modelType,
-        customConfig: customConfig as SpeakerEmbeddingCustomConfig,
-        numThreads: NUM_THREADS,
-      });
-
-      engineRef.current = engine;
-      setModelDim(engine.dim);
-      setCurrentModelFolder(null);
-      setInitializedSummary(`custom:${customInitForm.modelType}`);
-      setInitResult(
-        `Initialized (custom): ${customInitForm.modelType}\nDim: ${engine.dim}`
-      );
-      setActionResult(null);
-      await refreshSpeakers();
-    } catch (initErr) {
-      showActionError('init', normalizeErrorMessage(initErr));
-      setInitResult(
-        `Custom initialization failed: ${normalizeErrorMessage(initErr)}`
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleInitialize = async (modelFolder: string) => {
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    setInitResult(null);
-    setInitializedSummary(null);
-
-    try {
-      const previous = engineRef.current;
-      if (previous) {
-        await previous.destroy();
-        engineRef.current = null;
-      }
-
-      const modelPath = resolveSidModelPath(modelFolder);
-      const modelSource = await toDetectSource(modelPath);
-
-      const detectResult = await detectSpeakerEmbeddingModel(modelSource, {
-        modelType: 'auto',
-      });
-      if (!detectResult.success || !detectResult.detectedModels?.length) {
-        showActionError(
-          'init',
-          'No speaker-embedding models detected in the directory'
-        );
-        return;
-      }
-
-      const modelType =
-        detectResult.modelType === 'wespeaker' ||
-        detectResult.modelType === '3d-speaker' ||
-        detectResult.modelType === 'nemo'
-          ? detectResult.modelType
-          : (detectResult.detectedModels[0]?.type as SpeakerEmbeddingModelType);
-
-      const engine = await createSpeakerIdentification({
-        modelSource,
-        modelType,
-        numThreads: NUM_THREADS,
-      });
-
-      engineRef.current = engine;
-      setModelDim(engine.dim);
-      setCurrentModelFolder(modelFolder);
-      setInitializedSummary(modelFolder);
-      setInitResult(
-        `Initialized: ${getModelDisplayName(
-          modelFolder
-        )} (${modelType})\nDim: ${engine.dim}`
-      );
-      setActionResult(null);
-      await refreshSpeakers();
-    } catch (initErr) {
-      showActionError('init', normalizeErrorMessage(initErr));
-      setInitResult(`Initialization failed: ${normalizeErrorMessage(initErr)}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFree = async () => {
+  const clearScreenAfterEngineRelease = useCallback(async () => {
     await cleanupLiveRuntime();
-    const engine = engineRef.current;
-    if (engine) {
-      await engine.destroy().catch(() => {});
-    }
-    engineRef.current = null;
-    setCurrentModelFolder(null);
-    setInitializedSummary(null);
-    setInitResult(null);
-    setModelDim(null);
     setEnrolledSpeakers([]);
     setActionResult(null);
     setLabeledLog([]);
+    setSpanLabelNames([]);
     setLiveStatus(null);
     setLiveLabelLog([]);
+    setLiveLabelEvents([]);
     setEnrollmentJson('');
     setJsonBufferExpanded(false);
-  };
+  }, [cleanupLiveRuntime]);
+
+  const speakerId = useSpeakerIdModelInit({
+    onBeforeInit: clearRunStateOnInit,
+    onAfterRelease: clearScreenAfterEngineRelease,
+  });
+
+  const { engineRef, isEngineInitialized, loading: initLoading } = speakerId;
+
+  const refreshSpeakers = useCallback(async () => {
+    const engine = engineRef.current;
+    if (!engine) {
+      setEnrolledSpeakers([]);
+      return;
+    }
+    try {
+      const names = await engine.listSpeakers();
+      setEnrolledSpeakers(names);
+      setExportSpeakerFilter((prev) =>
+        prev === EXPORT_SPEAKER_ALL || names.includes(prev)
+          ? prev
+          : EXPORT_SPEAKER_ALL
+      );
+    } catch {
+      setEnrolledSpeakers([]);
+    }
+  }, [engineRef]);
+
+  useEffect(() => {
+    if (isEngineInitialized) {
+      refreshSpeakers().catch(() => {});
+    }
+  }, [isEngineInitialized, refreshSpeakers]);
+
+  useEffect(() => {
+    return () => {
+      cleanupLiveRuntime().catch(() => {});
+    };
+  }, [cleanupLiveRuntime]);
 
   const requireEngine = (): SpeakerIdentificationEngine => {
     const engine = engineRef.current;
@@ -685,6 +330,50 @@ export default function SpeakerIdentificationScreen() {
       throw new Error('Prepare an offline audio buffer first.');
     }
     return preparedInputBuffer;
+  };
+
+  const resolveThreshold = useCallback((): number => {
+    const parsed = Number.parseFloat(thresholdText);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_THRESHOLD;
+  }, [thresholdText]);
+
+  const formatSecondsToMMSS = useCallback((seconds: number): string => {
+    const clamped = Math.max(0, seconds);
+    const total = Math.floor(clamped);
+    const mm = Math.floor(total / 60);
+    const ss = total % 60;
+    return `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }, []);
+
+  const showActionError = (
+    source: 'init' | 'action' | 'live',
+    message: string
+  ) => {
+    setActionResult(null);
+    setLabeledLog([]);
+    setSpanLabelNames([]);
+    setErrorSource(source);
+    setError(message);
+    const title =
+      source === 'init'
+        ? 'Initialization failed'
+        : source === 'live'
+        ? 'Live pipeline error'
+        : 'Action failed';
+    Alert.alert(title, message);
+  };
+
+  const showActionSuccess = (
+    message: string,
+    options?: { keepLabeledLog?: boolean }
+  ) => {
+    setError(null);
+    setErrorSource(null);
+    if (!options?.keepLabeledLog) {
+      setLabeledLog([]);
+      setSpanLabelNames([]);
+    }
+    setActionResult(message);
   };
 
   const withSpeechSegments = async <T,>(
@@ -1449,19 +1138,8 @@ export default function SpeakerIdentificationScreen() {
   };
 
   const liveBusy = liveRunState === 'running' || liveRunState === 'stopping';
-  const engineReady = !!engineRef.current && !!initializedSummary;
-  const canInitAuto =
-    initMode === 'auto' &&
-    !!selectedModelForInit &&
-    !loading &&
-    !busy &&
-    !liveBusy;
-  const canInitCustom =
-    initMode === 'custom' &&
-    Object.keys(customInitForm.fileSources).length > 0 &&
-    !loading &&
-    !busy &&
-    !liveBusy;
+  const engineReady = isEngineInitialized && !!engineRef.current;
+  const initPanelBusy = busy || liveBusy || initLoading;
   const canRunBatch =
     processingMode === 'batch' &&
     engineReady &&
@@ -1581,111 +1259,11 @@ export default function SpeakerIdentificationScreen() {
           </View>
         </View>
 
-        <View style={screenStyles.card}>
-          <Text style={screenStyles.cardTitle}>Model</Text>
-          <InitModeSelector
-            value={initMode}
-            onChange={setInitMode}
-            disabled={loading || busy || liveBusy}
-          />
-
-          {initMode === 'auto' ? (
-            <>
-              <ModelFolderGrid
-                entries={catalogEntries}
-                selectedId={selectedModelForInit}
-                initializedId={currentModelFolder}
-                onSelect={setSelectedModelForInit}
-                loading={loadingModels}
-                disabled={loading || busy || liveBusy}
-                emptyMessage="No speaker-embedding models found."
-              />
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  !canInitAuto && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  if (selectedModelForInit) {
-                    handleInitialize(selectedModelForInit).catch(() => {});
-                  }
-                }}
-                disabled={!canInitAuto}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>
-                    Initialize model
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <ModelFolderGrid
-                entries={catalogEntries}
-                selectedId={selectedModelForInit}
-                initializedId={currentModelFolder}
-                onSelect={setSelectedModelForInit}
-                loading={loadingModels}
-                disabled={loading || busy || liveBusy}
-                emptyMessage="No speaker-embedding models found (optional for Fill)."
-              />
-              <SpeakerIdentificationCustomInitForm
-                value={customInitForm}
-                onChange={setCustomInitForm}
-                selectedCatalogModelId={selectedModelForInit}
-                onFillFromSelectedModel={() => {
-                  handleFillFromSelectedModel().catch(() => {});
-                }}
-                onPrepareScatteredTest={handlePrepareScatteredTest}
-                fillLoading={customFillLoading}
-                disabled={loading || busy || liveBusy}
-                fillHint={customFillHint}
-              />
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  !canInitCustom && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleInitializeCustom().catch(() => {});
-                }}
-                disabled={!canInitCustom}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>
-                    Initialize (custom)
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-
-          {initializedSummary ? (
-            <Text style={baseStyles.currentModelText}>
-              Ready: {initializedSummary}
-              {modelDim != null ? ` • dim ${modelDim}` : ''}
-            </Text>
-          ) : null}
-          {initResult ? (
-            <Text style={screenStyles.monoResultText}>{initResult}</Text>
-          ) : null}
-          {engineReady ? (
-            <TouchableOpacity
-              style={baseStyles.secondaryButton}
-              onPress={() => {
-                handleFree().catch(() => {});
-              }}
-              disabled={loading || busy || liveBusy}
-            >
-              <Text style={baseStyles.secondaryButtonText}>Release engine</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+        <SpeakerIdModelInitPanel
+          speakerId={speakerId}
+          disabled={initPanelBusy}
+          onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+        />
 
         {processingMode === 'batch' ? (
           <View style={screenStyles.card}>

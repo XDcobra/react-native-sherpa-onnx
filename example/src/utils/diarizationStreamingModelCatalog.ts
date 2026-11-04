@@ -91,15 +91,29 @@ function prioritizeEntries(
   return [...recommended, ...remaining];
 }
 
+export type DiarizationStreamingModelPathContext = {
+  padModelIds: string[];
+  padModelsPath: string | null;
+  bundledFolders: string[];
+  downloadedIds: Set<string>;
+  downloadedPaths?: Record<string, string>;
+};
+
+export function createDiarizationStreamingModelPathContext(
+  snapshot: DiarizationStreamingCatalogSnapshot
+): DiarizationStreamingModelPathContext {
+  return {
+    padModelIds: snapshot.padModelIds,
+    padModelsPath: snapshot.padModelsPath,
+    bundledFolders: snapshot.bundledFolders,
+    downloadedIds: new Set(snapshot.downloadedIds),
+    downloadedPaths: snapshot.downloadedPaths,
+  };
+}
+
 export function getDiarizationStreamingModelPathConfig(
   modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
-    downloadedPaths?: Record<string, string>;
-  }
+  ctx: DiarizationStreamingModelPathContext
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath

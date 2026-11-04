@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,19 +9,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as DocumentPicker from '@react-native-documents/picker';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import {
-  createSeparation,
-  detectSeparationModel,
-  assertSeparationCustomConfig,
   SEPARATION_STEM_LABELS,
-  type SeparationEngine,
-  type SeparationModelType,
   type SeparationPipelineHandle,
-  type SpleeterCustomConfig,
-  type UvrCustomConfig,
 } from 'react-native-sherpa-onnx/separation';
 import {
   createEmptyOfflineAudioBuffer,
@@ -40,16 +33,6 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import type { SpeechSegment } from 'react-native-sherpa-onnx/segment';
-import {
-  getAssetPackPath,
-  listAssetModels,
-  listModelsAtPath,
-} from 'react-native-sherpa-onnx/utils';
-import {
-  listDownloadedModels,
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
 import { styles as baseStyles } from '../stt/STTScreen.styles';
 import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
@@ -65,19 +48,9 @@ import {
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
 import { PipelineOfflineAudioResultCard } from '../../components/PipelineOfflineAudioResultCard';
-import {
-  InitModeSelector,
-  ModelFolderGrid,
-  SeparationCustomInitForm,
-  type ModelInitMode,
-  type SeparationCustomInitFormState,
-} from '../../components/modelInit';
-import {
-  getAssetModelPath,
-  getFileModelPath,
-  getModelDisplayName,
-  toDetectSource,
-} from '../../modelConfig';
+import { SeparationModelInitPanel } from '../../components/SeparationModelInitPanel';
+import { useSeparationModelInit } from '../../hooks/useSeparationModelInit';
+import type { RootStackParamList } from '../../types/navigation';
 import { AUDIO_FILES } from '../../audioConfig';
 import {
   fileSourceFromBundledPath,
@@ -85,10 +58,7 @@ import {
   toFileSource,
 } from '../../utils/fileSourceFromUri';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
-import { fillSeparationCustomConfigFromModelFolder } from '../../utils/separationCustomInitFill';
 
-const PAD_PACK_NAME = 'sherpa_models';
-const NUM_THREADS = 2;
 const PIPELINE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 type ProcessingMode = 'batch' | 'liveOverload';
@@ -116,11 +86,6 @@ type LiveMicPipelinePhase =
   | 'separating'
   | 'separation_complete';
 
-const DEFAULT_SEPARATION_CUSTOM_INIT: SeparationCustomInitFormState = {
-  modelType: 'spleeter',
-  fileSources: {},
-};
-
 const LIVE_SEG_DEFAULT: SegmentationControlConfig = {
   mode: 'auto',
   policy: {
@@ -140,12 +105,6 @@ function normalizeErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function isSeparationHint(folder: string, hint: string): boolean {
-  if (hint === 'separation') return true;
-  const n = folder.toLowerCase();
-  return n.includes('spleeter') || n.includes('uvr') || n.includes('mdx');
-}
-
 function stemLabel(index: number, numStems: number): string {
   if (numStems <= 2 && index < SEPARATION_STEM_LABELS.length) {
     return SEPARATION_STEM_LABELS[index]!;
@@ -154,36 +113,14 @@ function stemLabel(index: number, numStems: number): string {
 }
 
 export default function SeparationScreen() {
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
   const [processingMode, setProcessingMode] = useState<ProcessingMode>('batch');
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [padModelIds, setPadModelIds] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
-  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] =
-    useState<SeparationCustomInitFormState>(DEFAULT_SEPARATION_CUSTOM_INIT);
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-  const [selectedModelForInit, setSelectedModelForInit] = useState<
-    string | null
-  >(null);
-  const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
-    null
-  );
-  const [initializedSummary, setInitializedSummary] = useState<string | null>(
-    null
-  );
-  const [selectedModelKind, setSelectedModelKind] =
-    useState<SeparationModelType | null>(null);
-  const [numStems, setNumStems] = useState(2);
-  const [modelSampleRate, setModelSampleRate] = useState<number | null>(null);
-  const [initResult, setInitResult] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [errorSource, setErrorSource] = useState<
-    'init' | 'separate' | 'live' | null
-  >(null);
+  const [errorSource, setErrorSource] = useState<'separate' | 'live' | null>(
+    null
+  );
 
   const [segBatchConfig, setSegBatchConfig] =
     useState<SegmentationControlConfig>({ mode: 'off' });
@@ -228,7 +165,6 @@ export default function SeparationScreen() {
   >('idle');
   const [liveSegmentLog, setLiveSegmentLog] = useState<string[]>([]);
 
-  const engineRef = useRef<SeparationEngine | null>(null);
   const pipelineRef = useRef<SeparationPipelineHandle | null>(null);
   const liveInRef = useRef<LiveAudioBufferRef | null>(null);
   const liveOutRefs = useRef<LiveAudioBufferRef[]>([]);
@@ -301,107 +237,6 @@ export default function SeparationScreen() {
     }
   }, []);
 
-  const loadAvailableModels = useCallback(async () => {
-    setLoadingModels(true);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const assetModels = await listAssetModels();
-      const separationFolders = assetModels
-        .filter((m) => isSeparationHint(m.folder, m.hint))
-        .map((m) => m.folder);
-      const downloadedModels = await listDownloadedModels(
-        ModelCategory.Separation
-      );
-      const downloadedFolders = downloadedModels.map((model) => model.id);
-
-      let padFolders: string[] = [];
-      let resolvedPadPath: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${DocumentDirectoryPath}/models`;
-        const padPath = padPathFromNative ?? fallbackPath;
-        const padResults = await listModelsAtPath(padPath);
-        padFolders = (padResults || [])
-          .filter((m) => isSeparationHint(m.folder, m.hint))
-          .map((m) => m.folder);
-        if (padFolders.length > 0) {
-          resolvedPadPath = padPath;
-        }
-      } catch (loadPadErr) {
-        console.warn(
-          'SeparationScreen: PAD/listModelsAtPath failed',
-          loadPadErr
-        );
-        padFolders = [];
-      }
-      setPadModelsPath(resolvedPadPath);
-
-      const combined = [
-        ...padFolders,
-        ...separationFolders.filter((f) => !padFolders.includes(f)),
-        ...downloadedFolders.filter(
-          (f) => !padFolders.includes(f) && !separationFolders.includes(f)
-        ),
-      ];
-      setPadModelIds(padFolders);
-      setDownloadedModelIds(downloadedFolders);
-      setAvailableModels(combined);
-
-      if (combined.length === 0) {
-        setErrorSource('init');
-        setError(
-          'No separation models found. Add a Spleeter or UVR model as a bundled asset, downloaded model, or PAD model.'
-        );
-      }
-    } catch (loadErr) {
-      console.error('SeparationScreen: Failed to load models:', loadErr);
-      setErrorSource('init');
-      setError('Failed to load available models');
-      setAvailableModels([]);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadAvailableModels().catch(() => {});
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category === ModelCategory.Separation) {
-        loadAvailableModels().catch(() => {});
-      }
-    });
-    return unsubscribe;
-  }, [loadAvailableModels]);
-
-  const resolveSeparationModelPath = useCallback(
-    (modelFolder: string) => {
-      if (padModelIds.includes(modelFolder)) {
-        return padModelsPath
-          ? getFileModelPath(
-              modelFolder,
-              ModelCategory.Separation,
-              padModelsPath
-            )
-          : getFileModelPath(modelFolder, ModelCategory.Separation);
-      }
-      if (downloadedModelIds.includes(modelFolder)) {
-        return getFileModelPath(modelFolder, ModelCategory.Separation);
-      }
-      return getAssetModelPath(modelFolder);
-    },
-    [downloadedModelIds, padModelIds, padModelsPath]
-  );
-
-  const catalogEntries = useMemo(
-    () =>
-      availableModels.map((id) => ({
-        id,
-        label: getModelDisplayName(id),
-      })),
-    [availableModels]
-  );
-
   const cleanupLiveRuntime = useCallback(async () => {
     if (cleanupLockRef.current) {
       return;
@@ -456,203 +291,19 @@ export default function SeparationScreen() {
       for (const stem of stems) {
         releasePipelineAudioBuffer(stem.bufferId).catch(() => {});
       }
-      const engine = engineRef.current;
-      engineRef.current = null;
-      if (engine) {
-        engine.destroy().catch(() => {});
-      }
     };
   }, [cleanupLiveRuntime]);
 
-  const handleFillFromSelectedModel = useCallback(async () => {
-    const modelFolder = selectedModelForInit;
-    if (!modelFolder) {
-      Alert.alert('Select a model', 'Pick a catalog model folder first.');
-      return;
-    }
+  const clearSeparationRunState = useCallback(async () => {
+    setSeparateResult(null);
+    setBatchPhase('idle');
+    setBatchSeparationProgress(null);
+    await clearStemResults();
+  }, [clearStemResults]);
 
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const modelPath = resolveSeparationModelPath(modelFolder);
-      const fillResult = await fillSeparationCustomConfigFromModelFolder(
-        await toDetectSource(modelPath),
-        { modelTypeOverride: customInitForm.modelType }
-      );
-      setCustomInitForm({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-      });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setCustomFillHint(
-        `Filled from ${getModelDisplayName(modelFolder)} (${
-          fillResult.modelDir
-        }).${missing}`
-      );
-    } catch (fillErr) {
-      setCustomFillHint(null);
-      setErrorSource('init');
-      setError(normalizeErrorMessage(fillErr));
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [
-    customInitForm.modelType,
-    resolveSeparationModelPath,
-    selectedModelForInit,
-  ]);
-
-  const handlePrepareScatteredTest = useCallback(() => {
-    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
-    setCustomFillHint(
-      'Scattered test: pick stem files from different locations, then Initialize.'
-    );
-  }, []);
-
-  const applyEngineMetadata = useCallback(async (engine: SeparationEngine) => {
-    const stems = await engine.getNumStems();
-    const sr = await engine.getSampleRate();
-    setNumStems(stems);
-    setModelSampleRate(sr);
-    return { stems, sr };
-  }, []);
-
-  const handleInitializeCustom = async () => {
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    setInitResult(null);
-    setInitializedSummary(null);
-    setSelectedModelKind(null);
-
-    try {
-      const previous = engineRef.current;
-      if (previous) {
-        await previous.destroy();
-        engineRef.current = null;
-      }
-      await clearStemResults();
-
-      const customConfig = { ...customInitForm.fileSources };
-      assertSeparationCustomConfig(
-        customConfig as unknown as Record<string, unknown>
-      );
-
-      const engine =
-        customInitForm.modelType === 'spleeter'
-          ? await createSeparation({
-              initMode: 'custom',
-              modelType: 'spleeter',
-              customConfig: customConfig as SpleeterCustomConfig,
-              numThreads: NUM_THREADS,
-            })
-          : await createSeparation({
-              initMode: 'custom',
-              modelType: 'uvr',
-              customConfig: customConfig as UvrCustomConfig,
-              numThreads: NUM_THREADS,
-            });
-
-      engineRef.current = engine;
-      const { stems, sr } = await applyEngineMetadata(engine);
-      setCurrentModelFolder(null);
-      setSelectedModelKind(customInitForm.modelType);
-      setInitializedSummary(`custom:${customInitForm.modelType}`);
-      setInitResult(
-        `Initialized (custom): ${customInitForm.modelType}\nStems: ${stems}\nSample rate: ${sr} Hz`
-      );
-      setSeparateResult(null);
-    } catch (initErr) {
-      setErrorSource('init');
-      setError(normalizeErrorMessage(initErr));
-      setInitResult(
-        `Custom initialization failed: ${normalizeErrorMessage(initErr)}`
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleInitialize = async (modelFolder: string) => {
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    setInitResult(null);
-    setInitializedSummary(null);
-    setSelectedModelKind(null);
-
-    try {
-      const previous = engineRef.current;
-      if (previous) {
-        await previous.destroy();
-        engineRef.current = null;
-      }
-      await clearStemResults();
-
-      const modelPath = resolveSeparationModelPath(modelFolder);
-      const modelSource = await toDetectSource(modelPath);
-
-      const detectResult = await detectSeparationModel(modelSource, {
-        modelType: 'auto',
-      });
-      if (!detectResult.success || !detectResult.detectedModels?.length) {
-        setErrorSource('init');
-        setError('No separation models detected in the directory');
-        return;
-      }
-
-      const modelType =
-        detectResult.modelType === 'spleeter' ||
-        detectResult.modelType === 'uvr'
-          ? detectResult.modelType
-          : (detectResult.detectedModels[0]?.type as SeparationModelType);
-
-      const engine = await createSeparation({
-        modelSource,
-        modelType,
-        numThreads: NUM_THREADS,
-      });
-
-      engineRef.current = engine;
-      const { stems, sr } = await applyEngineMetadata(engine);
-      setCurrentModelFolder(modelFolder);
-      setSelectedModelKind(modelType);
-      setInitializedSummary(modelFolder);
-      setInitResult(
-        `Initialized: ${getModelDisplayName(
-          modelFolder
-        )} (${modelType})\nStems: ${stems}\nSample rate: ${sr} Hz`
-      );
-      setSeparateResult(null);
-    } catch (initErr) {
-      setErrorSource('init');
-      setError(normalizeErrorMessage(initErr));
-      setInitResult(`Initialization failed: ${normalizeErrorMessage(initErr)}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleFree = async () => {
+  const clearScreenAfterEngineRelease = useCallback(async () => {
     await cleanupLiveRuntime();
     await clearStemResults();
-    const engine = engineRef.current;
-    if (engine) {
-      await engine.destroy().catch(() => {});
-    }
-    engineRef.current = null;
-    setCurrentModelFolder(null);
-    setInitializedSummary(null);
-    setSelectedModelForInit(null);
-    setSelectedModelKind(null);
-    setInitResult(null);
-    setModelSampleRate(null);
-    setNumStems(2);
     setSeparateResult(null);
     setBatchPhase('idle');
     setBatchSeparationProgress(null);
@@ -667,7 +318,24 @@ export default function SeparationScreen() {
     setErrorSource(null);
     await offlineWidgetRef.current?.clear();
     setPreparedInputBuffer(null);
-  };
+  }, [cleanupLiveRuntime, clearStemResults]);
+
+  const separation = useSeparationModelInit({
+    onBeforeInit: clearSeparationRunState,
+    onEngineReady: () => {
+      setSeparateResult(null);
+    },
+    onAfterRelease: clearScreenAfterEngineRelease,
+  });
+
+  const {
+    engineRef,
+    isEngineInitialized,
+    selectedModelKind,
+    numStems,
+    modelSampleRate,
+    loading: initLoading,
+  } = separation;
 
   const handleSeparateBatch = async () => {
     if (!engineRef.current) {
@@ -1139,6 +807,7 @@ export default function SeparationScreen() {
     }
   }, [
     cleanupLiveRuntime,
+    engineRef,
     finalizeLiveStemResults,
     handleSeparationOutputFrames,
     liveRunState,
@@ -1178,15 +847,8 @@ export default function SeparationScreen() {
     }
   }, []);
 
-  const canInitAuto =
-    initMode === 'auto' && !!selectedModelForInit && !loading && !separating;
-  const canInitCustom =
-    initMode === 'custom' &&
-    Object.keys(customInitForm.fileSources).length > 0 &&
-    !loading &&
-    !separating;
-
-  const engineReady = !!engineRef.current && !!initializedSummary;
+  const engineReady = isEngineInitialized && engineRef.current != null;
+  const initBusy = initLoading || separating;
   const livePipelineBusy =
     liveRunState === 'running' ||
     liveRunState === 'stopping' ||
@@ -1261,104 +923,11 @@ export default function SeparationScreen() {
           </View>
         </View>
 
-        <View style={screenStyles.card}>
-          <Text style={screenStyles.cardTitle}>Model</Text>
-          <InitModeSelector
-            value={initMode}
-            onChange={setInitMode}
-            disabled={loading || separating || liveBusy}
-          />
-
-          {initMode === 'auto' ? (
-            <>
-              <ModelFolderGrid
-                entries={catalogEntries}
-                selectedId={selectedModelForInit}
-                initializedId={currentModelFolder}
-                onSelect={setSelectedModelForInit}
-                loading={loadingModels}
-                disabled={loading || separating || liveBusy}
-                emptyMessage="No separation models found."
-              />
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  !canInitAuto && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  if (selectedModelForInit) {
-                    handleInitialize(selectedModelForInit).catch(() => {});
-                  }
-                }}
-                disabled={!canInitAuto}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>
-                    Initialize model
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              <SeparationCustomInitForm
-                value={customInitForm}
-                onChange={setCustomInitForm}
-                selectedCatalogModelId={selectedModelForInit}
-                onFillFromSelectedModel={() => {
-                  handleFillFromSelectedModel().catch(() => {});
-                }}
-                onPrepareScatteredTest={handlePrepareScatteredTest}
-                fillLoading={customFillLoading}
-                disabled={loading || separating || liveBusy}
-                fillHint={customFillHint}
-              />
-              <TouchableOpacity
-                style={[
-                  screenStyles.primaryButton,
-                  !canInitCustom && screenStyles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleInitializeCustom().catch(() => {});
-                }}
-                disabled={!canInitCustom}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={screenStyles.primaryButtonText}>
-                    Initialize (custom)
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-
-          {initializedSummary ? (
-            <Text style={baseStyles.currentModelText}>
-              Ready: {initializedSummary}
-              {modelSampleRate != null
-                ? ` • ${numStems} stem(s) @ ${modelSampleRate} Hz`
-                : ''}
-            </Text>
-          ) : null}
-          {initResult ? (
-            <Text style={screenStyles.monoResultText}>{initResult}</Text>
-          ) : null}
-          {engineReady ? (
-            <TouchableOpacity
-              style={baseStyles.secondaryButton}
-              onPress={() => {
-                handleFree().catch(() => {});
-              }}
-              disabled={loading || separating || liveBusy}
-            >
-              <Text style={baseStyles.secondaryButtonText}>Release engine</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+        <SeparationModelInitPanel
+          separation={separation}
+          disabled={initBusy || liveBusy}
+          onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+        />
 
         <View style={screenStyles.card}>
           <Text style={screenStyles.cardTitle}>Segmentation</Text>
@@ -1643,9 +1212,7 @@ export default function SeparationScreen() {
         {error ? (
           <View style={baseStyles.errorContainer}>
             <Text style={baseStyles.errorLabel}>
-              {errorSource === 'init'
-                ? 'Initialization error'
-                : errorSource === 'live'
+              {errorSource === 'live'
                 ? 'Live separation error'
                 : 'Separation error'}
             </Text>
@@ -1672,9 +1239,13 @@ export default function SeparationScreen() {
                 <PipelineOfflineAudioResultCard
                   key={stem.bufferId}
                   bufferId={stem.bufferId}
+                  title={`${stem.label} stem`}
                   sourceLabel={stem.label}
                   sampleRate={stem.sampleRate}
                   durationMs={durationMs}
+                  filename={`separation_${stem.label
+                    .toLowerCase()
+                    .replace(/\s+/g, '_')}_${Date.now()}.wav`}
                   onDismiss={() => {
                     releasePipelineAudioBuffer(stem.bufferId)
                       .catch(() => {})

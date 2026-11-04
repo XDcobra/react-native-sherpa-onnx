@@ -39,6 +39,10 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
+import {
+  PipelineOfflineAudioResultCard,
+  type PipelineOfflineAudioResultCardHandle,
+} from '../../components/PipelineOfflineAudioResultCard';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
   getAssetPackPath,
@@ -62,6 +66,7 @@ import {
   getFileModelPath,
   toDetectSource,
 } from '../../modelConfig';
+import { ensureEnUsTtsLexiconForFileSource } from '../../utils/enUsTtsLexicon';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -210,7 +215,6 @@ export default function StreamingTTSScreen() {
     sampleRate: number;
     numSamples: number;
   } | null>(null);
-  const [isResultPlaying, setIsResultPlaying] = useState(false);
   const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
     mode: 'auto',
     policy: {
@@ -224,13 +228,15 @@ export default function StreamingTTSScreen() {
   const controllerRef = useRef<StreamingSessionController | null>(null);
   const audioBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const playerRef = useRef<PcmPlayer | null>(null);
+  const resultCardRef = useRef<PipelineOfflineAudioResultCardHandle | null>(
+    null
+  );
   const cleanupLockRef = useRef(false);
   const currentResultBufferRef = useRef<{
     bufferId: string;
     sampleRate: number;
     numSamples: number;
   } | null>(null);
-  const isResultPlayingRef = useRef(false);
   const streamedInputLengthRef = useRef(0);
   const lastInputSnapshotRef = useRef('');
   const pendingDeltaRef = useRef('');
@@ -381,16 +387,7 @@ export default function StreamingTTSScreen() {
   }, [loadModels]);
 
   const releaseResultBuffer = useCallback(async () => {
-    if (isResultPlayingRef.current) {
-      try {
-        await playerRef.current?.destroy();
-      } catch {
-        // ignore teardown races
-      }
-      playerRef.current = null;
-      isResultPlayingRef.current = false;
-      setIsResultPlaying(false);
-    }
+    await resultCardRef.current?.stop().catch(() => {});
 
     const previous = currentResultBufferRef.current;
     if (previous) {
@@ -426,7 +423,7 @@ export default function StreamingTTSScreen() {
           // ignore teardown races
         }
         playerRef.current = null;
-        setIsResultPlaying(false);
+        await resultCardRef.current?.stop().catch(() => {});
 
         try {
           await engineRef.current?.destroy();
@@ -477,6 +474,7 @@ export default function StreamingTTSScreen() {
 
     try {
       const modelPath = resolveModelPath(selectedModelFolder);
+      await ensureEnUsTtsLexiconForFileSource(modelPath, selectedModelFolder);
       const detection = await detectTtsModel(await toDetectSource(modelPath));
       if (!detection.success) {
         throw new Error(detection.error ?? 'TTS model detection failed');
@@ -622,10 +620,6 @@ export default function StreamingTTSScreen() {
   }, [resultBuffer]);
 
   useEffect(() => {
-    isResultPlayingRef.current = isResultPlaying;
-  }, [isResultPlaying]);
-
-  useEffect(() => {
     if (streamingState !== 'running') {
       if (deltaDebounceTimerRef.current) {
         clearTimeout(deltaDebounceTimerRef.current);
@@ -674,33 +668,6 @@ export default function StreamingTTSScreen() {
     }, LIVE_INPUT_PUSH_DEBOUNCE_MS);
     setProgress(null);
   }, [inputText, streamingState]);
-
-  const handleToggleResultPlayback = useCallback(async () => {
-    if (!resultBuffer) {
-      return;
-    }
-
-    if (isResultPlaying) {
-      try {
-        await playerRef.current?.destroy();
-      } catch {
-        // ignore playback teardown races
-      }
-      playerRef.current = null;
-      isResultPlayingRef.current = false;
-      setIsResultPlaying(false);
-      return;
-    }
-
-    const player = await createPcmPlayer(resultBuffer.bufferId, {
-      onEnded: () => {
-        setIsResultPlaying(false);
-      },
-    });
-    playerRef.current = player;
-    isResultPlayingRef.current = true;
-    setIsResultPlaying(true);
-  }, [isResultPlaying, resultBuffer]);
 
   useEffect(() => {
     return () => {
@@ -841,67 +808,26 @@ export default function StreamingTTSScreen() {
               <Text style={styles.resultTitle}>Stream result</Text>
             </View>
             <Text style={styles.mutedText}>
-              Finalized audio buffer after Stop — same pipeline buffer, ready
-              for PCM playback.
+              Finalized audio buffer after Stop — play, save, or dismiss.
             </Text>
-            <View style={styles.resultStats}>
-              <Text style={styles.resultStatLine}>
-                {resultBuffer.sampleRate} Hz ·{' '}
-                {resultBuffer.numSamples.toLocaleString()} samples
-              </Text>
-              <Text style={styles.resultStatLine}>
-                Duration:{' '}
-                {resultBuffer.sampleRate > 0
-                  ? (resultBuffer.numSamples / resultBuffer.sampleRate).toFixed(
-                      2
-                    )
-                  : '—'}{' '}
-                s
-              </Text>
-              <Text style={styles.resultBufferId} numberOfLines={2} selectable>
-                Buffer: {resultBuffer.bufferId}
-              </Text>
-            </View>
-            <View style={styles.resultActions}>
-              <Pressable
-                style={[
-                  styles.primaryButton,
-                  styles.resultPlayButton,
-                  isResultPlaying && styles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  if (isResultPlaying) {
-                    return;
-                  }
-                  handleToggleResultPlayback().catch((err) => {
-                    setError(normalizeErrorMessage(err));
-                  });
-                }}
-                disabled={isResultPlaying}
-              >
-                <Ionicons name="play" size={18} color="#FFFFFF" />
-                <Text style={styles.primaryButtonText}>Play</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.secondaryButton,
-                  styles.resultStopButton,
-                  !isResultPlaying && styles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  if (!isResultPlaying) {
-                    return;
-                  }
-                  handleToggleResultPlayback().catch((err) => {
-                    setError(normalizeErrorMessage(err));
-                  });
-                }}
-                disabled={!isResultPlaying}
-              >
-                <Ionicons name="stop" size={18} color="#111827" />
-                <Text style={styles.secondaryButtonText}>Stop playback</Text>
-              </Pressable>
-            </View>
+            <PipelineOfflineAudioResultCard
+              ref={resultCardRef}
+              bufferId={resultBuffer.bufferId}
+              title="Stream result (offline buffer)"
+              sourceLabel={`${resultBuffer.numSamples.toLocaleString()} samples`}
+              sampleRate={resultBuffer.sampleRate}
+              durationMs={
+                resultBuffer.sampleRate > 0
+                  ? (resultBuffer.numSamples / resultBuffer.sampleRate) * 1000
+                  : 0
+              }
+              filename={`tts_streaming_${Date.now()}.wav`}
+              defaultDestinationKind="app"
+              onDismiss={() => {
+                releaseResultBuffer().catch(() => {});
+              }}
+              disabled={streamingState === 'running'}
+            />
           </View>
         )}
       </ScrollView>

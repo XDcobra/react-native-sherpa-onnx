@@ -345,4 +345,25 @@ export const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     gap: 8,
   },
+  selectedFileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    backgroundColor: '#F9FAFB',
+  },
+  selectedFileInfo: {
+    flex: 1,
+  },
+  liveLogBox: {
+    maxHeight: 220,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: '#F9FAFB',
+  },
 });

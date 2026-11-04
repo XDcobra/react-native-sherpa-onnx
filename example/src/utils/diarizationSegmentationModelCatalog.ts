@@ -103,15 +103,29 @@ function prioritizeEntries(
   return [...recommended, ...remaining];
 }
 
+export type DiarizationSegmentationModelPathContext = {
+  padModelIds: string[];
+  padModelsPath: string | null;
+  bundledFolders: string[];
+  downloadedIds: Set<string>;
+  downloadedPaths?: Record<string, string>;
+};
+
+export function createDiarizationSegmentationModelPathContext(
+  snapshot: DiarizationSegmentationCatalogSnapshot
+): DiarizationSegmentationModelPathContext {
+  return {
+    padModelIds: snapshot.padModelIds,
+    padModelsPath: snapshot.padModelsPath,
+    bundledFolders: snapshot.bundledFolders,
+    downloadedIds: new Set(snapshot.downloadedIds),
+    downloadedPaths: snapshot.downloadedPaths,
+  };
+}
+
 export function getDiarizationSegmentationModelPathConfig(
   modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
-    downloadedPaths?: Record<string, string>;
-  }
+  ctx: DiarizationSegmentationModelPathContext
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath

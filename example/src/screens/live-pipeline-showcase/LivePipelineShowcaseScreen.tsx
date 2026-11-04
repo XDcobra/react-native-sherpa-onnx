@@ -66,6 +66,7 @@ import {
   getFileModelPath,
   toDetectSource,
 } from '../../modelConfig';
+import { ensureEnUsTtsLexiconForFileSource } from '../../utils/enUsTtsLexicon';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   SegmentationPolicyControls,
@@ -774,6 +775,7 @@ export default function LivePipelineShowcaseScreen() {
 
       // ── Init TTS engine ────────────────────────────────────────────────────
       const ttsSource = await resolveTtsSource(selectedTtsModel);
+      await ensureEnUsTtsLexiconForFileSource(ttsSource, selectedTtsModel);
 
       setStatusText('Initializing TTS…');
       const ttsEngine = await createTTS({
@@ -1202,9 +1204,11 @@ export default function LivePipelineShowcaseScreen() {
             </Text>
             <PipelineOfflineAudioResultCard
               bufferId={pipelineTtsOutput.bufferId}
+              title="TTS output (offline buffer)"
               sourceLabel={pipelineTtsOutput.sourceLabel}
               sampleRate={pipelineTtsOutput.sampleRate}
               durationMs={pipelineTtsOutput.durationMs}
+              filename={`pipeline_tts_${Date.now()}.wav`}
               onDismiss={releasePriorCapturedTts}
               disabled={
                 pipelineState === 'running' || pipelineState === 'starting'

@@ -37,12 +37,11 @@ import {
 import type { OfflineAudioBufferRef } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createEmptyOfflineTextBuffer,
-  getOfflineTextBufferTextSlice,
-  getPipelineTextBufferInfo,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { getSegments } from 'react-native-sherpa-onnx/segment';
+import { ensureEnUsTtsLexiconForFileSource } from '../../utils/enUsTtsLexicon';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -51,6 +50,11 @@ import {
 } from '../../modelConfig';
 import { AUDIO_FILES } from '../../audioConfig';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import { OfflineTextBufferResultCard } from '../../components/OfflineTextBufferResultCard';
+import {
+  readOfflineTextBufferSnapshot,
+  type OfflineTextBufferSnapshot,
+} from '../../utils/readOfflineTextBufferSnapshot';
 import {
   OfflineAudioBufferWidget,
   type OfflineAudioBufferInfo,
@@ -107,7 +111,8 @@ export default function OfflinePipelineShowcaseScreen() {
   const [sttProgress, setSttProgress] = useState(0);
   const [ttsProgress, setTtsProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState<string | null>(null);
+  const [transcript, setTranscript] =
+    useState<OfflineTextBufferSnapshot | null>(null);
   const [segmentEvents, setSegmentEvents] = useState<SegmentEvent[]>([]);
   const [summaryText, setSummaryText] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -395,6 +400,7 @@ export default function OfflinePipelineShowcaseScreen() {
 
       setStatusText('Initializing TTS…');
       const ttsSource = await resolveTtsSource(selectedTtsModel);
+      await ensureEnUsTtsLexiconForFileSource(ttsSource, selectedTtsModel);
       const ttsEngine = await createTTS({
         modelSource: ttsSource,
         modelType: 'auto',
@@ -477,16 +483,12 @@ export default function OfflinePipelineShowcaseScreen() {
         setSegmentEvents(sttDetailedEvents);
       }
 
-      const textInfo = await getPipelineTextBufferInfo(textBufferRef.bufferId);
-      const fullText =
-        textInfo.kind === 'offlineTextBuffer' && textInfo.utf16Length > 0
-          ? await getOfflineTextBufferTextSlice(
-              textBufferRef.bufferId,
-              0,
-              textInfo.utf16Length
-            )
-          : '';
-      setTranscript(fullText || '(no transcript)');
+      const snapshot = await readOfflineTextBufferSnapshot(
+        textBufferRef.bufferId
+      );
+      setTranscript(
+        snapshot.text ? snapshot : { ...snapshot, text: '(no transcript)' }
+      );
 
       // ─── TTS phase ──────────────────────────────────────────────────────────
       setStatusText('Running TTS…');
@@ -835,13 +837,15 @@ export default function OfflinePipelineShowcaseScreen() {
 
         {/* Transcript */}
         {transcript ? (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Transcript</Text>
-            <View style={styles.resultCard}>
-              <Text style={styles.resultLabel}>STT Output</Text>
-              <Text style={styles.resultText}>{transcript}</Text>
-            </View>
-          </View>
+          <OfflineTextBufferResultCard
+            title="Transcript"
+            textLabel="STT Output:"
+            result={transcript}
+            showExpanders={false}
+            showMeta={false}
+            showJsonExport={false}
+            showBufferList={false}
+          />
         ) : null}
 
         {/* Synthesized Audio */}
