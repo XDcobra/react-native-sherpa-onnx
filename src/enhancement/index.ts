@@ -13,10 +13,11 @@ import {
   voiceSampleFromInitOptions,
 } from './types';
 import {
+  liveAudioNotifyToSpeechSegment,
   releasePipelineAudioBuffer,
   resolvePipelineAudioBufferId,
+  subscribeLiveAudioBufferEvents,
 } from '../audiobuffer';
-import type { SpeechSegment } from '../segment/segment';
 import type {
   DetectedModelEntry,
   DetectionSource,
@@ -34,7 +35,6 @@ import type {
 } from '../audiobuffer/types';
 import { runOfflineEnhancementPipeline } from './orchestrate';
 import { validateLiveOfflinePipelineOptions } from '../livePipeline';
-import { subscribeLiveAudioBufferEvents } from '../audiobuffer';
 import type { EnhancementLivePipelineOptions } from './types';
 import type { EnhancementPipelineHandle } from './streamingTypes';
 import {
@@ -173,7 +173,7 @@ async function enhanceLiveOverload(
   if (options.onSegment) {
     const cb = options.onSegment;
     const unsub = subscribeLiveAudioBufferEvents(outId, {
-      onSegment: (event) => cb(event.segment as SpeechSegment),
+      onSegment: (event) => cb(liveAudioNotifyToSpeechSegment(event)),
     });
     handle.completed.then(unsub, unsub);
   }

@@ -15,7 +15,7 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 | **2 — Audio: JS boundary polish** | **A2** | After native readers exist, fix JSI double-copy into `OwnedBuffer`. One JS-boundary copy remains OK |
 | **3 — Text: drop storage mirrors** | **T3 → T5 → T1 → T2** | T3 first (live mirror/cursors = dual SoT). T5 moves offline spans into C. T1 drops full-string default for features. T2 UTF-16 JNI after readers exist |
 | **4 — Segment: drop storage mirrors** | **S8 → S6 → S1 → S4** | S8 mirrors T3 (cursor/log in C). S6/S1 stop full snapshot/getter dumps. S4 single validator in C |
-| **5 — Optional event contracts** | **T4, S5** | May change JS payload shape; do after storage mirrors are gone; keep or version public contract |
+| **5 — Optional event contracts** | **T4, S5, A10** | May change JS payload shape; do after storage mirrors are gone; keep or version public contract |
 | **6 — Engine in C (separate epic)** | **S7 → S2** | S7 is the dual-hook symptom; S2 is full SegEngine port. **Not** buffer-handle work — schedule after A/T/S mirrors |
 | **7 — Deferred from closed IDs** | **A8 → A9 → T1b** (then any new D\* / A\*/T\* deferred rows) | Explicit follow-ups spawned when a closed ID left residual scope — **never** only a done-note |
 
@@ -60,7 +60,7 @@ When adding future deferred rows, update this table **and** the living backlog i
 | S6 | No full vector copy for offline-from-live default | Host: fullIfSpooled / windowSnapshot |
 | S1 | Getters don’t dump entire arrays by default | Host + TurboModule contract |
 | S4 | One validator | Host: invalid payload reject codes |
-| T4/S5 | Event payload size | Contract tests; optional |
+| T4/S5/A10 | Event payload size | Contract tests; optional |
 | S7/S2 | Engine SoT in C | Engine epic; device smoke after host |
 
 ## Test gate (mandatory per closed ID)
@@ -80,6 +80,7 @@ Buffer behavior must stay as today (append/drain/cursor/finalize/spool/overflow/
 | A7 | Audio | Android JSI → Kotlin `PipelineAudioRegistry` hop | — | Already fixed; JSI → `AudioRegistry` like iOS | **done** |
 | A8 | Audio | Offline feature helpers still `readAllSamples` → full `FloatArray` into engine JNI | Split from A1; needs per-feature bufferId / `const float*` handoff | Engine JNI default off full materialize | **deferred** (see [Deferred](#deferred-explicit-follow-ups)) |
 | A9 | Audio | JSI `OwnedBuffer` alloc per get-slice (no pool) | Split from A2; pool left out of A2 scope | Cross-call buffer pool / reuse | **deferred** (see [Deferred](#deferred-explicit-follow-ups)) |
+| A10 | Audio | Live `onSegment` still embeds `SpeechSegment` in `LiveAudioBufferSegmentEvent` | S5 slimmed native emit; audio fan-in kept fat TS shape | Notify scalars + `liveAudioNotifyToSpeechSegment` / segmentbuffer pull | **done** (`refactor/close-buffer-copy-backlog-phase-5-7`: notify+pull; no embedded segment) |
 | T1 | Text | Feature/Kotlin helpers still materialize full strings via JNI `txt_read_*` / `nativeReadOfflineText` / live `currentText` mirror (TTS, STT, punctuation, OCR populate) | SoT PR kept TurboModule + worker APIs compiling; no text JSI | Shared UTF-16 views / length-bounded readers into feature workers; drop full-string default where safe | **done** (`txt_copy_*_utf16_slice` + TurboModule slices; deferred → **T1b**) |
 | T1b | Text | TTS batch / punct offline / alignment / offline TEXT seg / `createLiveFromOffline` still full `.text` → engine `jstring` | Split from T1; needs per-feature bufferId / text-view JNI handoff | Engine JNI default off full materialize | **deferred** (see [Deferred](#deferred-explicit-follow-ups)) |
 | T2 | Text | JNI text path uses modified UTF-8 `GetStringUTFChars`/`NewStringUTF` round-trips (not UTF-16 code units) across TurboModule | RN string boundary; SoT preserved UTF-16 index semantics inside C via `TxtUtf16` | Critical JNI UTF-16 (`GetStringCritical` / `jchar`) or direct UTF-16 storage without UTF-8 hop | **done** (`TxtUtf16Codec` + textbuffer JNI content via `GetStringChars`/`NewString`; IDs stay MUTF-8) |

@@ -25,6 +25,7 @@ import {
   releaseSegmentationStateForBuffer,
   setAssociatedAudioSegmentBuffer,
 } from '../segment/runtime-state';
+import type { SpeechSegment } from '../segment/segment';
 import {
   installJSI as installJSIBindings,
   isJSIAvailable,
@@ -399,6 +400,7 @@ function ensureLiveEventSubscriptions(): void {
     segmentSubscription = emitter.addListener(
       'pipelineLiveSegmentAppended',
       (rawEvent: {
+        segmentBufferId?: string;
         sourceAudioBufferId?: string;
         segmentId?: string;
         segmentIndex?: number;
@@ -449,44 +451,46 @@ function ensureLiveEventSubscriptions(): void {
             ? consumeSpeechSegmentAnnotation(segmentId)
             : undefined;
 
-        // Notify-only segment events: payload lives in SegmentMeta — pull via
-        // segmentbuffer `readLiveSegment` when needed (avoid bridge dump).
-        const segment = {
-          segmentId,
-          domain: 'speech' as const,
-          startOffset:
-            typeof rawEvent.startSample === 'number'
-              ? Math.trunc(rawEvent.startSample)
-              : 0,
-          endOffset:
-            typeof rawEvent.endSample === 'number'
-              ? Math.trunc(rawEvent.endSample)
-              : 0,
-          reason: annotation?.reason ?? eventReason,
-          source: annotation?.source ?? eventSource,
-          createdAtMs: annotation?.createdAtMs ?? eventCreatedAtMs,
-          segmentIndex,
-          sourceAudioBufferId,
-          sampleRate:
-            typeof rawEvent.sampleRate === 'number'
-              ? Math.trunc(rawEvent.sampleRate)
-              : 0,
-          durationMs:
-            typeof rawEvent.durationMs === 'number' ? rawEvent.durationMs : 0,
-          ...(typeof rawEvent.confidence === 'number'
-            ? { confidence: rawEvent.confidence }
-            : {}),
-        };
+        const reason = annotation?.reason ?? eventReason;
+        const source = annotation?.source ?? eventSource;
+        const createdAtMs = annotation?.createdAtMs ?? eventCreatedAtMs;
 
         const totalSegments =
           typeof rawEvent.totalSegments === 'number'
             ? Math.trunc(rawEvent.totalSegments)
             : Math.max(1, segmentIndex + 1);
 
+        // Notify-only: no embedded SpeechSegment / payload. Pull SegmentMeta via
+        // segmentbuffer `readLiveSegment` when needed (avoid bridge dump).
         const event: LiveAudioBufferSegmentEvent = {
           bufferId: sourceAudioBufferId,
-          segment,
+          segmentBufferId:
+            typeof rawEvent.segmentBufferId === 'string'
+              ? rawEvent.segmentBufferId
+              : '',
+          segmentId,
+          segmentIndex,
           totalSegments,
+          startSample:
+            typeof rawEvent.startSample === 'number'
+              ? Math.trunc(rawEvent.startSample)
+              : 0,
+          endSample:
+            typeof rawEvent.endSample === 'number'
+              ? Math.trunc(rawEvent.endSample)
+              : 0,
+          sampleRate:
+            typeof rawEvent.sampleRate === 'number'
+              ? Math.trunc(rawEvent.sampleRate)
+              : 0,
+          durationMs:
+            typeof rawEvent.durationMs === 'number' ? rawEvent.durationMs : 0,
+          reason,
+          source,
+          createdAtMs,
+          ...(typeof rawEvent.confidence === 'number'
+            ? { confidence: rawEvent.confidence }
+            : {}),
         };
 
         for (const cb of callbacks) {
@@ -495,6 +499,40 @@ function ensureLiveEventSubscriptions(): void {
       }
     );
   }
+}
+
+/**
+ * Map a notify-only live-audio segment event into a domain SpeechSegment
+ * for product callbacks (enhancement / TTS / separation).
+ */
+export function liveAudioNotifyToSpeechSegment(
+  event: LiveAudioBufferSegmentEvent
+): SpeechSegment {
+  const reason = toSegmentReason(event.reason);
+  const source = toSegmentSource(event.source);
+  const createdAtMs =
+    typeof event.createdAtMs === 'number'
+      ? Math.trunc(event.createdAtMs)
+      : Date.now();
+
+  return {
+    segmentId:
+      event.segmentId ||
+      `seg_${event.segmentBufferId || event.bufferId}_${event.segmentIndex}`,
+    domain: 'speech',
+    startOffset: event.startSample,
+    endOffset: event.endSample,
+    reason,
+    source,
+    createdAtMs,
+    segmentIndex: event.segmentIndex,
+    sourceAudioBufferId: event.bufferId,
+    sampleRate: event.sampleRate,
+    durationMs: event.durationMs,
+    ...(typeof event.confidence === 'number'
+      ? { confidence: event.confidence }
+      : {}),
+  };
 }
 
 function maybeTearDownLiveEventSubscriptions(): void {
