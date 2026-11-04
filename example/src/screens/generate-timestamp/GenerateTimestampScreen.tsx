@@ -15,18 +15,10 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation, type NavigationProp } from '@react-navigation/native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import {
-  getAssetPackPath,
-  listAssetModels,
-  listModelsAtPath,
-} from 'react-native-sherpa-onnx/utils';
-import {
-  createAlignment,
-  detectAlignmentModel,
   type AlignmentGranularity,
-  type AlignmentModelType,
   type AlignmentWarning,
 } from 'react-native-sherpa-onnx/alignment';
 import {
@@ -41,43 +33,16 @@ import {
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 import { segmentOfflineBuffer } from 'react-native-sherpa-onnx/segment';
-import {
-  createSTT,
-  detectSttModel,
-  type STTModelType,
-} from 'react-native-sherpa-onnx/stt';
-import {
-  detectVadModel,
-  type VADModelType,
-} from 'react-native-sherpa-onnx/vad';
-import {
-  listDownloadedModels,
-  ModelCategory,
-  onModelsListUpdated,
-  type ModelMeta,
-} from 'react-native-sherpa-onnx/download';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import {
-  getAssetModelPath,
-  getFileModelPath,
-  getModelDisplayName,
-  toDetectSource,
-} from '../../modelConfig';
-import { AUDIO_FILES } from '../../audioConfig';
-import { RECOMMENDED_MODEL_IDS } from '../../utils/recommendedModels';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
-import {
-  AlignmentCustomInitForm,
-  InitModeSelector,
-  type AlignmentCustomInitFormState,
-  type ModelInitMode,
-} from '../../components/modelInit';
-import { fillAlignmentCustomConfigFromModelFolder } from '../../utils/alignmentCustomInitFill';
+import { GenerateTimestampModelInitPanel } from '../../components/GenerateTimestampModelInitPanel';
 import {
   OfflineAudioBufferWidget,
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
+import { useGenerateTimestampModelInit } from '../../hooks/useGenerateTimestampModelInit';
+import { AUDIO_FILES } from '../../audioConfig';
+import type { RootStackParamList } from '../../types/navigation';
 import { styles } from './GenerateTimestampScreen.styles';
 
 type UiMode =
@@ -87,20 +52,6 @@ type UiMode =
   | 'vad'
   | 'asr_mediated'
   | 'chunked_forced_ctc';
-
-type ModelEntry = {
-  id: string;
-  label: string;
-  recommended?: boolean;
-};
-
-type ModelCatalog = {
-  entries: ModelEntry[];
-  bundledIds: string[];
-  padIds: string[];
-  downloadedIds: string[];
-  padPath: string | null;
-};
 
 type AlignmentSegmentView = Extract<SegmentMeta, { kind: 'alignment' }>;
 
@@ -138,18 +89,11 @@ type ModeConfig = {
   runButtonLabel: string;
 };
 
-const PAD_PACK_NAME = 'sherpa_models';
 const DEFAULT_REFERENCE_TEXT =
   'This is the reference transcript that should be aligned to the selected audio.';
 const DEFAULT_ESTIMATED_SAMPLE_RATE = '16000';
 const DEFAULT_ESTIMATED_COUNTS = '3200, 4000, 2800';
-const EMPTY_MODEL_CATALOG: ModelCatalog = {
-  entries: [],
-  bundledIds: [],
-  padIds: [],
-  downloadedIds: [],
-  padPath: null,
-};
+
 const MODE_CONFIGS: ModeConfig[] = [
   {
     value: 'proportional',
@@ -241,6 +185,7 @@ const MODE_CONFIGS: ModeConfig[] = [
     runButtonLabel: 'Run accurate alignment (chunked_forced_ctc)',
   },
 ];
+
 const ALL_GRANULARITIES: AlignmentGranularity[] = [
   'sentence',
   'word',
@@ -262,145 +207,6 @@ function extractErrorCode(message: string): string | null {
   }
   const maybeCode = trimmed.slice(0, idx).trim();
   return maybeCode.length > 0 ? maybeCode : null;
-}
-
-function getModelLabel(model: ModelMeta): string {
-  const title = model.displayName?.trim();
-  if (title && title.length > 0) {
-    return title;
-  }
-  return getModelDisplayName(model.id);
-}
-
-function isAlignmentModelFolder(folder: string, hint: string): boolean {
-  if (hint === 'alignment') {
-    return true;
-  }
-  return folder.toLowerCase().includes('wav2vec');
-}
-
-function isVadModelFolder(folder: string, hint: string): boolean {
-  if (hint === 'vad') {
-    return true;
-  }
-  const normalized = folder.toLowerCase();
-  return (
-    normalized.includes('vad') ||
-    normalized.includes('silero') ||
-    normalized.includes('ten-vad')
-  );
-}
-
-function isSttModelFolder(_: string, hint: string): boolean {
-  return hint === 'stt';
-}
-
-function prioritizeEntries(
-  entries: ModelEntry[],
-  recommendedIds: string[] = []
-): ModelEntry[] {
-  const uniqueEntries = Array.from(
-    new Map(entries.map((entry) => [entry.id, entry])).values()
-  );
-  const recommendedSet = new Set(recommendedIds);
-  const recommended: ModelEntry[] = [];
-  const remaining: ModelEntry[] = [];
-
-  for (const entry of uniqueEntries) {
-    if (recommendedSet.has(entry.id)) {
-      recommended.push({ ...entry, recommended: true });
-      continue;
-    }
-    remaining.push(entry);
-  }
-
-  recommended.sort(
-    (left, right) =>
-      recommendedIds.indexOf(left.id) - recommendedIds.indexOf(right.id)
-  );
-  remaining.sort((left, right) => left.label.localeCompare(right.label));
-
-  return [...recommended, ...remaining];
-}
-
-function buildModelCatalog(params: {
-  category: ModelCategory;
-  assetModels: Array<{ folder: string; hint: string }>;
-  padModels: Array<{ folder: string; hint: string }>;
-  downloadedModels: ModelMeta[];
-  filter: (folder: string, hint: string) => boolean;
-  recommendedIds?: string[];
-  padPath: string | null;
-}): ModelCatalog {
-  const {
-    assetModels,
-    padModels,
-    downloadedModels,
-    filter,
-    recommendedIds,
-    padPath,
-  } = params;
-  const bundledIds = assetModels
-    .filter((model) => filter(model.folder, model.hint))
-    .map((model) => model.folder);
-  const padIds = padModels
-    .filter((model) => filter(model.folder, model.hint))
-    .map((model) => model.folder);
-  const downloadedIds = downloadedModels.map((model) => model.id);
-  const metaById = new Map(
-    downloadedModels.map((model) => [model.id, model] as const)
-  );
-  const mergedIds: string[] = [];
-  const pushId = (id: string) => {
-    if (!mergedIds.includes(id)) {
-      mergedIds.push(id);
-    }
-  };
-  for (const id of padIds) {
-    pushId(id);
-  }
-  for (const id of bundledIds) {
-    pushId(id);
-  }
-  for (const id of downloadedIds) {
-    pushId(id);
-  }
-
-  return {
-    entries: prioritizeEntries(
-      mergedIds.map((id) => {
-        const meta = metaById.get(id);
-        return {
-          id,
-          label: meta ? getModelLabel(meta) : getModelDisplayName(id),
-        };
-      }),
-      recommendedIds
-    ),
-    bundledIds,
-    padIds,
-    downloadedIds,
-    padPath,
-  };
-}
-
-function resolveModelPathForCatalog(
-  modelId: string,
-  category: ModelCategory,
-  catalog: ModelCatalog
-): FileSource {
-  if (catalog.padIds.includes(modelId)) {
-    return catalog.padPath
-      ? getFileModelPath(modelId, category, catalog.padPath)
-      : getFileModelPath(modelId, category);
-  }
-  if (catalog.downloadedIds.includes(modelId)) {
-    return getFileModelPath(modelId, category);
-  }
-  if (catalog.bundledIds.includes(modelId)) {
-    return getAssetModelPath(modelId);
-  }
-  return getAssetModelPath(modelId);
 }
 
 function parseEstimatedTimeline(
@@ -474,121 +280,17 @@ function SectionCard(props: {
   );
 }
 
-function ModelPreparationCard(props: {
-  stepLabel: string;
-  title: string;
-  description: string;
-  loading: boolean;
-  emptyMessage: string;
-  models: ModelEntry[];
-  selectedId: string | null;
-  preparedId: string | null;
-  preparing: boolean;
-  prepareLabel: string;
-  preparedSummary: string | null;
-  onSelect: (id: string) => void;
-  onPrepare: () => void;
-  showPrepareButton?: boolean;
-  leadingExtra?: ReactNode;
-  footerExtra?: ReactNode;
-}) {
-  return (
-    <SectionCard
-      stepLabel={props.stepLabel}
-      title={props.title}
-      description={props.description}
-    >
-      {props.leadingExtra}
-      {props.preparedId ? (
-        <View style={styles.currentModelContainer}>
-          <Text style={styles.currentModelText}>
-            Ready: {getModelDisplayName(props.preparedId)}
-          </Text>
-          {props.preparedSummary ? (
-            <Text style={styles.currentModelMetaText}>
-              {props.preparedSummary}
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
-
-      {props.loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color="#007AFF" />
-          <Text style={styles.loadingText}>Loading available models...</Text>
-        </View>
-      ) : props.models.length === 0 ? (
-        <View style={styles.warningContainer}>
-          <Text style={styles.warningBannerText}>{props.emptyMessage}</Text>
-        </View>
-      ) : (
-        <View style={styles.modelButtons}>
-          {props.models.map((model) => {
-            const isSelected = props.selectedId === model.id;
-            const isPrepared = props.preparedId === model.id;
-            return (
-              <Pressable
-                key={model.id}
-                style={[
-                  styles.modelSelectButton,
-                  isSelected && styles.modelSelectButtonActive,
-                  isPrepared && styles.modelSelectButtonInitialized,
-                ]}
-                onPress={() => props.onSelect(model.id)}
-                disabled={props.preparing}
-              >
-                <View style={styles.modelHeaderRow}>
-                  <Text
-                    style={[
-                      styles.modelSelectButtonTitle,
-                      isSelected && styles.modelSelectButtonTitleActive,
-                    ]}
-                  >
-                    {model.label}
-                  </Text>
-                  {model.recommended ? (
-                    <View style={styles.recommendedBadge}>
-                      <Text style={styles.recommendedBadgeText}>
-                        Recommended
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-                <Text style={styles.modelSelectButtonId}>{model.id}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      )}
-
-      {props.showPrepareButton !== false ? (
-        <Pressable
-          style={[
-            styles.button,
-            styles.applyButton,
-            (props.preparing ||
-              !props.selectedId ||
-              props.models.length === 0) &&
-              styles.buttonDisabled,
-          ]}
-          onPress={props.onPrepare}
-          disabled={
-            props.preparing || !props.selectedId || props.models.length === 0
-          }
-        >
-          {props.preparing ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.buttonText}>{props.prepareLabel}</Text>
-          )}
-        </Pressable>
-      ) : null}
-      {props.footerExtra}
-    </SectionCard>
-  );
-}
-
 export default function GenerateTimestampScreen() {
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
+    undefined
+  );
+
+  const modelInit = useGenerateTimestampModelInit({
+    onBeforeInit: () => onBeforeInitRef.current?.(),
+  });
+  const { alignment, vad, stt, collectRunBlockingIssues } = modelInit;
+
   const [mode, setMode] = useState<UiMode>('proportional');
   const [granularity, setGranularity] =
     useState<AlignmentGranularity>('sentence');
@@ -604,69 +306,6 @@ export default function GenerateTimestampScreen() {
   const [estimatedSegmentCountsText, setEstimatedSegmentCountsText] = useState(
     DEFAULT_ESTIMATED_COUNTS
   );
-  const [loadingModelCatalogs, setLoadingModelCatalogs] = useState(false);
-  const [alignmentCatalog, setAlignmentCatalog] =
-    useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
-  const [vadCatalog, setVadCatalog] =
-    useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
-  const [sttCatalog, setSttCatalog] =
-    useState<ModelCatalog>(EMPTY_MODEL_CATALOG);
-
-  const [selectedAlignmentModelId, setSelectedAlignmentModelId] = useState<
-    string | null
-  >(null);
-  const [preparedAlignmentModelId, setPreparedAlignmentModelId] = useState<
-    string | null
-  >(null);
-  const [preparedAlignmentModelPath, setPreparedAlignmentModelPath] = useState<
-    string | null
-  >(null);
-  const [preparedAlignmentModelType, setPreparedAlignmentModelType] = useState<
-    AlignmentModelType | string | null
-  >(null);
-  const [preparingAlignmentModel, setPreparingAlignmentModel] = useState(false);
-  const [alignmentPrepareSummary, setAlignmentPrepareSummary] = useState<
-    string | null
-  >(null);
-  const [alignmentInitMode, setAlignmentInitMode] =
-    useState<ModelInitMode>('auto');
-  const [alignmentCustomInitForm, setAlignmentCustomInitForm] =
-    useState<AlignmentCustomInitFormState>({ fileSources: {} });
-  const [alignmentCustomFillLoading, setAlignmentCustomFillLoading] =
-    useState(false);
-  const [alignmentCustomFillHint, setAlignmentCustomFillHint] = useState<
-    string | null
-  >(null);
-
-  const [selectedVadModelId, setSelectedVadModelId] = useState<string | null>(
-    null
-  );
-  const [preparedVadModelId, setPreparedVadModelId] = useState<string | null>(
-    null
-  );
-  const [preparedVadModelPath, setPreparedVadModelPath] = useState<
-    string | null
-  >(null);
-  const [preparedVadModelType, setPreparedVadModelType] =
-    useState<VADModelType | null>(null);
-  const [preparingVadModel, setPreparingVadModel] = useState(false);
-  const [vadPrepareSummary, setVadPrepareSummary] = useState<string | null>(
-    null
-  );
-
-  const [selectedSttModelId, setSelectedSttModelId] = useState<string | null>(
-    null
-  );
-  const [preparedSttModelId, setPreparedSttModelId] = useState<string | null>(
-    null
-  );
-  const [preparedSttModelType, setPreparedSttModelType] = useState<
-    STTModelType | string | null
-  >(null);
-  const [preparingSttModel, setPreparingSttModel] = useState(false);
-  const [sttPrepareSummary, setSttPrepareSummary] = useState<string | null>(
-    null
-  );
 
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -674,6 +313,12 @@ export default function GenerateTimestampScreen() {
   const [result, setResult] = useState<RunResult | null>(null);
   const [segmentsExpanded, setSegmentsExpanded] = useState(true);
   const [subtitlesExpanded, setSubtitlesExpanded] = useState(true);
+
+  onBeforeInitRef.current = () => {
+    setResult(null);
+    setError(null);
+    setErrorCode(null);
+  };
 
   const activeMode = useMemo<ModeConfig>(
     () => MODE_CONFIGS.find((item) => item.value === mode)!,
@@ -740,400 +385,30 @@ export default function GenerateTimestampScreen() {
     }
   }, [estimatedSampleRateText, estimatedSegmentCountsText, mode]);
 
-  const loadModelCatalogs = useCallback(async () => {
-    setLoadingModelCatalogs(true);
-    try {
-      const [assetModels, downloadedAlignment, downloadedVad, downloadedStt] =
-        await Promise.all([
-          listAssetModels(),
-          listDownloadedModels(ModelCategory.Alignment),
-          listDownloadedModels(ModelCategory.Vad),
-          listDownloadedModels(ModelCategory.Stt),
-        ]);
-
-      let padModels: Array<{ folder: string; hint: string }> = [];
-      let resolvedPadPath: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallbackPath = `${DocumentDirectoryPath}/models`;
-        const padPath = padPathFromNative ?? fallbackPath;
-        padModels = await listModelsAtPath(padPath);
-        if (padModels.length > 0) {
-          resolvedPadPath = padPath;
-        }
-      } catch {
-        padModels = [];
-      }
-
-      const nextAlignmentCatalog = buildModelCatalog({
-        category: ModelCategory.Alignment,
-        assetModels,
-        padModels,
-        downloadedModels: downloadedAlignment,
-        filter: isAlignmentModelFolder,
-        padPath: resolvedPadPath,
-      });
-      const nextVadCatalog = buildModelCatalog({
-        category: ModelCategory.Vad,
-        assetModels,
-        padModels,
-        downloadedModels: downloadedVad,
-        filter: isVadModelFolder,
-        recommendedIds: RECOMMENDED_MODEL_IDS[ModelCategory.Vad],
-        padPath: resolvedPadPath,
-      });
-      const nextSttCatalog = buildModelCatalog({
-        category: ModelCategory.Stt,
-        assetModels,
-        padModels,
-        downloadedModels: downloadedStt,
-        filter: isSttModelFolder,
-        recommendedIds: RECOMMENDED_MODEL_IDS[ModelCategory.Stt],
-        padPath: resolvedPadPath,
-      });
-
-      setAlignmentCatalog(nextAlignmentCatalog);
-      setVadCatalog(nextVadCatalog);
-      setSttCatalog(nextSttCatalog);
-
-      const alignmentIds = new Set(
-        nextAlignmentCatalog.entries.map((entry) => entry.id)
-      );
-      const vadIds = new Set(nextVadCatalog.entries.map((entry) => entry.id));
-      const sttIds = new Set(nextSttCatalog.entries.map((entry) => entry.id));
-
-      setSelectedAlignmentModelId((prev) =>
-        prev && alignmentIds.has(prev)
-          ? prev
-          : nextAlignmentCatalog.entries[0]?.id ?? null
-      );
-      setSelectedVadModelId((prev) =>
-        prev && vadIds.has(prev) ? prev : nextVadCatalog.entries[0]?.id ?? null
-      );
-      setSelectedSttModelId((prev) =>
-        prev && sttIds.has(prev) ? prev : nextSttCatalog.entries[0]?.id ?? null
-      );
-
-      if (
-        preparedAlignmentModelId &&
-        !alignmentIds.has(preparedAlignmentModelId)
-      ) {
-        setPreparedAlignmentModelId(null);
-        setPreparedAlignmentModelPath(null);
-        setPreparedAlignmentModelType(null);
-        setAlignmentPrepareSummary(null);
-      }
-      if (preparedVadModelId && !vadIds.has(preparedVadModelId)) {
-        setPreparedVadModelId(null);
-        setPreparedVadModelPath(null);
-        setPreparedVadModelType(null);
-        setVadPrepareSummary(null);
-      }
-      if (preparedSttModelId && !sttIds.has(preparedSttModelId)) {
-        setPreparedSttModelId(null);
-        setPreparedSttModelType(null);
-        setSttPrepareSummary(null);
-      }
-    } catch (err) {
-      console.error(
-        'GenerateTimestampScreen: failed to load model catalogs',
-        err
-      );
-      setAlignmentCatalog(EMPTY_MODEL_CATALOG);
-      setVadCatalog(EMPTY_MODEL_CATALOG);
-      setSttCatalog(EMPTY_MODEL_CATALOG);
-      setSelectedAlignmentModelId(null);
-      setSelectedVadModelId(null);
-      setSelectedSttModelId(null);
-    } finally {
-      setLoadingModelCatalogs(false);
-    }
-  }, [preparedAlignmentModelId, preparedSttModelId, preparedVadModelId]);
-
-  useEffect(() => {
-    loadModelCatalogs().catch(() => {});
-  }, [loadModelCatalogs]);
-
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (
-        category !== ModelCategory.Alignment &&
-        category !== ModelCategory.Vad &&
-        category !== ModelCategory.Stt
-      ) {
-        return;
-      }
-      loadModelCatalogs().catch(() => {});
-    });
-
-    return unsubscribe;
-  }, [loadModelCatalogs]);
-
   useEffect(() => {
     if (!activeMode.allowedGranularities.includes(granularity)) {
       setGranularity(activeMode.allowedGranularities[0] ?? 'sentence');
     }
   }, [activeMode, granularity]);
 
-  const runBlockingIssues = useMemo(() => {
-    const issues: string[] = [];
-    if (!preparedAudioBuffer) {
-      issues.push('Select an audio file.');
-    }
-    if (!referenceTranscript.trim()) {
-      issues.push('Enter a reference transcript.');
-    }
-    if (!activeMode.allowedGranularities.includes(granularity)) {
-      issues.push(activeMode.granularityHint);
-    }
-    if (activeMode.requiresEstimatedChunks && estimatedTimeline.error) {
-      issues.push(estimatedTimeline.error);
-    }
-    if (
-      activeMode.requiresAlignmentModel &&
-      alignmentInitMode === 'auto' &&
-      (!selectedAlignmentModelId ||
-        preparedAlignmentModelId !== selectedAlignmentModelId)
-    ) {
-      issues.push('Prepare the selected alignment model with Use model.');
-    }
-    if (
-      activeMode.requiresAlignmentModel &&
-      alignmentInitMode === 'custom' &&
-      alignmentCustomInitForm.fileSources.model == null
-    ) {
-      issues.push('Set the custom alignment model path (model slot).');
-    }
-    if (
-      activeMode.requiresVadModel &&
-      (!selectedVadModelId || preparedVadModelId !== selectedVadModelId)
-    ) {
-      issues.push('Prepare the selected VAD model with Use model.');
-    }
-    if (
-      activeMode.requiresSttModel &&
-      (!selectedSttModelId || preparedSttModelId !== selectedSttModelId)
-    ) {
-      issues.push('Prepare the selected STT model with Use model.');
-    }
-    return issues;
-  }, [
-    activeMode,
-    estimatedTimeline.error,
-    granularity,
-    preparedAlignmentModelId,
-    preparedSttModelId,
-    preparedVadModelId,
-    referenceTranscript,
-    selectedAlignmentModelId,
-    preparedAudioBuffer,
-    selectedSttModelId,
-    selectedVadModelId,
-    alignmentInitMode,
-    alignmentCustomInitForm.fileSources.model,
-  ]);
-
-  const handlePrepareAlignmentModel = useCallback(async () => {
-    if (!selectedAlignmentModelId) {
-      setError('Select an alignment model first.');
-      return;
-    }
-
-    setPreparingAlignmentModel(true);
-    setError(null);
-    setErrorCode(null);
-    setAlignmentPrepareSummary(null);
-
-    try {
-      const detection = await detectAlignmentModel(
-        await toDetectSource(
-          resolveModelPathForCatalog(
-            selectedAlignmentModelId,
-            ModelCategory.Alignment,
-            alignmentCatalog
-          )
-        ),
-        { modelType: 'auto' as AlignmentModelType }
-      );
-      const modelPath = detection.paths?.model?.trim();
-      if (!detection.success || !modelPath) {
-        throw new Error(
-          detection.error ||
-            'Alignment model detection failed: no model path found.'
-        );
-      }
-
-      setPreparedAlignmentModelId(selectedAlignmentModelId);
-      setPreparedAlignmentModelPath(modelPath);
-      setPreparedAlignmentModelType(
-        detection.modelType ?? detection.detectedModels[0]?.type ?? null
-      );
-      setAlignmentPrepareSummary(
-        `${getModelDisplayName(selectedAlignmentModelId)}\nmodel: ${modelPath}`
-      );
-      setResult(null);
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Failed to prepare alignment model.';
-      setError(message);
-      setErrorCode(extractErrorCode(message));
-    } finally {
-      setPreparingAlignmentModel(false);
-    }
-  }, [alignmentCatalog, selectedAlignmentModelId]);
-
-  const handleFillAlignmentCustomFromCatalog = useCallback(async () => {
-    if (!selectedAlignmentModelId) {
-      setError('Select an alignment model folder first.');
-      return;
-    }
-
-    setAlignmentCustomFillLoading(true);
-    setAlignmentCustomFillHint(null);
-    setError(null);
-    setErrorCode(null);
-
-    try {
-      const modelSource = resolveModelPathForCatalog(
-        selectedAlignmentModelId,
-        ModelCategory.Alignment,
-        alignmentCatalog
-      );
-      const fillResult = await fillAlignmentCustomConfigFromModelFolder(
-        await toDetectSource(modelSource)
-      );
-      setAlignmentCustomInitForm({ fileSources: fillResult.customConfig });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setAlignmentCustomFillHint(
-        `Filled from ${getModelDisplayName(selectedAlignmentModelId)} (${
-          fillResult.modelDir
-        }).${missing}`
-      );
-      setResult(null);
-    } catch (err) {
-      setAlignmentCustomFillHint(null);
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Failed to fill custom alignment paths.';
-      setError(message);
-      setErrorCode(extractErrorCode(message));
-    } finally {
-      setAlignmentCustomFillLoading(false);
-    }
-  }, [alignmentCatalog, selectedAlignmentModelId]);
-
-  const handleAlignmentCustomScatteredTest = useCallback(() => {
-    setAlignmentCustomInitForm({ fileSources: {} });
-    setAlignmentCustomFillHint(
-      'Scattered test: pick the wav2vec2 ONNX from a different location, then run alignment.'
-    );
-  }, []);
-
-  const handlePrepareVadModel = useCallback(async () => {
-    if (!selectedVadModelId) {
-      setError('Select a VAD model first.');
-      return;
-    }
-
-    setPreparingVadModel(true);
-    setError(null);
-    setErrorCode(null);
-    setVadPrepareSummary(null);
-
-    try {
-      const detection = await detectVadModel(
-        await toDetectSource(
-          resolveModelPathForCatalog(
-            selectedVadModelId,
-            ModelCategory.Vad,
-            vadCatalog
-          )
-        ),
-        { modelType: 'auto' }
-      );
-      const modelPath = detection.paths?.model?.trim();
-      const modelType = detection.modelType;
-      if (!detection.success || !modelPath || !modelType) {
-        throw new Error(
-          detection.error || 'VAD model detection failed: no model path/type.'
-        );
-      }
-      if (modelType !== 'silero_vad' && modelType !== 'ten_vad') {
-        throw new Error(`Unsupported detected VAD model type: ${modelType}`);
-      }
-
-      setPreparedVadModelId(selectedVadModelId);
-      setPreparedVadModelPath(modelPath);
-      setPreparedVadModelType(modelType);
-      setVadPrepareSummary(
-        `${getModelDisplayName(
-          selectedVadModelId
-        )}\nmodel: ${modelPath}\ntype: ${modelType}`
-      );
-      setResult(null);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to prepare VAD model.';
-      setError(message);
-      setErrorCode(extractErrorCode(message));
-    } finally {
-      setPreparingVadModel(false);
-    }
-  }, [selectedVadModelId, vadCatalog]);
-
-  const handlePrepareSttModel = useCallback(async () => {
-    if (!selectedSttModelId) {
-      setError('Select an STT model first.');
-      return;
-    }
-
-    setPreparingSttModel(true);
-    setError(null);
-    setErrorCode(null);
-    setSttPrepareSummary(null);
-
-    try {
-      const detection = await detectSttModel(
-        await toDetectSource(
-          resolveModelPathForCatalog(
-            selectedSttModelId,
-            ModelCategory.Stt,
-            sttCatalog
-          )
-        ),
-        { modelType: 'auto' }
-      );
-      if (!detection.success || detection.detectedModels.length === 0) {
-        throw new Error(
-          detection.error ||
-            'STT model detection failed: no compatible models found.'
-        );
-      }
-      const detectedType =
-        detection.modelType ?? detection.detectedModels[0]?.type ?? null;
-      setPreparedSttModelId(selectedSttModelId);
-      setPreparedSttModelType(detectedType);
-      setSttPrepareSummary(
-        `${getModelDisplayName(selectedSttModelId)}\ndetected: ${
-          detectedType ?? 'unknown'
-        }\nstreaming: ${detection.isStreaming ? 'yes' : 'no'}`
-      );
-      setResult(null);
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Failed to prepare STT model.';
-      setError(message);
-      setErrorCode(extractErrorCode(message));
-    } finally {
-      setPreparingSttModel(false);
-    }
-  }, [selectedSttModelId, sttCatalog]);
+  const runBlockingIssues = useMemo(
+    () =>
+      collectRunBlockingIssues({
+        modeRequirements: activeMode,
+        granularity,
+        hasAudio: preparedAudioBuffer != null,
+        hasReferenceText: referenceTranscript.trim().length > 0,
+        estimatedTimelineError: estimatedTimeline.error,
+      }),
+    [
+      activeMode,
+      collectRunBlockingIssues,
+      estimatedTimeline.error,
+      granularity,
+      preparedAudioBuffer,
+      referenceTranscript,
+    ]
+  );
 
   const handleRunAlignment = useCallback(async () => {
     if (runBlockingIssues.length > 0) {
@@ -1150,8 +425,6 @@ export default function GenerateTimestampScreen() {
     setErrorCode(null);
     setResult(null);
 
-    const alignment = createAlignment();
-    let stt: Awaited<ReturnType<typeof createSTT>> | null = null;
     let textBufferId: string | null = null;
     let outputSegmentBufferId: string | null = null;
     let anchorSegmentBufferId: string | null = null;
@@ -1159,6 +432,7 @@ export default function GenerateTimestampScreen() {
     const audioBufferId = preparedAudioBuffer!.bufferId;
 
     try {
+      const alignmentEngine = await alignment.ensureAlignmentEngine();
       const referenceBuffer = await createOfflineTextBufferFromText(
         referenceTranscript.trim()
       );
@@ -1170,61 +444,29 @@ export default function GenerateTimestampScreen() {
       outputSegmentBufferId = outputBuffer.bufferId;
 
       const accurateAlignmentModel = activeMode.requiresAlignmentModel
-        ? alignmentInitMode === 'custom'
-          ? {
-              initMode: 'custom' as const,
-              modelType: 'wav2vec2' as const,
-              customConfig: {
-                model: alignmentCustomInitForm.fileSources.model!,
-              },
-            }
-          : {
-              modelSource: resolveModelPathForCatalog(
-                preparedAlignmentModelId!,
-                ModelCategory.Alignment,
-                alignmentCatalog
-              ),
-            }
+        ? alignment.buildAccurateAlignmentModelArg()
         : null;
-      const vadModelPath = activeMode.requiresVadModel
-        ? await toDetectSource(
-            resolveModelPathForCatalog(
-              preparedVadModelId!,
-              ModelCategory.Vad,
-              vadCatalog
-            )
-          )
-        : null;
-      const sttModelPath = activeMode.requiresSttModel
-        ? resolveModelPathForCatalog(
-            preparedSttModelId!,
-            ModelCategory.Stt,
-            sttCatalog
-          )
-        : null;
+      if (activeMode.requiresAlignmentModel && !accurateAlignmentModel) {
+        throw new Error('Alignment model is not prepared.');
+      }
 
-      let anchorRef: Awaited<ReturnType<typeof segmentOfflineBuffer>> | null =
-        null;
       if (activeMode.requiresVadModel) {
-        anchorRef = await segmentOfflineBuffer(audioBufferId, {
+        const vadModelPath = await vad.resolvePreparedModelPath();
+        const anchorRef = await segmentOfflineBuffer(audioBufferId, {
           evaluator: 'speech_vad_model',
-          modelPath: vadModelPath!,
+          modelPath: vadModelPath,
         });
         anchorSegmentBufferId = anchorRef.segmentBufferId;
       }
 
       if (activeMode.requiresSttModel) {
+        const sttEngine = stt.engineRef.current;
+        if (!sttEngine) {
+          throw new Error('STT engine is not initialized.');
+        }
         const hypothesisBuffer = await createEmptyOfflineTextBuffer();
         hypothesisTextBufferId = hypothesisBuffer.bufferId;
-        stt = await createSTT({
-          modelSource: sttModelPath!,
-          modelType: 'auto',
-          numThreads: 2,
-          modelOptions: {
-            whisper: { enableTokenTimestamps: true },
-          },
-        });
-        await stt.transcribe(audioBufferId, hypothesisBuffer, {
+        await sttEngine.transcribe(audioBufferId, hypothesisBuffer, {
           segmentation: { mode: 'off' },
         });
       }
@@ -1233,7 +475,7 @@ export default function GenerateTimestampScreen() {
       const textGranularity = granularity as 'sentence' | 'word';
       const writeResult =
         mode === 'proportional'
-          ? await alignment.alignTextToAudio(
+          ? await alignmentEngine.alignTextToAudio(
               referenceBuffer,
               audioBufferId,
               outputBuffer,
@@ -1243,7 +485,7 @@ export default function GenerateTimestampScreen() {
               }
             )
           : mode === 'estimated'
-          ? await alignment.alignTextToAudio(
+          ? await alignmentEngine.alignTextToAudio(
               referenceBuffer,
               audioBufferId,
               outputBuffer,
@@ -1257,7 +499,7 @@ export default function GenerateTimestampScreen() {
               }
             )
           : mode === 'accurate'
-          ? await alignment.alignTextToAudio(
+          ? await alignmentEngine.alignTextToAudio(
               referenceBuffer,
               audioBufferId,
               outputBuffer,
@@ -1268,7 +510,7 @@ export default function GenerateTimestampScreen() {
               }
             )
           : mode === 'vad'
-          ? await alignment.alignTextToAudio(
+          ? await alignmentEngine.alignTextToAudio(
               referenceBuffer,
               audioBufferId,
               outputBuffer,
@@ -1282,7 +524,7 @@ export default function GenerateTimestampScreen() {
               }
             )
           : mode === 'asr_mediated'
-          ? await alignment.alignTextToAudio(
+          ? await alignmentEngine.alignTextToAudio(
               referenceBuffer,
               audioBufferId,
               outputBuffer,
@@ -1300,7 +542,7 @@ export default function GenerateTimestampScreen() {
                 },
               }
             )
-          : await alignment.alignTextToAudio(
+          : await alignmentEngine.alignTextToAudio(
               referenceBuffer,
               audioBufferId,
               outputBuffer,
@@ -1347,7 +589,6 @@ export default function GenerateTimestampScreen() {
       setError(message);
       setErrorCode(extractErrorCode(message));
     } finally {
-      await stt?.destroy().catch(() => {});
       if (hypothesisTextBufferId) {
         await releasePipelineTextBuffer(hypothesisTextBufferId).catch(() => {});
       }
@@ -1364,27 +605,23 @@ export default function GenerateTimestampScreen() {
       if (textBufferId) {
         await releasePipelineTextBuffer(textBufferId).catch(() => {});
       }
-      await alignment.destroy().catch(() => {});
       setRunning(false);
     }
   }, [
     activeMode,
-    alignmentCatalog,
-    alignmentCustomInitForm.fileSources.model,
-    alignmentInitMode,
+    alignment,
     estimatedTimeline.counts,
     estimatedTimeline.sampleRate,
     granularity,
     mode,
-    preparedAlignmentModelId,
     preparedAudioBuffer,
-    preparedSttModelId,
-    preparedVadModelId,
     referenceTranscript,
     runBlockingIssues,
-    sttCatalog,
-    vadCatalog,
+    stt.engineRef,
+    vad,
   ]);
+
+  const pipelineBusy = running;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -1466,7 +703,7 @@ export default function GenerateTimestampScreen() {
             <OfflineAudioBufferWidget
               ref={audioWidgetRef}
               audioFiles={AUDIO_FILES}
-              disabled={running}
+              disabled={pipelineBusy}
               onBufferReady={(info) => {
                 setPreparedAudioBuffer(info);
                 setResult(null);
@@ -1588,96 +825,24 @@ export default function GenerateTimestampScreen() {
             </SectionCard>
           ) : null}
 
-          {activeMode.requiresAlignmentModel ? (
-            <ModelPreparationCard
-              stepLabel={stepLabels.alignment!}
-              title="Prepare wav2vec2 alignment model"
-              description="Plain accurate and both anchor-constrained accurate modes require a wav2vec2 alignment model. Auto: detect from catalog folder per call. Custom: explicit ONNX path per accurate call (no engine init)."
-              loading={loadingModelCatalogs}
-              emptyMessage="No alignment models found. Add a wav2vec2 model under assets/models, PAD/documents/models, or downloads (category: alignment)."
-              models={alignmentCatalog.entries}
-              selectedId={selectedAlignmentModelId}
-              preparedId={
-                alignmentInitMode === 'auto' ? preparedAlignmentModelId : null
-              }
-              preparing={preparingAlignmentModel}
-              prepareLabel="Use alignment model"
-              preparedSummary={
-                alignmentInitMode === 'auto' ? alignmentPrepareSummary : null
-              }
-              onSelect={setSelectedAlignmentModelId}
-              onPrepare={handlePrepareAlignmentModel}
-              showPrepareButton={alignmentInitMode === 'auto'}
-              leadingExtra={
-                <InitModeSelector
-                  value={alignmentInitMode}
-                  onChange={setAlignmentInitMode}
-                  disabled={
-                    running ||
-                    preparingAlignmentModel ||
-                    alignmentCustomFillLoading
-                  }
-                />
-              }
-              footerExtra={
-                alignmentInitMode === 'custom' ? (
-                  <AlignmentCustomInitForm
-                    value={alignmentCustomInitForm}
-                    onChange={setAlignmentCustomInitForm}
-                    selectedCatalogModelId={selectedAlignmentModelId}
-                    onFillFromSelectedModel={() => {
-                      handleFillAlignmentCustomFromCatalog().catch(() => {});
-                    }}
-                    onPrepareScatteredTest={handleAlignmentCustomScatteredTest}
-                    fillLoading={alignmentCustomFillLoading}
-                    disabled={running || preparingAlignmentModel}
-                    fillHint={alignmentCustomFillHint}
-                  />
-                ) : null
-              }
-            />
-          ) : null}
-
-          {activeMode.requiresVadModel ? (
-            <ModelPreparationCard
-              stepLabel={stepLabels.vad!}
-              title="Prepare VAD anchors"
-              description="Best-practice anchor generation: segmentOfflineBuffer(audio, { evaluator: speech_vad_model, modelSource: FileSource }) — same detect path as streaming VAD. The resulting seg_off_* buffer feeds vad mode or accurate segmentation auto."
-              loading={loadingModelCatalogs}
-              emptyMessage="No VAD models found. Add one under assets/models, PAD/documents/models, or downloads (category: vad)."
-              models={vadCatalog.entries}
-              selectedId={selectedVadModelId}
-              preparedId={preparedVadModelId}
-              preparing={preparingVadModel}
-              prepareLabel="Use VAD model"
-              preparedSummary={vadPrepareSummary}
-              onSelect={setSelectedVadModelId}
-              onPrepare={handlePrepareVadModel}
-            />
-          ) : null}
-
-          {activeMode.requiresSttModel ? (
-            <ModelPreparationCard
-              stepLabel={stepLabels.stt!}
-              title="Prepare STT hypothesis model"
-              description="asr_mediated requires a real hypothesis buffer H. Use model runs STT detection now; the run step then creates STT, writes H via stt.transcribe(audio, H), and passes that buffer into alignment."
-              loading={loadingModelCatalogs}
-              emptyMessage="No STT models found. Add one under assets/models, PAD/documents/models, or downloads (category: stt)."
-              models={sttCatalog.entries}
-              selectedId={selectedSttModelId}
-              preparedId={preparedSttModelId}
-              preparing={preparingSttModel}
-              prepareLabel="Use STT model"
-              preparedSummary={sttPrepareSummary}
-              onSelect={setSelectedSttModelId}
-              onPrepare={handlePrepareSttModel}
-            />
-          ) : null}
+          <GenerateTimestampModelInitPanel
+            init={modelInit}
+            stepLabels={{
+              alignment: stepLabels.alignment,
+              vad: stepLabels.vad,
+              stt: stepLabels.stt,
+            }}
+            requiresAlignmentModel={activeMode.requiresAlignmentModel}
+            requiresVadModel={activeMode.requiresVadModel}
+            requiresSttModel={activeMode.requiresSttModel}
+            disabled={pipelineBusy}
+            onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+          />
 
           <SectionCard
             stepLabel={stepLabels.run}
             title="Run offline alignment"
-            description="This step creates fresh offline buffers, runs only the selected public mode, reads alignment segments from segmentOut, and then releases buffers and destroys engines in finally."
+            description="Creates fresh offline buffers per run, executes the selected mode, reads alignment segments, then releases buffers. Cached alignment / STT engines stay alive for navigation."
           >
             <View style={styles.resultCard}>
               <Text style={styles.resultMetaText}>Pipeline summary</Text>
@@ -1693,49 +858,33 @@ export default function GenerateTimestampScreen() {
               <Text style={styles.resultCodeText}>
                 alignment init:{' '}
                 {activeMode.requiresAlignmentModel
-                  ? alignmentInitMode
+                  ? alignment.initMode
                   : 'not required'}
               </Text>
               <Text style={styles.resultCodeText}>
                 alignment model:{' '}
                 {activeMode.requiresAlignmentModel
-                  ? alignmentInitMode === 'auto'
-                    ? preparedAlignmentModelId ?? 'missing'
-                    : alignmentCustomInitForm.fileSources.model
-                    ? 'custom path set'
+                  ? alignment.isPrepared
+                    ? alignment.initializedSummary ?? 'ready'
                     : 'missing'
                   : 'not required'}
               </Text>
-              {activeMode.requiresAlignmentModel &&
-              alignmentInitMode === 'auto' ? (
-                <Text style={styles.resultCodeText}>
-                  alignment detect: {preparedAlignmentModelType ?? 'unknown'} ·{' '}
-                  {preparedAlignmentModelPath ?? 'path unavailable'}
-                </Text>
-              ) : null}
               <Text style={styles.resultCodeText}>
                 VAD model:{' '}
                 {activeMode.requiresVadModel
-                  ? preparedVadModelId ?? 'missing'
+                  ? vad.isPrepared
+                    ? vad.initializedSummary ?? 'ready'
+                    : 'missing'
                   : 'not required'}
               </Text>
-              {activeMode.requiresVadModel ? (
-                <Text style={styles.resultCodeText}>
-                  VAD detect: {preparedVadModelType ?? 'unknown'} ·{' '}
-                  {preparedVadModelPath ?? 'path unavailable'}
-                </Text>
-              ) : null}
               <Text style={styles.resultCodeText}>
                 STT model:{' '}
                 {activeMode.requiresSttModel
-                  ? preparedSttModelId ?? 'missing'
+                  ? stt.isPrepared
+                    ? stt.initializedSummary ?? 'ready'
+                    : 'missing'
                   : 'not required'}
               </Text>
-              {activeMode.requiresSttModel ? (
-                <Text style={styles.resultCodeText}>
-                  STT detect: {preparedSttModelType ?? 'unknown'}
-                </Text>
-              ) : null}
             </View>
 
             {runBlockingIssues.length > 0 ? (
@@ -1760,11 +909,11 @@ export default function GenerateTimestampScreen() {
               style={[
                 styles.button,
                 styles.generateButton,
-                (running || runBlockingIssues.length > 0) &&
+                (pipelineBusy || runBlockingIssues.length > 0) &&
                   styles.buttonDisabled,
               ]}
               onPress={handleRunAlignment}
-              disabled={running || runBlockingIssues.length > 0}
+              disabled={pipelineBusy || runBlockingIssues.length > 0}
             >
               {running ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -1789,7 +938,7 @@ export default function GenerateTimestampScreen() {
           <SectionCard
             stepLabel={stepLabels.result}
             title="Result"
-            description="The output shown here is derived from the alignment segments already read from segmentOut before cleanup."
+            description="The output shown here is derived from the alignment segments already read from segmentOut before buffer cleanup."
           >
             {result ? (
               <>

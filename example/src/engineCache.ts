@@ -45,8 +45,16 @@ import type {
   DiarizationEngine,
   StreamingDiarizationEngine,
 } from 'react-native-sherpa-onnx/diarization';
+import type {
+  AlignmentCustomPathKey,
+  AlignmentEngine,
+  AlignmentModelType,
+} from 'react-native-sherpa-onnx/alignment';
+import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
+import type { VADModelType } from 'react-native-sherpa-onnx/vad';
+import type { ModelInitMode } from './components/modelInit';
 
 // --- STT cache ---
 
@@ -727,4 +735,138 @@ export function clearDiarizationStreamingCache(): void {
   diarizationStreamingModelFolder = null;
   diarizationStreamingInitMessage = null;
   diarizationStreamingEngineInfo = null;
+}
+
+// --- Alignment (Generate timestamp) cache ---
+
+export type AlignmentCachedPrepInfo = {
+  initMode: ModelInitMode;
+  modelFolder: string | null;
+  modelPath: string | null;
+  modelType: AlignmentModelType | string | null;
+  customConfig: Partial<Record<AlignmentCustomPathKey, FileSource>> | null;
+};
+
+let alignmentEngine: AlignmentEngine | null = null;
+let alignmentInitMessage: string | null = null;
+let alignmentPrepInfo: AlignmentCachedPrepInfo | null = null;
+
+export function getAlignmentCache(): {
+  engine: AlignmentEngine | null;
+  initMessage: string | null;
+  prepInfo: AlignmentCachedPrepInfo | null;
+} {
+  return {
+    engine: alignmentEngine,
+    initMessage: alignmentInitMessage,
+    prepInfo: alignmentPrepInfo ? { ...alignmentPrepInfo } : null,
+  };
+}
+
+export function setAlignmentCache(
+  engine: AlignmentEngine,
+  prepInfo: AlignmentCachedPrepInfo,
+  initMessage: string | null
+): void {
+  alignmentEngine = engine;
+  alignmentPrepInfo = {
+    ...prepInfo,
+    customConfig: prepInfo.customConfig ? { ...prepInfo.customConfig } : null,
+  };
+  alignmentInitMessage = initMessage;
+}
+
+export function clearAlignmentCache(): void {
+  alignmentEngine = null;
+  alignmentInitMessage = null;
+  alignmentPrepInfo = null;
+}
+
+// --- Generate timestamp: offline VAD anchor prep (detect only, no VADEngine) ---
+
+let generateTimestampVadModelFolder: string | null = null;
+let generateTimestampVadModelPath: string | null = null;
+let generateTimestampVadModelType: VADModelType | null = null;
+let generateTimestampVadInitMessage: string | null = null;
+
+export function getGenerateTimestampVadPrepCache(): {
+  modelFolder: string | null;
+  modelPath: string | null;
+  modelType: VADModelType | null;
+  initMessage: string | null;
+} {
+  return {
+    modelFolder: generateTimestampVadModelFolder,
+    modelPath: generateTimestampVadModelPath,
+    modelType: generateTimestampVadModelType,
+    initMessage: generateTimestampVadInitMessage,
+  };
+}
+
+export function setGenerateTimestampVadPrepCache(
+  modelFolder: string,
+  modelPath: string,
+  modelType: VADModelType,
+  initMessage: string | null
+): void {
+  generateTimestampVadModelFolder = modelFolder;
+  generateTimestampVadModelPath = modelPath;
+  generateTimestampVadModelType = modelType;
+  generateTimestampVadInitMessage = initMessage;
+}
+
+export function clearGenerateTimestampVadPrepCache(): void {
+  generateTimestampVadModelFolder = null;
+  generateTimestampVadModelPath = null;
+  generateTimestampVadModelType = null;
+  generateTimestampVadInitMessage = null;
+}
+
+// --- Generate timestamp STT cache (Whisper token timestamps for asr_mediated) ---
+
+let generateTimestampSttEngine: SttEngine | null = null;
+let generateTimestampSttModelFolder: string | null = null;
+let generateTimestampSttDetectedModels: Array<{
+  type: STTModelType;
+  modelDir: string;
+}> = [];
+let generateTimestampSttSelectedModelType: STTModelType | null = null;
+let generateTimestampSttInitMessage: string | null = null;
+
+export function getGenerateTimestampSttCache(): {
+  engine: SttEngine | null;
+  modelFolder: string | null;
+  detectedModels: Array<{ type: STTModelType; modelDir: string }>;
+  selectedModelType: STTModelType | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: generateTimestampSttEngine,
+    modelFolder: generateTimestampSttModelFolder,
+    detectedModels: [...generateTimestampSttDetectedModels],
+    selectedModelType: generateTimestampSttSelectedModelType,
+    initMessage: generateTimestampSttInitMessage,
+  };
+}
+
+export function setGenerateTimestampSttCache(
+  engine: SttEngine,
+  modelFolder: string,
+  detectedModels: Array<{ type: STTModelType; modelDir: string }>,
+  selectedModelType: STTModelType | null,
+  initMessage: string | null
+): void {
+  generateTimestampSttEngine = engine;
+  generateTimestampSttModelFolder = modelFolder;
+  generateTimestampSttDetectedModels = detectedModels;
+  generateTimestampSttSelectedModelType = selectedModelType;
+  generateTimestampSttInitMessage = initMessage;
+}
+
+export function clearGenerateTimestampSttCache(): void {
+  generateTimestampSttEngine = null;
+  generateTimestampSttModelFolder = null;
+  generateTimestampSttDetectedModels = [];
+  generateTimestampSttSelectedModelType = null;
+  generateTimestampSttInitMessage = null;
 }
