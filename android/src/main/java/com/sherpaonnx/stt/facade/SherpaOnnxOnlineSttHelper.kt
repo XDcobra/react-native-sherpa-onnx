@@ -419,14 +419,14 @@ internal class SherpaOnnxOnlineSttHelper(
     ): HashMap<String, Any>?
 
     @JvmStatic
-    internal external fun nativeCreateStream(
+    external fun nativeCreateStream(
       instanceId: String,
       streamId: String,
       hotwords: String,
     ): Boolean
 
     @JvmStatic
-    internal external fun nativeAcceptWaveform(
+    external fun nativeAcceptWaveform(
       instanceId: String,
       streamId: String,
       sampleRate: Int,
@@ -434,28 +434,28 @@ internal class SherpaOnnxOnlineSttHelper(
     )
 
     @JvmStatic
-    internal external fun nativeInputFinished(instanceId: String, streamId: String)
+    external fun nativeInputFinished(instanceId: String, streamId: String)
 
     @JvmStatic
-    internal external fun nativeIsReady(instanceId: String, streamId: String): Boolean
+    external fun nativeIsReady(instanceId: String, streamId: String): Boolean
 
     @JvmStatic
-    internal external fun nativeDecode(instanceId: String, streamId: String)
+    external fun nativeDecode(instanceId: String, streamId: String)
 
     @JvmStatic
-    internal external fun nativeGetResult(
+    external fun nativeGetResult(
       instanceId: String,
       streamId: String,
     ): HashMap<String, Any>?
 
     @JvmStatic
-    internal external fun nativeIsEndpoint(instanceId: String, streamId: String): Boolean
+    external fun nativeIsEndpoint(instanceId: String, streamId: String): Boolean
 
     @JvmStatic
-    internal external fun nativeResetStream(instanceId: String, streamId: String)
+    external fun nativeResetStream(instanceId: String, streamId: String)
 
     @JvmStatic
-    internal external fun nativeReleaseStream(instanceId: String, streamId: String)
+    external fun nativeReleaseStream(instanceId: String, streamId: String)
 
     @JvmStatic
     private external fun nativeGetSampleRate(instanceId: String): Int

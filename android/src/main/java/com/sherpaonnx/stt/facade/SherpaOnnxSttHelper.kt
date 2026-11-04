@@ -565,7 +565,7 @@ internal class SherpaOnnxSttHelper(
     ): HashMap<String, Any>?
 
     @JvmStatic
-    internal external fun nativeTranscribeSamples(
+    private external fun nativeTranscribeSamples(
       instanceId: String,
       samples: FloatArray,
       sampleRate: Int,
