@@ -154,6 +154,9 @@ public:
 
     SttRecognitionResult transcribeFile(const std::string& filePath);
 
+    SttRecognitionResult transcribeSamples(const float* samples, int32_t numSamples,
+                                         int32_t sampleRate);
+
     SttRecognitionResult transcribeSamples(const std::vector<float>& samples, int32_t sampleRate);
 
     /**

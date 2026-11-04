@@ -289,22 +289,14 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
 
   dispatch_async(AudioTaggingSerialQueue(), ^{
     @try {
-      std::vector<float> samples;
       int sampleRate = inSampleRate;
-
-      if (!hasStart) {
-        if (!pa_read_offline_samples(audioInId, &samples, &sampleRate) || samples.empty()) {
-          reject(@"AUDIO_TAGGING_BUFFER_EMPTY",
-                 [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioBufferId],
-                 nil);
-          return;
-        }
-      } else {
+      int rangeStart = -1;
+      int rangeEnd = -1;
+      if (hasStart) {
         const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
         const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
         const int end = std::min(endRaw, inNumSamples);
-        const int frameCount = std::max(0, end - start);
-        if (frameCount == 0) {
+        if (end <= start) {
           resolve(@{
             @"events": @[],
             @"audioDuration": @(0.0),
@@ -313,33 +305,44 @@ void FillPathsFromDict(NSDictionary *dict, sherpaonnx::AudioTaggingModelPaths &p
           });
           return;
         }
-        std::string sliceErrCode;
-        std::string sliceErrMsg;
-        if (!pa_get_offline_samples_slice(
-                audioInId, start, frameCount, &samples, &sliceErrCode, &sliceErrMsg)) {
-          NSString *code = sliceErrCode.empty()
-              ? @"AUDIO_TAGGING_TAG_FAILED"
-              : [NSString stringWithUTF8String:sliceErrCode.c_str()];
-          NSString *msg = sliceErrMsg.empty()
-              ? @"Failed to read offline audio slice"
-              : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
-          reject(code, msg, nil);
+        rangeStart = start;
+        rangeEnd = end;
+        RCTLogInfo(@"[SherpaOnnx:audioTagging] tagOffline slice instanceId=%@ bufferId=%@ startSample=%d endSample=%d frameCount=%d",
+                   instanceId, audioBufferId, start, end, end - start);
+      }
+
+      PaOfflineSampleView pcmView;
+      std::string sliceErrCode;
+      std::string sliceErrMsg;
+      if (!pa_acquire_offline_sample_view(audioInId, rangeStart, rangeEnd, &pcmView, &sliceErrCode,
+                                          &sliceErrMsg) ||
+          pcmView.count == 0 || pcmView.data == nullptr) {
+        if (!sliceErrCode.empty() && sliceErrCode != "AUDIO_BUFFER_NOT_FOUND") {
+          reject([NSString stringWithUTF8String:sliceErrCode.c_str()],
+                 sliceErrMsg.empty()
+                     ? @"Failed to read offline audio slice"
+                     : [NSString stringWithUTF8String:sliceErrMsg.c_str()],
+                 nil);
           return;
         }
-        RCTLogInfo(@"[SherpaOnnx:audioTagging] tagOffline slice instanceId=%@ bufferId=%@ startSample=%d endSample=%d frameCount=%d",
-                   instanceId, audioBufferId, start, end, frameCount);
+        reject(@"AUDIO_TAGGING_BUFFER_EMPTY",
+               [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioBufferId],
+               nil);
+        return;
       }
+      sampleRate = pcmView.sampleRate;
 
       const auto t0 = std::chrono::steady_clock::now();
       const double audioDuration = (sampleRate > 0)
-          ? static_cast<double>(samples.size()) / static_cast<double>(sampleRate)
+          ? static_cast<double>(pcmView.count) / static_cast<double>(sampleRate)
           : 0.0;
 
       RCTLogInfo(@"[SherpaOnnx:audioTagging] tagOffline instanceId=%@ bufferId=%@ sampleRate=%d numSamples=%zu topK=%d",
-                 instanceId, audioBufferId, sampleRate, samples.size(), (int)effectiveTopK);
+                 instanceId, audioBufferId, sampleRate, pcmView.count, (int)effectiveTopK);
 
       const auto computed = state->wrapper->compute(
-          samples, sampleRate, std::optional<int32_t>(effectiveTopK));
+          pcmView.data, static_cast<int32_t>(pcmView.count), sampleRate,
+          std::optional<int32_t>(effectiveTopK));
       if (!computed.success) {
         NSString *msg = computed.error.empty()
             ? @"Audio tagging compute failed"

@@ -1,6 +1,7 @@
 #include "sherpa-onnx-tts-engine-wrapper.h"
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-path-fill.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -264,7 +265,8 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerateWithOptions(
     JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring text, jint sid,
     jfloat speed, jboolean applyNumSteps, jint numSteps, jfloat silenceScale,
     jfloatArray referenceAudio, jint referenceSampleRate, jstring referenceText,
-    jobject extraMap, jobjectArray phonemeCodepoints, jobjectArray tokens) {
+    jobject extraMap, jobjectArray phonemeCodepoints, jobjectArray tokens,
+    jstring referenceBufferId) {
   auto inst = Lookup(CopyJstring(env, instanceId));
   if (!inst || !inst->isInitialized()) {
     jmethodID mapPut = nullptr;
@@ -279,9 +281,37 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerateWithOptions(
   opts.apply_num_steps = applyNumSteps == JNI_TRUE;
   opts.num_steps = numSteps;
   opts.silence_scale = silenceScale;
-  opts.reference_audio = CopyFloatArray(env, referenceAudio);
-  opts.reference_sample_rate = referenceSampleRate;
   opts.reference_text = CopyJstring(env, referenceText);
+  PaOfflineSampleView refView;
+  const std::string refId = CopyJstring(env, referenceBufferId);
+  if (!refId.empty()) {
+    std::string errCode;
+    std::string errMsg;
+    if (!pa_acquire_offline_sample_view(refId, -1, -1, &refView, &errCode, &errMsg)) {
+      jmethodID mapPut = nullptr;
+      jobject map = NewHashMap(env, &mapPut);
+      if (!map) return nullptr;
+      sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+      sherpaonnx::PutString(env, map, mapPut, "error",
+                            errMsg.empty() ? "Reference audio buffer not found" : errMsg);
+      return map;
+    }
+    if (refView.count == 0 || refView.data == nullptr || refView.sampleRate <= 0) {
+      jmethodID mapPut = nullptr;
+      jobject map = NewHashMap(env, &mapPut);
+      if (!map) return nullptr;
+      sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+      sherpaonnx::PutString(env, map, mapPut, "error", "Reference audio is empty");
+      return map;
+    }
+    opts.reference_pcm = refView.data;
+    opts.reference_pcm_count = static_cast<int32_t>(refView.count);
+    opts.reference_sample_rate = refView.sampleRate;
+    opts.reference_keepalive = refView.entry;
+  } else {
+    opts.reference_audio = CopyFloatArray(env, referenceAudio);
+    opts.reference_sample_rate = referenceSampleRate;
+  }
   if (extraMap != nullptr) {
     for (const auto& kv : HashMapToStringMap(env, extraMap)) {
       opts.extra[kv.first] = kv.second;

@@ -38,6 +38,8 @@ internal object TtsNative {
   /**
    * GenerationConfig path (clone and/or numSteps/extra/phonemes).
    * Pass empty [referenceAudio] and referenceSampleRate=0 for non-clone config.
+   * When [referenceBufferId] is set, native reads that offline buffer as the reference
+   * and ignores [referenceAudio].
    */
   @JvmStatic
   external fun nativeGenerateWithOptions(
@@ -54,6 +56,7 @@ internal object TtsNative {
     extra: HashMap<String, String>?,
     phonemeCodepoints: Array<IntArray>?,
     tokens: Array<Array<String>>?,
+    referenceBufferId: String? = null,
   ): HashMap<String, Any>?
 
   @JvmStatic

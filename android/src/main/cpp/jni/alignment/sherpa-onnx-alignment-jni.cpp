@@ -12,6 +12,7 @@
 
 #include "sherpa_onnx_alignment_engine.hpp"
 #include "sherpa-onnx-detect-jni-common.h"
+#include "jni/offline_pcm_view.h"
 
 namespace {
 
@@ -485,6 +486,146 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
         provider,
         static_cast<int32_t>(jNumThreads));
 
+    return ForcedCtcResultToJavaHashMap(env, result);
+  } catch (const std::bad_alloc&) {
+    ThrowRuntimeException(env, "OFFLINE_OOM: forced CTC alignment out of memory");
+    return nullptr;
+  } catch (const std::exception& e) {
+    ThrowRuntimeException(
+        env,
+        WithAlignmentCodePrefix(e.what(), "ALIGNMENT_FORCED_CTC_FAILED").c_str());
+    return nullptr;
+  } catch (...) {
+    ThrowRuntimeException(env, "ALIGNMENT_NATIVE_UNKNOWN: forced CTC alignment failed");
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignAccurateFromBuffer(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring jModelPath,
+    jstring jText,
+    jstring jBufferId,
+    jint jStartSample,
+    jint jEndSampleExclusive,
+    jint jSampleRate,
+    jstring jGranularity,
+    jstring jVocabPath,
+    jstring jProvider,
+    jint jNumThreads) {
+  try {
+    if (!jModelPath || !jText || !jBufferId) {
+      throw std::runtime_error("ALIGNMENT_NATIVE_ACCURATE_FAILED: null argument");
+    }
+    const std::string modelPath = JStringToUtf8(env, jModelPath);
+    const std::string text = JStringToUtf8(env, jText);
+    const std::string granularity = JStringToUtf8(env, jGranularity);
+    const std::string vocabPath = JStringToUtf8(env, jVocabPath);
+    const std::string provider = JStringToUtf8(env, jProvider);
+    if (modelPath.empty()) {
+      throw std::runtime_error("ALIGNMENT_MODEL_LOAD_FAILED: modelPath is required");
+    }
+
+    PaOfflineSampleView view;
+    std::string errCode;
+    std::string errMsg;
+    if (!JniAcquireOfflinePcm(env, jBufferId, jStartSample, jEndSampleExclusive, &view, &errCode,
+                              &errMsg)) {
+      throw std::runtime_error(
+          std::string("ALIGNMENT_NATIVE_ACCURATE_FAILED: ") +
+          (errMsg.empty() ? errCode : errMsg));
+    }
+    if (view.count == 0 || view.data == nullptr) {
+      throw std::runtime_error("ALIGNMENT_NATIVE_ACCURATE_FAILED: samples array is empty");
+    }
+    if (jSampleRate > 0 && view.sampleRate != static_cast<int>(jSampleRate)) {
+      throw std::runtime_error(
+          "ALIGNMENT_ANCHOR_OUT_OF_RANGE: sampleRate mismatch for pcm slice.");
+    }
+
+    auto result = sherpa_onnx::alignment::AlignAccurateFromPcm(
+        modelPath,
+        text,
+        view.data,
+        view.count,
+        view.sampleRate,
+        granularity,
+        vocabPath,
+        provider,
+        static_cast<int32_t>(jNumThreads));
+    return AlignmentResultToJavaHashMap(env, result);
+  } catch (const std::bad_alloc&) {
+    ThrowRuntimeException(env, "OFFLINE_OOM: native accurate alignment out of memory");
+    return nullptr;
+  } catch (const std::exception& e) {
+    ThrowRuntimeException(
+        env,
+        WithAlignmentCodePrefix(e.what(), "ALIGNMENT_NATIVE_ACCURATE_FAILED").c_str());
+    return nullptr;
+  } catch (...) {
+    ThrowRuntimeException(env, "ALIGNMENT_NATIVE_UNKNOWN: Accurate alignment (PCM) failed");
+    return nullptr;
+  }
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignAccurateForcedCtcFromBuffer(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring jModelPath,
+    jstring jWindowText,
+    jstring jBufferId,
+    jint jStartSample,
+    jint jEndSampleExclusive,
+    jint jSampleRate,
+    jstring jGranularity,
+    jstring jLanguage,
+    jstring jVocabPath,
+    jstring jProvider,
+    jint jNumThreads) {
+  try {
+    if (!jModelPath || !jWindowText || !jBufferId) {
+      throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: null argument");
+    }
+    const std::string modelPath = JStringToUtf8(env, jModelPath);
+    const std::string windowText = JStringToUtf8(env, jWindowText);
+    const std::string granularity = JStringToUtf8(env, jGranularity);
+    const std::string language = JStringToUtf8(env, jLanguage);
+    const std::string vocabPath = JStringToUtf8(env, jVocabPath);
+    const std::string provider = JStringToUtf8(env, jProvider);
+    if (modelPath.empty()) {
+      throw std::runtime_error("ALIGNMENT_MODEL_LOAD_FAILED: modelPath is required");
+    }
+
+    PaOfflineSampleView view;
+    std::string errCode;
+    std::string errMsg;
+    if (!JniAcquireOfflinePcm(env, jBufferId, jStartSample, jEndSampleExclusive, &view, &errCode,
+                              &errMsg)) {
+      throw std::runtime_error(
+          std::string("ALIGNMENT_FORCED_CTC_FAILED: ") + (errMsg.empty() ? errCode : errMsg));
+    }
+    if (view.count == 0 || view.data == nullptr) {
+      throw std::runtime_error("ALIGNMENT_FORCED_CTC_FAILED: samples array is empty");
+    }
+    if (jSampleRate > 0 && view.sampleRate != static_cast<int>(jSampleRate)) {
+      throw std::runtime_error(
+          "ALIGNMENT_ANCHOR_OUT_OF_RANGE: sampleRate mismatch for pcm slice.");
+    }
+
+    auto result = sherpa_onnx::alignment::AlignAccurateForcedCtcFromPcm(
+        modelPath,
+        windowText,
+        view.data,
+        view.count,
+        view.sampleRate,
+        granularity,
+        language,
+        vocabPath,
+        provider,
+        static_cast<int32_t>(jNumThreads));
     return ForcedCtcResultToJavaHashMap(env, result);
   } catch (const std::bad_alloc&) {
     ThrowRuntimeException(env, "OFFLINE_OOM: forced CTC alignment out of memory");

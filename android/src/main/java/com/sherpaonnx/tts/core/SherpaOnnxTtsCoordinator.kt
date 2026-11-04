@@ -173,9 +173,12 @@ internal class SherpaOnnxTtsCoordinator(
           promise.reject("TTS_PIPELINE_VOICE_CLONE_UNSUPPORTED", "Voice cloning in pipeline mode is only supported for Pocket TTS")
           return
         }
+        if (refEntry.numSamples <= 0 || refEntry.sampleRate <= 0) {
+          promise.reject("TTS_PIPELINE_VOICE_CLONE_REF_NOT_FOUND", "Reference audio buffer is empty: $refBufferId")
+          return
+        }
         voiceCloneConfig = TtsVoiceCloneConfig(
-          referenceAudio = refEntry.readAllSamples(),
-          referenceSampleRate = refEntry.sampleRate,
+          referenceBufferId = refBufferId,
           referenceText = options.getString("referenceText") ?: "",
           silenceScale = TtsGenerationOptionsParser.getSilenceScale(options),
           numSteps = TtsGenerationOptionsParser.getNumSteps(options),

@@ -5,8 +5,7 @@ package com.sherpaonnx.tts.pipeline
  * [com.sherpaonnx.tts.core.SherpaOnnxTtsCoordinator] from offline reference audio.
  */
 internal data class TtsVoiceCloneConfig(
-  val referenceAudio: FloatArray,
-  val referenceSampleRate: Int,
+  val referenceBufferId: String,
   val referenceText: String,
   val silenceScale: Float,
   val numSteps: Int,

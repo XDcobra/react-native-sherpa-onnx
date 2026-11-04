@@ -139,15 +139,19 @@ std::optional<sherpaonnx::VoiceCloneOptions> GenerationExtraFromOptions(NSDictio
 
 std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
     NSDictionary *options,
-    const std::vector<float> &refSamples,
+    const float *refSamples,
+    int32_t refSampleCount,
     int32_t refSampleRate,
-    int32_t defaultNumSteps
+    int32_t defaultNumSteps,
+    std::shared_ptr<void> keepalive
 ) {
-    if (refSamples.empty() || refSampleRate <= 0) return std::nullopt;
+    if (refSamples == nullptr || refSampleCount <= 0 || refSampleRate <= 0) return std::nullopt;
 
     sherpaonnx::VoiceCloneOptions vo;
-    vo.reference_audio = refSamples;
+    vo.reference_pcm = refSamples;
+    vo.reference_pcm_count = refSampleCount;
     vo.reference_sample_rate = refSampleRate;
+    vo.reference_keepalive = std::move(keepalive);
 
     NSString *rt = options[@"referenceText"];
     if (rt != nil && [rt length] > 0) {

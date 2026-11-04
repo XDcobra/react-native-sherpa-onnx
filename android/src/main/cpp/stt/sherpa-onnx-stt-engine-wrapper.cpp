@@ -863,25 +863,21 @@ SttRecognitionResult SttWrapper::transcribeFile(const std::string& filePath) {
     }
 }
 
-SttRecognitionResult SttWrapper::transcribeSamples(const std::vector<float>& samples, int32_t sampleRate) {
+SttRecognitionResult SttWrapper::transcribeSamples(const float* samples, int32_t numSamples,
+                                                     int32_t sampleRate) {
     if (!pImpl->initialized || !HasLiveRecognizerHandle(pImpl->recognizer)) {
         LOGE("Not initialized. Call initialize() first.");
         throw std::runtime_error("STT not initialized. Call initialize() first.");
     }
-    if (samples.empty()) {
+    if (samples == nullptr || numSamples <= 0) {
         SttRecognitionResult empty;
         return empty;
-    }
-    if (samples.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
-        LOGE("Samples too large: %zu", samples.size());
-        throw std::runtime_error("Samples array too large to process");
     }
     try {
         auto stream = pImpl->recognizer.value().CreateStream();
         if (pImpl->currentModelKind == SttModelKind::kQwen3Asr && !pImpl->qwen3_hotwords_csv.empty())
             stream.SetOption("hotwords", pImpl->qwen3_hotwords_csv.c_str());
-        int32_t n = static_cast<int32_t>(samples.size());
-        stream.AcceptWaveform(sampleRate, samples.data(), n);
+        stream.AcceptWaveform(sampleRate, samples, numSamples);
         pImpl->recognizer.value().Decode(&stream);
         auto result = pImpl->recognizer.value().GetResult(&stream);
         return offlineResultToSttResult(result);
@@ -892,6 +888,15 @@ SttRecognitionResult SttWrapper::transcribeSamples(const std::vector<float>& sam
         LOGE("TranscribeSamples: recognition failed (unknown exception)");
         throw std::runtime_error("Recognition failed.");
     }
+}
+
+SttRecognitionResult SttWrapper::transcribeSamples(const std::vector<float>& samples, int32_t sampleRate) {
+    if (samples.size() > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+        LOGE("Samples too large: %zu", samples.size());
+        throw std::runtime_error("Samples array too large to process");
+    }
+    return transcribeSamples(samples.empty() ? nullptr : samples.data(),
+                             static_cast<int32_t>(samples.size()), sampleRate);
 }
 
 SttRecognitionResult SttWrapper::transcribeSamplesChunked(const std::vector<float>& samples, int32_t sampleRate, int32_t chunkSize) {

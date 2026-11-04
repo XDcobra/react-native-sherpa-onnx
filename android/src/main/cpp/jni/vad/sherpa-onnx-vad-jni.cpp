@@ -1,9 +1,13 @@
 #include "sherpa-onnx-vad-engine-wrapper.h"
 #include "sherpa-onnx-detect-jni-common.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
 
+#include <algorithm>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -163,6 +167,46 @@ Java_com_sherpaonnx_vad_facade_SherpaOnnxVadHelper_nativeAcceptWaveform(
   if (!pcm.empty()) {
     inst->acceptWaveform(pcm.data(), static_cast<int32_t>(pcm.size()));
   }
+}
+
+JNIEXPORT jint JNICALL
+Java_com_sherpaonnx_vad_facade_SherpaOnnxVadHelper_nativeAcceptOfflineBuffer(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring bufferId,
+    jint windowSize) {
+  auto inst = Lookup(CopyRequiredJstring(env, instanceId));
+  if (!inst) return -1;
+
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, -1, -1, &view, &errCode, &errMsg)) {
+    LOGE("nativeAcceptOfflineBuffer: %s %s", errCode.c_str(), errMsg.c_str());
+    return -1;
+  }
+
+  const int32_t frame = windowSize > 0 ? static_cast<int32_t>(windowSize) : 1;
+  const int32_t n = static_cast<int32_t>(
+      std::min(view.count, static_cast<size_t>(std::numeric_limits<int32_t>::max())));
+  const float* data = view.data;
+  int32_t idx = 0;
+  jint chunks = 0;
+  std::vector<float> pad;
+  while (idx < n) {
+    const int32_t end = std::min(idx + frame, n);
+    const int32_t count = end - idx;
+    if (count == frame && data != nullptr) {
+      inst->acceptWaveform(data + idx, frame);
+    } else {
+      pad.assign(static_cast<size_t>(frame), 0.f);
+      if (count > 0 && data != nullptr) {
+        std::memcpy(pad.data(), data + idx, sizeof(float) * static_cast<size_t>(count));
+      }
+      inst->acceptWaveform(pad.data(), frame);
+    }
+    chunks += 1;
+    idx = end;
+  }
+  return chunks;
 }
 
 JNIEXPORT void JNICALL

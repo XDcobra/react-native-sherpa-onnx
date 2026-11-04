@@ -121,8 +121,10 @@ internal class TtsBatchGenerationService(
               return
             }
           }
-          val refSamples = refEntry.readAllSamples()
-          val refSampleRate = refEntry.sampleRate
+          if (refEntry.numSamples <= 0 || refEntry.sampleRate <= 0) {
+            promise.reject("TTS_GENERATE_ERROR", "Reference audio buffer is empty: $refBufferId")
+            return
+          }
           val silenceScale = TtsGenerationOptionsParser.getSilenceScale(options)
           val numSteps = TtsGenerationOptionsParser.getNumSteps(options)
           val refText = options?.getString("referenceText") ?: ""
@@ -134,9 +136,10 @@ internal class TtsBatchGenerationService(
             applyNumSteps = true,
             numSteps = numSteps,
             silenceScale = silenceScale,
-            referenceAudio = refSamples,
-            referenceSampleRate = refSampleRate,
+            referenceAudio = null,
+            referenceSampleRate = 0,
             referenceText = refText,
+            referenceBufferId = refBufferId,
             extra = TtsGenerationOptionsParser.buildExtraMap(options),
             phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
             tokens = TtsGenerationOptionsParser.parseTokens(options),

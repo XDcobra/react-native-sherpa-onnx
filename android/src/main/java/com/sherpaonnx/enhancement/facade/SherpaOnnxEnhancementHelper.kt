@@ -306,7 +306,6 @@ internal class SherpaOnnxEnhancementHelper(
     }
 
     try {
-      val inputSamples = audioInEntry.readAllSamples()
       val gateKey = inst.gateKey()
       if (!NativeInstanceGate.beginUse(gateKey)) {
         promise.reject(
@@ -316,7 +315,7 @@ internal class SherpaOnnxEnhancementHelper(
         return
       }
       val audio = try {
-        runOffline(instanceId, inputSamples, audioInEntry.sampleRate)
+        runOfflineFromBuffer(instanceId, audioInBufferId)
       } finally {
         NativeInstanceGate.endUse(gateKey)
       }
@@ -384,14 +383,6 @@ internal class SherpaOnnxEnhancementHelper(
     }
 
     try {
-      val inputSamples = audioInEntry.readAllSamples()
-      if (inputSamples.isEmpty()) {
-        promise.reject(
-          EnhancementErrorCodes.ENHANCEMENT_BUFFER_EMPTY,
-          "Input offline audio buffer is empty: $bufferId",
-        )
-        return
-      }
       val gateKey = offlineInst?.gateKey() ?: onlineInst!!.gateKey()
       if (!NativeInstanceGate.beginUse(gateKey)) {
         promise.reject(
@@ -401,7 +392,7 @@ internal class SherpaOnnxEnhancementHelper(
         return
       }
       val result = try {
-        nativeSetVoiceSample(instanceId, inputSamples, audioInEntry.sampleRate)
+        nativeSetVoiceSampleFromBuffer(instanceId, bufferId)
       } finally {
         NativeInstanceGate.endUse(gateKey)
       }
@@ -787,6 +778,11 @@ internal class SherpaOnnxEnhancementHelper(
       sampleRate: Int,
     ): NativeEnhanceAudio = parseAudio(nativeOfflineRun(instanceId, samples, sampleRate))
 
+    fun runOfflineFromBuffer(
+      instanceId: String,
+      bufferId: String,
+    ): NativeEnhanceAudio = parseAudio(nativeOfflineRunFromBuffer(instanceId, bufferId))
+
     fun runOnline(
       instanceId: String,
       samples: FloatArray,
@@ -852,10 +848,22 @@ internal class SherpaOnnxEnhancementHelper(
     ): HashMap<String, Any>?
 
     @JvmStatic
+    private external fun nativeSetVoiceSampleFromBuffer(
+      instanceId: String,
+      bufferId: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
     private external fun nativeOfflineRun(
       instanceId: String,
       samples: FloatArray,
       sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeOfflineRunFromBuffer(
+      instanceId: String,
+      bufferId: String,
     ): HashMap<String, Any>?
 
     @JvmStatic

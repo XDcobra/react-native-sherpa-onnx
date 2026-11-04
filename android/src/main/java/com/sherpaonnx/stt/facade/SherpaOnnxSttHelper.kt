@@ -329,14 +329,13 @@ internal class SherpaOnnxSttHelper(
         promise.reject(SttErrorCodes.BUFFER_NOT_FOUND, "Offline text buffer not found: $textOutBufferId")
         return
       }
-      val samples = entry.readAllSamples()
       val gateKey = "stt:$instanceId"
       if (!NativeInstanceGate.beginUse(gateKey)) {
         promise.reject(SttErrorCodes.NOT_INITIALIZED, "STT instance released: $instanceId")
         return
       }
       try {
-        val result = transcribeSamplesInternal(instanceId, samples, entry.sampleRate)
+        val result = transcribeFromBuffer(instanceId, bufferId)
         textEntry.populate(
           text = result.text,
           tokens = result.tokens,
@@ -364,6 +363,13 @@ internal class SherpaOnnxSttHelper(
     }
   }
 
+  private fun transcribeFromBuffer(instanceId: String, bufferId: String): TranscribeResult {
+    @Suppress("UNCHECKED_CAST")
+    val raw = nativeTranscribeFromBuffer(instanceId, bufferId, -1, -1) as? HashMap<String, Any>
+      ?: throw IllegalStateException("nativeTranscribeFromBuffer returned null")
+    return transcribeResultFromMap(raw)
+  }
+
   /** Used by offline-live pipeline worker. */
   fun transcribeSamplesInternal(
     instanceId: String,
@@ -373,6 +379,10 @@ internal class SherpaOnnxSttHelper(
     @Suppress("UNCHECKED_CAST")
     val raw = nativeTranscribeSamples(instanceId, samples, sampleRate) as? HashMap<String, Any>
       ?: throw IllegalStateException("nativeTranscribeSamples returned null")
+    return transcribeResultFromMap(raw)
+  }
+
+  private fun transcribeResultFromMap(raw: HashMap<String, Any>): TranscribeResult {
     val ok = raw["success"] as? Boolean ?: false
     if (!ok) {
       throw IllegalStateException(raw["error"] as? String ?: "Recognition failed")
@@ -559,6 +569,14 @@ internal class SherpaOnnxSttHelper(
       instanceId: String,
       samples: FloatArray,
       sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeTranscribeFromBuffer(
+      instanceId: String,
+      bufferId: String,
+      startSample: Int,
+      endSampleExclusive: Int,
     ): HashMap<String, Any>?
 
     @JvmStatic

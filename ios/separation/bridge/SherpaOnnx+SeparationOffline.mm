@@ -325,11 +325,13 @@ static NSString *const kOfflineSeparationOomMessage =
   }
 
   @try {
-    std::vector<float> inputSamples;
-    int inputSr = 0;
+    PaOfflineSampleView pcmView;
     sherpaonnx::SeparationProcessResult processResult;
     try {
-      if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+      std::string pcmErrCode;
+      std::string pcmErrMsg;
+      if (!pa_acquire_offline_sample_view(audioInId, -1, -1, &pcmView, &pcmErrCode, &pcmErrMsg) ||
+          pcmView.count == 0 || pcmView.data == nullptr) {
         reject(@"SEPARATION_BUFFER_EMPTY",
                [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
                nil);
@@ -344,7 +346,8 @@ static NSString *const kOfflineSeparationOomMessage =
           reject(@"SEPARATION_ERROR", @"Separation instance not found", nil);
           return;
         }
-        processResult = it->second->wrapper->processMonoSamples(inputSamples, inputSr);
+        processResult = it->second->wrapper->processMonoSamples(
+            pcmView.data, static_cast<int32_t>(pcmView.count), pcmView.sampleRate);
       }
     } catch (const std::bad_alloc &) {
       reject(kOfflineOomCode, kOfflineSeparationOomMessage, nil);

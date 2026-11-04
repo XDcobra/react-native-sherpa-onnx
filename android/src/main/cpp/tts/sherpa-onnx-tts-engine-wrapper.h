@@ -23,6 +23,10 @@ namespace sherpaonnx {
 /** Voice cloning / zero-shot options for Zipvoice and Pocket (matches JS referenceAudio + referenceSampleRate + optional fields). */
 struct VoiceCloneOptions {
     std::vector<float> reference_audio;
+    /** Non-owning PCM used when reference_audio is empty. reference_keepalive keeps that storage alive. */
+    const float* reference_pcm = nullptr;
+    int32_t reference_pcm_count = 0;
+    std::shared_ptr<void> reference_keepalive;
     int32_t reference_sample_rate = 0;
     std::string reference_text;
     int32_t num_steps = 5;

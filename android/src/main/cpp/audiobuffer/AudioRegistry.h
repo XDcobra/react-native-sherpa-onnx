@@ -34,6 +34,24 @@ std::string pa_temp_dir();
 std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId);
 bool pa_is_live_invalidated(const std::string &bufferId);
 
+std::shared_ptr<PaOfflineEntry> pa_get_offline_entry(const std::string &bufferId);
+
+struct PaOfflineSampleView {
+  std::shared_ptr<PaOfflineEntry> entry; // keeps storage alive
+  const float *data = nullptr;
+  size_t count = 0;
+  int sampleRate = 0;
+};
+
+/** Acquire a contiguous view into offline PCM. startSample/endSampleExclusive:
+ *  use startSample<0 and endSampleExclusive<0 for the full buffer.
+ *  Empty buffer → true with count==0 (data may be null). Missing buffer → false.
+ *  Pointer valid only while `out->entry` is held. Releasing the buffer id drops
+ *  the registry entry; storage stays alive until the last view is destroyed. */
+bool pa_acquire_offline_sample_view(const std::string &bufferId, int startSample,
+                                    int endSampleExclusive, PaOfflineSampleView *out,
+                                    std::string *errorCode, std::string *errorMessage);
+
 bool pa_read_offline_samples(const std::string &bufferId, std::vector<float> *samples,
                              int *sampleRate);
 

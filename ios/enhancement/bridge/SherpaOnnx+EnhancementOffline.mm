@@ -157,26 +157,28 @@ static NSString *const kOfflineEnhancementOomMessage =
   }
 
   @try {
-    std::vector<float> inputSamples;
-    int inputSr = 0;
-    if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+    PaOfflineSampleView pcmView;
+    std::string pcmErrCode;
+    std::string pcmErrMsg;
+    if (!pa_acquire_offline_sample_view(audioInId, -1, -1, &pcmView, &pcmErrCode, &pcmErrMsg) ||
+        pcmView.count == 0 || pcmView.data == nullptr) {
       RCTLogInfo(
-        @"[Enhancement] read offline samples failed or empty: bufferId=%@ inputSr=%d inputSamplesSize=%zu",
+        @"[Enhancement] offline view failed or empty: bufferId=%@ code=%s",
         audioInBufferId,
-        inputSr,
-        inputSamples.size()
+        pcmErrCode.c_str()
       );
       reject(@"ENHANCEMENT_BUFFER_EMPTY",
              [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
              nil);
       return;
     }
+    const int inputSr = pcmView.sampleRate;
 
     RCTLogInfo(
-      @"[Enhancement] input samples materialized: bufferId=%@ inputSr=%d inputSamplesSize=%zu (metaSr=%d metaNumSamples=%d) outBufferId=%@",
+      @"[Enhancement] input view: bufferId=%@ inputSr=%d inputSamplesSize=%zu (metaSr=%d metaNumSamples=%d) outBufferId=%@",
       audioInBufferId,
       inputSr,
-      inputSamples.size(),
+      pcmView.count,
       inSampleRate,
       inNumSamples,
       audioOutBufferId
@@ -190,7 +192,8 @@ static NSString *const kOfflineEnhancementOomMessage =
         reject(@"ENHANCEMENT_ERROR", @"Enhancement instance not found", nil);
         return;
       }
-      enhancedResult = it->second->wrapper->runSamples(inputSamples, inputSr);
+      enhancedResult = it->second->wrapper->runSamples(
+          pcmView.data, static_cast<int32_t>(pcmView.count), inputSr);
     }
 
     {
@@ -262,14 +265,17 @@ static NSString *const kOfflineEnhancementOomMessage =
     return;
   }
 
-  std::vector<float> inputSamples;
-  int inputSr = 0;
-  if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+  PaOfflineSampleView pcmView;
+  std::string pcmErrCode;
+  std::string pcmErrMsg;
+  if (!pa_acquire_offline_sample_view(audioInId, -1, -1, &pcmView, &pcmErrCode, &pcmErrMsg) ||
+      pcmView.count == 0 || pcmView.data == nullptr) {
     reject(@"ENHANCEMENT_BUFFER_EMPTY",
            [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", bufferId],
            nil);
     return;
   }
+  const int inputSr = pcmView.sampleRate;
 
   sherpaonnx::SetVoiceSampleResult setResult;
   bool found = false;
@@ -279,13 +285,15 @@ static NSString *const kOfflineEnhancementOomMessage =
     if (offlineIt != sherpaonnx::enhancement::bridge::g_enhancement_instances.end() &&
         offlineIt->second->wrapper != nullptr) {
       found = true;
-      setResult = offlineIt->second->wrapper->setVoiceSample(inputSamples, inputSr);
+      setResult = offlineIt->second->wrapper->setVoiceSample(
+          pcmView.data, static_cast<int32_t>(pcmView.count), inputSr);
     } else {
       auto onlineIt = sherpaonnx::enhancement::bridge::g_online_enhancement_instances.find(instanceIdStr);
       if (onlineIt != sherpaonnx::enhancement::bridge::g_online_enhancement_instances.end() &&
           onlineIt->second->wrapper != nullptr) {
         found = true;
-        setResult = onlineIt->second->wrapper->setVoiceSample(inputSamples, inputSr);
+        setResult = onlineIt->second->wrapper->setVoiceSample(
+            pcmView.data, static_cast<int32_t>(pcmView.count), inputSr);
       }
     }
   }

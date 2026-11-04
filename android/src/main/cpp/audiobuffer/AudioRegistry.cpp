@@ -408,6 +408,62 @@ bool pa_is_live_invalidated(const std::string &bufferId) {
   return g_pa_invalidated_live_ids.find(bufferId) != g_pa_invalidated_live_ids.end();
 }
 
+std::shared_ptr<PaOfflineEntry> pa_get_offline_entry(const std::string &bufferId) {
+  std::lock_guard<std::mutex> lock(g_pa_mutex);
+  auto it = g_pa_offline.find(bufferId);
+  if (it == g_pa_offline.end()) return nullptr;
+  return it->second;
+}
+
+bool pa_acquire_offline_sample_view(const std::string &bufferId, int startSample,
+                                    int endSampleExclusive, PaOfflineSampleView *out,
+                                    std::string *errorCode, std::string *errorMessage) {
+  if (!out) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "out must be non-null";
+    return false;
+  }
+  *out = PaOfflineSampleView{};
+
+  const bool full = startSample < 0 && endSampleExclusive < 0;
+  if (!full && (startSample < 0 || endSampleExclusive < 0)) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) {
+      *errorMessage =
+          "startSample and endSampleExclusive must both be >= 0, or both < 0 for the full buffer";
+    }
+    return false;
+  }
+  if (!full && startSample > endSampleExclusive) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "startSample must be <= endSampleExclusive";
+    return false;
+  }
+
+  auto entry = pa_get_offline_entry(bufferId);
+  if (!entry) {
+    if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+
+  const int total = entry->numSamples();
+  int start = 0;
+  int end = total;
+  if (!full) {
+    start = std::min(std::max(startSample, 0), total);
+    end = std::min(std::max(endSampleExclusive, 0), total);
+    if (start > end) start = end;
+  }
+  const int count = std::max(0, end - start);
+  const float *base = entry->floatPtr();
+  out->entry = std::move(entry);
+  out->sampleRate = out->entry->sampleRate;
+  out->count = static_cast<size_t>(count);
+  out->data = (count > 0 && base != nullptr) ? base + start : nullptr;
+  return true;
+}
+
 bool pa_read_offline_samples(const std::string &bufferId, std::vector<float> *samples,
                              int *sampleRate) {
   if (!samples || !sampleRate) return false;
@@ -795,8 +851,10 @@ bool pa_release_buffer(const std::string &bufferId) {
       g_pa_live.erase(lit);
     }
   }
-  if (off) off->release();
-  if (live) live->release();
+  // Views hold another shared_ptr. Only tear storage down when this is the last owner
+  // so an in-flight pa_acquire view stays valid after the id leaves the registry.
+  if (off && off.use_count() == 1) off->release();
+  if (live && live.use_count() == 1) live->release();
   return off || live;
 }
 

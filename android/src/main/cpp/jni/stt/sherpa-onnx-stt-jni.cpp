@@ -1,6 +1,7 @@
 #include "sherpa-onnx-stt-engine-wrapper.h"
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-path-fill.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -278,7 +279,90 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxSttHelper_nativeTranscribeSamples(
   }
   try {
     const auto pcm = CopyFloatArray(env, samples);
-    const auto result = inst->transcribeSamples(pcm, sampleRate);
+    const auto result = inst->transcribeSamples(
+        pcm.empty() ? nullptr : pcm.data(), static_cast<int32_t>(pcm.size()),
+        sampleRate);
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", true);
+    sherpaonnx::PutString(env, map, mapPut, "text", result.text);
+    sherpaonnx::PutString(env, map, mapPut, "lang", result.lang);
+    sherpaonnx::PutString(env, map, mapPut, "emotion", result.emotion);
+    sherpaonnx::PutString(env, map, mapPut, "event", result.event);
+
+    jmethodID listAdd = nullptr;
+    jobject tokens = NewArrayList(env, &listAdd);
+    if (tokens && listAdd) {
+      for (const auto& t : result.tokens) {
+        jstring js = env->NewStringUTF(t.c_str());
+        env->CallBooleanMethod(tokens, listAdd, js);
+        env->DeleteLocalRef(js);
+      }
+      jstring key = env->NewStringUTF("tokens");
+      env->CallObjectMethod(map, mapPut, key, tokens);
+      env->DeleteLocalRef(key);
+      env->DeleteLocalRef(tokens);
+    }
+    jfloatArray ts =
+        env->NewFloatArray(static_cast<jsize>(result.timestamps.size()));
+    if (ts) {
+      if (!result.timestamps.empty()) {
+        env->SetFloatArrayRegion(ts, 0,
+                                 static_cast<jsize>(result.timestamps.size()),
+                                 result.timestamps.data());
+      }
+      jstring key = env->NewStringUTF("timestamps");
+      env->CallObjectMethod(map, mapPut, key, ts);
+      env->DeleteLocalRef(key);
+      env->DeleteLocalRef(ts);
+    }
+    jfloatArray dur =
+        env->NewFloatArray(static_cast<jsize>(result.durations.size()));
+    if (dur) {
+      if (!result.durations.empty()) {
+        env->SetFloatArrayRegion(dur, 0,
+                                 static_cast<jsize>(result.durations.size()),
+                                 result.durations.data());
+      }
+      jstring key = env->NewStringUTF("durations");
+      env->CallObjectMethod(map, mapPut, key, dur);
+      env->DeleteLocalRef(key);
+      env->DeleteLocalRef(dur);
+    }
+  } catch (const std::exception& e) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", e.what());
+  } catch (...) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", "Recognition failed");
+  }
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_stt_facade_SherpaOnnxSttHelper_nativeTranscribeFromBuffer(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring bufferId,
+    jint startSample, jint endSampleExclusive) {
+  auto inst = Lookup(CopyJstring(env, instanceId));
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map) return nullptr;
+  if (!inst || !inst->isInitialized()) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", "STT not initialized");
+    return map;
+  }
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, startSample, endSampleExclusive, &view,
+                            &errCode, &errMsg)) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", errMsg.empty() ? errCode : errMsg);
+    return map;
+  }
+  try {
+    const auto result = inst->transcribeSamples(
+        view.count > 0 ? view.data : nullptr, static_cast<int32_t>(view.count),
+        view.sampleRate);
     sherpaonnx::PutBoolean(env, map, mapPut, "success", true);
     sherpaonnx::PutString(env, map, mapPut, "text", result.text);
     sherpaonnx::PutString(env, map, mapPut, "lang", result.lang);

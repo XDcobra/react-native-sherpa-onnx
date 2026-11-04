@@ -45,6 +45,8 @@ class SpeakerEmbeddingExtractorWrapper {
       bool debug = false);
 
   /** Returns empty vector on failure; check lastError() / lastErrorCode(). */
+  std::vector<float> computeFromSamples(const float* samples, int32_t numSamples,
+                                        int32_t sampleRate);
   std::vector<float> computeFromSamples(const std::vector<float>& samples,
                                         int32_t sampleRate);
 

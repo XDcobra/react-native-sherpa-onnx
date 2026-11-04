@@ -664,10 +664,10 @@ static void FillSttModelPathsFromDict(
         }
     }
 
-    // Read offline audio via shared helper API
-    std::vector<float> samples;
-    int sampleRate = 0;
-    if (!pa_read_offline_samples(bufferIdStr, &samples, &sampleRate)) {
+    PaOfflineSampleView pcmView;
+    std::string pcmErrCode;
+    std::string pcmErrMsg;
+    if (!pa_acquire_offline_sample_view(bufferIdStr, -1, -1, &pcmView, &pcmErrCode, &pcmErrMsg)) {
         auto liveEntry = pa_get_live_entry(bufferIdStr);
         if (liveEntry != nullptr) {
             reject(
@@ -681,14 +681,15 @@ static void FillSttModelPathsFromDict(
         return;
     }
 
-    if (samples.empty()) {
+    if (pcmView.count == 0 || pcmView.data == nullptr) {
         reject(kSttErrBufferNotFound, @"Audio buffer is empty", nil);
         return;
     }
 
     SttInstanceState *inst = it->second.get();
     try {
-        sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(samples, static_cast<int32_t>(sampleRate));
+        sherpaonnx::SttRecognitionResult result = inst->wrapper->transcribeSamples(
+            pcmView.data, static_cast<int32_t>(pcmView.count), static_cast<int32_t>(pcmView.sampleRate));
         std::string populateError;
         if (!txt_populate_offline_if_empty(
               textOutIdStr,

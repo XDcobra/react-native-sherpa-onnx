@@ -53,6 +53,12 @@ public:
     );
 
     SeparationProcessResult processMonoSamples(
+        const float* monoSamples,
+        int32_t numSamples,
+        int32_t sampleRate
+    );
+
+    SeparationProcessResult processMonoSamples(
         const std::vector<float>& monoSamples,
         int32_t sampleRate
     );

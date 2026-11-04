@@ -80,6 +80,22 @@ bool HasLiveTtsHandle(const std::optional<sherpa_onnx::cxx::OfflineTts>& tts) {
     return tts.has_value() && tts->Get() != nullptr;
 }
 
+bool VoiceCloneHasReferencePcm(const VoiceCloneOptions& options) {
+    if (options.reference_sample_rate <= 0) return false;
+    if (!options.reference_audio.empty()) return true;
+    return options.reference_pcm != nullptr && options.reference_pcm_count > 0;
+}
+
+void AssignVoiceCloneReference(sherpa_onnx::cxx::GenerationConfig& gc,
+                               const VoiceCloneOptions& options) {
+    if (!options.reference_audio.empty()) {
+        gc.reference_audio = options.reference_audio;
+    } else if (options.reference_pcm != nullptr && options.reference_pcm_count > 0) {
+        gc.reference_audio.assign(options.reference_pcm,
+                                  options.reference_pcm + options.reference_pcm_count);
+    }
+}
+
 }  // namespace
 
 class TtsWrapper::Impl {
@@ -563,7 +579,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     const std::optional<VoiceCloneOptions>& cloning
 ) {
     if (cloning.has_value() &&
-        (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0) &&
+        !VoiceCloneHasReferencePcm(*cloning) &&
         (!cloning->extra.empty() || cloning->apply_num_steps ||
          !cloning->phoneme_codepoints.empty() || !cloning->tokens.empty())) {
         AudioResult result;
@@ -602,8 +618,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         }
     }
 
-    if (!cloning.has_value() || cloning->reference_audio.empty() ||
-        cloning->reference_sample_rate <= 0) {
+    if (!cloning.has_value() || !VoiceCloneHasReferencePcm(*cloning)) {
         return generate(text, sid, speed);
     }
 
@@ -624,7 +639,7 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         gc.silence_scale = cloning->silence_scale;
         gc.speed = speed;
         gc.sid = sid;
-        gc.reference_audio = cloning->reference_audio;
+        AssignVoiceCloneReference(gc, *cloning);
         gc.reference_sample_rate = cloning->reference_sample_rate;
         gc.reference_text = cloning->reference_text;
         gc.num_steps = cloning->num_steps;
@@ -748,7 +763,7 @@ bool TtsWrapper::generateStream(
     const std::optional<VoiceCloneOptions>& cloning
 ) {
     if (cloning.has_value() &&
-        (cloning->reference_audio.empty() || cloning->reference_sample_rate <= 0) &&
+        !VoiceCloneHasReferencePcm(*cloning) &&
         (cloning->apply_num_steps || !cloning->phoneme_codepoints.empty() ||
          !cloning->tokens.empty() || !cloning->extra.empty())) {
         if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
@@ -791,8 +806,7 @@ bool TtsWrapper::generateStream(
         }
     }
 
-    if (!cloning.has_value() || cloning->reference_audio.empty() ||
-        cloning->reference_sample_rate <= 0) {
+    if (!cloning.has_value() || !VoiceCloneHasReferencePcm(*cloning)) {
         return generateStream(text, sid, speed, callback);
     }
 
@@ -817,7 +831,7 @@ bool TtsWrapper::generateStream(
         gc.silence_scale = cloning->silence_scale;
         gc.speed = speed;
         gc.sid = sid;
-        gc.reference_audio = cloning->reference_audio;
+        AssignVoiceCloneReference(gc, *cloning);
         gc.reference_sample_rate = cloning->reference_sample_rate;
         gc.reference_text = cloning->reference_text;
         gc.num_steps = cloning->num_steps;

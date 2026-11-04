@@ -1,5 +1,6 @@
 #include "sherpa-onnx-audio-tagging-wrapper.h"
 #include "sherpa-onnx-detect-jni-common.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -196,6 +197,75 @@ Java_com_sherpaonnx_audiotagging_facade_SherpaOnnxAudioTaggingHelper_nativeCompu
   }
   const auto result = inst->compute(pcm.data(), static_cast<int32_t>(pcm.size()),
                                     sampleRate, topKOpt);
+
+  sherpaonnx::PutBoolean(env, map, mapPut, "success", result.success);
+  sherpaonnx::PutString(env, map, mapPut, "error", result.error);
+  if (!result.success) {
+    sherpaonnx::PutString(env, map, mapPut, "errorCode",
+                          "AUDIO_TAGGING_TAG_FAILED");
+  }
+
+  jmethodID listAdd = nullptr;
+  jobject list = NewArrayList(env, &listAdd);
+  if (list) {
+    for (const auto& ev : result.events) {
+      jmethodID eventPut = nullptr;
+      jobject eventMap = NewHashMap(env, &eventPut);
+      if (!eventMap) continue;
+      sherpaonnx::PutString(env, eventMap, eventPut, "name", ev.name);
+      PutInt(env, eventMap, eventPut, "index", ev.index);
+      PutDouble(env, eventMap, eventPut, "prob", static_cast<jdouble>(ev.prob));
+      env->CallBooleanMethod(list, listAdd, eventMap);
+      env->DeleteLocalRef(eventMap);
+    }
+    jstring key = env->NewStringUTF("events");
+    env->CallObjectMethod(map, mapPut, key, list);
+    env->DeleteLocalRef(key);
+    env->DeleteLocalRef(list);
+  }
+
+  PutInt(env, map, mapPut, "defaultTopK", inst->defaultTopK());
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_audiotagging_facade_SherpaOnnxAudioTaggingHelper_nativeComputeFromBuffer(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring bufferId,
+    jint startSample, jint endSampleExclusive, jint topK) {
+  const std::string id = CopyRequiredJstring(env, instanceId);
+  auto inst = Lookup(id);
+
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map) return nullptr;
+
+  if (!inst) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error",
+                          "Audio tagging instance not found");
+    sherpaonnx::PutString(env, map, mapPut, "errorCode",
+                          "AUDIO_TAGGING_NOT_INITIALIZED");
+    return map;
+  }
+
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, startSample, endSampleExclusive, &view,
+                            &errCode, &errMsg)) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", errMsg);
+    sherpaonnx::PutString(env, map, mapPut, "errorCode", errCode);
+    return map;
+  }
+
+  std::optional<int32_t> topKOpt;
+  if (topK > 0) {
+    topKOpt = topK;
+  }
+  const auto result = inst->compute(view.count > 0 ? view.data : nullptr,
+                                    static_cast<int32_t>(view.count),
+                                    view.sampleRate, topKOpt);
 
   sherpaonnx::PutBoolean(env, map, mapPut, "success", result.success);
   sherpaonnx::PutString(env, map, mapPut, "error", result.error);

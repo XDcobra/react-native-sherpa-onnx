@@ -153,7 +153,9 @@ internal class SherpaOnnxLanguageIdHelper {
 
   private fun computeLang(
     instanceId: String,
-    samples: FloatArray,
+    bufferId: String,
+    startSample: Int,
+    endSampleExclusive: Int,
     sampleRate: Int,
     where: String,
   ): String {
@@ -168,12 +170,13 @@ internal class SherpaOnnxLanguageIdHelper {
       slidIdentity = instanceId.hashCode(),
       where = where,
       opId = opId,
-      detail = "instanceId=$instanceId samples=${samples.size} sr=$sampleRate",
+      detail = "instanceId=$instanceId bufferId=$bufferId start=$startSample end=$endSampleExclusive sr=$sampleRate",
     )
     try {
       @Suppress("UNCHECKED_CAST")
-      val raw = nativeCompute(instanceId, samples, sampleRate) as? HashMap<String, Any>
-        ?: throw IllegalStateException("nativeCompute returned null")
+      val raw = nativeComputeFromBuffer(instanceId, bufferId, startSample, endSampleExclusive)
+        as? HashMap<String, Any>
+        ?: throw IllegalStateException("nativeComputeFromBuffer returned null")
       val success = raw["success"] as? Boolean ?: false
       if (!success) {
         val err = raw["error"] as? String ?: "compute failed"
@@ -234,14 +237,18 @@ internal class SherpaOnnxLanguageIdHelper {
       try {
         val t0 = SystemClock.uptimeMillis()
         val sampleRate = audioEntry.sampleRate
-        val samples: FloatArray
+        val start: Int
+        val end: Int
+        val frameCount: Int
         if (!hasStart) {
-          samples = audioEntry.readAllSamples()
+          start = -1
+          end = -1
+          frameCount = audioEntry.numSamples
         } else {
-          val start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
+          start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
           val endRaw = kotlin.math.floor(endSample!!).toInt().coerceAtLeast(start)
-          val end = endRaw.coerceAtMost(audioEntry.numSamples)
-          val frameCount = (end - start).coerceAtLeast(0)
+          end = endRaw.coerceAtMost(audioEntry.numSamples)
+          frameCount = (end - start).coerceAtLeast(0)
           if (frameCount == 0) {
             val result = Arguments.createMap()
             result.putString("lang", "")
@@ -250,12 +257,11 @@ internal class SherpaOnnxLanguageIdHelper {
             promise.resolve(result)
             return@execute
           }
-          samples = audioEntry.readSlice(start, frameCount)
         }
         val audioDuration =
-          if (sampleRate > 0) samples.size.toDouble() / sampleRate.toDouble() else 0.0
+          if (sampleRate > 0) frameCount.toDouble() / sampleRate.toDouble() else 0.0
 
-        val lang = computeLang(instanceId, samples, sampleRate, "offline.identify")
+        val lang = computeLang(instanceId, audioBufferId, start, end, sampleRate, "offline.identify")
         val elapsedMs = (SystemClock.uptimeMillis() - t0).toDouble()
 
         val result = Arguments.createMap()
@@ -391,9 +397,9 @@ internal class SherpaOnnxLanguageIdHelper {
 
         for (i in speechSpans.indices) {
           val span = speechSpans[i]
-          val frameCount = (span.endSample - span.startSample).coerceAtLeast(0)
-          val samples = audioInEntry.readSlice(span.startSample, frameCount)
-          val lang = computeLang(instanceId, samples, sampleRate, "offline.label")
+          val start = span.startSample.coerceAtLeast(0)
+          val end = span.endSample.coerceAtMost(audioInEntry.numSamples)
+          val lang = computeLang(instanceId, audioInId, start, end, sampleRate, "offline.label")
 
           val durationMs = if (span.durationMs > 0) span.durationMs else {
             if (sampleRate > 0) ((span.endSample - span.startSample) * 1000) / sampleRate else 0
@@ -536,6 +542,14 @@ internal class SherpaOnnxLanguageIdHelper {
       instanceId: String,
       samples: FloatArray,
       sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeComputeFromBuffer(
+      instanceId: String,
+      bufferId: String,
+      startSample: Int,
+      endSampleExclusive: Int,
     ): HashMap<String, Any>?
 
     @JvmStatic

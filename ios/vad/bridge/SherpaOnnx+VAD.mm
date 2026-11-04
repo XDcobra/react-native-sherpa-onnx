@@ -513,13 +513,15 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     cfg = it->second;
   }
 
-  std::vector<float> samples;
-  int sampleRate = 0;
-  if (!pa_read_offline_samples([audioInBufferId UTF8String], &samples, &sampleRate)) {
+  PaOfflineSampleView pcmView;
+  std::string pcmErrCode;
+  std::string pcmErrMsg;
+  if (!pa_acquire_offline_sample_view([audioInBufferId UTF8String], -1, -1, &pcmView, &pcmErrCode,
+                                      &pcmErrMsg)) {
     reject(@"VAD_BUFFER_NOT_FOUND", @"Offline audio buffer not found", nil);
     return;
   }
-  if (sampleRate > 0) cfg.sampleRate = sampleRate;
+  if (pcmView.sampleRate > 0) cfg.sampleRate = pcmView.sampleRate;
   const int frameSize = MAX(1, cfg.windowSize);
   if (!cfg.runtime) {
     reject(@"VAD_MODEL_INIT_FAILED", @"VAD runtime is not initialized", nil);
@@ -530,8 +532,9 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
   int64_t speechDurationMs = 0;
   int chunksProcessed = 0;
   std::vector<SegRecord> records;
-  std::vector<float> pending;
-  pending.insert(pending.end(), samples.begin(), samples.end());
+  const float *pcmData = pcmView.data;
+  const int pcmCount = static_cast<int>(pcmView.count);
+  int pcmIndex = 0;
   auto appendSegments = [&](const std::vector<sherpaonnx::VadEngineSegment> &segments) {
     for (const auto &segment : segments) {
       SegRecord r;
@@ -551,19 +554,18 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
       speechDurationMs += segment.durationMs;
     }
   };
-  while ((int)pending.size() >= frameSize) {
-    cfg.runtime->acceptWaveform(pending.data(), frameSize);
+  while (pcmData != nullptr && pcmCount - pcmIndex >= frameSize) {
+    cfg.runtime->acceptWaveform(pcmData + pcmIndex, frameSize);
     chunksProcessed += 1;
     appendSegments(cfg.runtime->popSegments());
-    pending.erase(pending.begin(), pending.begin() + frameSize);
+    pcmIndex += frameSize;
   }
-  if (!pending.empty()) {
-    std::vector<float> tail(frameSize, 0.0f);
-    std::copy(pending.begin(), pending.end(), tail.begin());
+  if (pcmData != nullptr && pcmIndex < pcmCount) {
+    std::vector<float> tail(static_cast<size_t>(frameSize), 0.0f);
+    std::copy(pcmData + pcmIndex, pcmData + pcmCount, tail.begin());
     cfg.runtime->acceptWaveform(tail.data(), frameSize);
     chunksProcessed += 1;
     appendSegments(cfg.runtime->popSegments());
-    pending.clear();
   }
   cfg.runtime->flush();
   const auto finalSegments = cfg.runtime->popSegments();
@@ -594,7 +596,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
         it->second->segments = records;
         resolve(@{
           @"chunksProcessed": @((double)chunksProcessed),
-          @"unitsRead": @((double)samples.size()),
+          @"unitsRead": @((double)pcmView.count),
           @"unitsWritten": @((double)segmentCount),
           @"segmentCount": @((double)segmentCount),
           @"speechDurationMs": @((double)speechDurationMs)
@@ -635,7 +637,7 @@ std::shared_ptr<VadPipelineWorker> DetachPipelineLocked(
     }
     resolve(@{
       @"chunksProcessed": @((double)chunksProcessed),
-      @"unitsRead": @((double)samples.size()),
+      @"unitsRead": @((double)pcmView.count),
       @"unitsWritten": @((double)segmentCount),
       @"segmentCount": @((double)segmentCount),
       @"speechDurationMs": @((double)speechDurationMs)

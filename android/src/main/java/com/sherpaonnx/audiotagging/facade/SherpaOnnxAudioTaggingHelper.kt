@@ -315,14 +315,18 @@ internal class SherpaOnnxAudioTaggingHelper(
       try {
         val t0 = SystemClock.uptimeMillis()
         val sampleRate = audioEntry.sampleRate
-        val samples: FloatArray
+        val start: Int
+        val end: Int
+        val frameCount: Int
         if (!hasStart) {
-          samples = audioEntry.readAllSamples()
+          start = -1
+          end = -1
+          frameCount = audioEntry.numSamples
         } else {
-          val start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
+          start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
           val endRaw = kotlin.math.floor(endSample!!).toInt().coerceAtLeast(start)
-          val end = endRaw.coerceAtMost(audioEntry.numSamples)
-          val frameCount = (end - start).coerceAtLeast(0)
+          end = endRaw.coerceAtMost(audioEntry.numSamples)
+          frameCount = (end - start).coerceAtLeast(0)
           if (frameCount == 0) {
             val result = Arguments.createMap()
             result.putArray("events", Arguments.createArray())
@@ -332,7 +336,6 @@ internal class SherpaOnnxAudioTaggingHelper(
             promise.resolve(result)
             return@execute
           }
-          samples = audioEntry.readSlice(start, frameCount)
           Log.d(
             AudioTaggingErrorCodes.TAG,
             "tagOffline slice instanceId=$instanceId bufferId=$audioBufferId " +
@@ -340,12 +343,12 @@ internal class SherpaOnnxAudioTaggingHelper(
           )
         }
         val audioDuration =
-          if (sampleRate > 0) samples.size.toDouble() / sampleRate.toDouble() else 0.0
+          if (sampleRate > 0) frameCount.toDouble() / sampleRate.toDouble() else 0.0
 
         Log.d(
           AudioTaggingErrorCodes.TAG,
           "tagOffline instanceId=$instanceId bufferId=$audioBufferId " +
-            "sampleRate=$sampleRate numSamples=${samples.size} topK=$effectiveTopK",
+            "sampleRate=$sampleRate numSamples=$frameCount topK=$effectiveTopK",
         )
 
         val gateKey = instance.gateKey()
@@ -360,7 +363,13 @@ internal class SherpaOnnxAudioTaggingHelper(
         val events: List<Map<String, Any>>
         try {
           @Suppress("UNCHECKED_CAST")
-          val raw = nativeCompute(instanceId, samples, sampleRate, effectiveTopK)
+          val raw = nativeComputeFromBuffer(
+            instanceId,
+            audioBufferId,
+            start,
+            end,
+            effectiveTopK,
+          )
             as? HashMap<String, Any>
             ?: throw IllegalStateException("nativeCompute returned null")
           val success = raw["success"] as? Boolean ?: false
@@ -448,6 +457,15 @@ internal class SherpaOnnxAudioTaggingHelper(
       instanceId: String,
       samples: FloatArray,
       sampleRate: Int,
+      topK: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeComputeFromBuffer(
+      instanceId: String,
+      bufferId: String,
+      startSample: Int,
+      endSampleExclusive: Int,
       topK: Int,
     ): HashMap<String, Any>?
 

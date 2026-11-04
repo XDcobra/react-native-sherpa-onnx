@@ -61,6 +61,19 @@ internal class SherpaOnnxSeparationHelper(
     }
   }
 
+  private fun processSeparationFromBufferGated(
+    instanceId: String,
+    bufferId: String,
+  ): Array<FloatArray>? {
+    val gateKey = separationGateKey(instanceId)
+    if (!NativeInstanceGate.beginUse(gateKey)) return null
+    return try {
+      nativeProcessSeparationFromBuffer(instanceId, bufferId)
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
+    }
+  }
+
   fun shutdown() {
     for (id in activeLivePipelineByInstance.keys.toList()) {
       stopActiveLivePipeline(id)
@@ -311,15 +324,13 @@ internal class SherpaOnnxSeparationHelper(
           "numSamples=${audioInEntry.numSamples} sampleRate=${audioInEntry.sampleRate} " +
           "expectedStems=$expectedStems",
       )
-      val inputSamples = audioInEntry.readAllSamples()
       Log.i(
         SeparationErrorCodes.TAG,
-        "separateOfflineAudioBuffers: readAllSamples size=${inputSamples.size}",
+        "separateOfflineAudioBuffers: bufferId=$audioInBufferId numSamples=${audioInEntry.numSamples}",
       )
-      val stems = processSeparationGated(
+      val stems = processSeparationFromBufferGated(
         instanceId,
-        inputSamples,
-        audioInEntry.sampleRate,
+        audioInBufferId,
       )
       if (stems == null || stems.size != expectedStems) {
         Log.e(
@@ -703,6 +714,12 @@ internal class SherpaOnnxSeparationHelper(
       instanceId: String,
       samples: FloatArray,
       sampleRate: Int,
+    ): Array<FloatArray>?
+
+    @JvmStatic
+    private external fun nativeProcessSeparationFromBuffer(
+      instanceId: String,
+      bufferId: String,
     ): Array<FloatArray>?
 
     @JvmStatic

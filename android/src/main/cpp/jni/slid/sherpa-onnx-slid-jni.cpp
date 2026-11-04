@@ -1,5 +1,6 @@
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-slid-wrapper.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -125,6 +126,49 @@ Java_com_sherpaonnx_slid_facade_SherpaOnnxLanguageIdHelper_nativeCompute(
   const auto pcm = CopyFloatArray(env, samples);
   const auto result =
       inst->compute(pcm.data(), static_cast<int32_t>(pcm.size()), sampleRate);
+  sherpaonnx::PutBoolean(env, map, mapPut, "success", result.success);
+  sherpaonnx::PutString(env, map, mapPut, "lang", result.lang);
+  sherpaonnx::PutString(env, map, mapPut, "error", result.error);
+  if (!result.success) {
+    sherpaonnx::PutString(env, map, mapPut, "errorCode",
+                          "LANGUAGE_ID_IDENTIFY_FAILED");
+  }
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_slid_facade_SherpaOnnxLanguageIdHelper_nativeComputeFromBuffer(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring bufferId,
+    jint startSample, jint endSampleExclusive) {
+  const std::string id = CopyRequiredJstring(env, instanceId);
+  auto inst = Lookup(id);
+
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map) return nullptr;
+
+  if (!inst) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", "SLID instance not found");
+    sherpaonnx::PutString(env, map, mapPut, "errorCode",
+                          "LANGUAGE_ID_NOT_INITIALIZED");
+    return map;
+  }
+
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, startSample, endSampleExclusive, &view,
+                            &errCode, &errMsg)) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", errMsg);
+    sherpaonnx::PutString(env, map, mapPut, "errorCode", errCode);
+    return map;
+  }
+
+  const auto result = inst->compute(
+      view.count > 0 ? view.data : nullptr, static_cast<int32_t>(view.count),
+      view.sampleRate);
   sherpaonnx::PutBoolean(env, map, mapPut, "success", result.success);
   sherpaonnx::PutString(env, map, mapPut, "lang", result.lang);
   sherpaonnx::PutString(env, map, mapPut, "error", result.error);

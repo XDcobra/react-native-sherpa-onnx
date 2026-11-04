@@ -216,35 +216,19 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     }
 
     try {
-      val inputSamples: FloatArray
-      if (!hasStart) {
-        inputSamples = audioInEntry.readAllSamples()
-      } else {
-        val start =
-          kotlin.math
-            .floor(startSample!!)
-            .toInt()
-            .coerceAtLeast(0)
-        val endRaw =
-          kotlin.math
-            .floor(endSample!!)
-            .toInt()
-            .coerceAtLeast(start)
-        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
-        val frameCount = (end - start).coerceAtLeast(0)
-        if (frameCount == 0) {
-          val out = Arguments.createMap()
-          out.putArray("embedding", Arguments.createArray())
-          promise.resolve(out)
-          return
-        }
-        inputSamples = audioInEntry.readSlice(start, frameCount)
+      val (start, end) = offlineSampleRange(startSample, endSample, audioInEntry.numSamples)
+      if (start >= 0 && end <= start) {
+        val out = Arguments.createMap()
+        out.putArray("embedding", Arguments.createArray())
+        promise.resolve(out)
+        return
       }
 
-      val embedding = computeEmbeddingFromSamples(
+      val embedding = computeEmbeddingFromBuffer(
         instanceId,
-        inputSamples,
-        audioInEntry.sampleRate,
+        audioBufferId,
+        start,
+        end,
       )
       val arr = Arguments.createArray()
       for (v in embedding) {
@@ -296,36 +280,20 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     }
 
     try {
-      val inputSamples: FloatArray
-      if (!hasStart) {
-        inputSamples = audioInEntry.readAllSamples()
-      } else {
-        val start =
-          kotlin.math
-            .floor(startSample!!)
-            .toInt()
-            .coerceAtLeast(0)
-        val endRaw =
-          kotlin.math
-            .floor(endSample!!)
-            .toInt()
-            .coerceAtLeast(start)
-        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
-        val frameCount = (end - start).coerceAtLeast(0)
-        if (frameCount == 0) {
-          val out = Arguments.createMap()
-          out.putString("name", "")
-          promise.resolve(out)
-          return
-        }
-        inputSamples = audioInEntry.readSlice(start, frameCount)
+      val (start, end) = offlineSampleRange(startSample, endSample, audioInEntry.numSamples)
+      if (start >= 0 && end <= start) {
+        val out = Arguments.createMap()
+        out.putString("name", "")
+        promise.resolve(out)
+        return
       }
 
       val embedding =
-        computeEmbeddingFromSamples(
+        computeEmbeddingFromBuffer(
           instanceId,
-          inputSamples,
-          audioInEntry.sampleRate,
+          audioBufferId,
+          start,
+          end,
         )
       val name = searchSpeaker(managerId, embedding, threshold.toFloat())
       val out = Arguments.createMap()
@@ -388,34 +356,18 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
     }
 
     try {
-      val inputSamples: FloatArray
-      if (!hasStart) {
-        inputSamples = audioInEntry.readAllSamples()
-      } else {
-        val start =
-          kotlin.math
-            .floor(startSample!!)
-            .toInt()
-            .coerceAtLeast(0)
-        val endRaw =
-          kotlin.math
-            .floor(endSample!!)
-            .toInt()
-            .coerceAtLeast(start)
-        val end = endRaw.coerceAtMost(audioInEntry.numSamples)
-        val frameCount = (end - start).coerceAtLeast(0)
-        if (frameCount == 0) {
-          promise.resolve(okMap(false))
-          return
-        }
-        inputSamples = audioInEntry.readSlice(start, frameCount)
+      val (start, end) = offlineSampleRange(startSample, endSample, audioInEntry.numSamples)
+      if (start >= 0 && end <= start) {
+        promise.resolve(okMap(false))
+        return
       }
 
       val embedding =
-        computeEmbeddingFromSamples(
+        computeEmbeddingFromBuffer(
           instanceId,
-          inputSamples,
-          audioInEntry.sampleRate,
+          audioBufferId,
+          start,
+          end,
         )
       val ok = verifySpeaker(managerId, name, embedding, threshold.toFloat())
       promise.resolve(okMap(ok))
@@ -509,48 +461,44 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
           return
         }
 
-        val inputSamples: FloatArray
-        if (!hasStarts) {
-          inputSamples = audioInEntry.readAllSamples()
-        } else {
-          val startIsNull = startSamples!!.isNull(i)
-          val endIsNull = endSamples!!.isNull(i)
-          if (startIsNull != endIsNull) {
+        val start: Int
+        val end: Int
+        if (!hasStarts || startSamples!!.isNull(i)) {
+          val endIsNull = !hasStarts || endSamples!!.isNull(i)
+          if (hasStarts && startSamples!!.isNull(i) != endIsNull) {
             promise.reject(
               INVALID_ARGUMENT,
               "startSamples[$i] and endSamples[$i] must both be provided or both null",
             )
             return
           }
-          if (startIsNull) {
-            inputSamples = audioInEntry.readAllSamples()
-          } else {
-            val start =
-              kotlin.math
-                .floor(startSamples.getDouble(i))
-                .toInt()
-                .coerceAtLeast(0)
-            val endRaw =
-              kotlin.math
-                .floor(endSamples.getDouble(i))
-                .toInt()
-                .coerceAtLeast(start)
-            val end = endRaw.coerceAtMost(audioInEntry.numSamples)
-            val frameCount = (end - start).coerceAtLeast(0)
-            if (frameCount == 0) {
-              continue
-            }
-            inputSamples = audioInEntry.readSlice(start, frameCount)
+          start = -1
+          end = -1
+        } else {
+          if (endSamples!!.isNull(i)) {
+            promise.reject(
+              INVALID_ARGUMENT,
+              "startSamples[$i] and endSamples[$i] must both be provided or both null",
+            )
+            return
           }
-        }
-        if (inputSamples.isEmpty()) {
-          continue
+          val rangeStart =
+            kotlin.math.floor(startSamples.getDouble(i)).toInt().coerceAtLeast(0)
+          val endRaw =
+            kotlin.math.floor(endSamples.getDouble(i)).toInt().coerceAtLeast(rangeStart)
+          val rangeEnd = endRaw.coerceAtMost(audioInEntry.numSamples)
+          if (rangeEnd <= rangeStart) {
+            continue
+          }
+          start = rangeStart
+          end = rangeEnd
         }
         embeddings.add(
-          computeEmbeddingFromSamples(
+          computeEmbeddingFromBuffer(
             instanceId,
-            inputSamples,
-            audioInEntry.sampleRate,
+            audioBufferId,
+            start,
+            end,
           ),
         )
       }
@@ -877,12 +825,10 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
         for (span in speechSpans) {
           val start = span.startSample.coerceAtLeast(0)
           val end = span.endSample.coerceAtMost(audioInEntry.numSamples)
-          val frameCount = (end - start).coerceAtLeast(0)
-          val samples = if (frameCount > 0) audioInEntry.readSlice(start, frameCount) else FloatArray(0)
 
           val speakerName: String?
-          if (samples.isNotEmpty()) {
-            val embedding = computeEmbeddingFromSamples(instanceId, samples, sampleRate)
+          if (end > start) {
+            val embedding = computeEmbeddingFromBuffer(instanceId, audioInId, start, end)
             val name = searchSpeaker(managerId, embedding, threshold.toFloat()).trim()
             if (name.isNotEmpty()) {
               speakerName = name
@@ -949,6 +895,51 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
         }
         promise.reject(code, detail, e)
       }
+    }
+  }
+
+  /** Full buffer is -1,-1. A non-negative range with end <= start is empty. */
+  private fun offlineSampleRange(
+    startSample: Double?,
+    endSample: Double?,
+    numSamples: Int,
+  ): Pair<Int, Int> {
+    if (startSample == null || endSample == null) return -1 to -1
+    val start = kotlin.math.floor(startSample).toInt().coerceAtLeast(0)
+    val endRaw = kotlin.math.floor(endSample).toInt().coerceAtLeast(start)
+    val end = endRaw.coerceAtMost(numSamples)
+    return start to end
+  }
+
+  fun computeEmbeddingFromBuffer(
+    instanceId: String,
+    bufferId: String,
+    startSample: Int,
+    endSampleExclusive: Int,
+  ): FloatArray {
+    val gateKey = extractorGateKey(instanceId)
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      throw IllegalStateException("$COMPUTE_ERROR: Speaker embedding extractor released: $instanceId")
+    }
+    try {
+      val result = nativeComputeEmbeddingFromBuffer(
+        instanceId,
+        bufferId,
+        startSample,
+        endSampleExclusive,
+      ) ?: throw IllegalStateException("Speaker embedding compute returned null")
+      if (result["success"] as? Boolean != true) {
+        val code =
+          (result["errorCode"] as? String)?.takeIf { it.isNotBlank() } ?: COMPUTE_ERROR
+        val error =
+          (result["error"] as? String)?.takeIf { it.isNotBlank() }
+            ?: "Speaker embedding compute failed"
+        throw IllegalStateException("$code: $error")
+      }
+      return result["embedding"] as? FloatArray
+        ?: throw IllegalStateException("Speaker embedding compute missing embedding")
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
     }
   }
 
@@ -1110,6 +1101,14 @@ internal class SherpaOnnxSpeakerEmbeddingHelper(
       instanceId: String,
       samples: FloatArray,
       sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeComputeEmbeddingFromBuffer(
+      instanceId: String,
+      bufferId: String,
+      startSample: Int,
+      endSampleExclusive: Int,
     ): HashMap<String, Any>?
 
     @JvmStatic

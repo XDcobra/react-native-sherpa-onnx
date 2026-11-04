@@ -436,14 +436,18 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             });
             return;
           }
-          std::vector<float> pcm;
-          int pcmSampleRate = 0;
-          if (!pa_read_offline_samples(audioId, &pcm, &pcmSampleRate) || pcm.empty()) {
+          PaOfflineSampleView pcmView;
+          std::string pcmErrCode;
+          std::string pcmErrMsg;
+          if (!pa_acquire_offline_sample_view(audioId, -1, -1, &pcmView, &pcmErrCode, &pcmErrMsg) ||
+              pcmView.count == 0 || pcmView.data == nullptr) {
             reject(kAlignmentErrAudioBufferEmpty,
                    [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
                    nil);
             return;
           }
+          const int pcmSampleRate = pcmView.sampleRate;
+          const int pcmCount = static_cast<int>(pcmView.count);
           const auto units = splitTextUnits(inputText, granularityStr);
           const auto mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors);
           const size_t unmappedCount = std::count_if(mapped.begin(), mapped.end(), [](const auto &group) {
@@ -460,15 +464,15 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
             }
             if (textJoined.empty()) continue;
             const auto &anchor = anchors[i];
-            const int start = std::max(0, std::min(anchor.startSample, (int)pcm.size()));
-            const int end = std::max(start, std::min(anchor.endSample, (int)pcm.size()));
+            const int start = std::max(0, std::min(anchor.startSample, pcmCount));
+            const int end = std::max(start, std::min(anchor.endSample, pcmCount));
             if (end <= start) continue;
             sherpa_onnx::alignment::AlignmentResult chunkResult;
             try {
               chunkResult = sherpa_onnx::alignment::AlignAccurateFromPcm(
                   modelPathStr,
                   textJoined,
-                  pcm.data() + start,
+                  pcmView.data + start,
                   end - start,
                   pcmSampleRate,
                   granularityStr,
@@ -535,9 +539,11 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
           });
           return;
         }
-        std::vector<float> pcm;
-        int pcmSampleRate = 0;
-        if (!pa_read_offline_samples(audioId, &pcm, &pcmSampleRate) || pcm.empty()) {
+        PaOfflineSampleView pcmView;
+        std::string pcmErrCode;
+        std::string pcmErrMsg;
+        if (!pa_acquire_offline_sample_view(audioId, -1, -1, &pcmView, &pcmErrCode, &pcmErrMsg) ||
+            pcmView.count == 0 || pcmView.data == nullptr) {
           reject(kAlignmentErrAudioBufferEmpty,
                  [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioInBufferId],
                  nil);
@@ -546,9 +552,9 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
         result = sherpa_onnx::alignment::AlignAccurateFromPcm(
             modelPathStr,
             inputText,
-            pcm.data(),
-            pcm.size(),
-            pcmSampleRate,
+            pcmView.data,
+            pcmView.count,
+            pcmView.sampleRate,
             granularityStr,
             vocabPathStr,
             providerStr,
@@ -806,17 +812,14 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
         return;
       }
 
-      std::vector<float> samples;
+      PaOfflineSampleView pcmView;
       std::string sliceErrCode;
       std::string sliceErrMsg;
-      if (!pa_get_offline_samples_slice(
-              descriptor.audioBufferId,
-              descriptor.startSample,
-              descriptor.sampleCount,
-              &samples,
-              &sliceErrCode,
+      const int sliceEnd = descriptor.startSample + descriptor.sampleCount;
+      if (!pa_acquire_offline_sample_view(
+              descriptor.audioBufferId, descriptor.startSample, sliceEnd, &pcmView, &sliceErrCode,
               &sliceErrMsg) ||
-          samples.empty()) {
+          pcmView.count == 0 || pcmView.data == nullptr) {
         reject(kAlignmentErrAnchorOutOfRange,
                @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: failed to resolve pcm slice from offline buffer.",
                nil);
@@ -828,8 +831,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
         result = sherpa_onnx::alignment::AlignAccurateFromPcm(
             modelPathStr,
             textStr,
-            samples.data(),
-            samples.size(),
+            pcmView.data,
+            pcmView.count,
             requestedSampleRate,
             granularityStr,
             vocabPathStr,
@@ -973,17 +976,14 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
         return;
       }
 
-      std::vector<float> samples;
+      PaOfflineSampleView pcmView;
       std::string sliceErrCode;
       std::string sliceErrMsg;
-      if (!pa_get_offline_samples_slice(
-              descriptor.audioBufferId,
-              descriptor.startSample,
-              descriptor.sampleCount,
-              &samples,
-              &sliceErrCode,
+      const int sliceEnd = descriptor.startSample + descriptor.sampleCount;
+      if (!pa_acquire_offline_sample_view(
+              descriptor.audioBufferId, descriptor.startSample, sliceEnd, &pcmView, &sliceErrCode,
               &sliceErrMsg) ||
-          samples.empty()) {
+          pcmView.count == 0 || pcmView.data == nullptr) {
         reject(kAlignmentErrAnchorOutOfRange,
                @"ALIGNMENT_ANCHOR_OUT_OF_RANGE: failed to resolve pcm slice from offline buffer.",
                nil);
@@ -998,8 +998,8 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
         result = sherpa_onnx::alignment::AlignAccurateForcedCtcFromPcm(
             modelPathStr,
             windowTextStr,
-            samples.data(),
-            samples.size(),
+            pcmView.data,
+            pcmView.count,
             requestedSampleRate,
             effectiveGranularity,
             languageStr,

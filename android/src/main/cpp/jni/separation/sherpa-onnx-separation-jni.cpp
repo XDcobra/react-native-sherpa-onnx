@@ -1,6 +1,7 @@
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-separation-wrapper.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -283,7 +284,7 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeProcessSe
         LOGE("nativeProcessSeparation: instance not found: %s", instanceIdStr.c_str());
         return nullptr;
       }
-      result = it->second->processMonoSamples(input, sampleRate);
+      result = it->second->processMonoSamples(input.data(), static_cast<int32_t>(n), sampleRate);
     }
     if (!result.success) {
       LOGE("nativeProcessSeparation failed: %s", result.error.c_str());
@@ -310,6 +311,91 @@ Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeProcessSe
       return nullptr;
     }
 
+    for (jsize i = 0; i < static_cast<jsize>(result.stems.size()); ++i) {
+      const auto& stem = result.stems[static_cast<size_t>(i)];
+      jfloatArray stemArray = env->NewFloatArray(static_cast<jsize>(stem.samples.size()));
+      if (!stemArray) {
+        ThrowRuntimeException(
+            env, "OFFLINE_OOM: Not enough memory for offline source separation"
+        );
+        return nullptr;
+      }
+      if (!stem.samples.empty()) {
+        env->SetFloatArrayRegion(
+            stemArray, 0, static_cast<jsize>(stem.samples.size()), stem.samples.data()
+        );
+      }
+      env->SetObjectArrayElement(out, i, stemArray);
+      env->DeleteLocalRef(stemArray);
+    }
+    return out;
+  } catch (const std::bad_alloc&) {
+    ThrowRuntimeException(
+        env, "OFFLINE_OOM: Not enough memory for offline source separation"
+    );
+    return nullptr;
+  }
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_separation_facade_SherpaOnnxSeparationHelper_nativeProcessSeparationFromBuffer(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring instanceId,
+    jstring bufferId
+) {
+  try {
+    const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+    PaOfflineSampleView view;
+    std::string errCode;
+    std::string errMsg;
+    if (!JniAcquireOfflinePcm(env, bufferId, -1, -1, &view, &errCode, &errMsg) ||
+        view.data == nullptr || view.count == 0 || view.sampleRate <= 0) {
+      LOGE(
+          "nativeProcessSeparationFromBuffer: invalid input instanceId=%s code=%s msg=%s",
+          instanceIdStr.c_str(),
+          errCode.c_str(),
+          errMsg.c_str()
+      );
+      return nullptr;
+    }
+    const int32_t n = static_cast<int32_t>(view.count);
+    LOGI(
+        "nativeProcessSeparationFromBuffer: instanceId=%s n=%d sampleRate=%d",
+        instanceIdStr.c_str(),
+        n,
+        view.sampleRate
+    );
+
+    sherpaonnx::SeparationProcessResult result;
+    {
+      std::lock_guard<std::mutex> lock(g_separation_mutex);
+      auto it = g_separation_instances.find(instanceIdStr);
+      if (it == g_separation_instances.end() || it->second == nullptr) {
+        LOGE("nativeProcessSeparationFromBuffer: instance not found: %s", instanceIdStr.c_str());
+        return nullptr;
+      }
+      result = it->second->processMonoSamples(view.data, n, view.sampleRate);
+    }
+    if (!result.success) {
+      LOGE("nativeProcessSeparationFromBuffer failed: %s", result.error.c_str());
+      if (ErrorLooksLikeOfflineOom(result.error)) {
+        ThrowRuntimeException(env, result.error.c_str());
+      }
+      return nullptr;
+    }
+
+    jclass floatArrayClass = env->FindClass("[F");
+    if (!floatArrayClass) return nullptr;
+    jobjectArray out =
+        env->NewObjectArray(static_cast<jsize>(result.stems.size()), floatArrayClass, nullptr);
+    env->DeleteLocalRef(floatArrayClass);
+    if (!out) {
+      ThrowRuntimeException(
+          env, "OFFLINE_OOM: Not enough memory for offline source separation"
+      );
+      return nullptr;
+    }
     for (jsize i = 0; i < static_cast<jsize>(result.stems.size()); ++i) {
       const auto& stem = result.stems[static_cast<size_t>(i)];
       jfloatArray stemArray = env->NewFloatArray(static_cast<jsize>(stem.samples.size()));

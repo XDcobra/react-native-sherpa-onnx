@@ -284,9 +284,11 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
 
   dispatch_async(DiarizationSerialQueue(), ^{
     @try {
-      std::vector<float> inputSamples;
-      int inputSr = 0;
-      if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
+      PaOfflineSampleView pcmView;
+      std::string pcmErrCode;
+      std::string pcmErrMsg;
+      if (!pa_acquire_offline_sample_view(audioInId, -1, -1, &pcmView, &pcmErrCode, &pcmErrMsg) ||
+          pcmView.count == 0 || pcmView.data == nullptr) {
         reject(@"DIARIZATION_ERROR",
                [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioInBufferId],
                nil);
@@ -303,7 +305,8 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
       }
 
       sherpaonnx::DiarizationProcessResult result =
-          wrapper->processMonoSamples(inputSamples, inputSr, includeOverlap ? true : false, {});
+          wrapper->processMonoSamples(pcmView.data, static_cast<int32_t>(pcmView.count),
+                                       pcmView.sampleRate, includeOverlap ? true : false, {});
       if (!result.success) {
         reject(RejectCodeForProcess(result),
                result.error.empty()

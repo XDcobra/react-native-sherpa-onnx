@@ -96,7 +96,7 @@ DiarizationInitializeResult DiarizationWrapper::initialize(
 }
 
 DiarizationProcessResult DiarizationWrapper::processMonoSamples(
-    const std::vector<float>& monoSamples, int32_t sampleRate,
+    const float* monoSamples, int32_t numSamples, int32_t sampleRate,
     bool includeOverlap, const DiarizationProgressFn& onProgress) {
   if (!pImpl || !pImpl->session.isInitialized()) {
     DiarizationProcessResult out;
@@ -119,7 +119,15 @@ DiarizationProcessResult DiarizationWrapper::processMonoSamples(
   }
 
   return ToProcessResult(
-      pImpl->session.Process(monoSamples, sampleRate, opts));
+      pImpl->session.Process(monoSamples, numSamples, sampleRate, opts));
+}
+
+DiarizationProcessResult DiarizationWrapper::processMonoSamples(
+    const std::vector<float>& monoSamples, int32_t sampleRate,
+    bool includeOverlap, const DiarizationProgressFn& onProgress) {
+  return processMonoSamples(monoSamples.empty() ? nullptr : monoSamples.data(),
+                            static_cast<int32_t>(monoSamples.size()), sampleRate,
+                            includeOverlap, onProgress);
 }
 
 DiarizationProcessResult DiarizationWrapper::recluster(int32_t numClusters,

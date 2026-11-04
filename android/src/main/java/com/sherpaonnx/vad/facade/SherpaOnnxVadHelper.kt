@@ -99,6 +99,13 @@ class SherpaOnnxVadHelper(
     private external fun nativeAcceptWaveform(instanceId: String, samples: FloatArray)
 
     @JvmStatic
+    private external fun nativeAcceptOfflineBuffer(
+      instanceId: String,
+      bufferId: String,
+      windowSize: Int,
+    ): Int
+
+    @JvmStatic
     private external fun nativeFlush(instanceId: String)
 
     @JvmStatic
@@ -543,7 +550,6 @@ class SherpaOnnxVadHelper(
       return
     }
     val records = mutableListOf<SegmentRecord>()
-    val samples = audio.readAllSamples()
     val gateKey = cfg.gateKey()
     if (!NativeInstanceGate.beginUse(gateKey)) {
       promise.reject(VadErrorCodes.MODEL_INIT_FAILED, "VAD instance released: $instanceId")
@@ -552,7 +558,6 @@ class SherpaOnnxVadHelper(
     val stats = try {
       runAcceptFlushPopSegmentation(
         cfg = cfg,
-        samples = samples,
         sourceAudioBufferId = audioInBufferId,
         liveOut = liveOut,
         records = records,
@@ -565,7 +570,7 @@ class SherpaOnnxVadHelper(
     }
     val out = Arguments.createMap().apply {
       putDouble("chunksProcessed", stats.chunksProcessed.toDouble())
-      putDouble("unitsRead", samples.size.toDouble())
+      putDouble("unitsRead", audio.numSamples.toDouble())
       putDouble("unitsWritten", stats.segmentCount.toDouble())
       putDouble("segmentCount", stats.segmentCount.toDouble())
       putDouble("speechDurationMs", stats.speechDurationMs.toDouble())
@@ -582,24 +587,15 @@ class SherpaOnnxVadHelper(
   /** iOS-aligned offline path: windowed AcceptWaveform → Flush → PopSegments. */
   private fun runAcceptFlushPopSegmentation(
     cfg: VadInstanceConfig,
-    samples: FloatArray,
     sourceAudioBufferId: String,
     liveOut: com.sherpaonnx.segment.pipeline.LiveSegmentEntry?,
     records: MutableList<SegmentRecord>,
   ): OfflineInferenceStats {
     val frameSize = cfg.runtimeOptions.windowSize.coerceAtLeast(1)
     cfg.runtime.reset()
-    var idx = 0
-    var chunksProcessed = 0
-    while (idx < samples.size) {
-      val end = minOf(idx + frameSize, samples.size)
-      var chunk = samples.copyOfRange(idx, end)
-      if (chunk.size < frameSize) {
-        chunk = chunk.copyOf(frameSize)
-      }
-      cfg.runtime.acceptWaveform(chunk)
-      chunksProcessed += 1
-      idx = end
+    val chunksProcessed = nativeAcceptOfflineBuffer(cfg.instanceId, sourceAudioBufferId, frameSize)
+    if (chunksProcessed < 0) {
+      throw IllegalStateException("Offline audio buffer not found: $sourceAudioBufferId")
     }
     cfg.runtime.flush()
     val segments = cfg.runtime.popSegments()

@@ -7,6 +7,7 @@
 #import <Foundation/Foundation.h>
 
 #include "sherpa-onnx-tts-engine-wrapper.h"
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -20,11 +21,14 @@ extern const int32_t kDefaultVoiceCloneNumSteps;
  * Build VoiceCloneOptions from buffer-based reference audio.
  * The caller provides pre-resolved samples and sample rate from the pipeline registry.
  */
+/** Non-owning PCM. `keepalive` must keep `refSamples` valid through generate(). */
 std::optional<sherpaonnx::VoiceCloneOptions> VoiceCloneOptionsFromBuffer(
     NSDictionary *options,
-    const std::vector<float> &refSamples,
+    const float *refSamples,
+    int32_t refSampleCount,
     int32_t refSampleRate,
-    int32_t defaultNumSteps
+    int32_t defaultNumSteps,
+    std::shared_ptr<void> keepalive
 );
 
 /** Check if options contain a buffer-based voice clone (referenceAudioBufferId key). */

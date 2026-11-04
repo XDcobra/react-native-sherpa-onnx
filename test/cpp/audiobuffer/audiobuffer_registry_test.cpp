@@ -442,6 +442,75 @@ TEST_F(AudioRegistryFixture, OptInLargeMmap_SkippedWithoutEnv) {
       << errMsg;
 }
 
+TEST_F(AudioRegistryFixture, AcquireOfflineSampleView_RamParityRangeAndRelease) {
+  std::vector<float> samples(64);
+  for (int i = 0; i < 64; ++i) {
+    samples[static_cast<size_t>(i)] = static_cast<float>(i) * 0.5f;
+  }
+  std::string json;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_offline_from_samples(samples.data(), samples.size(), 16000, 1, &json,
+                                             &errCode, &errMsg))
+      << errMsg;
+  const std::string id = bufferIdFromCreateJson(json);
+  ASSERT_FALSE(id.empty());
+
+  std::vector<float> read;
+  int readRate = 0;
+  ASSERT_TRUE(pa_read_offline_samples(id, &read, &readRate));
+  ASSERT_EQ(read.size(), samples.size());
+
+  PaOfflineSampleView full;
+  ASSERT_TRUE(pa_acquire_offline_sample_view(id, -1, -1, &full, &errCode, &errMsg)) << errMsg;
+  EXPECT_EQ(full.sampleRate, readRate);
+  EXPECT_EQ(full.count, read.size());
+  ASSERT_NE(full.data, nullptr);
+  ASSERT_TRUE(static_cast<bool>(full.entry));
+  for (size_t i = 0; i < read.size(); ++i) {
+    EXPECT_FLOAT_EQ(full.data[i], read[i]) << "i=" << i;
+  }
+
+  PaOfflineSampleView range;
+  ASSERT_TRUE(pa_acquire_offline_sample_view(id, 10, 26, &range, &errCode, &errMsg)) << errMsg;
+  EXPECT_EQ(range.count, 16u);
+  ASSERT_NE(range.data, nullptr);
+  for (size_t i = 0; i < range.count; ++i) {
+    EXPECT_FLOAT_EQ(range.data[i], read[10 + i]);
+  }
+
+  // Past-end range clamps to empty success.
+  PaOfflineSampleView past;
+  ASSERT_TRUE(pa_acquire_offline_sample_view(id, 64, 80, &past, &errCode, &errMsg));
+  EXPECT_EQ(past.count, 0u);
+  EXPECT_EQ(past.data, nullptr);
+
+  EXPECT_TRUE(pa_release_buffer(id));
+  // Registry id is gone, but a held view keeps storage readable.
+  EXPECT_FLOAT_EQ(full.data[0], read[0]);
+  EXPECT_FLOAT_EQ(full.data[63], read[63]);
+  PaOfflineSampleView missing;
+  errCode.clear();
+  EXPECT_FALSE(pa_acquire_offline_sample_view(id, -1, -1, &missing, &errCode, &errMsg));
+  EXPECT_EQ(errCode, "AUDIO_BUFFER_NOT_FOUND");
+}
+
+TEST_F(AudioRegistryFixture, AcquireOfflineSampleView_EmptyBuffer) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_empty_offline(16000, 1, &id, &errCode, &errMsg)) << errMsg;
+
+  PaOfflineSampleView view;
+  ASSERT_TRUE(pa_acquire_offline_sample_view(id, -1, -1, &view, &errCode, &errMsg)) << errMsg;
+  EXPECT_EQ(view.count, 0u);
+  EXPECT_EQ(view.sampleRate, 16000);
+  EXPECT_EQ(view.data, nullptr);
+  EXPECT_TRUE(static_cast<bool>(view.entry));
+
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
 TEST_F(AudioRegistryFixture, SegEngineHooks_FireOnAppendFinalizeRelease) {
   ResetSegHooks();
   std::string id;
