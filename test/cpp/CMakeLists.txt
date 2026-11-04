@@ -823,6 +823,30 @@ set_tests_properties(segmentbuffer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+# SegEngine host tests (always-on, no ORT). VAD/pyannote paths are stubbed.
+set(AUDIOBUFFER_CPP_ROOT_SEG "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/audiobuffer")
+set(TEXTBUFFER_CPP_ROOT_SEG "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/textbuffer")
+add_executable(segengine_host_test
+  "${SEGMENTBUFFER_TEST_DIR}/segengine_registry_test.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegEngine.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegJson.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegPayloadValidate.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegmentRegistry.cpp"
+  "${AUDIOBUFFER_CPP_ROOT_SEG}/AudioRegistry.cpp"
+  "${TEXTBUFFER_CPP_ROOT_SEG}/TextRegistry.cpp"
+)
+target_include_directories(segengine_host_test PRIVATE
+  "${SEGMENTBUFFER_CPP_ROOT}"
+  "${AUDIOBUFFER_CPP_ROOT_SEG}"
+  "${TEXTBUFFER_CPP_ROOT_SEG}"
+)
+target_compile_definitions(segengine_host_test PRIVATE SHERPA_SEG_ENGINE_STUB_INFERENCE)
+target_link_libraries(segengine_host_test PRIVATE ${SEGMENTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
+add_test(NAME segengine_host_test COMMAND $<TARGET_FILE:segengine_host_test>)
+set_tests_properties(segengine_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
 
 
 # PDF text-layer host test (disabled path by default; no PDFium required)

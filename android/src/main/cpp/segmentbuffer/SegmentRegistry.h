@@ -42,7 +42,11 @@ bool seg_live_append_segment(const std::string &liveBufferId, const std::string 
                              const std::string &sourceAudioBufferId, int startSample, int endSample,
                              int sampleRate, int durationMs, bool hasConfidence, double confidence,
                              const std::string &payloadJson, std::string *segmentId,
-                             int *segmentIndex, std::string *error);
+                             int *segmentIndex, std::string *error, bool emitAppended = true);
+
+/** Emit pipelineLiveSegmentAppended for a segment already stored on the live buffer. */
+void seg_live_emit_appended(const std::string &liveBufferId, const std::string &segmentId,
+                            int segmentIndex);
 
 bool seg_create_empty_offline(const std::string &sourceAudioBufferIdOrEmpty, std::string *bufferIdOut,
                               std::string *error = nullptr);

@@ -179,7 +179,7 @@ bool seg_live_append_segment(const std::string &liveBufferId, const std::string 
                              const std::string &sourceAudioBufferId, int startSample, int endSample,
                              int sampleRate, int durationMs, bool hasConfidence, double confidence,
                              const std::string &payloadJson, std::string *segmentId,
-                             int *segmentIndex, std::string *error) {
+                             int *segmentIndex, std::string *error, bool emitAppended) {
   auto entry = seg_get_live_entry(liveBufferId);
   if (!entry) {
     if (error) *error = "SEGMENT_BUFFER_NOT_FOUND: Live segment buffer not found: " + liveBufferId;
@@ -243,7 +243,7 @@ bool seg_live_append_segment(const std::string &liveBufferId, const std::string 
       checkpointSnapshot = entry->snapshotForSpoolLocked();
     }
     entry->maybeAppendSegmentToSpool(seg, true, checkpointSnapshot);
-    notifyAppended(entry, seg, idx);
+    if (emitAppended) notifyAppended(entry, seg, idx);
     entry->notifyCommitListeners(seg.id, idx, seg);
 
     if (segmentId) *segmentId = seg.id;
@@ -253,6 +253,27 @@ bool seg_live_append_segment(const std::string &liveBufferId, const std::string 
     if (error) *error = e.what();
     return false;
   }
+}
+
+void seg_live_emit_appended(const std::string &liveBufferId, const std::string &segmentId,
+                            int segmentIndex) {
+  if (segmentId.empty()) return;
+  auto entry = seg_get_live_entry(liveBufferId);
+  if (!entry) return;
+  SegRecord rec;
+  bool found = false;
+  {
+    std::lock_guard<std::mutex> lock(entry->lock);
+    for (const auto &s : entry->segments) {
+      if (s.id == segmentId) {
+        rec = s;
+        found = true;
+        break;
+      }
+    }
+  }
+  if (!found) return;
+  notifyAppended(entry, rec, segmentIndex);
 }
 
 bool seg_create_empty_offline(const std::string &sourceAudioBufferIdOrEmpty, std::string *bufferIdOut,

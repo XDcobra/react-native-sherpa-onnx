@@ -10,7 +10,7 @@
 #include <sstream>
 #include <sys/stat.h>
 
-// Always weak so Android SegEngineAndroidHooks (and iOS .mm) can provide strong overrides.
+// Always weak so SegEngine.cpp can provide the strong definitions.
 #if defined(__GNUC__) || defined(__clang__)
 #define PA_WEAK_STUB __attribute__((weak))
 #else

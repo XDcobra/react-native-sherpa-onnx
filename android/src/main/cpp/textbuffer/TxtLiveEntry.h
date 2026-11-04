@@ -549,13 +549,14 @@ struct TxtLiveEntry {
 			totalCharsWritten += len;
 			revision.fetch_add(1);
 			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
-			seg_engine_on_text_write(bufferId);
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
 			utf16LenSnap = txt_utf16_length(currentText);
 			revSnap = (int64_t)revision.load();
 		}
+		// Outside stateMutex: the engine reads and commits the partial.
+		seg_engine_on_text_write(bid);
 		if (shouldEmitPartial) {
 			txt_dispatch_pipeline_live_text_partial(bid, "replace", utf16LenSnap, revSnap, minIntervalMs);
 		}
@@ -583,13 +584,13 @@ struct TxtLiveEntry {
 			totalCharsWritten += appendLen;
 			revision.fetch_add(1);
 			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
-			seg_engine_on_text_write(bufferId);
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
 			utf16LenSnap = txt_utf16_length(currentText);
 			revSnap = (int64_t)revision.load();
 		}
+		seg_engine_on_text_write(bid);
 		if (shouldEmitPartial) {
 			txt_dispatch_pipeline_live_text_partial(bid, "append", utf16LenSnap, revSnap, minIntervalMs);
 		}

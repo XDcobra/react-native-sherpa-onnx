@@ -72,6 +72,37 @@ std::shared_ptr<sherpaonnx::OnlinePunctuationWrapper> LookupOnline(
 
 extern "C" {
 
+/** C ABI used by shared SegEngine (matches iOS punctuation bridge). */
+bool sherpaonnx_punct_offline_add_punctuation_if_exists(const std::string &instanceId,
+                                                        const std::string &text,
+                                                        std::string *outText) {
+  auto inst = LookupOffline(instanceId);
+  if (!inst) return false;
+  const auto result = inst->addPunctuation(text);
+  if (!result.success) return false;
+  if (outText) *outText = result.text;
+  return true;
+}
+
+bool sherpaonnx_punct_online_add_punctuation_if_exists(const std::string &instanceId,
+                                                       const std::string &text,
+                                                       std::string *outText) {
+  auto inst = LookupOnline(instanceId);
+  if (!inst) return false;
+  const auto result = inst->addPunctuation(text);
+  if (!result.success) return false;
+  if (outText) *outText = result.text;
+  return true;
+}
+
+bool sherpaonnx_punct_offline_has_instance(const std::string &instanceId) {
+  return LookupOffline(instanceId) != nullptr;
+}
+
+bool sherpaonnx_punct_online_has_instance(const std::string &instanceId) {
+  return LookupOnline(instanceId) != nullptr;
+}
+
 // --- Offline (SherpaOnnxPunctuationHelper) ---
 
 JNIEXPORT jobject JNICALL

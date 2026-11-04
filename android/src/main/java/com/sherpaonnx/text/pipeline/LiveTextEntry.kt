@@ -70,7 +70,7 @@ class LiveTextEntry(
     if (!TextBufferNative.nativeWritePartial(bufferId, text)) {
       throw TextPipelineException(TextErrorCodes.INVALID_STATE, "writePartial failed for $bufferId")
     }
-    // Engine notify: C txt_live_* → seg_engine_on_text_write → JNI → SegmentationEngineRegistry
+    // Engine notify: C txt_live_* → seg_engine_on_text_write (SegEngine)
     TextPipelineRegistry.notifyLivePartialWritten(this, "set")
     notifyAppendListeners()
   }
@@ -80,7 +80,7 @@ class LiveTextEntry(
     if (!TextBufferNative.nativeAppendText(bufferId, text)) {
       throw TextPipelineException(TextErrorCodes.INVALID_STATE, "appendText failed for $bufferId")
     }
-    // Engine notify: C txt_live_* → seg_engine_on_text_write → JNI → SegmentationEngineRegistry
+    // Engine notify: C txt_live_* → seg_engine_on_text_write (SegEngine)
     TextPipelineRegistry.notifyLivePartialWritten(this, "append")
     notifyAppendListeners()
   }
@@ -119,7 +119,7 @@ class LiveTextEntry(
       throw TextPipelineException(TextErrorCodes.ALREADY_FINALIZED, "finalize failed for $bufferId")
     }
     notifyAppendListeners()
-    // Engine flush/detach: C finalize → seg_engine_on_buffer_finalized → JNI
+    // Engine flush/detach: C finalize → seg_engine_on_buffer_finalized (SegEngine)
   }
 
   fun snapshotText(): String = currentText
@@ -197,7 +197,7 @@ class LiveTextEntry(
     } catch (_: Exception) {
     }
     TextBufferNative.nativeRelease(bufferId)
-    // Engine release: C release → seg_engine_on_buffer_released → JNI
+    // Engine release: C release → seg_engine_on_buffer_released (SegEngine)
     appendListeners.clear()
     commitListeners.clear()
   }

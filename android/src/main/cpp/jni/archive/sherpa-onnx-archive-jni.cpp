@@ -12,15 +12,12 @@
 
 static JavaVM* g_vm = nullptr;
 
-extern "C" void seg_engine_android_hooks_onload(JavaVM* vm);
-
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
   g_vm = vm;
   JNIEnv* env = nullptr;
   if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
     return -1;
   }
-  seg_engine_android_hooks_onload(vm);
   return JNI_VERSION_1_6;
 }
 
