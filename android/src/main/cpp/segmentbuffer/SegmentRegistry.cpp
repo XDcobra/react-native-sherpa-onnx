@@ -15,12 +15,16 @@ std::string g_seg_cache_dir;
 SegAppendedEmitFn g_seg_appended_emit = nullptr;
 
 std::string makeUuidLike() {
+  // Match TS dashed UUID; do not use unpadded std::hex.
   static thread_local std::mt19937_64 rng{std::random_device{}()};
   std::uniform_int_distribution<uint64_t> dist;
-  uint64_t a = dist(rng);
-  uint64_t b = dist(rng);
+  const uint64_t a = dist(rng);
+  const uint64_t b = dist(rng);
   char buf[40];
-  std::snprintf(buf, sizeof(buf), "%016llx%016llx", (unsigned long long)a, (unsigned long long)b);
+  std::snprintf(buf, sizeof(buf), "%08x-%04x-%04x-%04x-%012llx", static_cast<unsigned>(a >> 32),
+                static_cast<unsigned>((a >> 16) & 0xffffu), static_cast<unsigned>(a & 0xffffu),
+                static_cast<unsigned>((b >> 48) & 0xffffu),
+                static_cast<unsigned long long>(b & 0xffffffffffffULL));
   return std::string(buf);
 }
 
