@@ -10,7 +10,11 @@
  * 'background' or before reloading the bundle) to free native resources.
  */
 
-import type { SttEngine } from 'react-native-sherpa-onnx/stt';
+import type {
+  LiveSttEngine,
+  OnlineSTTModelType,
+  SttEngine,
+} from 'react-native-sherpa-onnx/stt';
 import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
 import type {
   OcrConcreteModelType,
@@ -78,6 +82,46 @@ export function clearSttCache(): void {
   sttModelFolder = null;
   sttDetectedModels = [];
   sttSelectedModelType = null;
+}
+
+// --- Streaming (online) STT cache (LiveSttEngine / native OnlineStt) ---
+
+let sttStreamingEngine: LiveSttEngine | null = null;
+let sttStreamingModelFolder: string | null = null;
+let sttStreamingInitMessage: string | null = null;
+let sttStreamingSelectedModelType: OnlineSTTModelType | null = null;
+
+export function getSttStreamingCache(): {
+  engine: LiveSttEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  selectedModelType: OnlineSTTModelType | null;
+} {
+  return {
+    engine: sttStreamingEngine,
+    modelFolder: sttStreamingModelFolder,
+    initMessage: sttStreamingInitMessage,
+    selectedModelType: sttStreamingSelectedModelType,
+  };
+}
+
+export function setSttStreamingCache(
+  engine: LiveSttEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  selectedModelType: OnlineSTTModelType | null
+): void {
+  sttStreamingEngine = engine;
+  sttStreamingModelFolder = modelFolder;
+  sttStreamingInitMessage = initMessage;
+  sttStreamingSelectedModelType = selectedModelType;
+}
+
+export function clearSttStreamingCache(): void {
+  sttStreamingEngine = null;
+  sttStreamingModelFolder = null;
+  sttStreamingInitMessage = null;
+  sttStreamingSelectedModelType = null;
 }
 
 // --- TTS cache ---

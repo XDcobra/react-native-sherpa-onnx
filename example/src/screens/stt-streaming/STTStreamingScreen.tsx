@@ -10,20 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
-import {
-  createStreamingSTT,
-  detectSttModel,
-  assertStreamingSttCustomConfig,
-  type LiveSttEngine,
-  type StreamingSttCustomConfig,
-  type SttPipelineHandle,
-} from 'react-native-sherpa-onnx/stt';
-import {
-  EngineModeModelSelector,
-  type EngineMode,
-} from '../../components/EngineModeModelSelector';
+import type { SttPipelineHandle } from 'react-native-sherpa-onnx/stt';
 import {
   createEmptyLiveAudioBuffer,
   ingestFileToLiveAudioBuffer,
@@ -41,34 +29,14 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import {
-  getAssetPackPath,
-  listAssetModels,
-  listModelsAtPath,
-} from 'react-native-sherpa-onnx/utils';
-import {
-  listDownloadedModels,
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
-import {
-  InitModeSelector,
-  StreamingSttCustomInitForm,
-  type ModelInitMode,
-  type StreamingSttCustomInitFormState,
-} from '../../components/modelInit';
-import { fillStreamingCustomConfigFromFolder } from '../../utils/streamingCustomInitFill';
+import { SttStreamingModelInitPanel } from '../../components/SttStreamingModelInitPanel';
+import { useSttStreamingModelInit } from '../../hooks/useSttStreamingModelInit';
 import {
   SegmentationPolicyControls,
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
-import {
-  getAssetModelPath,
-  getFileModelPath,
-  toDetectSource,
-} from '../../modelConfig';
 import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
 import {
   resolveAudioFileDisplayName,
@@ -76,12 +44,6 @@ import {
 } from '../../utils/fileSourceFromUri';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
-const PAD_PACK_NAME = 'sherpa_models';
-
-const DEFAULT_STREAMING_CUSTOM_INIT: StreamingSttCustomInitFormState = {
-  modelType: 'transducer',
-  fileSources: {},
-};
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -100,27 +62,16 @@ type StreamingState = 'idle' | 'starting' | 'running' | 'stopping';
 type SourceMode = 'mic' | 'file';
 
 export default function STTStreamingScreen() {
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  /** File-backed STT locations: downloads, FS scan, and asset-pack pad (same union as Live Pipeline Showcase). */
-  const [sttFileBackedIds, setSttFileBackedIds] = useState<string[]>([]);
-  const [sttPadIds, setSttPadIds] = useState<string[]>([]);
-  const [sttPadPath, setSttPadPath] = useState<string | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [selectedModelFolder, setSelectedModelFolder] = useState<string | null>(
-    null
+  const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
+    undefined
   );
-  const [engineMode, setEngineMode] = useState<EngineMode>('streaming');
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] =
-    useState<StreamingSttCustomInitFormState>(DEFAULT_STREAMING_CUSTOM_INIT);
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-  const [streamingModelIds, setStreamingModelIds] = useState<Set<string>>(
-    new Set()
-  );
-  const [offlineModelIds, setOfflineModelIds] = useState<Set<string>>(
-    new Set()
-  );
+
+  const stt = useSttStreamingModelInit({
+    onBeforeInit: () => onBeforeInitRef.current?.(),
+  });
+
+  const { getTranscribeEngine, isEngineInitialized, engineMode } = stt;
+
   const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
     mode: 'off',
   });
@@ -128,7 +79,7 @@ export default function STTStreamingScreen() {
   const [selectedFileUri, setSelectedFileUri] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [status, setStatus] = useState(
-    'Select a model, choose microphone or file input, then start streaming.'
+    'Initialize a model, choose microphone or file input, then start streaming.'
   );
   const [error, setError] = useState<string | null>(null);
   const [streamingState, setStreamingState] = useState<StreamingState>('idle');
@@ -137,7 +88,6 @@ export default function STTStreamingScreen() {
   const [committedTranscript, setCommittedTranscript] = useState('');
   const [partialTranscript, setPartialTranscript] = useState('');
 
-  const engineRef = useRef<LiveSttEngine | null>(null);
   const pipelineRef = useRef<SttPipelineHandle | null>(null);
   const liveAudioBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const liveTextBufferRef = useRef<LiveTextBufferRef | null>(null);
@@ -145,22 +95,6 @@ export default function STTStreamingScreen() {
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cleanupLockRef = useRef(false);
 
-  const resolveModelPath = useCallback(
-    (modelFolder: string) => {
-      if (sttPadIds.includes(modelFolder)) {
-        return sttPadPath
-          ? getFileModelPath(modelFolder, ModelCategory.Stt, sttPadPath)
-          : getFileModelPath(modelFolder, ModelCategory.Stt);
-      }
-      if (sttFileBackedIds.includes(modelFolder)) {
-        return getFileModelPath(modelFolder, ModelCategory.Stt);
-      }
-      return getAssetModelPath(modelFolder);
-    },
-    [sttFileBackedIds, sttPadIds, sttPadPath]
-  );
-
-  // Auto-enforce segmentation when switching to Live Overload mode
   useEffect(() => {
     if (engineMode === 'offline') {
       setSegConfig((prev) => {
@@ -177,131 +111,6 @@ export default function STTStreamingScreen() {
       });
     }
   }, [engineMode]);
-
-  const loadModels = useCallback(async () => {
-    setLoadingModels(true);
-    setError(null);
-    try {
-      const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-      const fallbackPath = `${DocumentDirectoryPath}/models`;
-      const padPath = padPathFromNative ?? fallbackPath;
-
-      const allAsset = await listAssetModels();
-      const assetSttIds = allAsset
-        .filter((m) => m.hint === 'stt')
-        .map((m) => m.folder);
-
-      const sttDl = await listDownloadedModels(ModelCategory.Stt).then((r) =>
-        r.map((m) => m.id)
-      );
-
-      const padResults = await listModelsAtPath(padPath).catch(() => []);
-      const padSttIds = padResults
-        .filter((m) => m.hint === 'stt')
-        .map((m) => m.folder);
-
-      const sttFilePath = `${DocumentDirectoryPath}/sherpa-onnx/models/${ModelCategory.Stt}`;
-      const sttFs = await listModelsAtPath(sttFilePath).catch(() => []);
-      const sttFsIds = sttFs.map((m) => m.folder);
-
-      const candidateModels = [
-        ...padSttIds,
-        ...assetSttIds.filter((f) => !padSttIds.includes(f)),
-        ...sttDl.filter(
-          (f) => !padSttIds.includes(f) && !assetSttIds.includes(f)
-        ),
-        ...sttFsIds.filter(
-          (f) =>
-            !padSttIds.includes(f) &&
-            !assetSttIds.includes(f) &&
-            !sttDl.includes(f)
-        ),
-      ];
-
-      const sttPadSet = new Set(padSttIds);
-      const sttAssetSet = new Set(assetSttIds);
-      const fileBackedUnion = [
-        ...new Set([...sttDl, ...sttFsIds, ...padSttIds]),
-      ];
-
-      const sttDetections = await Promise.all(
-        candidateModels.map(async (modelFolder) => {
-          try {
-            const modelPath = sttPadSet.has(modelFolder)
-              ? getFileModelPath(modelFolder, ModelCategory.Stt, padPath)
-              : sttAssetSet.has(modelFolder)
-              ? getAssetModelPath(modelFolder)
-              : getFileModelPath(modelFolder, ModelCategory.Stt);
-            const detection = await detectSttModel(
-              await toDetectSource(modelPath),
-              {
-                modelType: 'auto',
-              }
-            );
-            if (!detection.success) {
-              return { folder: modelFolder, streaming: false, offline: false };
-            }
-            return {
-              folder: modelFolder,
-              streaming: detection.isStreaming,
-              offline: !detection.isStreaming,
-            };
-          } catch {
-            return { folder: modelFolder, streaming: false, offline: false };
-          }
-        })
-      );
-
-      const streamingIds = new Set(
-        sttDetections.filter((r) => r.streaming).map((r) => r.folder)
-      );
-      const offlineIds = new Set(
-        sttDetections.filter((r) => r.offline).map((r) => r.folder)
-      );
-
-      const available = candidateModels.filter(
-        (folder) => streamingIds.has(folder) || offlineIds.has(folder)
-      );
-
-      setAvailableModels(available);
-      setStreamingModelIds(streamingIds);
-      setOfflineModelIds(offlineIds);
-      setSttPadIds(padSttIds);
-      setSttPadPath(padSttIds.length > 0 ? padPath : null);
-      setSttFileBackedIds(fileBackedUnion);
-
-      const initialModel =
-        engineMode === 'streaming'
-          ? available.find((m) => streamingIds.has(m))
-          : available.find((m) => offlineIds.has(m));
-
-      setSelectedModelFolder((prev) =>
-        prev && available.includes(prev) ? prev : initialModel ?? null
-      );
-      if (available.length === 0) {
-        setStatus(
-          'No STT models found. Install/download a model to use this screen.'
-        );
-      }
-    } catch (loadErr) {
-      setError(normalizeErrorMessage(loadErr));
-      setAvailableModels([]);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, [engineMode]);
-
-  useEffect(() => {
-    loadModels().catch(() => {
-      // loadModels already updates state
-    });
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category === ModelCategory.Stt) {
-        loadModels().catch(() => {});
-      }
-    });
-    return unsubscribe;
-  }, [loadModels]);
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current) {
@@ -333,7 +142,7 @@ export default function STTStreamingScreen() {
     setPartialTranscript(partial.trim());
   }, []);
 
-  const cleanupStream = useCallback(async () => {
+  const releasePipelineResources = useCallback(async () => {
     if (cleanupLockRef.current) {
       return;
     }
@@ -362,13 +171,6 @@ export default function STTStreamingScreen() {
       }
       pipelineRef.current = null;
 
-      try {
-        await engineRef.current?.destroy();
-      } catch {
-        // ignore teardown races
-      }
-      engineRef.current = null;
-
       const textBuffer = liveTextBufferRef.current;
       liveTextBufferRef.current = null;
       if (textBuffer) {
@@ -385,47 +187,28 @@ export default function STTStreamingScreen() {
     }
   }, [stopPolling]);
 
-  const fillCustomFromSelectedModel = useCallback(async () => {
-    if (!selectedModelFolder) {
-      setCustomFillHint('Select a catalog model first.');
-      return;
-    }
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    try {
-      const modelPath = resolveModelPath(selectedModelFolder);
-      const fillResult = await fillStreamingCustomConfigFromFolder({
-        modelSource: modelPath,
-        modelType: customInitForm.modelType,
-      });
-      setCustomInitForm({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-      });
-      if (fillResult.missingKeys.length > 0) {
-        setCustomFillHint(
-          `Filled from ${
-            fillResult.modelDir
-          }; still missing: ${fillResult.missingKeys.join(', ')}`
-        );
-      } else {
-        setCustomFillHint(`Filled all slots from ${fillResult.modelDir}`);
-      }
-    } catch (err) {
-      setCustomFillHint(normalizeErrorMessage(err));
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [customInitForm.modelType, resolveModelPath, selectedModelFolder]);
+  onBeforeInitRef.current = async () => {
+    setCommittedTranscript('');
+    setPartialTranscript('');
+    setSegmentCount(0);
+    setProgress(null);
+    setError(null);
+    await releasePipelineResources();
+  };
+
+  useEffect(() => {
+    return () => {
+      releasePipelineResources().catch(() => {});
+    };
+  }, [releasePipelineResources]);
 
   const startStreaming = useCallback(async () => {
     if (streamingState !== 'idle') {
       return;
     }
-    const isStreamingCustom =
-      engineMode === 'streaming' && initMode === 'custom';
-    if (!isStreamingCustom && !selectedModelFolder) {
-      setError('Select an STT model first.');
+    const engine = getTranscribeEngine();
+    if (!engine) {
+      setError('Initialize an STT model first (Use model).');
       return;
     }
     if (sourceMode === 'file' && !selectedFileUri) {
@@ -441,58 +224,6 @@ export default function STTStreamingScreen() {
     setStreamingState('starting');
 
     try {
-      if (engineMode === 'streaming' && initMode === 'custom') {
-        const customConfig = {
-          ...customInitForm.fileSources,
-        } as StreamingSttCustomConfig;
-        assertStreamingSttCustomConfig(
-          customConfig as unknown as Record<string, unknown>
-        );
-        const engine = await createStreamingSTT({
-          initMode: 'custom',
-          modelType: customInitForm.modelType,
-          customConfig,
-          numThreads: 2,
-        });
-        engineRef.current = engine;
-      } else {
-        const modelPath = resolveModelPath(selectedModelFolder!);
-        const detectSource = await toDetectSource(modelPath);
-        const detection = await detectSttModel(detectSource, {
-          modelType: 'auto',
-        });
-        if (!detection.success) {
-          throw new Error(detection.error ?? 'STT model detection failed');
-        }
-        if (engineMode === 'streaming' && !detection.isStreaming) {
-          throw new Error(
-            'This STT model is offline-only. Switch to "Live Overload" mode to use it.'
-          );
-        }
-        if (engineMode === 'offline' && detection.isStreaming) {
-          throw new Error(
-            'This STT model is streaming-only (incremental encoder). Live Overload needs offline weights — pick another model or use ⚡ Streaming.'
-          );
-        }
-
-        if (engineMode === 'streaming') {
-          const engine = await createStreamingSTT({
-            modelSource: modelPath,
-            modelType: 'auto',
-            numThreads: 2,
-          });
-          engineRef.current = engine;
-        } else {
-          const { createSTT } = require('react-native-sherpa-onnx/stt');
-          const engine = await createSTT({
-            modelSource: modelPath,
-            modelType: 'auto',
-            numThreads: 2,
-          });
-          engineRef.current = engine;
-        }
-      }
-
       const liveAudio = await createEmptyLiveAudioBuffer({
         sampleRate: STT_INPUT_SAMPLE_RATE,
         channelCount: 1,
@@ -508,14 +239,14 @@ export default function STTStreamingScreen() {
       liveTextBufferRef.current = liveText;
 
       const segOpt = buildSegmentationOption(segConfig);
-      const pipeline = await engineRef.current!.transcribe(
+      const pipeline = (await engine.transcribe(
         liveAudio.bufferId,
         liveText.bufferId,
         {
           chunkSize: 3200,
           ...(segOpt && segOpt.mode !== 'off' ? { segmentation: segOpt } : {}),
         }
-      );
+      )) as SttPipelineHandle;
       pipelineRef.current = pipeline;
 
       let fileIngestDone: Promise<unknown> = Promise.resolve();
@@ -560,9 +291,7 @@ export default function STTStreamingScreen() {
 
       stopPolling();
       pollTimerRef.current = setInterval(() => {
-        syncTranscript().catch(() => {
-          // ignore polling races during teardown
-        });
+        syncTranscript().catch(() => {});
       }, 150);
 
       (async () => {
@@ -581,26 +310,22 @@ export default function STTStreamingScreen() {
           }
         } finally {
           await syncTranscript().catch(() => {});
-          await cleanupStream();
+          await releasePipelineResources();
           setStreamingState('idle');
         }
       })().catch(() => {});
     } catch (startErr) {
       setError(normalizeErrorMessage(startErr));
       setStreamingState('idle');
-      await cleanupStream();
+      await releasePipelineResources();
     }
   }, [
-    cleanupStream,
-    customInitForm,
-    engineMode,
-    initMode,
-    resolveModelPath,
+    getTranscribeEngine,
+    releasePipelineResources,
     segConfig,
-    selectedFileUri,
     selectedFileName,
+    selectedFileUri,
     sourceMode,
-    selectedModelFolder,
     stopPolling,
     streamingState,
     syncTranscript,
@@ -622,10 +347,10 @@ export default function STTStreamingScreen() {
     } catch {
       // ignore stop races
     }
-    await cleanupStream();
+    await releasePipelineResources();
     setStreamingState('idle');
     setStatus('Stopped.');
-  }, [cleanupStream, streamingState]);
+  }, [releasePipelineResources, streamingState]);
 
   const pickFile = useCallback(async () => {
     try {
@@ -661,15 +386,13 @@ export default function STTStreamingScreen() {
     setStatus('Audio file removed. Choose another file to continue.');
   }, [streamingState]);
 
-  const canStartCustomStreaming =
-    engineMode === 'streaming' &&
-    initMode === 'custom' &&
-    Object.keys(customInitForm.fileSources).length > 0;
+  const pipelineBusy = streamingState !== 'idle';
+  const engineReady = isEngineInitialized && getTranscribeEngine() != null;
 
   const canStart =
     streamingState === 'idle' &&
-    (sourceMode === 'mic' || !!selectedFileUri) &&
-    (canStartCustomStreaming || !!selectedModelFolder);
+    engineReady &&
+    (sourceMode === 'mic' || !!selectedFileUri);
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -681,58 +404,20 @@ export default function STTStreamingScreen() {
           <Text style={styles.headerTitle}>Speech-to-Text Streaming</Text>
         </View>
 
-        <EngineModeModelSelector
-          label="STT Engine"
-          engineMode={engineMode}
-          onEngineModeChange={setEngineMode}
-          models={availableModels}
-          selectedModel={selectedModelFolder}
-          onModelSelect={setSelectedModelFolder}
-          isModelStreamingCapable={(m) => streamingModelIds.has(m)}
-          isModelOfflineCapable={(m) => offlineModelIds.has(m)}
-          loading={loadingModels}
-          disabled={streamingState !== 'idle'}
-        />
-
-        {engineMode === 'streaming' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Initialization</Text>
-            <InitModeSelector
-              value={initMode}
-              onChange={setInitMode}
-              disabled={streamingState !== 'idle' || customFillLoading}
-            />
-            {initMode === 'custom' ? (
-              <StreamingSttCustomInitForm
-                value={customInitForm}
-                onChange={setCustomInitForm}
-                selectedCatalogModelId={selectedModelFolder}
-                onFillFromSelectedModel={fillCustomFromSelectedModel}
-                fillLoading={customFillLoading}
-                disabled={streamingState !== 'idle'}
-                fillHint={customFillHint}
-              />
-            ) : (
-              <Text style={styles.bodyText}>
-                Auto mode scans the selected model folder for streaming ONNX
-                files.
-              </Text>
-            )}
-          </View>
-        )}
+        <SttStreamingModelInitPanel stt={stt} disabled={pipelineBusy} />
 
         {engineMode === 'offline' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Speech Segmentation</Text>
             <Text style={styles.bodyText}>
               Live Overload requires segmentation to commit speech into discrete
-              chunks before transcription. The 'Off' option is disabled.
+              chunks before transcription. The Off option is disabled.
             </Text>
             <SegmentationPolicyControls
               variant="speech-offline"
               value={segConfig}
               onChange={setSegConfig}
-              disabled={streamingState !== 'idle'}
+              disabled={pipelineBusy}
               disableOff
               offDisabledMessage="Live Overload requires mandatory segmentation to commit speech segments for transcription."
             />
@@ -750,7 +435,7 @@ export default function STTStreamingScreen() {
                   sourceMode === mode && lpStyles.sourceToggleBtnActive,
                 ]}
                 onPress={() => setSourceMode(mode)}
-                disabled={streamingState !== 'idle'}
+                disabled={pipelineBusy}
               >
                 <Text
                   style={[
@@ -776,7 +461,7 @@ export default function STTStreamingScreen() {
                     onPress={() => {
                       pickFile().catch(() => {});
                     }}
-                    disabled={streamingState !== 'idle'}
+                    disabled={pipelineBusy}
                   >
                     <Text style={lpStyles.optionButtonText}>
                       Pick audio file…
@@ -799,10 +484,10 @@ export default function STTStreamingScreen() {
                   <Pressable
                     style={[
                       styles.removeFileButton,
-                      streamingState !== 'idle' && styles.buttonDisabled,
+                      pipelineBusy && styles.buttonDisabled,
                     ]}
                     onPress={clearSelectedFile}
-                    disabled={streamingState !== 'idle'}
+                    disabled={pipelineBusy}
                     accessibilityLabel="Remove selected audio file"
                   >
                     <Ionicons name="trash-outline" size={18} color="#B42318" />
@@ -826,13 +511,12 @@ export default function STTStreamingScreen() {
             <Pressable
               style={[
                 styles.primaryButton,
-                (!canStart || streamingState !== 'idle') &&
-                  styles.buttonDisabled,
+                (!canStart || pipelineBusy) && styles.buttonDisabled,
               ]}
               onPress={() => {
                 startStreaming().catch(() => {});
               }}
-              disabled={!canStart || streamingState !== 'idle'}
+              disabled={!canStart || pipelineBusy}
             >
               <Text style={styles.primaryButtonText}>Start streaming</Text>
             </Pressable>
@@ -919,11 +603,6 @@ const styles = StyleSheet.create({
     color: '#111827',
     marginBottom: 12,
   },
-  inlineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
   mutedText: {
     fontSize: 14,
     lineHeight: 20,
@@ -986,34 +665,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF5F4',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  modelList: {
-    gap: 8,
-  },
-  modelListItem: {
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-    backgroundColor: '#F2F2F7',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-  },
-  modelListItemSelected: {
-    backgroundColor: '#EBF3FF',
-    borderColor: '#0F62FE',
-  },
-  modelListTitle: {
-    color: '#111827',
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  modelListTitleSelected: {
-    color: '#0F62FE',
-  },
-  modelListSubtitle: {
-    fontSize: 12,
-    lineHeight: 16,
-    color: '#6B7280',
   },
   actionRow: {
     flexDirection: 'row',
