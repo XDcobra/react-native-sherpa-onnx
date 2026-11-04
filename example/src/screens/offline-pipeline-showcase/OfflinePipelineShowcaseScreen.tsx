@@ -41,6 +41,7 @@ import {
 } from 'react-native-sherpa-onnx/textbuffer';
 import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { getSegments } from 'react-native-sherpa-onnx/segment';
+import { ensureEnUsTtsLexiconForFileSource } from '../../utils/enUsTtsLexicon';
 import {
   getAssetModelPath,
   getFileModelPath,
@@ -399,6 +400,7 @@ export default function OfflinePipelineShowcaseScreen() {
 
       setStatusText('Initializing TTS…');
       const ttsSource = await resolveTtsSource(selectedTtsModel);
+      await ensureEnUsTtsLexiconForFileSource(ttsSource, selectedTtsModel);
       const ttsEngine = await createTTS({
         modelSource: ttsSource,
         modelType: 'auto',

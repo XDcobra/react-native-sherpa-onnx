@@ -66,6 +66,7 @@ import {
   getFileModelPath,
   toDetectSource,
 } from '../../modelConfig';
+import { ensureEnUsTtsLexiconForFileSource } from '../../utils/enUsTtsLexicon';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   SegmentationPolicyControls,
@@ -774,6 +775,7 @@ export default function LivePipelineShowcaseScreen() {
 
       // ── Init TTS engine ────────────────────────────────────────────────────
       const ttsSource = await resolveTtsSource(selectedTtsModel);
+      await ensureEnUsTtsLexiconForFileSource(ttsSource, selectedTtsModel);
 
       setStatusText('Initializing TTS…');
       const ttsEngine = await createTTS({

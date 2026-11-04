@@ -66,6 +66,7 @@ import {
   getFileModelPath,
   toDetectSource,
 } from '../../modelConfig';
+import { ensureEnUsTtsLexiconForFileSource } from '../../utils/enUsTtsLexicon';
 
 const PAD_PACK_NAME = 'sherpa_models';
 
@@ -473,6 +474,7 @@ export default function StreamingTTSScreen() {
 
     try {
       const modelPath = resolveModelPath(selectedModelFolder);
+      await ensureEnUsTtsLexiconForFileSource(modelPath, selectedModelFolder);
       const detection = await detectTtsModel(await toDetectSource(modelPath));
       if (!detection.success) {
         throw new Error(detection.error ?? 'TTS model detection failed');
