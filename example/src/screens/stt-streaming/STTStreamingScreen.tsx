@@ -1,24 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as DocumentPicker from '@react-native-documents/picker';
-import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import type { SttPipelineHandle } from 'react-native-sherpa-onnx/stt';
 import {
+  appendOfflineToLiveAudioBuffer,
   createEmptyLiveAudioBuffer,
-  ingestFileToLiveAudioBuffer,
+  finalizeLiveAudioBuffer,
+  getPipelineAudioBufferInfo,
   releasePipelineAudioBuffer,
   startMicToLiveAudioBuffer,
   stopMicToLiveAudioBuffer,
-  type FileIngestHandle,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
@@ -29,7 +21,14 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
+import { getAudioFilesForModel } from '../../audioConfig';
+import type { AudioIngressSourceMode } from '../../components/AudioIngressSourceToggle';
+import {
+  type OfflineAudioBufferInfo,
+  type OfflineAudioBufferWidgetHandle,
+} from '../../components/OfflineAudioBufferWidget';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import { StreamingAudioInputSection } from '../../components/StreamingAudioInputSection';
 import { SttStreamingModelInitPanel } from '../../components/SttStreamingModelInitPanel';
 import { useSttStreamingModelInit } from '../../hooks/useSttStreamingModelInit';
 import {
@@ -37,11 +36,6 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
-import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
-import {
-  resolveAudioFileDisplayName,
-  toFileSource,
-} from '../../utils/fileSourceFromUri';
 
 const STT_INPUT_SAMPLE_RATE = 16000;
 
@@ -59,7 +53,6 @@ function normalizeErrorMessage(error: unknown): string {
 }
 
 type StreamingState = 'idle' | 'starting' | 'running' | 'stopping';
-type SourceMode = 'mic' | 'file';
 
 export default function STTStreamingScreen() {
   const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
@@ -70,20 +63,25 @@ export default function STTStreamingScreen() {
     onBeforeInit: () => onBeforeInitRef.current?.(),
   });
 
-  const { getTranscribeEngine, isEngineInitialized, engineMode } = stt;
+  const {
+    getTranscribeEngine,
+    isEngineInitialized,
+    engineMode,
+    currentModelFolder,
+    selectedModelForInit,
+  } = stt;
 
   const [segConfig, setSegConfig] = useState<SegmentationControlConfig>({
     mode: 'off',
   });
-  const [sourceMode, setSourceMode] = useState<SourceMode>('file');
-  const [selectedFileUri, setSelectedFileUri] = useState<string | null>(null);
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
+  const [sourceMode, setSourceMode] = useState<AudioIngressSourceMode>('file');
+  const [offlineInputBuffer, setOfflineInputBuffer] =
+    useState<OfflineAudioBufferInfo | null>(null);
   const [status, setStatus] = useState(
     'Initialize a model, choose microphone or file input, then start streaming.'
   );
   const [error, setError] = useState<string | null>(null);
   const [streamingState, setStreamingState] = useState<StreamingState>('idle');
-  const [progress, setProgress] = useState<number | null>(null);
   const [segmentCount, setSegmentCount] = useState(0);
   const [committedTranscript, setCommittedTranscript] = useState('');
   const [partialTranscript, setPartialTranscript] = useState('');
@@ -91,9 +89,17 @@ export default function STTStreamingScreen() {
   const pipelineRef = useRef<SttPipelineHandle | null>(null);
   const liveAudioBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const liveTextBufferRef = useRef<LiveTextBufferRef | null>(null);
-  const ingestHandleRef = useRef<FileIngestHandle | null>(null);
+  const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cleanupLockRef = useRef(false);
+
+  const audioFiles = useMemo(
+    () =>
+      currentModelFolder || selectedModelForInit
+        ? getAudioFilesForModel(currentModelFolder ?? selectedModelForInit!)
+        : [],
+    [currentModelFolder, selectedModelForInit]
+  );
 
   useEffect(() => {
     if (engineMode === 'offline') {
@@ -152,13 +158,6 @@ export default function STTStreamingScreen() {
       stopPolling();
 
       try {
-        ingestHandleRef.current?.cancel();
-      } catch {
-        // ignore teardown races
-      }
-      ingestHandleRef.current = null;
-
-      try {
         await stopMicToLiveAudioBuffer();
       } catch {
         // ignore teardown races
@@ -191,8 +190,9 @@ export default function STTStreamingScreen() {
     setCommittedTranscript('');
     setPartialTranscript('');
     setSegmentCount(0);
-    setProgress(null);
     setError(null);
+    setOfflineInputBuffer(null);
+    await offlineWidgetRef.current?.clear().catch(() => {});
     await releasePipelineResources();
   };
 
@@ -211,23 +211,39 @@ export default function STTStreamingScreen() {
       setError('Initialize an STT model first (Use model).');
       return;
     }
-    if (sourceMode === 'file' && !selectedFileUri) {
-      setError('Pick an audio file first.');
+    if (sourceMode === 'file' && !offlineInputBuffer) {
+      setError('Select and decode an audio file first.');
       return;
     }
 
     setError(null);
-    setProgress(null);
     setSegmentCount(0);
     setCommittedTranscript('');
     setPartialTranscript('');
     setStreamingState('starting');
 
     try {
+      let ringSeconds = 240;
+      if (sourceMode === 'file' && offlineInputBuffer) {
+        try {
+          const bufInfo = await getPipelineAudioBufferInfo(
+            offlineInputBuffer.bufferId
+          );
+          if (bufInfo && bufInfo.durationMs > 0) {
+            ringSeconds = Math.max(
+              120,
+              Math.ceil(bufInfo.durationMs / 1000) + 30
+            );
+          }
+        } catch {
+          ringSeconds = 300;
+        }
+      }
+
       const liveAudio = await createEmptyLiveAudioBuffer({
         sampleRate: STT_INPUT_SAMPLE_RATE,
         channelCount: 1,
-        ringSeconds: 240,
+        ringSeconds,
         retention: 'auto',
         streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
       });
@@ -249,38 +265,19 @@ export default function STTStreamingScreen() {
       )) as SttPipelineHandle;
       pipelineRef.current = pipeline;
 
-      let fileIngestDone: Promise<unknown> = Promise.resolve();
-
-      if (sourceMode === 'file') {
-        const source = toFileSource(
-          selectedFileUri!,
-          selectedFileName ?? undefined
-        );
-        const ingest = await ingestFileToLiveAudioBuffer(
-          liveAudio.bufferId,
-          source,
-          {
-            targetSampleRateHz: STT_INPUT_SAMPLE_RATE,
-            forceMono: true,
-            autoFinalize: true,
-            backpressure: 'block',
-            onProgress: (event) => {
-              setProgress(event.percent);
-              setStatus(
-                `Streaming decode ${event.percent.toFixed(
-                  0
-                )}% • ${event.framesDecoded.toLocaleString()} frames decoded`
-              );
-            },
-          }
-        );
-        ingestHandleRef.current = ingest;
-        fileIngestDone = ingest.done;
+      if (sourceMode === 'file' && offlineInputBuffer) {
         setStatus(
-          'Streaming STT is running. The live buffer stays lossless while the text buffer tracks committed and partial text.'
+          `Ingesting offline buffer: ${offlineInputBuffer.sourceLabel}`
+        );
+        await appendOfflineToLiveAudioBuffer(
+          liveAudio.bufferId,
+          offlineInputBuffer.bufferId
+        );
+        await finalizeLiveAudioBuffer(liveAudio.bufferId);
+        setStatus(
+          'Streaming STT is running. Offline samples appended to the live buffer.'
         );
       } else {
-        ingestHandleRef.current = null;
         await startMicToLiveAudioBuffer(liveAudio, { emitToJs: false });
         setStatus(
           'Microphone active. Speak to transcribe; tap Stop when finished.'
@@ -296,11 +293,7 @@ export default function STTStreamingScreen() {
 
       (async () => {
         try {
-          if (sourceMode === 'file') {
-            await Promise.all([fileIngestDone, pipeline.completed]);
-          } else {
-            await pipeline.completed;
-          }
+          await pipeline.completed;
           setStatus('Streaming transcription completed.');
         } catch (streamErr) {
           const code = (streamErr as { code?: string })?.code;
@@ -321,10 +314,9 @@ export default function STTStreamingScreen() {
     }
   }, [
     getTranscribeEngine,
+    offlineInputBuffer,
     releasePipelineResources,
     segConfig,
-    selectedFileName,
-    selectedFileUri,
     sourceMode,
     stopPolling,
     streamingState,
@@ -342,49 +334,10 @@ export default function STTStreamingScreen() {
     } catch {
       // ignore stop races
     }
-    try {
-      ingestHandleRef.current?.cancel();
-    } catch {
-      // ignore stop races
-    }
     await releasePipelineResources();
     setStreamingState('idle');
     setStatus('Stopped.');
   }, [releasePipelineResources, streamingState]);
-
-  const pickFile = useCallback(async () => {
-    try {
-      const [result] = await DocumentPicker.pick({
-        type: DECODABLE_AUDIO_PICKER_TYPES,
-      });
-      if (result) {
-        const resolvedName =
-          resolveAudioFileDisplayName(result.uri, result.name) ??
-          result.name ??
-          result.uri;
-        setSelectedFileUri(result.uri);
-        setSelectedFileName(resolvedName);
-      }
-    } catch (pickErr) {
-      const isPickCancel =
-        (DocumentPicker as any)?.isCancel?.(pickErr) ||
-        (pickErr as any)?.code === 'DOCUMENT_PICKER_CANCELED' ||
-        (pickErr as any)?.name === 'DocumentPickerCanceled';
-      if (!isPickCancel) {
-        setError(normalizeErrorMessage(pickErr));
-      }
-    }
-  }, []);
-
-  const clearSelectedFile = useCallback(() => {
-    if (streamingState !== 'idle') {
-      return;
-    }
-    setSelectedFileUri(null);
-    setSelectedFileName(null);
-    setProgress(null);
-    setStatus('Audio file removed. Choose another file to continue.');
-  }, [streamingState]);
 
   const pipelineBusy = streamingState !== 'idle';
   const engineReady = isEngineInitialized && getTranscribeEngine() != null;
@@ -392,7 +345,7 @@ export default function STTStreamingScreen() {
   const canStart =
     streamingState === 'idle' &&
     engineReady &&
-    (sourceMode === 'mic' || !!selectedFileUri);
+    (sourceMode === 'mic' || !!offlineInputBuffer);
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -409,7 +362,7 @@ export default function STTStreamingScreen() {
         {engineMode === 'offline' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Speech Segmentation</Text>
-            <Text style={styles.bodyText}>
+            <Text style={styles.mutedText}>
               Live Overload requires segmentation to commit speech into discrete
               chunks before transcription. The Off option is disabled.
             </Text>
@@ -424,86 +377,17 @@ export default function STTStreamingScreen() {
           </View>
         )}
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Input Source</Text>
-          <View style={lpStyles.sourceToggle}>
-            {(['mic', 'file'] as SourceMode[]).map((mode) => (
-              <TouchableOpacity
-                key={mode}
-                style={[
-                  lpStyles.sourceToggleBtn,
-                  sourceMode === mode && lpStyles.sourceToggleBtnActive,
-                ]}
-                onPress={() => setSourceMode(mode)}
-                disabled={pipelineBusy}
-              >
-                <Text
-                  style={[
-                    lpStyles.sourceToggleText,
-                    sourceMode === mode && lpStyles.sourceToggleTextActive,
-                  ]}
-                >
-                  {mode === 'mic' ? '🎤 Microphone' : '📁 File'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          {sourceMode === 'file' && (
-            <>
-              {!selectedFileUri ? (
-                <>
-                  <TouchableOpacity
-                    style={[
-                      lpStyles.optionButton,
-                      lpStyles.optionButtonAlignStart,
-                      styles.inputSourcePickButton,
-                    ]}
-                    onPress={() => {
-                      pickFile().catch(() => {});
-                    }}
-                    disabled={pipelineBusy}
-                  >
-                    <Text style={lpStyles.optionButtonText}>
-                      Pick audio file…
-                    </Text>
-                  </TouchableOpacity>
-                  <Text style={[styles.bodyText, styles.inputSourceFileHint]}>
-                    No file selected yet.
-                  </Text>
-                </>
-              ) : (
-                <View
-                  style={[styles.selectedFileCard, styles.inputSourceFileCard]}
-                >
-                  <View style={styles.selectedFileInfo}>
-                    <Text style={styles.selectedFileLabel}>Selected file</Text>
-                    <Text style={styles.selectedFileName} numberOfLines={2}>
-                      {selectedFileName ?? selectedFileUri}
-                    </Text>
-                  </View>
-                  <Pressable
-                    style={[
-                      styles.removeFileButton,
-                      pipelineBusy && styles.buttonDisabled,
-                    ]}
-                    onPress={clearSelectedFile}
-                    disabled={pipelineBusy}
-                    accessibilityLabel="Remove selected audio file"
-                  >
-                    <Ionicons name="trash-outline" size={18} color="#B42318" />
-                  </Pressable>
-                </View>
-              )}
-            </>
-          )}
-          {sourceMode === 'mic' ? (
-            <Text style={[styles.bodyText, styles.inputSourceMicHint]}>
-              Audio is captured from the device microphone at{' '}
-              {STT_INPUT_SAMPLE_RATE} Hz mono. Grant mic permission when
-              prompted.
-            </Text>
-          ) : null}
-        </View>
+        <StreamingAudioInputSection
+          sourceMode={sourceMode}
+          onSourceModeChange={setSourceMode}
+          audioFiles={audioFiles}
+          onBufferReady={setOfflineInputBuffer}
+          onBufferReleased={() => setOfflineInputBuffer(null)}
+          disabled={pipelineBusy}
+          widgetRef={offlineWidgetRef}
+          micSampleRateHz={STT_INPUT_SAMPLE_RATE}
+          decodeTargetSampleRateHz={STT_INPUT_SAMPLE_RATE}
+        />
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Run</Text>
@@ -534,11 +418,6 @@ export default function STTStreamingScreen() {
             </Pressable>
           </View>
           <Text style={styles.mutedText}>{status}</Text>
-          {sourceMode === 'file' && progress != null ? (
-            <Text style={styles.mutedText}>
-              Decode progress: {progress.toFixed(0)}%
-            </Text>
-          ) : null}
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
 
@@ -607,64 +486,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: '#6B7280',
-  },
-  bodyText: {
-    marginTop: 10,
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#374151',
-  },
-  inputSourcePickButton: {
-    marginTop: 12,
-  },
-  inputSourceFileHint: {
-    marginTop: 10,
-  },
-  inputSourceFileCard: {
-    marginTop: 12,
-  },
-  inputSourceMicHint: {
-    marginTop: 12,
-  },
-  selectedFileCard: {
-    marginTop: 2,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    backgroundColor: '#F9FAFB',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  selectedFileInfo: {
-    flex: 1,
-  },
-  selectedFileLabel: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '700',
-    color: '#6B7280',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 4,
-  },
-  selectedFileName: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#111827',
-    fontWeight: '600',
-  },
-  removeFileButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#F4C7C3',
-    backgroundColor: '#FFF5F4',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   actionRow: {
     flexDirection: 'row',

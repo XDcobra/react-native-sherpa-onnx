@@ -86,6 +86,9 @@ export function useEnhancementStreamingModelInit(
   const [initializedSummary, setInitializedSummary] = useState<string | null>(
     null
   );
+  /** Engine mode that was active when the current engine was initialized. */
+  const [initializedEngineMode, setInitializedEngineMode] =
+    useState<EngineMode | null>(null);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
     null
@@ -155,6 +158,7 @@ export function useEnhancementStreamingModelInit(
           ? `custom:${cached.selectedModelKind ?? 'unknown'}`
           : getModelDisplayName(cached.modelFolder)
       );
+      setInitializedEngineMode('streaming');
       setInitResult(cached.initMessage);
     }
   }, []);
@@ -179,6 +183,7 @@ export function useEnhancementStreamingModelInit(
       setDetectedModels([]);
       setSelectedModelKind(null);
       setInitializedSummary(null);
+      setInitializedEngineMode(null);
       await onBeforeInitRef.current?.();
 
       try {
@@ -230,6 +235,7 @@ export function useEnhancementStreamingModelInit(
         const types = normalized.map((m) => m.type).join(', ');
         const message = `Initialized streaming: ${summary}\nDetected: ${types}`;
         setInitializedSummary(summary);
+        setInitializedEngineMode(engineMode);
         setInitResult(message);
         setEnhancementStreamingCache(
           engine,
@@ -247,7 +253,7 @@ export function useEnhancementStreamingModelInit(
         setLoading(false);
       }
     },
-    [releaseCurrentEngine, resolveModelPath]
+    [engineMode, releaseCurrentEngine, resolveModelPath]
   );
 
   const initializeCustom = useCallback(async () => {
@@ -257,6 +263,7 @@ export function useEnhancementStreamingModelInit(
     setDetectedModels([]);
     setSelectedModelKind(null);
     setInitializedSummary(null);
+    setInitializedEngineMode(null);
     await onBeforeInitRef.current?.();
 
     try {
@@ -285,6 +292,7 @@ export function useEnhancementStreamingModelInit(
       const summary = `custom:${kind}`;
       const message = `Initialized streaming (custom): ${kind}\nFile: model`;
       setInitializedSummary(summary);
+      setInitializedEngineMode(engineMode);
       setInitResult(message);
       setEnhancementStreamingCache(engine, 'custom', message, normalized, kind);
       onEngineReadyRef.current?.();
@@ -298,6 +306,7 @@ export function useEnhancementStreamingModelInit(
   }, [
     customInitForm.fileSources,
     customInitForm.modelType,
+    engineMode,
     releaseCurrentEngine,
   ]);
 
@@ -412,6 +421,7 @@ export function useEnhancementStreamingModelInit(
     setSelectedModelForInit(null);
     setInitResult(null);
     setInitializedSummary(null);
+    setInitializedEngineMode(null);
     setDetectedModels([]);
     setSelectedModelKind(null);
     setCustomFillHint(null);
@@ -448,6 +458,7 @@ export function useEnhancementStreamingModelInit(
     selectedModelForInit,
     setSelectedModelForInit,
     initializedSummary,
+    initializedEngineMode,
     loadingModels,
     initResult,
     currentModelFolder,

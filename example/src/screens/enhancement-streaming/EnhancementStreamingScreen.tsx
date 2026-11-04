@@ -6,51 +6,39 @@ import {
   ScrollView,
   Alert,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { styles } from '../stt/STTScreen.styles';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import * as DocumentPicker from '@react-native-documents/picker';
-import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import {
-  fileSourceFromBundledPath,
-  resolveAudioFileDisplayName,
-  toFileSource,
-} from '../../utils/fileSourceFromUri';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 import type { EnhancementPipelineHandle } from 'react-native-sherpa-onnx/enhancement';
 import {
+  appendOfflineToLiveAudioBuffer,
   createEmptyLiveAudioBuffer,
   createOfflineAudioBufferFromLive,
   finalizeLiveAudioBuffer,
   getPipelineAudioBufferInfo,
-  ingestFileToLiveAudioBuffer,
   releasePipelineAudioBuffer,
-  type FileIngestHandle,
+  startMicToLiveAudioBuffer,
+  stopMicToLiveAudioBuffer,
   type LiveAudioBufferRef,
 } from 'react-native-sherpa-onnx/audiobuffer';
+import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
+import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import { getSegments } from 'react-native-sherpa-onnx/segment';
 import { EnhancementStreamingModelInitPanel } from '../../components/EnhancementStreamingModelInitPanel';
 import { useEnhancementStreamingModelInit } from '../../hooks/useEnhancementStreamingModelInit';
 import type { RootStackParamList } from '../../types/navigation';
-import {
-  getAudioFilesForEnhancement,
-  type AudioFileInfo,
-} from '../../audioConfig';
+import { getAudioFilesForEnhancement } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
+import type { AudioIngressSourceMode } from '../../components/AudioIngressSourceToggle';
 import {
-  startPcmFilePlayback,
-  stopPcmFilePlayback,
-  type ActivePcmFilePlayback,
-} from '../../utils/audioFilePcmPlayback';
-import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
-import {
-  fetchOutputDevices,
-  keepValidDeviceSelection,
-  type AudioRouteDevice,
-} from '../../utils/audioDevices';
+  type OfflineAudioBufferInfo,
+  type OfflineAudioBufferWidgetHandle,
+} from '../../components/OfflineAudioBufferWidget';
+import { StreamingAudioInputSection } from '../../components/StreamingAudioInputSection';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   PipelineOfflineAudioResultCard,
@@ -63,35 +51,7 @@ import {
 } from '../../components/SegmentationPolicyControls';
 import { VoxLockReferenceAudioPicker } from '../../components/VoxLockReferenceAudioPicker';
 
-type SelectedEnhancementInput = {
-  source: FileSource;
-  sourceType: 'example' | 'own';
-  sourceLabel: string;
-  sourcePathForPlayback: string;
-  selectedAudioId: string | null;
-  customAudioPath: string | null;
-  customAudioName: string | null;
-};
-
 const localStyles = StyleSheet.create({
-  sourceActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
-  },
-  sourceActionTitle: {
-    flex: 1,
-    marginBottom: 0,
-  },
-  backButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 12,
-    backgroundColor: '#F2F2F7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   playRow: {
     flexDirection: 'row',
     gap: 10,
@@ -110,9 +70,39 @@ const localStyles = StyleSheet.create({
   enhancedCardWrap: {
     marginTop: 12,
   },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  actionButton: {
+    flex: 1,
+  },
 });
 
 const PIPELINE_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
+
+function formatEnhancementError(err: unknown): string {
+  if (err instanceof Error) {
+    let message = err.message;
+    if ('code' in err) {
+      message = `[${(err as { code?: string }).code}] ${message}`;
+    }
+    return message;
+  }
+  if (typeof err === 'object' && err !== null) {
+    const errorObj = err as {
+      message?: string;
+      userInfo?: { NSLocalizedDescription?: string };
+    };
+    return (
+      errorObj.message ??
+      errorObj.userInfo?.NSLocalizedDescription ??
+      JSON.stringify(err)
+    );
+  }
+  return 'Unknown error';
+}
 
 export default function EnhancementStreamingScreen() {
   const navigation =
@@ -149,26 +139,15 @@ export default function EnhancementStreamingScreen() {
   const [errorSource, setErrorSource] = useState<'init' | 'enhance' | null>(
     null
   );
-  const [audioSourceType, setAudioSourceType] = useState<
-    'example' | 'own' | null
-  >(null);
-  const [selectedAudio, setSelectedAudio] = useState<AudioFileInfo | null>(
-    null
-  );
-  const [customAudioPath, setCustomAudioPath] = useState<string | null>(null);
-  const [customAudioName, setCustomAudioName] = useState<string | null>(null);
-  const [preparingInputBuffer, setPreparingInputBuffer] = useState(false);
-  const [inputBufferBuildProgress, setInputBufferBuildProgress] = useState<
-    number | null
-  >(null);
-  const [inputBufferBuildStatus, setInputBufferBuildStatus] = useState<
-    string | null
-  >(null);
+  const [sourceMode, setSourceMode] = useState<AudioIngressSourceMode>('file');
+  const [offlineInputBuffer, setOfflineInputBuffer] =
+    useState<OfflineAudioBufferInfo | null>(null);
   const [enhancing, setEnhancing] = useState(false);
+  const [micRunning, setMicRunning] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
   const [segStreamingConfig, setSegStreamingConfig] =
     useState<SegmentationControlConfig>({ mode: 'off' });
   const [enhanceResult, setEnhanceResult] = useState<string | null>(null);
-  const [lastInputPath, setLastInputPath] = useState<string | null>(null);
   const [lastEnhancedAudio, setLastEnhancedAudio] = useState<{
     outputBufferId: string;
     sampleRate: number;
@@ -176,36 +155,28 @@ export default function EnhancementStreamingScreen() {
   } | null>(null);
   const [playingOriginal, setPlayingOriginal] = useState(false);
 
-  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
-  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
-    string | null
-  >(null);
-
-  const pcmPlaybackRef = useRef<ActivePcmFilePlayback | null>(null);
+  const originalPlayerRef = useRef<PcmPlayer | null>(null);
   const enhancedCardRef = useRef<PipelineOfflineAudioResultCardHandle | null>(
     null
   );
-  const fileIngestRef = useRef<FileIngestHandle | null>(null);
+  const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
+  const inputLiveBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const outputLiveBufferRef = useRef<LiveAudioBufferRef | null>(null);
   const pipelineRef = useRef<EnhancementPipelineHandle | null>(null);
   const finalizedOutputBufferIdRef = useRef<string | null>(null);
+  const micCompletionWaiterRef = useRef<{
+    resolve: (value: unknown) => void;
+    reject: (reason?: unknown) => void;
+  } | null>(null);
 
   const stopOriginalPlayback = async () => {
-    if (pcmPlaybackRef.current) {
-      const activePlayback = pcmPlaybackRef.current;
-      pcmPlaybackRef.current = null;
-      await stopPcmFilePlayback(activePlayback);
+    const player = originalPlayerRef.current;
+    originalPlayerRef.current = null;
+    if (player) {
+      await player.destroy().catch(() => {});
     }
     setPlayingOriginal(false);
   };
-
-  const refreshOutputDevices = useCallback(async () => {
-    const nextOutputDevices = await fetchOutputDevices();
-    setOutputDevices(nextOutputDevices);
-    setSelectedOutputDeviceId((prev) =>
-      keepValidDeviceSelection(prev, nextOutputDevices)
-    );
-  }, []);
 
   const clearFinalizedOutput = async () => {
     const existingOutputBufferId = finalizedOutputBufferIdRef.current;
@@ -218,18 +189,7 @@ export default function EnhancementStreamingScreen() {
   };
 
   const cleanupRuntimeResources = async () => {
-    const ingest = fileIngestRef.current;
-    fileIngestRef.current = null;
-    if (ingest) {
-      try {
-        const status = await ingest.getStatus();
-        if (status.isRunning) {
-          ingest.cancel();
-        }
-      } catch {
-        // Ignore status races.
-      }
-    }
+    await stopMicToLiveAudioBuffer().catch(() => {});
 
     const pipeline = pipelineRef.current;
     pipelineRef.current = null;
@@ -237,110 +197,19 @@ export default function EnhancementStreamingScreen() {
       await pipeline.stop().catch(() => {});
     }
 
-    const outputLiveBuffer = outputLiveBufferRef.current;
+    const inputLive = inputLiveBufferRef.current;
+    inputLiveBufferRef.current = null;
+    if (inputLive?.bufferId) {
+      await releasePipelineAudioBuffer(inputLive.bufferId).catch(() => {});
+    }
+
+    const outputLive = outputLiveBufferRef.current;
     outputLiveBufferRef.current = null;
-    if (outputLiveBuffer?.bufferId) {
-      await releasePipelineAudioBuffer(outputLiveBuffer.bufferId).catch(
-        () => {}
-      );
+    if (outputLive?.bufferId) {
+      await releasePipelineAudioBuffer(outputLive.bufferId).catch(() => {});
     }
   };
 
-  const clearPreparedInputBuffer = async () => {
-    const ingest = fileIngestRef.current;
-    fileIngestRef.current = null;
-    if (ingest) {
-      try {
-        const status = await ingest.getStatus();
-        if (status.isRunning) {
-          ingest.cancel();
-        }
-      } catch {
-        // Ignore status races.
-      }
-    }
-
-    setPreparingInputBuffer(false);
-    setInputBufferBuildProgress(null);
-    setInputBufferBuildStatus(null);
-  };
-
-  const resolveSelectedInputSource = async (
-    override?: {
-      selectedAudio?: AudioFileInfo | null;
-      customAudioPath?: string | null;
-      customAudioName?: string | null;
-    } | null
-  ): Promise<SelectedEnhancementInput> => {
-    const effectiveCustomAudioPath =
-      override?.customAudioPath ?? customAudioPath;
-    const effectiveCustomAudioName =
-      override?.customAudioName ?? customAudioName;
-    const effectiveSelectedAudio = override?.selectedAudio ?? selectedAudio;
-
-    if (effectiveCustomAudioPath) {
-      const trimmed = effectiveCustomAudioPath.trim();
-      if (trimmed.startsWith('content://')) {
-        return {
-          source: toFileSource(trimmed, effectiveCustomAudioName ?? undefined),
-          sourceType: 'own',
-          sourceLabel: effectiveCustomAudioName ?? 'Local audio',
-          sourcePathForPlayback: trimmed,
-          selectedAudioId: null,
-          customAudioPath: effectiveCustomAudioPath,
-          customAudioName: effectiveCustomAudioName,
-        };
-      }
-      if (trimmed.startsWith('file://')) {
-        const filePath = decodeURI(trimmed.replace(/^file:\/\//, ''));
-        if (filePath.startsWith('/proc/self/fd/')) {
-          throw new Error(
-            'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
-          );
-        }
-        return {
-          source: { kind: 'fs', path: filePath },
-          sourceType: 'own',
-          sourceLabel: effectiveCustomAudioName ?? 'Local audio',
-          sourcePathForPlayback: effectiveCustomAudioPath,
-          selectedAudioId: null,
-          customAudioPath: effectiveCustomAudioPath,
-          customAudioName: effectiveCustomAudioName,
-        };
-      }
-      if (trimmed.startsWith('/proc/self/fd/')) {
-        throw new Error(
-          'The selected file points to an ephemeral file descriptor. Please re-pick using a regular file from Files/Documents.'
-        );
-      }
-      return {
-        source: { kind: 'fs', path: trimmed },
-        sourceType: 'own',
-        sourceLabel: effectiveCustomAudioName ?? 'Local audio',
-        sourcePathForPlayback: trimmed,
-        selectedAudioId: null,
-        customAudioPath: effectiveCustomAudioPath,
-        customAudioName: effectiveCustomAudioName,
-      };
-    }
-
-    if (effectiveSelectedAudio) {
-      const source = fileSourceFromBundledPath(effectiveSelectedAudio.id);
-      return {
-        source,
-        sourceType: 'example',
-        sourceLabel: effectiveSelectedAudio.name,
-        sourcePathForPlayback: effectiveSelectedAudio.id,
-        selectedAudioId: effectiveSelectedAudio.id,
-        customAudioPath: null,
-        customAudioName: null,
-      };
-    }
-
-    throw new Error('Select example audio or a local WAV file');
-  };
-
-  // Auto-enforce segmentation when switching to Live Overload mode
   useEffect(() => {
     if (engineMode === 'offline') {
       setSegStreamingConfig((prev) => {
@@ -357,10 +226,8 @@ export default function EnhancementStreamingScreen() {
 
   useEffect(() => {
     return () => {
-      if (pcmPlaybackRef.current) {
-        stopPcmFilePlayback(pcmPlaybackRef.current).catch(() => {});
-        pcmPlaybackRef.current = null;
-      }
+      originalPlayerRef.current?.destroy().catch(() => {});
+      originalPlayerRef.current = null;
       cleanupRuntimeResources().catch(() => {});
       const outputBufferId = finalizedOutputBufferIdRef.current;
       finalizedOutputBufferIdRef.current = null;
@@ -370,130 +237,22 @@ export default function EnhancementStreamingScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    refreshOutputDevices().catch(() => {
-      // Ignore unsupported-platform lookup failures.
-    });
-  }, [refreshOutputDevices]);
-
   onBeforeInitRef.current = async () => {
     setError(null);
     setErrorSource(null);
+    setStatus(null);
+    setMicRunning(false);
+    micCompletionWaiterRef.current = null;
     await stopOriginalPlayback();
     await enhancedCardRef.current?.stop().catch(() => {});
     await cleanupRuntimeResources();
     await clearFinalizedOutput();
-    await clearPreparedInputBuffer();
-    setEnhanceResult(null);
-    setLastInputPath(null);
-    setAudioSourceType(null);
-    setSelectedAudio(null);
-    setCustomAudioPath(null);
-    setCustomAudioName(null);
+    setOfflineInputBuffer(null);
+    await offlineWidgetRef.current?.clear().catch(() => {});
   };
 
   onEngineReadyRef.current = async () => {
     await onBeforeInitRef.current?.();
-  };
-
-  const handlePickLocalFile = async () => {
-    setError(null);
-    setErrorSource(null);
-    try {
-      const res = await DocumentPicker.pick({
-        type: DECODABLE_AUDIO_PICKER_TYPES,
-      });
-      const file = Array.isArray(res) ? res[0] : res;
-      const uri =
-        file.uri ??
-        (file as any).fileCopyUri ??
-        (file as any).localUri ??
-        (file as any).nativeUri;
-      const name =
-        resolveAudioFileDisplayName(uri, file.name) ??
-        file.name?.trim() ??
-        uri?.split('/')?.pop() ??
-        'local.wav';
-      if (!uri) {
-        setErrorSource('enhance');
-        setError('Could not get file URI from picker result');
-        return;
-      }
-      const fsPathProbe = uri.startsWith('file://')
-        ? decodeURI(uri.replace(/^file:\/\//, ''))
-        : uri;
-      if (
-        uri.startsWith('/proc/self/fd/') ||
-        fsPathProbe.startsWith('/proc/self/fd/')
-      ) {
-        setErrorSource('enhance');
-        setError(
-          'The picker returned an ephemeral fd path. Please select a file from Documents/Files so we get a content:// or file:// URI.'
-        );
-        return;
-      }
-
-      await handleEnhance({
-        customAudioPath: uri,
-        customAudioName: name,
-      });
-    } catch (err: any) {
-      const isCancel =
-        (DocumentPicker &&
-          typeof (DocumentPicker as any).isCancel === 'function' &&
-          (DocumentPicker as any).isCancel(err)) ||
-        err?.code === 'DOCUMENT_PICKER_CANCELED' ||
-        err?.name === 'DocumentPickerCanceled' ||
-        (typeof err?.message === 'string' &&
-          err.message.toLowerCase().includes('cancel'));
-      if (isCancel) return;
-      setErrorSource('enhance');
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
-  const playPath = async (
-    path: string | null,
-    options?: { bindResultOriginalUi?: boolean; displayName?: string | null }
-  ) => {
-    if (!path) return;
-    const bindResult = options?.bindResultOriginalUi === true;
-    try {
-      await stopOriginalPlayback();
-      await enhancedCardRef.current?.stop().catch(() => {});
-      let nextPlayback: ActivePcmFilePlayback | null = null;
-      nextPlayback = await startPcmFilePlayback(
-        path,
-        () => {
-          if (pcmPlaybackRef.current === nextPlayback) {
-            pcmPlaybackRef.current = null;
-          }
-          if (bindResult) {
-            setPlayingOriginal(false);
-          }
-        },
-        {
-          outputDeviceId: selectedOutputDeviceId ?? undefined,
-          displayName: options?.displayName ?? undefined,
-        }
-      );
-      pcmPlaybackRef.current = nextPlayback;
-      if (bindResult) {
-        setPlayingOriginal(true);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Playback failed', msg);
-    }
-  };
-
-  const togglePlayOriginalPath = async () => {
-    if (!lastInputPath) return;
-    if (pcmPlaybackRef.current) {
-      await stopOriginalPlayback();
-      return;
-    }
-    await playPath(lastInputPath, { bindResultOriginalUi: true });
   };
 
   const resultPlaybackLabel =
@@ -514,44 +273,67 @@ export default function EnhancementStreamingScreen() {
     ]
   );
 
-  const handleEnhance = async (
-    override?: {
-      selectedAudio?: AudioFileInfo | null;
-      customAudioPath?: string | null;
-      customAudioName?: string | null;
-    } | null
+  const finalizeEnhancementOutput = async (
+    sampleRate: number,
+    frameShift: number,
+    inputLiveBufferId: string,
+    outputLiveBufferId: string
   ) => {
+    const checkpointCount =
+      segStreamingConfig.mode !== 'off' &&
+      segStreamingConfig.policy?.evaluator === 'continuous_frames'
+        ? (
+            await getSegments(inputLiveBufferId, 0, 100000).catch(() => [])
+          ).filter((segment) => segment.reason === 'policy_checkpoint').length
+        : 0;
+
+    setStatus('Finalizing output...');
+    await finalizeLiveAudioBuffer(outputLiveBufferId).catch(() => {});
+
+    const offlineOutput = await createOfflineAudioBufferFromLive(
+      outputLiveBufferId,
+      { mode: 'fullIfSpooled' }
+    );
+
+    const outInfo = await getPipelineAudioBufferInfo(offlineOutput.bufferId);
+    const numSamples =
+      outInfo.kind === 'offlinePcmBuffer' ? outInfo.numSamples : 0;
+    const outputSampleRate = outInfo.sampleRate ?? sampleRate;
+    const durationSeconds =
+      outputSampleRate > 0 ? (numSamples / outputSampleRate).toFixed(2) : '?';
+
+    finalizedOutputBufferIdRef.current = offlineOutput.bufferId;
+    setLastEnhancedAudio({
+      outputBufferId: offlineOutput.bufferId,
+      sampleRate: outputSampleRate,
+      numSamples,
+    });
+    setEnhanceResult(
+      `Pipeline: streaming enhancement\nContinuous checkpoints: ${checkpointCount}\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nUse the result card below to play or save.`
+    );
+    setStatus(null);
+  };
+
+  const handleEnhance = async () => {
     if (!isEngineInitialized || !engineRef.current) {
       setErrorSource('enhance');
       setError('Please initialize a model first');
       return;
     }
+    if (sourceMode === 'file' && !offlineInputBuffer) {
+      setErrorSource('enhance');
+      setError('Select and decode an audio file first.');
+      return;
+    }
 
     setEnhancing(true);
-    setPreparingInputBuffer(true);
     setError(null);
     setErrorSource(null);
     setEnhanceResult(null);
-    setLastInputPath(null);
-    setInputBufferBuildProgress(0);
-    setInputBufferBuildStatus('Preparing streaming pipeline...');
-
-    let producedOfflineBufferId: string | null = null;
+    setStatus('Preparing streaming pipeline...');
 
     try {
-      const engine = engineRef.current!;
-      const selectedInput = await resolveSelectedInputSource(override);
-      setAudioSourceType(selectedInput.sourceType);
-      setSelectedAudio(
-        selectedInput.sourceType === 'example'
-          ? enhancementAudioFiles.find(
-              (f) => f.id === selectedInput.selectedAudioId
-            ) ?? null
-          : null
-      );
-      setCustomAudioPath(selectedInput.customAudioPath);
-      setCustomAudioName(selectedInput.customAudioName);
-
+      const engine = engineRef.current;
       await stopOriginalPlayback();
       await enhancedCardRef.current?.stop().catch(() => {});
       await cleanupRuntimeResources();
@@ -559,26 +341,44 @@ export default function EnhancementStreamingScreen() {
 
       const sampleRate = await engine.getSampleRate();
       const frameShift = await engine.getFrameShiftInSamples();
-      setInputBufferBuildStatus('Creating live buffers...');
+
+      let ringSeconds = 240;
+      if (sourceMode === 'file' && offlineInputBuffer) {
+        try {
+          const bufInfo = await getPipelineAudioBufferInfo(
+            offlineInputBuffer.bufferId
+          );
+          if (bufInfo && bufInfo.durationMs > 0) {
+            ringSeconds = Math.max(
+              120,
+              Math.ceil(bufInfo.durationMs / 1000) + 30
+            );
+          }
+        } catch {
+          ringSeconds = 300;
+        }
+      }
 
       const inputLive = await createEmptyLiveAudioBuffer({
         sampleRate,
         channelCount: 1,
-        ringSeconds: 240,
+        ringSeconds,
         retention: 'auto',
         streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
       });
+      inputLiveBufferRef.current = inputLive;
+
       const outputLivePath = `${DocumentDirectoryPath}/streaming_enhancement_live_${Date.now()}.wav`;
       const outputLive = await createEmptyLiveAudioBuffer({
         sampleRate,
         channelCount: 1,
-        ringSeconds: 240,
+        ringSeconds,
         retention: { mode: 'path', path: outputLivePath },
         streamEvents: { framesAppended: { enabled: false, minIntervalMs: 0 } },
       });
       outputLiveBufferRef.current = outputLive;
 
-      setInputBufferBuildStatus('Starting enhancement pipeline...');
+      setStatus('Starting enhancement pipeline...');
       const pipeline = await engine.enhance(
         inputLive.bufferId,
         outputLive.bufferId,
@@ -587,36 +387,18 @@ export default function EnhancementStreamingScreen() {
           : { segmentation: buildSegmentationOption(segStreamingConfig) }
       );
       pipelineRef.current = pipeline;
-      setInputBufferBuildStatus(
-        `Decoding and streaming "${selectedInput.sourceLabel}"...`
-      );
 
-      const ingest = await ingestFileToLiveAudioBuffer(
-        inputLive.bufferId,
-        selectedInput.source,
-        {
-          targetSampleRateHz: sampleRate,
-          forceMono: true,
-          autoFinalize: true,
-          onProgress: (event) => {
-            const percent = Math.max(0, Math.min(100, event.percent ?? 0));
-            setInputBufferBuildProgress(percent);
-            setInputBufferBuildStatus(
-              `Decoding and streaming "${
-                selectedInput.sourceLabel
-              }"... ${Math.round(percent)}%`
-            );
-          },
-        }
-      );
-      fileIngestRef.current = ingest;
-      await ingest.done;
-      if (fileIngestRef.current === ingest) {
-        fileIngestRef.current = null;
-      }
+      if (sourceMode === 'file' && offlineInputBuffer) {
+        setStatus(`Ingesting "${offlineInputBuffer.sourceLabel}"...`);
+        await appendOfflineToLiveAudioBuffer(
+          inputLive.bufferId,
+          offlineInputBuffer.bufferId
+        );
+        await finalizeLiveAudioBuffer(inputLive.bufferId);
 
-      const completion = await new Promise<Awaited<typeof pipeline.completed>>(
-        (resolve, reject) => {
+        const completion = await new Promise<
+          Awaited<typeof pipeline.completed>
+        >((resolve, reject) => {
           const timeoutId = setTimeout(() => {
             reject(
               new Error(
@@ -635,93 +417,130 @@ export default function EnhancementStreamingScreen() {
               reject(pipelineError);
             }
           );
+        });
+
+        if (completion.reason === 'stopped') {
+          throw new Error(
+            'Enhancement pipeline was stopped before completion.'
+          );
         }
-      );
 
-      if (completion.reason === 'stopped') {
-        throw new Error('Enhancement pipeline was stopped before completion.');
-      }
+        pipelineRef.current = null;
+        await finalizeEnhancementOutput(
+          sampleRate,
+          frameShift,
+          inputLive.bufferId,
+          outputLive.bufferId
+        );
+      } else {
+        await startMicToLiveAudioBuffer(inputLive, { emitToJs: false });
+        setMicRunning(true);
+        setStatus(
+          'Microphone active. Speak, then tap Stop to finalize enhancement.'
+        );
 
-      pipelineRef.current = null;
+        await new Promise<unknown>((resolve, reject) => {
+          micCompletionWaiterRef.current = { resolve, reject };
+          const timeoutId = setTimeout(() => {
+            micCompletionWaiterRef.current = null;
+            reject(
+              new Error(
+                `Enhancement pipeline timeout after ${PIPELINE_WAIT_TIMEOUT_MS}ms`
+              )
+            );
+          }, PIPELINE_WAIT_TIMEOUT_MS);
 
-      const checkpointCount =
-        segStreamingConfig.mode !== 'off' &&
-        segStreamingConfig.policy?.evaluator === 'continuous_frames'
-          ? (
-              await getSegments(inputLive.bufferId, 0, 100000).catch(() => [])
-            ).filter((segment) => segment.reason === 'policy_checkpoint').length
-          : 0;
+          pipeline.completed.then(
+            (result) => {
+              clearTimeout(timeoutId);
+              const waiter = micCompletionWaiterRef.current;
+              micCompletionWaiterRef.current = null;
+              waiter?.resolve(result);
+              resolve(result);
+            },
+            (pipelineError) => {
+              clearTimeout(timeoutId);
+              const waiter = micCompletionWaiterRef.current;
+              micCompletionWaiterRef.current = null;
+              waiter?.reject(pipelineError);
+              reject(pipelineError);
+            }
+          );
+        });
 
-      setInputBufferBuildProgress(100);
-      setInputBufferBuildStatus('Finalizing output...');
-      await finalizeLiveAudioBuffer(outputLive.bufferId).catch(() => {});
-
-      const offlineOutput = await createOfflineAudioBufferFromLive(
-        outputLive.bufferId,
-        { mode: 'fullIfSpooled' }
-      );
-      producedOfflineBufferId = offlineOutput.bufferId;
-
-      const outInfo = await getPipelineAudioBufferInfo(offlineOutput.bufferId);
-      const numSamples =
-        outInfo.kind === 'offlinePcmBuffer' ? outInfo.numSamples : 0;
-      const outputSampleRate = outInfo.sampleRate ?? sampleRate;
-      const durationSeconds =
-        outputSampleRate > 0 ? (numSamples / outputSampleRate).toFixed(2) : '?';
-
-      finalizedOutputBufferIdRef.current = offlineOutput.bufferId;
-      setLastEnhancedAudio({
-        outputBufferId: offlineOutput.bufferId,
-        sampleRate: outputSampleRate,
-        numSamples,
-      });
-      setLastInputPath(selectedInput.sourcePathForPlayback);
-      setEnhanceResult(
-        `Pipeline: streaming enhancement\nContinuous checkpoints: ${checkpointCount}\nFrame shift: ${frameShift} samples\nSamples: ${numSamples}\nSample rate: ${outputSampleRate} Hz\nDuration: ~${durationSeconds} s\nUse the result card below to play or save.`
-      );
-      producedOfflineBufferId = null;
-      setInputBufferBuildProgress(null);
-      setInputBufferBuildStatus(null);
-    } catch (err) {
-      if (producedOfflineBufferId) {
-        await releasePipelineAudioBuffer(producedOfflineBufferId).catch(
-          () => {}
+        pipelineRef.current = null;
+        setMicRunning(false);
+        await finalizeEnhancementOutput(
+          sampleRate,
+          frameShift,
+          inputLive.bufferId,
+          outputLive.bufferId
         );
       }
-
-      let errorMessage = 'Unknown error';
-      if (err instanceof Error) {
-        errorMessage = err.message;
-        if ('code' in err) {
-          errorMessage = `[${(err as any).code}] ${errorMessage}`;
-        }
-      } else if (typeof err === 'object' && err !== null) {
-        const errorObj = err as any;
-        errorMessage =
-          errorObj.message ||
-          errorObj.userInfo?.NSLocalizedDescription ||
-          JSON.stringify(err);
-      }
+    } catch (err) {
       setErrorSource('enhance');
-      setError(errorMessage);
-      setInputBufferBuildProgress(null);
-      setInputBufferBuildStatus(null);
+      setError(formatEnhancementError(err));
+      setStatus(null);
+      setMicRunning(false);
+      micCompletionWaiterRef.current = null;
     } finally {
       await cleanupRuntimeResources();
-      setPreparingInputBuffer(false);
       setEnhancing(false);
     }
   };
 
+  const handleStopMicEnhance = async () => {
+    const inputLive = inputLiveBufferRef.current;
+    if (!inputLive) return;
+    setStatus('Stopping microphone and finalizing...');
+    await stopMicToLiveAudioBuffer().catch(() => {});
+    await finalizeLiveAudioBuffer(inputLive.bufferId).catch(() => {});
+  };
+
   const handleReleaseAll = async () => {
+    setMicRunning(false);
+    micCompletionWaiterRef.current = null;
     await stopOriginalPlayback();
     await enhancedCardRef.current?.stop().catch(() => {});
     await cleanupRuntimeResources();
     await clearFinalizedOutput();
-    await clearPreparedInputBuffer();
+    setOfflineInputBuffer(null);
+    await offlineWidgetRef.current?.clear().catch(() => {});
     await releaseEngine();
     setError(null);
     setErrorSource(null);
+    setStatus(null);
+  };
+
+  const togglePlayOriginal = async () => {
+    const bufferId = offlineInputBuffer?.bufferId;
+    if (!bufferId) return;
+    if (originalPlayerRef.current) {
+      await stopOriginalPlayback();
+      return;
+    }
+    try {
+      await stopOriginalPlayback();
+      await enhancedCardRef.current?.stop().catch(() => {});
+      await setPipelineAudioRoutePreference({
+        outputDeviceId: null,
+      }).catch(() => {});
+      const player = await createPcmPlayer(bufferId, {
+        onEnded: () => {
+          if (originalPlayerRef.current === player) {
+            originalPlayerRef.current = null;
+          }
+          setPlayingOriginal(false);
+        },
+      });
+      originalPlayerRef.current = player;
+      setPlayingOriginal(true);
+    } catch (e) {
+      Alert.alert(
+        'Playback failed',
+        e instanceof Error ? e.message : String(e)
+      );
+    }
   };
 
   const applyVoxLockVoiceSample = useCallback(
@@ -744,6 +563,9 @@ export default function EnhancementStreamingScreen() {
     detectedModels.length > 1 &&
     detectedModels.some((m) => m.type === 'gtcrn') &&
     detectedModels.some((m) => m.type === 'dpdfnet');
+  const busy = enhancing || loading;
+  const canRun =
+    engineReady && !busy && (sourceMode === 'mic' || !!offlineInputBuffer);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -765,7 +587,7 @@ export default function EnhancementStreamingScreen() {
               <Text style={styles.sectionTitle}>2. Architecture</Text>
               <Text style={styles.hint}>
                 This folder contains both GTCRN and DPDFNet. Pick which
-                checkpoint to use, then stream a file below.
+                checkpoint to use, then stream audio below.
               </Text>
               <View style={styles.detectedModelsContainer}>
                 {(['gtcrn', 'dpdfnet'] as const).map((kind) => (
@@ -779,7 +601,7 @@ export default function EnhancementStreamingScreen() {
                     onPress={() => {
                       reinitWithKind(kind);
                     }}
-                    disabled={loading || enhancing}
+                    disabled={busy}
                   >
                     <Text
                       style={[
@@ -804,24 +626,15 @@ export default function EnhancementStreamingScreen() {
                   : '2. Stream enhancement'}
               </Text>
               <Text style={styles.hint}>
-                Same UX as offline enhancement, but processing runs as a
-                streaming pipeline with live buffers to avoid offline OOM on
-                long audio.
+                Same file input as offline enhancement, plus microphone.
+                Processing runs on a streaming pipeline with live buffers.
               </Text>
 
               <VoxLockReferenceAudioPicker
                 key={voxLockEngineId ?? 'voxlock-ref'}
                 visible={voxLockEngineId != null}
-                disabled={enhancing || loading || preparingInputBuffer}
+                disabled={busy}
                 applyVoiceSample={applyVoxLockVoiceSample}
-              />
-
-              <AudioDeviceDropdown
-                label="Output device"
-                devices={outputDevices}
-                selectedDeviceId={selectedOutputDeviceId}
-                onSelectDeviceId={setSelectedOutputDeviceId}
-                disabled={enhancing || loading || preparingInputBuffer}
               />
 
               {engineMode === 'streaming' && (
@@ -829,7 +642,7 @@ export default function EnhancementStreamingScreen() {
                   variant="speech-streaming"
                   value={segStreamingConfig}
                   onChange={setSegStreamingConfig}
-                  disabled={enhancing || loading || preparingInputBuffer}
+                  disabled={busy}
                 />
               )}
 
@@ -838,239 +651,60 @@ export default function EnhancementStreamingScreen() {
                   variant="speech-offline"
                   value={segStreamingConfig}
                   onChange={setSegStreamingConfig}
-                  disabled={enhancing || loading || preparingInputBuffer}
+                  disabled={busy}
                   disableOff
                   offDisabledMessage="Live Overload requires mandatory segmentation to split audio into processable chunks."
                 />
               )}
 
-              {(audioSourceType === 'example' || audioSourceType === 'own') &&
-                (preparingInputBuffer || inputBufferBuildStatus != null) && (
-                  <View style={styles.decodeProgressContainer}>
-                    <View style={styles.decodeProgressHeaderRow}>
-                      <Text style={styles.decodeProgressLabel}>
-                        {inputBufferBuildStatus ??
-                          'Preparing LiveAudioBuffer...'}
+              <StreamingAudioInputSection
+                sourceMode={sourceMode}
+                onSourceModeChange={setSourceMode}
+                audioFiles={enhancementAudioFiles}
+                onBufferReady={setOfflineInputBuffer}
+                onBufferReleased={() => setOfflineInputBuffer(null)}
+                disabled={busy}
+                widgetRef={offlineWidgetRef}
+              />
+
+              <View style={localStyles.actionRow}>
+                {!micRunning ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.button,
+                      localStyles.actionButton,
+                      (!canRun || busy) && styles.buttonDisabled,
+                    ]}
+                    onPress={() => {
+                      handleEnhance().catch(() => {});
+                    }}
+                    disabled={!canRun || busy}
+                  >
+                    {enhancing && !micRunning ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.buttonText}>
+                        {sourceMode === 'mic'
+                          ? 'Start enhancement'
+                          : 'Run enhancement'}
                       </Text>
-                      {inputBufferBuildProgress != null && (
-                        <Text style={styles.decodeProgressPercent}>
-                          {Math.round(inputBufferBuildProgress)}%
-                        </Text>
-                      )}
-                    </View>
-                    <View style={styles.decodeProgressTrack}>
-                      <View
-                        style={[
-                          styles.decodeProgressFill,
-                          {
-                            width: `${Math.max(
-                              0,
-                              Math.min(100, inputBufferBuildProgress ?? 0)
-                            )}%`,
-                          },
-                        ]}
-                      />
-                    </View>
-                    <Text style={styles.decodeProgressMeta}>
-                      Long files are decoded and streamed into a live input
-                      buffer.
-                    </Text>
-                  </View>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.button, localStyles.actionButton]}
+                    onPress={() => {
+                      handleStopMicEnhance().catch(() => {});
+                    }}
+                  >
+                    <Text style={styles.buttonText}>Stop microphone</Text>
+                  </TouchableOpacity>
                 )}
+              </View>
 
-              {!audioSourceType && (
-                <>
-                  <Text style={styles.subsectionTitle}>Audio source</Text>
-                  <View style={styles.sourceChoiceRow}>
-                    <TouchableOpacity
-                      style={[styles.sourceChoiceButton, styles.flex1]}
-                      onPress={() => {
-                        setAudioSourceType('example');
-                        setSelectedAudio(null);
-                        setCustomAudioPath(null);
-                        setCustomAudioName(null);
-                        clearPreparedInputBuffer().catch(() => {});
-                      }}
-                      disabled={enhancing || loading || preparingInputBuffer}
-                    >
-                      <View style={styles.rowCenter}>
-                        <Ionicons
-                          name="folder-outline"
-                          size={18}
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.sourceChoiceButtonText}>
-                          Example audio
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.sourceChoiceButton, styles.flex1]}
-                      onPress={() => {
-                        setAudioSourceType('own');
-                        setSelectedAudio(null);
-                        setCustomAudioPath(null);
-                        setCustomAudioName(null);
-                        clearPreparedInputBuffer().catch(() => {});
-                      }}
-                      disabled={enhancing || loading || preparingInputBuffer}
-                    >
-                      <View style={styles.rowCenter}>
-                        <Ionicons
-                          name="musical-notes"
-                          size={18}
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.sourceChoiceButtonText}>
-                          Local file
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-
-              {audioSourceType === 'example' && (
-                <>
-                  <View style={localStyles.sourceActionRow}>
-                    <TouchableOpacity
-                      style={[
-                        localStyles.backButton,
-                        preparingInputBuffer && styles.buttonDisabled,
-                      ]}
-                      onPress={() => {
-                        setAudioSourceType(null);
-                        setSelectedAudio(null);
-                        clearPreparedInputBuffer().catch(() => {});
-                        clearFinalizedOutput().catch(() => {});
-                        setLastInputPath(null);
-                      }}
-                      disabled={preparingInputBuffer}
-                      accessibilityLabel="Back"
-                    >
-                      <Ionicons name="chevron-back" size={22} color="#007AFF" />
-                    </TouchableOpacity>
-                    <Text
-                      style={[
-                        styles.subsectionTitle,
-                        localStyles.sourceActionTitle,
-                      ]}
-                    >
-                      Select clip
-                    </Text>
-                  </View>
-                  <View style={styles.audioFilesContainer}>
-                    {enhancementAudioFiles.map((audioFile) => (
-                      <TouchableOpacity
-                        key={audioFile.id}
-                        style={[
-                          styles.audioFileButton,
-                          selectedAudio?.id === audioFile.id &&
-                            styles.audioFileButtonActive,
-                        ]}
-                        onPress={() => {
-                          handleEnhance({
-                            selectedAudio: audioFile,
-                          }).catch(() => {});
-                        }}
-                        disabled={enhancing || loading || preparingInputBuffer}
-                      >
-                        <Text
-                          style={[
-                            styles.audioFileButtonText,
-                            selectedAudio?.id === audioFile.id &&
-                              styles.audioFileButtonTextActive,
-                          ]}
-                        >
-                          {audioFile.name}
-                        </Text>
-                        <Text style={styles.audioFileDescription}>
-                          {audioFile.description}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              )}
-
-              {audioSourceType === 'own' && (
-                <>
-                  {!preparingInputBuffer && (
-                    <View style={localStyles.sourceActionRow}>
-                      <TouchableOpacity
-                        style={[
-                          localStyles.backButton,
-                          (loading || enhancing) && styles.buttonDisabled,
-                        ]}
-                        onPress={() => {
-                          setAudioSourceType(null);
-                          setCustomAudioPath(null);
-                          setCustomAudioName(null);
-                          clearPreparedInputBuffer().catch(() => {});
-                          clearFinalizedOutput().catch(() => {});
-                          setLastInputPath(null);
-                        }}
-                        disabled={loading || enhancing}
-                        accessibilityLabel="Back"
-                      >
-                        <Ionicons
-                          name="chevron-back"
-                          size={22}
-                          color="#007AFF"
-                        />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[
-                          styles.button,
-                          styles.flex1,
-                          (loading || enhancing) && styles.buttonDisabled,
-                        ]}
-                        onPress={handlePickLocalFile}
-                        disabled={loading || enhancing}
-                      >
-                        <View style={styles.rowCenter}>
-                          <Ionicons
-                            name="folder-open-outline"
-                            size={16}
-                            style={styles.iconInline}
-                          />
-                          <Text style={styles.buttonText}>Choose file</Text>
-                        </View>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-
-                  {customAudioName && (
-                    <View style={styles.selectedFileContainer}>
-                      <Text style={styles.selectedFileLabel}>Selected:</Text>
-                      <Text style={styles.selectedFileName}>
-                        {customAudioName}
-                      </Text>
-                      <TouchableOpacity
-                        style={[
-                          styles.playButton,
-                          preparingInputBuffer && styles.buttonDisabled,
-                        ]}
-                        onPress={() =>
-                          playPath(customAudioPath, {
-                            displayName: customAudioName,
-                          })
-                        }
-                        disabled={preparingInputBuffer}
-                      >
-                        <View style={styles.rowAlignCenter}>
-                          <Ionicons
-                            name="play"
-                            size={16}
-                            style={styles.iconInline}
-                          />
-                          <Text style={styles.playButtonText}>Play input</Text>
-                        </View>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </>
-              )}
+              {status ? (
+                <Text style={[styles.hint, styles.mt12]}>{status}</Text>
+              ) : null}
 
               {enhanceResult && (
                 <View style={styles.resultSection}>
@@ -1083,10 +717,12 @@ export default function EnhancementStreamingScreen() {
                       style={[
                         styles.playButton,
                         localStyles.playOriginal,
-                        !lastInputPath && localStyles.playDisabled,
+                        !offlineInputBuffer && localStyles.playDisabled,
                       ]}
-                      onPress={() => togglePlayOriginalPath()}
-                      disabled={!lastInputPath}
+                      onPress={() => {
+                        togglePlayOriginal().catch(() => {});
+                      }}
+                      disabled={!offlineInputBuffer}
                     >
                       <View style={styles.rowAlignCenter}>
                         <Ionicons
@@ -1129,7 +765,7 @@ export default function EnhancementStreamingScreen() {
                               setEnhanceResult(null);
                             });
                         }}
-                        disabled={enhancing || loading}
+                        disabled={busy}
                       />
                     </View>
                   )}
@@ -1148,7 +784,7 @@ export default function EnhancementStreamingScreen() {
                 onPress={() => {
                   handleReleaseAll().catch(() => {});
                 }}
-                disabled={loading || enhancing}
+                disabled={busy}
               >
                 <Text style={styles.freeButtonText}>
                   Release model & clear buffers

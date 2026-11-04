@@ -37,6 +37,10 @@ export function EnhancementStreamingModelInitPanel({
   const isCustom = enhancement.initMode === 'custom';
   const catalogEmpty =
     enhancement.catalogEntries.length === 0 && !enhancement.loadingModels;
+  // Rebuild only when the live engine was initialized for the selected mode.
+  const showRebuild =
+    enhancement.isEngineInitialized &&
+    enhancement.initializedEngineMode === enhancement.engineMode;
 
   return (
     <View style={styles.section}>
@@ -73,15 +77,17 @@ export function EnhancementStreamingModelInitPanel({
         enhancement.selectedModelForInit) && (
         <View style={styles.currentModelContainer}>
           <Text style={styles.currentModelText}>
-            {enhancement.initializedSummary
+            {showRebuild && enhancement.initializedSummary
               ? `Initialized: ${enhancement.initializedSummary}`
+              : enhancement.selectedModelForInit
+              ? `Selected: ${getModelDisplayName(
+                  enhancement.selectedModelForInit
+                )}`
               : enhancement.currentModelFolder
               ? `Loaded: ${getModelDisplayName(enhancement.currentModelFolder)}`
-              : `Selected: ${
-                  enhancement.selectedModelForInit
-                    ? getModelDisplayName(enhancement.selectedModelForInit)
-                    : ''
-                }`}
+              : enhancement.initializedSummary
+              ? `Other mode initialized: ${enhancement.initializedSummary}`
+              : ''}
           </Text>
         </View>
       )}
@@ -155,7 +161,7 @@ export function EnhancementStreamingModelInitPanel({
             <Ionicons name="construct-outline" size={18} color="#FFFFFF" />
           )}
           <Text style={styles.primaryButtonText}>
-            {enhancement.isEngineInitialized
+            {showRebuild
               ? isCustom
                 ? 'Rebuild custom'
                 : 'Rebuild model'

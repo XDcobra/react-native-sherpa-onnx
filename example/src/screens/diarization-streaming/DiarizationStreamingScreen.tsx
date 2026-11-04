@@ -37,11 +37,12 @@ import { DiarizationStreamingModelInitPanel } from '../../components/Diarization
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import { useDiarizationStreamingModelInit } from '../../hooks/useDiarizationStreamingModelInit';
 import { DIARIZATION_AUDIO_FILES } from '../../audioConfig';
+import type { AudioIngressSourceMode } from '../../components/AudioIngressSourceToggle';
 import {
-  OfflineAudioBufferWidget,
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
+import { StreamingAudioInputSection } from '../../components/StreamingAudioInputSection';
 import {
   SPEAKER_BG_COLORS,
   SPEAKER_COLORS,
@@ -89,7 +90,7 @@ export default function DiarizationStreamingScreen() {
   const { engineRef, engineInfo, chunkSize, minDurationOff } = streaming;
 
   // Audio ingress selection
-  const [sourceMode, setSourceMode] = useState<'file' | 'mic'>('file');
+  const [sourceMode, setSourceMode] = useState<AudioIngressSourceMode>('file');
   const [offlineInputBuffer, setOfflineInputBuffer] =
     useState<OfflineAudioBufferInfo | null>(null);
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
@@ -528,89 +529,32 @@ export default function DiarizationStreamingScreen() {
           onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
         />
 
-        {/* Module 2: Audio Ingress & Pipeline Lifecycle */}
+        <StreamingAudioInputSection
+          title="2. Input source"
+          sourceMode={sourceMode}
+          onSourceModeChange={setSourceMode}
+          audioFiles={DIARIZATION_AUDIO_FILES}
+          onBufferReady={(info) => {
+            setOfflineInputBuffer(info);
+            appendEvent(`Audio buffer ready: ${info.sourceLabel}`);
+          }}
+          onBufferReleased={() => {
+            setOfflineInputBuffer(null);
+            appendEvent('Audio buffer released');
+          }}
+          disabled={streamState !== 'idle'}
+          widgetRef={offlineWidgetRef}
+          micSampleRateHz={engineInfo?.sampleRate ?? 16000}
+          decodeTargetSampleRateHz={engineInfo?.sampleRate ?? 16000}
+        />
+
+        {/* Module 3: Pipeline Lifecycle */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>
-            2. Audio Ingress & Stream Controls
-          </Text>
+          <Text style={styles.cardTitle}>3. Stream Controls</Text>
           <Text style={styles.cardSubtitle}>
-            Select a decoded audio buffer (multi-speaker presets or custom file)
-            or stream live from the microphone.
+            Start the diarization pipeline after preparing file or microphone
+            input above.
           </Text>
-
-          <View style={styles.toggleChipRow}>
-            <TouchableOpacity
-              style={[
-                styles.toggleChip,
-                sourceMode === 'file' && styles.toggleChipActive,
-              ]}
-              onPress={() => setSourceMode('file')}
-              disabled={streamState !== 'idle'}
-            >
-              <Ionicons
-                name="musical-notes-outline"
-                size={16}
-                color={sourceMode === 'file' ? '#FFFFFF' : '#4B5563'}
-              />
-              <Text
-                style={[
-                  styles.toggleChipText,
-                  sourceMode === 'file' && styles.toggleChipTextActive,
-                ]}
-              >
-                Audio Buffer (Preset / File)
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.toggleChip,
-                sourceMode === 'mic' && styles.toggleChipActive,
-              ]}
-              onPress={() => setSourceMode('mic')}
-              disabled={streamState !== 'idle'}
-            >
-              <Ionicons
-                name="mic-outline"
-                size={16}
-                color={sourceMode === 'mic' ? '#FFFFFF' : '#4B5563'}
-              />
-              <Text
-                style={[
-                  styles.toggleChipText,
-                  sourceMode === 'mic' && styles.toggleChipTextActive,
-                ]}
-              >
-                Microphone (Live)
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {sourceMode === 'file' ? (
-            <View style={styles.marginTop10}>
-              <OfflineAudioBufferWidget
-                ref={offlineWidgetRef}
-                audioFiles={DIARIZATION_AUDIO_FILES}
-                decodeTargetSampleRateHz={engineInfo?.sampleRate ?? 16000}
-                disabled={streamState !== 'idle'}
-                visible={true}
-                onBufferReady={(info) => {
-                  setOfflineInputBuffer(info);
-                  appendEvent(`Audio buffer ready: ${info.sourceLabel}`);
-                }}
-                onBufferReleased={() => {
-                  setOfflineInputBuffer(null);
-                  appendEvent('Audio buffer released');
-                }}
-              />
-            </View>
-          ) : (
-            <View style={styles.micHintContainer}>
-              <Text style={[styles.cardSubtitle, styles.micHintText]}>
-                Microphone captures directly into native LiveAudioBuffer at
-                16kHz mono. Grant microphone permission when prompted.
-              </Text>
-            </View>
-          )}
 
           {/* Pipeline Action Controls */}
           <View style={styles.pipelineControlRow}>

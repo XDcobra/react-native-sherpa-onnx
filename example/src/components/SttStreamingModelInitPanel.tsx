@@ -32,6 +32,12 @@ export function SttStreamingModelInitPanel({
   const n1 = sectionStart;
   const busy = disabled || stt.loading || stt.customFillLoading;
   const isCustom = stt.initMode === 'custom';
+  // Rebuild only when the live engine matches the selected Streaming / Live Overload mode.
+  const engineMatchesMode =
+    (stt.engineMode === 'streaming' && stt.activeEngineKind === 'streaming') ||
+    (stt.engineMode === 'offline' &&
+      stt.activeEngineKind === 'offline-overload');
+  const showRebuild = engineMatchesMode;
 
   return (
     <View style={styles.section}>
@@ -68,15 +74,15 @@ export function SttStreamingModelInitPanel({
         stt.selectedModelForInit) && (
         <View style={styles.currentModelContainer}>
           <Text style={styles.currentModelText}>
-            {stt.initializedSummary
+            {showRebuild && stt.initializedSummary
               ? `Initialized: ${stt.initializedSummary}`
+              : stt.selectedModelForInit
+              ? `Selected: ${getModelDisplayName(stt.selectedModelForInit)}`
               : stt.currentModelFolder
               ? `Loaded: ${getModelDisplayName(stt.currentModelFolder)}`
-              : `Selected: ${
-                  stt.selectedModelForInit
-                    ? getModelDisplayName(stt.selectedModelForInit)
-                    : ''
-                }`}
+              : stt.initializedSummary
+              ? `Other mode initialized: ${stt.initializedSummary}`
+              : ''}
           </Text>
         </View>
       )}
@@ -146,7 +152,7 @@ export function SttStreamingModelInitPanel({
             <Ionicons name="construct-outline" size={18} color="#FFFFFF" />
           )}
           <Text style={styles.primaryButtonText}>
-            {stt.isEngineInitialized
+            {showRebuild
               ? isCustom
                 ? 'Rebuild custom'
                 : 'Rebuild model'
