@@ -1,8 +1,7 @@
 /**
- * Persists STT/TTS/OCR/punctuation/audio-tagging engine instances and UI state
- * across screen navigation. When the user leaves a screen, the instance is not
- * released; when they return, the same state (selected model, Free button
- * visible) is restored.
+ * Persists feature engine instances and UI state across screen navigation.
+ * When the user leaves a screen, the instance is not released; when they return,
+ * the same state (selected model, Free button visible) is restored.
  *
  * **Lifecycle note:** These module-level caches persist for the lifetime of the JS context.
  * If the JS context is reloaded (e.g. on hot reload or app restart), native instances will
@@ -19,6 +18,7 @@ import type {
 } from 'react-native-sherpa-onnx/ocr';
 import type { OfflinePunctuationEngine } from 'react-native-sherpa-onnx/punctuation';
 import type { AudioTaggingEngine } from 'react-native-sherpa-onnx/audio-tagging';
+import type { LanguageIdentificationEngine } from 'react-native-sherpa-onnx/language-identification';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -220,4 +220,38 @@ export function clearAudioTaggingCache(): void {
   audioTaggingEngine = null;
   audioTaggingModelFolder = null;
   audioTaggingInitMessage = null;
+}
+
+// --- Language ID cache ---
+
+let languageIdEngine: LanguageIdentificationEngine | null = null;
+let languageIdModelFolder: string | null = null;
+let languageIdInitMessage: string | null = null;
+
+export function getLanguageIdCache(): {
+  engine: LanguageIdentificationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: languageIdEngine,
+    modelFolder: languageIdModelFolder,
+    initMessage: languageIdInitMessage,
+  };
+}
+
+export function setLanguageIdCache(
+  engine: LanguageIdentificationEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  languageIdEngine = engine;
+  languageIdModelFolder = modelFolder;
+  languageIdInitMessage = initMessage;
+}
+
+export function clearLanguageIdCache(): void {
+  languageIdEngine = null;
+  languageIdModelFolder = null;
+  languageIdInitMessage = null;
 }
