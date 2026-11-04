@@ -1239,9 +1239,13 @@ export default function SeparationScreen() {
                 <PipelineOfflineAudioResultCard
                   key={stem.bufferId}
                   bufferId={stem.bufferId}
+                  title={`${stem.label} stem`}
                   sourceLabel={stem.label}
                   sampleRate={stem.sampleRate}
                   durationMs={durationMs}
+                  filename={`separation_${stem.label
+                    .toLowerCase()
+                    .replace(/\s+/g, '_')}_${Date.now()}.wav`}
                   onDismiss={() => {
                     releasePipelineAudioBuffer(stem.bufferId)
                       .catch(() => {})

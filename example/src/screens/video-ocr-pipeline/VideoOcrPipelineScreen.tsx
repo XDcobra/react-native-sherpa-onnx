@@ -635,6 +635,7 @@ export default function VideoOcrPipelineScreen() {
             <PipelineOfflineAudioResultCard
               ref={audioCardRef}
               bufferId={extractedAudio.bufferId}
+              title="Extracted audio (offline buffer)"
               sourceLabel={`${audioMeta.sourceCodec} ${
                 audioMeta.sourceSampleRate
               } Hz × ${audioMeta.sourceChannels} → ${
@@ -642,6 +643,7 @@ export default function VideoOcrPipelineScreen() {
               } Hz · mediaStart ${audioMeta.mediaStartMs.toFixed(1)} ms`}
               sampleRate={extractedAudio.info.sampleRate}
               durationMs={extractedAudio.info.durationMs}
+              filename={`video_ocr_audio_${Date.now()}.wav`}
               onDismiss={() => {
                 releaseAudio().catch(() => {});
               }}

@@ -17,8 +17,6 @@ import {
   releasePipelineAudioBuffer,
   getPipelineAudioBufferInfo,
 } from 'react-native-sherpa-onnx/audiobuffer';
-import { AudioSaveDestinationPicker } from '../../components/AudioSaveDestinationPicker';
-import { formatResolvedLocation } from '../../components/audioSaveUtils';
 import { getAudioFilesForEnhancement } from '../../audioConfig';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
@@ -29,6 +27,10 @@ import {
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
+import {
+  PipelineOfflineAudioResultCard,
+  type PipelineOfflineAudioResultCardHandle,
+} from '../../components/PipelineOfflineAudioResultCard';
 import { VoxLockReferenceAudioPicker } from '../../components/VoxLockReferenceAudioPicker';
 import {
   SegmentationPolicyControls,
@@ -49,11 +51,14 @@ const localStyles = StyleSheet.create({
     marginTop: 12,
     alignItems: 'stretch',
   },
-  playHalf: {
+  playOriginal: {
     flex: 1,
     minWidth: 0,
     paddingVertical: 12,
     paddingHorizontal: 8,
+  },
+  enhancedCardWrap: {
+    marginTop: 12,
   },
 });
 
@@ -101,26 +106,21 @@ export default function EnhancementScreen() {
     sampleRate: number;
     numSamples: number;
   } | null>(null);
-  const [activePlaybackKind, setActivePlaybackKind] = useState<
-    'original' | 'enhanced' | null
-  >(null);
+  const [playingOriginal, setPlayingOriginal] = useState(false);
 
   const originalInputPlayerRef = useRef<PcmPlayer | null>(null);
-  const enhancedOutputPlayerRef = useRef<PcmPlayer | null>(null);
+  const enhancedCardRef = useRef<PipelineOfflineAudioResultCardHandle | null>(
+    null
+  );
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
 
-  const stopActivePlayback = async () => {
+  const stopOriginalPlayback = async () => {
     const original = originalInputPlayerRef.current;
     originalInputPlayerRef.current = null;
     if (original) {
       await original.destroy().catch(() => {});
     }
-    const enhanced = enhancedOutputPlayerRef.current;
-    enhancedOutputPlayerRef.current = null;
-    if (enhanced) {
-      await enhanced.destroy().catch(() => {});
-    }
-    setActivePlaybackKind(null);
+    setPlayingOriginal(false);
   };
 
   useEffect(() => {
@@ -129,11 +129,6 @@ export default function EnhancementScreen() {
       originalInputPlayerRef.current = null;
       if (o) {
         o.destroy().catch(() => {});
-      }
-      const p = enhancedOutputPlayerRef.current;
-      enhancedOutputPlayerRef.current = null;
-      if (p) {
-        p.destroy().catch(() => {});
       }
     };
   }, []);
@@ -157,7 +152,8 @@ export default function EnhancementScreen() {
     setErrorSource(null);
     setEnhanceResult(null);
     setLastEnhancedAudio(null);
-    await stopActivePlayback();
+    await stopOriginalPlayback();
+    await enhancedCardRef.current?.stop().catch(() => {});
 
     try {
       const engine = engineRef.current;
@@ -195,7 +191,7 @@ export default function EnhancementScreen() {
           numSamples: n,
         });
         setEnhanceResult(
-          `Segmentation: ${segConfig.mode}\nStatus: ${result.status}\nSegments: ${result.completedSegments}/${result.totalSegments}\nSkipped: ${result.skippedSegments.length}\nSamples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nUse “Save to” below to export a file.`
+          `Segmentation: ${segConfig.mode}\nStatus: ${result.status}\nSegments: ${result.completedSegments}/${result.totalSegments}\nSkipped: ${result.skippedSegments.length}\nSamples: ${n}\nSample rate: ${outSr} Hz\nDuration: ~${sec} s\nUse the result card below to play or save.`
         );
       } catch (enhanceErr) {
         await releasePipelineAudioBuffer(outputBuf.bufferId).catch(() => {});
@@ -237,18 +233,20 @@ export default function EnhancementScreen() {
     clearEnhanceRunState();
     setError(null);
     setErrorSource(null);
-    await stopActivePlayback();
+    await stopOriginalPlayback();
+    await enhancedCardRef.current?.stop().catch(() => {});
   };
 
   const togglePlayOriginalOutput = async () => {
     const bufferId = preparedInputBuffer?.bufferId;
     if (!bufferId) return;
     if (originalInputPlayerRef.current) {
-      await stopActivePlayback();
+      await stopOriginalPlayback();
       return;
     }
     try {
-      await stopActivePlayback();
+      await stopOriginalPlayback();
+      await enhancedCardRef.current?.stop().catch(() => {});
       await setPipelineAudioRoutePreference({
         outputDeviceId: null,
       }).catch(() => {});
@@ -257,39 +255,11 @@ export default function EnhancementScreen() {
           if (originalInputPlayerRef.current === player) {
             originalInputPlayerRef.current = null;
           }
-          setActivePlaybackKind(null);
+          setPlayingOriginal(false);
         },
       });
       originalInputPlayerRef.current = player;
-      setActivePlaybackKind('original');
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      Alert.alert('Playback failed', msg);
-    }
-  };
-
-  const togglePlayEnhancedOutput = async () => {
-    const bufferId = lastEnhancedAudio?.outputBufferId;
-    if (!bufferId) return;
-    if (enhancedOutputPlayerRef.current) {
-      await stopActivePlayback();
-      return;
-    }
-    try {
-      await stopActivePlayback();
-      await setPipelineAudioRoutePreference({
-        outputDeviceId: null,
-      }).catch(() => {});
-      const player = await createPcmPlayer(bufferId, {
-        onEnded: () => {
-          if (enhancedOutputPlayerRef.current === player) {
-            enhancedOutputPlayerRef.current = null;
-          }
-          setActivePlaybackKind(null);
-        },
-      });
-      enhancedOutputPlayerRef.current = player;
-      setActivePlaybackKind('enhanced');
+      setPlayingOriginal(true);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       Alert.alert('Playback failed', msg);
@@ -412,7 +382,8 @@ export default function EnhancementScreen() {
                   setErrorSource(null);
                 }}
                 onBufferReleased={() => {
-                  stopActivePlayback().catch(() => {});
+                  stopOriginalPlayback().catch(() => {});
+                  enhancedCardRef.current?.stop().catch(() => {});
                   setPreparedInputBuffer(null);
                   clearEnhanceRunState();
                 }}
@@ -453,7 +424,7 @@ export default function EnhancementScreen() {
                     <TouchableOpacity
                       style={[
                         styles.playButton,
-                        localStyles.playHalf,
+                        localStyles.playOriginal,
                         !preparedInputBuffer && localStyles.playDisabled,
                       ]}
                       onPress={() => togglePlayOriginalOutput()}
@@ -461,57 +432,43 @@ export default function EnhancementScreen() {
                     >
                       <View style={styles.rowAlignCenter}>
                         <Ionicons
-                          name={
-                            activePlaybackKind === 'original' ? 'stop' : 'play'
-                          }
+                          name={playingOriginal ? 'stop' : 'play'}
                           size={16}
                           style={styles.iconInline}
                         />
                         <Text style={styles.playButtonText}>
-                          {activePlaybackKind === 'original'
-                            ? 'Stop'
-                            : 'Original'}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.playButton,
-                        localStyles.playHalf,
-                        !lastEnhancedAudio && localStyles.playDisabled,
-                      ]}
-                      onPress={() => togglePlayEnhancedOutput()}
-                      disabled={!lastEnhancedAudio}
-                    >
-                      <View style={styles.rowAlignCenter}>
-                        <Ionicons
-                          name={
-                            activePlaybackKind === 'enhanced' ? 'stop' : 'play'
-                          }
-                          size={16}
-                          style={styles.iconInline}
-                        />
-                        <Text style={styles.playButtonText}>
-                          {activePlaybackKind === 'enhanced'
-                            ? 'Stop'
-                            : resultPlaybackLabel}
+                          {playingOriginal ? 'Stop' : 'Original'}
                         </Text>
                       </View>
                     </TouchableOpacity>
                   </View>
                   {lastEnhancedAudio && (
-                    <View style={styles.mt12}>
-                      <AudioSaveDestinationPicker
-                        audioInput={lastEnhancedAudio.outputBufferId}
+                    <View style={localStyles.enhancedCardWrap}>
+                      <PipelineOfflineAudioResultCard
+                        ref={enhancedCardRef}
+                        bufferId={lastEnhancedAudio.outputBufferId}
+                        title={`${resultPlaybackLabel} audio`}
+                        sourceLabel={`${lastEnhancedAudio.numSamples.toLocaleString()} samples`}
+                        sampleRate={lastEnhancedAudio.sampleRate}
+                        durationMs={
+                          lastEnhancedAudio.sampleRate > 0
+                            ? (lastEnhancedAudio.numSamples /
+                                lastEnhancedAudio.sampleRate) *
+                              1000
+                            : 0
+                        }
                         filename={`sherpa_enhanced_${Date.now()}.wav`}
-                        format="wav"
-                        onSaveComplete={(result) => {
-                          const location = formatResolvedLocation(result);
-                          Alert.alert('Saved', `Audio saved to:\n${location}`);
+                        onDismiss={() => {
+                          releasePipelineAudioBuffer(
+                            lastEnhancedAudio.outputBufferId
+                          )
+                            .catch(() => {})
+                            .finally(() => {
+                              setLastEnhancedAudio(null);
+                              setEnhanceResult(null);
+                            });
                         }}
-                        onError={(saveError) => {
-                          Alert.alert('Save failed', saveError.message);
-                        }}
+                        disabled={enhancing || loading}
                       />
                     </View>
                   )}

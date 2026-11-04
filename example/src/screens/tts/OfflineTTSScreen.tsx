@@ -16,7 +16,6 @@ import {
   type TtsVitsModelOptions,
 } from 'react-native-sherpa-onnx/tts';
 import { shareFile } from 'react-native-sherpa-onnx/fileio';
-import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   createEmptyOfflineAudioBuffer,
   createOfflineAudioBufferFromFile,
@@ -37,15 +36,8 @@ import {
 } from '../../utils/fileSourceFromUri';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { styles } from './OfflineTTSScreen.styles';
-import { setPipelineAudioRoutePreference } from 'react-native-sherpa-onnx/audio';
 import { formatResolvedLocation } from '../../components/audioSaveUtils';
-import { AudioSaveDestinationPicker } from '../../components/AudioSaveDestinationPicker';
-import { AudioDeviceDropdown } from '../../components/AudioDeviceDropdown';
-import {
-  fetchOutputDevices,
-  keepValidDeviceSelection,
-  type AudioRouteDevice,
-} from '../../utils/audioDevices';
+import { PipelineOfflineAudioResultCard } from '../../components/PipelineOfflineAudioResultCard';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   SegmentationPolicyControls,
@@ -108,12 +100,6 @@ export default function OfflineTTSScreen() {
   const [savedAudioBufferId, setSavedAudioBufferId] = useState<string | null>(
     null
   );
-  const [playingBufferId, setPlayingBufferId] = useState<string | null>(null);
-  const [outputDevices, setOutputDevices] = useState<AudioRouteDevice[]>([]);
-  const [selectedOutputDeviceId, setSelectedOutputDeviceId] = useState<
-    string | null
-  >(null);
-
   const [silenceScale, setSilenceScale] = useState('');
   const [noiseScale, setNoiseScale] = useState('');
   const [noiseScaleW, setNoiseScaleW] = useState('');
@@ -136,7 +122,6 @@ export default function OfflineTTSScreen() {
   };
 
   const currentModelFolderRef = useRef<string | null>(null);
-  const pcmPlayerRef = useRef<PcmPlayer | null>(null);
   const referenceAudioRef = useRef<ReferenceAudioState | null>(null);
   const paramsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const offlineAudioBuffersRef = useRef<GeneratedResult[]>([]);
@@ -169,20 +154,6 @@ export default function OfflineTTSScreen() {
     () => selectedModelType === 'pocket',
     [selectedModelType]
   );
-
-  const refreshOutputDevices = useCallback(async () => {
-    const nextOutputDevices = await fetchOutputDevices();
-    setOutputDevices(nextOutputDevices);
-    setSelectedOutputDeviceId((prev) =>
-      keepValidDeviceSelection(prev, nextOutputDevices)
-    );
-  }, []);
-
-  useEffect(() => {
-    refreshOutputDevices().catch(() => {
-      // ignore unsupported-platform lookup failures
-    });
-  }, [refreshOutputDevices]);
 
   useEffect(() => {
     currentModelFolderRef.current = currentModelFolder;
@@ -296,15 +267,6 @@ export default function OfflineTTSScreen() {
     ttsEngineRef,
   ]);
 
-  const stopTtsSavedAudioPlayback = useCallback(() => {
-    const player = pcmPlayerRef.current;
-    if (player) {
-      pcmPlayerRef.current = null;
-      player.destroy().catch(() => {});
-    }
-    setPlayingBufferId(null);
-  }, []);
-
   const appendOfflineAudioBuffer = useCallback((audio: GeneratedResult) => {
     setGeneratedAudio(audio);
     setOfflineAudioBuffers((prev) => {
@@ -338,7 +300,6 @@ export default function OfflineTTSScreen() {
     setGeneratedAudio(null);
     setSavedAudioPath(null);
     setSavedAudioBufferId(null);
-    stopTtsSavedAudioPlayback();
     setSilenceScale('');
     setNoiseScale('');
     setNoiseScaleW('');
@@ -354,14 +315,9 @@ export default function OfflineTTSScreen() {
     offlineAudioBuffersRef.current = offlineAudioBuffers;
   }, [offlineAudioBuffers]);
 
-  // On unmount: stop saved-audio playback; do NOT destroy the batch TTS engine (it stays in cache)
+  // On unmount: do NOT destroy the batch TTS engine (it stays in cache)
   useEffect(() => {
     return () => {
-      const pcmPlayer = pcmPlayerRef.current;
-      if (pcmPlayer) {
-        pcmPlayerRef.current = null;
-        pcmPlayer.destroy().catch(() => {});
-      }
       const refAudio = referenceAudioRef.current;
       referenceAudioRef.current = null;
       if (refAudio) {
@@ -459,7 +415,6 @@ export default function OfflineTTSScreen() {
     setSavedAudioPath(null);
     setSavedAudioBufferId(null);
     setLastSynthesisResult(null);
-    stopTtsSavedAudioPlayback();
 
     const engine = ttsEngineRef.current;
     if (!engine) {
@@ -592,46 +547,8 @@ export default function OfflineTTSScreen() {
     Alert.alert('Success', `Audio saved to:\n${display}`);
   };
 
-  const handleToggleOfflineBufferPlayback = useCallback(
-    async (bufferId: string) => {
-      try {
-        const currentPlayer = pcmPlayerRef.current;
-        if (currentPlayer) {
-          await currentPlayer.destroy().catch(() => {});
-          pcmPlayerRef.current = null;
-          const wasSameBuffer = playingBufferId === bufferId;
-          setPlayingBufferId(null);
-          if (wasSameBuffer) {
-            return;
-          }
-        }
-
-        await setPipelineAudioRoutePreference({
-          outputDeviceId: selectedOutputDeviceId ?? null,
-        }).catch(() => {});
-        const player = await createPcmPlayer(bufferId, {
-          onEnded: () => {
-            pcmPlayerRef.current = null;
-            setPlayingBufferId(null);
-          },
-        });
-        pcmPlayerRef.current = player;
-        setPlayingBufferId(bufferId);
-      } catch (err) {
-        const errorMessage =
-          err instanceof Error ? err.message : 'Unknown error';
-        Alert.alert('Error', `Failed to play buffer: ${errorMessage}`);
-      }
-    },
-    [playingBufferId, selectedOutputDeviceId]
-  );
-
   const handleDeleteOfflineBuffer = useCallback(
     async (bufferId: string) => {
-      if (playingBufferId === bufferId) {
-        stopTtsSavedAudioPlayback();
-      }
-
       await releasePipelineAudioBuffer(bufferId).catch(() => {});
       setOfflineAudioBuffers((prev) => {
         return prev.filter((item) => item.bufferId !== bufferId);
@@ -642,7 +559,7 @@ export default function OfflineTTSScreen() {
         setSavedAudioBufferId(null);
       }
     },
-    [playingBufferId, savedAudioBufferId, stopTtsSavedAudioPlayback]
+    [savedAudioBufferId]
   );
 
   const handleShareAudio = async () => {
@@ -675,7 +592,6 @@ export default function OfflineTTSScreen() {
 
   const handleFree = async () => {
     try {
-      stopTtsSavedAudioPlayback();
       await tts.releaseEngine();
       setGeneratedAudio(null);
       const buffersToRelease = offlineAudioBuffersRef.current;
@@ -885,14 +801,6 @@ export default function OfflineTTSScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>3. Generate Speech</Text>
 
-              <AudioDeviceDropdown
-                label="Output device"
-                devices={outputDevices}
-                selectedDeviceId={selectedOutputDeviceId}
-                onSelectDeviceId={setSelectedOutputDeviceId}
-                disabled={generating}
-              />
-
               <Text style={styles.inputLabel}>Text to Synthesize:</Text>
               <TextInput
                 style={styles.textInput}
@@ -953,66 +861,58 @@ export default function OfflineTTSScreen() {
           {generatedAudio && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Generated Audio</Text>
-              <View style={styles.resultContainer}>
-                <Text style={styles.resultText}>
-                  Samples: {generatedAudio.numSamples.toLocaleString()}
-                </Text>
-                <Text style={styles.resultText}>
-                  Sample Rate: {generatedAudio.sampleRate} Hz
-                </Text>
-                <Text style={styles.resultText}>
-                  Duration:{' '}
-                  {(
-                    generatedAudio.numSamples / generatedAudio.sampleRate
-                  ).toFixed(2)}{' '}
-                  seconds
-                </Text>
-              </View>
+              <PipelineOfflineAudioResultCard
+                bufferId={generatedAudio.bufferId}
+                title="Generated speech"
+                sourceLabel={`${generatedAudio.numSamples.toLocaleString()} samples`}
+                sampleRate={generatedAudio.sampleRate}
+                durationMs={
+                  generatedAudio.sampleRate > 0
+                    ? (generatedAudio.numSamples / generatedAudio.sampleRate) *
+                      1000
+                    : 0
+                }
+                filename={`tts_${Date.now()}.wav`}
+                defaultDestinationKind="app"
+                onSaveComplete={handleSaveAudioComplete(generatedAudio)}
+                onDismiss={() => {
+                  handleDeleteOfflineBuffer(generatedAudio.bufferId).catch(
+                    () => {}
+                  );
+                }}
+                disabled={generating || loading}
+              />
 
-              {/* Audio Controls — save only via shared destination picker */}
-              <View style={styles.generatedAudioSaveWrap}>
-                {generatedAudio && generatedAudio.numSamples > 0 && (
-                  <AudioSaveDestinationPicker
-                    audioInput={generatedAudio.bufferId}
-                    filename={`tts_${Date.now()}.wav`}
-                    format="wav"
-                    defaultDestinationKind="app"
-                    onSaveComplete={handleSaveAudioComplete(generatedAudio)}
-                    onError={(saveError) => {
-                      Alert.alert('Save failed', saveError.message);
-                    }}
-                  />
+              {savedAudioPath &&
+                savedAudioBufferId === generatedAudio.bufferId && (
+                  <View style={styles.generatedAudioSaveWrap}>
+                    <TouchableOpacity
+                      style={styles.generatedAudioShareButton}
+                      onPress={handleShareAudio}
+                    >
+                      <View style={styles.rowAlignCenter}>
+                        <Ionicons
+                          name="share-social"
+                          size={16}
+                          color="#fff"
+                          style={styles.iconInline}
+                        />
+                        <Text style={styles.audioButtonText}>Share</Text>
+                      </View>
+                    </TouchableOpacity>
+                    <Text style={styles.savedPathText}>
+                      Saved: {getDisplayPath(savedAudioPath).split('/').pop()}
+                      {'\n'}
+                      {getDisplayPath(savedAudioPath)}
+                    </Text>
+                  </View>
                 )}
-
-                {savedAudioPath && (
-                  <TouchableOpacity
-                    style={styles.generatedAudioShareButton}
-                    onPress={handleShareAudio}
-                  >
-                    <View style={styles.rowAlignCenter}>
-                      <Ionicons
-                        name="share-social"
-                        size={16}
-                        color="#fff"
-                        style={styles.iconInline}
-                      />
-                      <Text style={styles.audioButtonText}>Share</Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {savedAudioPath && (
-                <Text style={styles.savedPathText}>
-                  Saved: {getDisplayPath(savedAudioPath).split('/').pop()}
-                  {'\n'}
-                  {getDisplayPath(savedAudioPath)}
-                </Text>
-              )}
             </View>
           )}
 
-          {offlineAudioBuffers.length > 0 && (
+          {offlineAudioBuffers.filter(
+            (b) => b.bufferId !== generatedAudio?.bufferId
+          ).length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>OfflineAudioBuffer List</Text>
               <Text style={styles.sectionDescription}>
@@ -1021,75 +921,31 @@ export default function OfflineTTSScreen() {
                 lifecycle management and should not forget to call
                 releasePipelineAudioBuffer at the appropriate time.
               </Text>
-              <View style={styles.bufferList}>
-                {offlineAudioBuffers.map((buffer, index) => {
-                  const isPlayingThis = playingBufferId === buffer.bufferId;
-                  return (
-                    <View key={buffer.bufferId} style={styles.bufferListItem}>
-                      <View style={styles.bufferListHeader}>
-                        <Text style={styles.bufferListTitle}>
-                          Buffer {index + 1}
-                        </Text>
-                        <Text style={styles.bufferListMeta}>
-                          {(buffer.numSamples / buffer.sampleRate).toFixed(2)}s
-                        </Text>
-                      </View>
-                      <Text style={styles.bufferListMeta}>
-                        {buffer.sampleRate} Hz |{' '}
-                        {buffer.numSamples.toLocaleString()} samples
-                      </Text>
-                      <Text style={styles.bufferIdText} selectable>
-                        {buffer.bufferId}
-                      </Text>
-
-                      <View style={styles.bufferListActions}>
-                        <TouchableOpacity
-                          style={[styles.bufferActionButton, styles.playButton]}
-                          onPress={() => {
-                            handleToggleOfflineBufferPlayback(
-                              buffer.bufferId
-                            ).catch(() => {});
-                          }}
-                        >
-                          <View style={styles.rowAlignCenter}>
-                            <Ionicons
-                              name={isPlayingThis ? 'stop' : 'play'}
-                              size={16}
-                              color="#fff"
-                              style={styles.iconInline}
-                            />
-                            <Text style={styles.audioButtonText}>
-                              {isPlayingThis ? 'Stop' : 'Play'}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[
-                            styles.bufferActionButton,
-                            styles.bufferDeleteButton,
-                          ]}
-                          onPress={() => {
-                            handleDeleteOfflineBuffer(buffer.bufferId).catch(
-                              () => {}
-                            );
-                          }}
-                        >
-                          <View style={styles.rowAlignCenter}>
-                            <Ionicons
-                              name="trash-outline"
-                              size={16}
-                              color="#b71c1c"
-                              style={styles.iconInline}
-                            />
-                            <Text style={styles.bufferDeleteText}>Delete</Text>
-                          </View>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
+              {offlineAudioBuffers
+                .filter((b) => b.bufferId !== generatedAudio?.bufferId)
+                .map((buffer, index) => (
+                  <View key={buffer.bufferId} style={styles.bufferCardWrap}>
+                    <PipelineOfflineAudioResultCard
+                      bufferId={buffer.bufferId}
+                      title={`Buffer ${index + 1}`}
+                      sourceLabel={`${buffer.numSamples.toLocaleString()} samples`}
+                      sampleRate={buffer.sampleRate}
+                      durationMs={
+                        buffer.sampleRate > 0
+                          ? (buffer.numSamples / buffer.sampleRate) * 1000
+                          : 0
+                      }
+                      filename={`tts_buffer_${index + 1}_${Date.now()}.wav`}
+                      defaultDestinationKind="app"
+                      onDismiss={() => {
+                        handleDeleteOfflineBuffer(buffer.bufferId).catch(
+                          () => {}
+                        );
+                      }}
+                      disabled={generating || loading}
+                    />
+                  </View>
+                ))}
             </View>
           )}
 

@@ -1202,9 +1202,11 @@ export default function LivePipelineShowcaseScreen() {
             </Text>
             <PipelineOfflineAudioResultCard
               bufferId={pipelineTtsOutput.bufferId}
+              title="TTS output (offline buffer)"
               sourceLabel={pipelineTtsOutput.sourceLabel}
               sampleRate={pipelineTtsOutput.sampleRate}
               durationMs={pipelineTtsOutput.durationMs}
+              filename={`pipeline_tts_${Date.now()}.wav`}
               onDismiss={releasePriorCapturedTts}
               disabled={
                 pipelineState === 'running' || pipelineState === 'starting'
