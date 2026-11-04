@@ -80,6 +80,75 @@ std::shared_ptr<TxtOfflineEntry> txt_get_offline_entry(const std::string &buffer
   return it->second;
 }
 
+bool txt_acquire_offline_text_view(const std::string &bufferId, bool allowEmpty,
+                                   TxtOfflineTextView *out, std::string *errorCode,
+                                   std::string *errorMessage) {
+  if (!out) {
+    if (errorCode) *errorCode = "TEXT_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "out must be non-null";
+    return false;
+  }
+  *out = TxtOfflineTextView{};
+  auto entry = txt_get_offline_entry(bufferId);
+  if (!entry) {
+    if (errorCode) *errorCode = "TEXT_BUFFER_NOT_FOUND";
+    if (errorMessage) *errorMessage = "Offline text buffer not found";
+    return false;
+  }
+  out->entry = std::move(entry);
+  out->populated = out->entry->populated;
+  out->lang = out->entry->lang.c_str();
+  if (!out->entry->populated || out->entry->text.empty()) {
+    if (!allowEmpty) {
+      if (errorCode) *errorCode = "TEXT_BUFFER_EMPTY";
+      if (errorMessage) *errorMessage = "Text buffer is empty or not populated";
+      *out = TxtOfflineTextView{};
+      return false;
+    }
+    out->data = nullptr;
+    out->bytes = 0;
+    return true;
+  }
+  out->data = out->entry->text.data();
+  out->bytes = out->entry->text.size();
+  return true;
+}
+
+bool txt_create_live_from_offline(const std::string &offlineBufferId, int windowMaxChars,
+                                  int maxSegments, bool emitPartialEvents,
+                                  int64_t partialEventMinIntervalMs, const std::string &spoolMode,
+                                  const std::string &spoolPathOrEmpty, bool spoolTemporary,
+                                  std::string *liveBufferIdOut, std::string *errorCode,
+                                  std::string *errorMessage) {
+  TxtOfflineTextView view;
+  if (!txt_acquire_offline_text_view(offlineBufferId, /*allowEmpty=*/true, &view, errorCode,
+                                     errorMessage)) {
+    return false;
+  }
+  std::string liveId;
+  std::string createErr;
+  if (!txt_create_live(windowMaxChars, maxSegments, emitPartialEvents, partialEventMinIntervalMs,
+                       spoolMode, spoolPathOrEmpty, spoolTemporary, &liveId, &createErr)) {
+    if (errorCode) *errorCode = "TEXT_CREATE_LIVE_FAILED";
+    if (errorMessage) *errorMessage = createErr.empty() ? "Failed to create live text buffer" : createErr;
+    return false;
+  }
+  if (view.bytes > 0 && view.data != nullptr) {
+    auto live = txt_get_live_entry(liveId);
+    std::string writeErr;
+    if (!txt_live_write_partial(live, std::string(view.data, view.bytes), &writeErr)) {
+      txt_release_buffer(liveId);
+      if (errorCode) *errorCode = "TEXT_WRITE_PARTIAL_FAILED";
+      if (errorMessage) {
+        *errorMessage = writeErr.empty() ? "Failed to seed live text from offline" : writeErr;
+      }
+      return false;
+    }
+  }
+  if (liveBufferIdOut) *liveBufferIdOut = liveId;
+  return true;
+}
+
 bool txt_live_is_recording(const std::shared_ptr<TxtLiveEntry> &entry) {
   return entry && entry->state == TxtLiveEntry::RECORDING;
 }

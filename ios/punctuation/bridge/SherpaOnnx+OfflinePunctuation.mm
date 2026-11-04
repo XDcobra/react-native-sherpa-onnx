@@ -281,15 +281,16 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
   std::string lang;
   {
     std::string inId = std::string([textInId UTF8String]);
-    std::string err;
-    if (!txt_read_offline_text_with_lang(inId, &plain, &lang, &err)) {
-      NSString *c = kTxtNotFound;
-      if (err.find("not found") == std::string::npos) {
-        c = kTxtEmpty;
-      }
-      reject(c, [NSString stringWithUTF8String:err.c_str()], nil);
+    TxtOfflineTextView view;
+    std::string errCode;
+    std::string errMsg;
+    if (!txt_acquire_offline_text_view(inId, /*allowEmpty=*/false, &view, &errCode, &errMsg)) {
+      NSString *c = (errCode == "TEXT_BUFFER_NOT_FOUND") ? kTxtNotFound : kTxtEmpty;
+      reject(c, [NSString stringWithUTF8String:errMsg.c_str()], nil);
       return;
     }
+    plain.assign(view.data, view.bytes);
+    lang = view.lang ? view.lang : "";
   }
   std::string outId = std::string([textOutId UTF8String]);
   {

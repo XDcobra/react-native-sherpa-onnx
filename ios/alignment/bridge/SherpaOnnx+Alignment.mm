@@ -291,12 +291,18 @@ static sherpaonnx::alignment::bridge::PcmSliceDescriptor pcmSliceFromCodegen(
       }
 
       std::string inputText;
-      std::string textReadErr;
-      if (!txt_read_offline_text(textId, &inputText, &textReadErr) || inputText.empty()) {
-        reject(kAlignmentErrTextBufferEmpty,
-               [NSString stringWithFormat:@"Offline text buffer is empty or not populated: %@", textInBufferId],
-               nil);
-        return;
+      {
+        TxtOfflineTextView textView;
+        std::string viewCode;
+        std::string viewMsg;
+        if (!txt_acquire_offline_text_view(textId, /*allowEmpty=*/false, &textView, &viewCode, &viewMsg) ||
+            textView.bytes == 0 || textView.data == nullptr) {
+          reject(kAlignmentErrTextBufferEmpty,
+                 [NSString stringWithFormat:@"Offline text buffer is empty or not populated: %@", textInBufferId],
+                 nil);
+          return;
+        }
+        inputText.assign(textView.data, textView.bytes);
       }
 
       if (audioId.find("off_") != 0) {

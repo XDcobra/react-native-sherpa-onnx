@@ -25,6 +25,32 @@ std::string txt_generate_id(const char *prefix);
 std::shared_ptr<TxtLiveEntry> txt_get_live_entry(const std::string &bufferId);
 std::shared_ptr<TxtOfflineEntry> txt_get_offline_entry(const std::string &bufferId);
 
+struct TxtOfflineTextView {
+  std::shared_ptr<TxtOfflineEntry> entry; // keeps storage alive
+  const char *data = nullptr;
+  size_t bytes = 0;
+  const char *lang = nullptr; // points into entry->lang; may be ""
+  bool populated = false;
+};
+
+/**
+ * Acquire a view into offline UTF-8 text. Missing buffer → false.
+ * Empty / not populated → true with bytes==0 (data may be null) when allowEmpty;
+ * when allowEmpty is false, empty/not populated → false with error.
+ * Pointers valid only while `out->entry` is held.
+ */
+bool txt_acquire_offline_text_view(const std::string &bufferId, bool allowEmpty,
+                                   TxtOfflineTextView *out, std::string *errorCode,
+                                   std::string *errorMessage);
+
+/** Create a live text buffer seeded from offline SoT (no Kotlin/ObjC full string hop). */
+bool txt_create_live_from_offline(const std::string &offlineBufferId, int windowMaxChars,
+                                  int maxSegments, bool emitPartialEvents,
+                                  int64_t partialEventMinIntervalMs, const std::string &spoolMode,
+                                  const std::string &spoolPathOrEmpty, bool spoolTemporary,
+                                  std::string *liveBufferIdOut, std::string *errorCode,
+                                  std::string *errorMessage);
+
 bool txt_live_is_recording(const std::shared_ptr<TxtLiveEntry> &entry);
 bool txt_live_write_partial(const std::shared_ptr<TxtLiveEntry> &entry, const std::string &text,
                             std::string *error = nullptr);

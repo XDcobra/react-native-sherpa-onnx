@@ -13,6 +13,7 @@
 #include "sherpa_onnx_alignment_engine.hpp"
 #include "sherpa-onnx-detect-jni-common.h"
 #include "jni/offline_pcm_view.h"
+#include "TextRegistry.h"
 
 namespace {
 
@@ -285,6 +286,20 @@ void ThrowRuntimeException(JNIEnv* env, const char* message) {
   }
 }
 
+std::string ResolveAlignText(JNIEnv* env, jstring jText, jstring jTextBufferId) {
+  const std::string textId = JStringToUtf8(env, jTextBufferId);
+  if (!textId.empty()) {
+    TxtOfflineTextView view;
+    std::string errCode;
+    std::string errMsg;
+    if (!txt_acquire_offline_text_view(textId, /*allowEmpty=*/false, &view, &errCode, &errMsg)) {
+      throw std::runtime_error(errMsg.empty() ? "Offline text buffer not found" : errMsg);
+    }
+    return std::string(view.data, view.bytes);
+  }
+  return JStringToUtf8(env, jText);
+}
+
 }  // namespace
 
 extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignProportional(
@@ -293,9 +308,10 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     jstring jText,
     jint jTotalSamples,
     jint jSampleRate,
-    jstring jGranularity) {
+    jstring jGranularity,
+    jstring jTextBufferId) {
   try {
-    const std::string text = JStringToUtf8(env, jText);
+    const std::string text = ResolveAlignText(env, jText, jTextBufferId);
     const std::string granularity = JStringToUtf8(env, jGranularity);
     auto result = sherpa_onnx::alignment::AlignProportional(
         text,
@@ -318,9 +334,10 @@ extern "C" JNIEXPORT jobject JNICALL Java_com_sherpaonnx_alignment_facade_Sherpa
     jstring jText,
     jintArray jSegmentSampleCounts,
     jint jSampleRate,
-    jstring jGranularity) {
+    jstring jGranularity,
+    jstring jTextBufferId) {
   try {
-    const std::string text = JStringToUtf8(env, jText);
+    const std::string text = ResolveAlignText(env, jText, jTextBufferId);
     const std::string granularity = JStringToUtf8(env, jGranularity);
     const std::vector<int32_t> counts = JIntArrayToVector(env, jSegmentSampleCounts);
 
@@ -514,13 +531,14 @@ Java_com_sherpaonnx_alignment_facade_SherpaOnnxAlignmentHelper_nativeAlignAccura
     jstring jGranularity,
     jstring jVocabPath,
     jstring jProvider,
-    jint jNumThreads) {
+    jint jNumThreads,
+    jstring jTextBufferId) {
   try {
-    if (!jModelPath || !jText || !jBufferId) {
+    if (!jModelPath || !jBufferId) {
       throw std::runtime_error("ALIGNMENT_NATIVE_ACCURATE_FAILED: null argument");
     }
     const std::string modelPath = JStringToUtf8(env, jModelPath);
-    const std::string text = JStringToUtf8(env, jText);
+    const std::string text = ResolveAlignText(env, jText, jTextBufferId);
     const std::string granularity = JStringToUtf8(env, jGranularity);
     const std::string vocabPath = JStringToUtf8(env, jVocabPath);
     const std::string provider = JStringToUtf8(env, jProvider);

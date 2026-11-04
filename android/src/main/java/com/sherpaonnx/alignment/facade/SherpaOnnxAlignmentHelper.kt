@@ -32,6 +32,7 @@ internal class SherpaOnnxAlignmentHelper {
     totalSamples: Int,
     sampleRate: Int,
     granularity: String,
+    textBufferId: String?,
   ): HashMap<String, Any>
 
   private external fun nativeAlignEstimated(
@@ -39,6 +40,7 @@ internal class SherpaOnnxAlignmentHelper {
     segmentSampleCounts: IntArray,
     sampleRate: Int,
     granularity: String,
+    textBufferId: String?,
   ): HashMap<String, Any>
 
   private external fun nativeAlignAccurateFromBuffer(
@@ -52,6 +54,7 @@ internal class SherpaOnnxAlignmentHelper {
     vocabPath: String,
     provider: String,
     numThreads: Int,
+    textBufferId: String?,
   ): HashMap<String, Any>
 
   private external fun nativeAlignAccurateFromFloatPcm(
@@ -224,8 +227,7 @@ internal class SherpaOnnxAlignmentHelper {
           return@execute
         }
 
-        val text = textEntry.text
-        if (!textEntry.populated || text.isBlank()) {
+        if (!textEntry.populated || textEntry.utf16Length <= 0) {
           promise.reject(
             AlignmentErrorCodes.ERR_TEXT_EMPTY,
             "Offline text buffer is empty or not populated: $textInBufferId",
@@ -305,20 +307,22 @@ internal class SherpaOnnxAlignmentHelper {
         }
         val raw = when (normalizedMode) {
           "proportional" -> nativeAlignProportional(
-            text,
+            "",
             audioEntry.numSamples,
             audioEntry.sampleRate,
             normalizedGranularity,
+            textId,
           )
 
           "estimated" -> {
             val estimatedRate = AlignmentOptionParsers.parseEstimatedSampleRate(options, audioEntry.sampleRate)
             val counts = AlignmentOptionParsers.parseSegmentSampleCounts(options)
             nativeAlignEstimated(
-              text,
+              "",
               counts,
               estimatedRate,
               normalizedGranularity,
+              textId,
             )
           }
 
@@ -370,7 +374,10 @@ internal class SherpaOnnxAlignmentHelper {
                 )
                 return@execute
               }
-              val units = splitTextUnits(text, normalizedGranularity)
+              // VAD unit split still needs a local string (window strings remain the escape hatch).
+              val textForUnits =
+                com.sherpaonnx.text.pipeline.TextBufferNative.nativeReadOfflineText(textId).orEmpty()
+              val units = splitTextUnits(textForUnits, normalizedGranularity)
               val mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors)
               val unmappedAnchorCount = mapped.count { it.isEmpty() }
               val records = mutableListOf<SegmentRecord>()
@@ -395,6 +402,7 @@ internal class SherpaOnnxAlignmentHelper {
                     vocabPath,
                     provider,
                     numThreads,
+                    null,
                   )
                 } catch (e: Exception) {
                   throw IllegalStateException(
@@ -456,7 +464,7 @@ internal class SherpaOnnxAlignmentHelper {
             }
             nativeAlignAccurateFromBuffer(
               modelPath,
-              text,
+              "",
               audioInBufferId,
               -1,
               -1,
@@ -465,6 +473,7 @@ internal class SherpaOnnxAlignmentHelper {
               vocabPath,
               provider,
               numThreads,
+              textId,
             )
           }
 
@@ -482,7 +491,9 @@ internal class SherpaOnnxAlignmentHelper {
               writeAlignmentResult(promise, segmentOutId, outputEntry, emptyList())
               return@execute
             }
-            val units = splitTextUnits(text, normalizedGranularity)
+            val textForUnits =
+              com.sherpaonnx.text.pipeline.TextBufferNative.nativeReadOfflineText(textId).orEmpty()
+            val units = splitTextUnits(textForUnits, normalizedGranularity)
             val mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors)
             val records = mutableListOf<SegmentRecord>()
             for (i in anchors.indices) {
@@ -693,6 +704,7 @@ internal class SherpaOnnxAlignmentHelper {
           normalizedVocabPath,
           normalizedProvider,
           normalizedNumThreads,
+          null,
         )
 
         promise.resolve(AlignmentResultMapper.alignmentResultToWritable(raw))
@@ -827,6 +839,7 @@ internal class SherpaOnnxAlignmentHelper {
             samples.size,
             sampleRate,
             normalizedGranularity,
+            null,
           )
 
           "accurate" -> {

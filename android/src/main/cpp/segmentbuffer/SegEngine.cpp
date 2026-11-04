@@ -832,21 +832,27 @@ bool seg_segment_offline_text(const std::string &bufferId, const SegEnginePolicy
                               std::string *outBufferId, int *segmentCount, std::string *errorCode,
                               std::string *error) {
   if (!seg_validate_boundary_chars(policy.sentenceBoundaryChars, errorCode, error)) return false;
-  std::string text;
-  std::string readErr;
-  if (!txt_read_offline_text(bufferId, &text, &readErr)) {
+  TxtOfflineTextView textView;
+  std::string viewCode;
+  std::string viewMsg;
+  if (!txt_acquire_offline_text_view(bufferId, /*allowEmpty=*/false, &textView, &viewCode, &viewMsg)) {
     return seg_fail(errorCode, error, "BUFFER_STATE_INVALID",
-                    readErr.empty() ? "Offline text buffer not found" : readErr);
+                    viewMsg.empty() ? "Offline text buffer not found" : viewMsg);
   }
+  // Hold entry for the whole run; local string needed for UTF-16 slicing / punct mutation.
+  std::string text;
   SegEnginePolicy p = policy;
   seg_normalize_policy(p, true);
   if (!seg_validate_text_evaluator(p, false, errorCode, error)) return false;
   if (p.evaluator == "text_punctuation_assisted") {
     try {
-      text = seg_add_punctuation_or_throw(p.punctuationInstanceId, text);
+      text = seg_add_punctuation_or_throw(p.punctuationInstanceId,
+                                          std::string(textView.data, textView.bytes));
     } catch (const std::exception &e) {
       return seg_fail(errorCode, error, "POLICY_PUNCTUATION_INSTANCE_NOT_FOUND", e.what());
     }
+  } else {
+    text.assign(textView.data, textView.bytes);
   }
 
   std::vector<SegOfflineTextSegment> segments;

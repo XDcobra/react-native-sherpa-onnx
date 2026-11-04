@@ -497,6 +497,66 @@ TEST_F(TextRegistryFixture, OptInSpool_SkippedWithoutEnv) {
   EXPECT_FALSE(text.empty());
 }
 
+TEST_F(TextRegistryFixture, OfflineTextView_ParityWithRead) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_empty_offline(&id, &err)) << err;
+  ASSERT_TRUE(txt_populate_offline_if_empty(id, "hello view", {}, {}, {}, "en", "", "", &err))
+      << err;
+
+  std::string viaRead;
+  ASSERT_TRUE(txt_read_offline_text(id, &viaRead, &err)) << err;
+
+  TxtOfflineTextView view;
+  std::string code;
+  std::string msg;
+  ASSERT_TRUE(txt_acquire_offline_text_view(id, /*allowEmpty=*/false, &view, &code, &msg)) << msg;
+  ASSERT_NE(view.data, nullptr);
+  EXPECT_EQ(std::string(view.data, view.bytes), viaRead);
+  EXPECT_STREQ(view.lang, "en");
+  EXPECT_TRUE(view.populated);
+  EXPECT_TRUE(static_cast<bool>(view.entry));
+
+  EXPECT_TRUE(txt_release_buffer(id));
+  // Storage stays alive while view holds shared_ptr.
+  EXPECT_EQ(std::string(view.data, view.bytes), viaRead);
+}
+
+TEST_F(TextRegistryFixture, OfflineTextView_MissingAndEmpty) {
+  TxtOfflineTextView view;
+  std::string code;
+  std::string msg;
+  EXPECT_FALSE(txt_acquire_offline_text_view("txt_off_missing", false, &view, &code, &msg));
+  EXPECT_EQ(code, "TEXT_BUFFER_NOT_FOUND");
+
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_empty_offline(&id, &err)) << err;
+  EXPECT_FALSE(txt_acquire_offline_text_view(id, /*allowEmpty=*/false, &view, &code, &msg));
+  EXPECT_EQ(code, "TEXT_BUFFER_EMPTY");
+  ASSERT_TRUE(txt_acquire_offline_text_view(id, /*allowEmpty=*/true, &view, &code, &msg)) << msg;
+  EXPECT_EQ(view.bytes, 0u);
+  EXPECT_EQ(view.data, nullptr);
+}
+
+TEST_F(TextRegistryFixture, CreateLiveFromOffline_SeedsPartial) {
+  std::string offId;
+  std::string err;
+  ASSERT_TRUE(txt_create_offline_from_text("seed me", "de", "", "", &offId, &err)) << err;
+
+  std::string liveId;
+  std::string code;
+  std::string msg;
+  ASSERT_TRUE(txt_create_live_from_offline(offId, 1024, 100, false, 0, "off", "", true, &liveId,
+                                           &code, &msg))
+      << msg;
+  auto live = txt_get_live_entry(liveId);
+  ASSERT_NE(live, nullptr);
+  std::string snap;
+  ASSERT_TRUE(txt_live_snapshot_text(live, &snap, &err)) << err;
+  EXPECT_EQ(snap, "seed me");
+}
+
 TEST_F(TextRegistryFixture, SegEngineHooks_FireOnWriteFinalizeRelease) {
   ResetSegHooks();
   std::string id;

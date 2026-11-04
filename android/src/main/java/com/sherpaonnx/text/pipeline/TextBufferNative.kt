@@ -27,6 +27,19 @@ internal object TextBufferNative {
     spoolTemporary: Boolean,
   ): String?
 
+  /** Seed a live buffer from offline SoT without materializing full text in Kotlin. */
+  @JvmStatic
+  external fun nativeCreateLiveFromOffline(
+    offlineBufferId: String,
+    windowMaxChars: Int,
+    maxSegments: Int,
+    emitPartial: Boolean,
+    partialMinIntervalMs: Long,
+    spoolMode: String,
+    spoolPath: String?,
+    spoolTemporary: Boolean,
+  ): String?
+
   @JvmStatic external fun nativeWritePartial(liveId: String, text: String): Boolean
 
   @JvmStatic external fun nativeAppendText(liveId: String, text: String): Boolean

@@ -90,6 +90,14 @@ class SherpaOnnxPunctuationHelper(
       text: String,
     ): HashMap<String, Any>?
 
+    /** Offline punctuate from text bufferId (no Kotlin full-string read). */
+    @JvmStatic
+    private external fun nativeAddPunctuationOfflineFromBuffer(
+      instanceId: String,
+      textInBufferId: String,
+      textInputNormalization: String?,
+    ): HashMap<String, Any>?
+
     @JvmStatic
     private external fun nativeHasOfflineInstance(instanceId: String): Boolean
 
@@ -374,28 +382,6 @@ class SherpaOnnxPunctuationHelper(
   /** True when native offline instance exists (for live pipeline helpers). */
   fun hasOfflineEngine(instanceId: String): Boolean = hasOfflineInstance(instanceId)
 
-  private fun readOfflineText(
-    textInBufferId: String,
-  ): Result<Pair<String, String>> {
-    if (!textInBufferId.startsWith("txt_off_")) {
-      return Result.failure(
-        Exception(TextErrorCodes.BUFFER_KIND_MISMATCH)
-      )
-    }
-    val inEntry = TextPipelineRegistry.getOffline(textInBufferId)
-    if (inEntry == null) {
-      return Result.failure(
-        Exception(TextErrorCodes.BUFFER_NOT_FOUND)
-      )
-    }
-    if (!inEntry.populated) {
-      return Result.failure(
-        Exception(TextErrorCodes.BUFFER_EMPTY)
-      )
-    }
-    return Result.success(inEntry.text to inEntry.lang)
-  }
-
   fun punctuateOfflineTextBuffers(
     instanceId: String,
     textInBufferId: String,
@@ -410,21 +396,13 @@ class SherpaOnnxPunctuationHelper(
       )
       return
     }
-    val read = readOfflineText(textInBufferId)
-    if (read.isFailure) {
-      val code = read.exceptionOrNull()?.message ?: PunctuationErrorCodes.PUNCTUATE_ERROR
-      val msg = when (code) {
-        TextErrorCodes.BUFFER_KIND_MISMATCH -> "Expected offline text buffer (txt_off_*), got: $textInBufferId"
-        TextErrorCodes.BUFFER_NOT_FOUND -> "Offline text buffer not found: $textInBufferId"
-        TextErrorCodes.BUFFER_EMPTY -> "Input offline text buffer is not populated: $textInBufferId"
-        else -> "Failed to read input text buffer: $code"
-      }
-      promise.reject(code, msg, null)
+    if (!textInBufferId.startsWith("txt_off_")) {
+      promise.reject(
+        TextErrorCodes.BUFFER_KIND_MISMATCH,
+        "Expected offline text buffer (txt_off_*), got: $textInBufferId",
+      )
       return
     }
-    val (plainRaw, lang) = read.getOrThrow()
-    val plain =
-      PunctuationTextInputNormalization.normalize(plainRaw, textInputNormalization)
     if (!textOutBufferId.startsWith("txt_off_")) {
       promise.reject(
         TextErrorCodes.BUFFER_KIND_MISMATCH,
@@ -457,8 +435,31 @@ class SherpaOnnxPunctuationHelper(
       return
     }
     val outText: String
+    val lang: String
     try {
-      outText = addPunctuationOfflineOrThrow(instanceId, plain)
+      @Suppress("UNCHECKED_CAST")
+      val raw =
+        nativeAddPunctuationOfflineFromBuffer(
+          instanceId,
+          textInBufferId,
+          PunctuationTextInputNormalization.resolve(textInputNormalization),
+        ) as? HashMap<String, Any>
+          ?: throw IllegalStateException("nativeAddPunctuationOfflineFromBuffer returned null")
+      val success = raw["success"] as? Boolean ?: false
+      if (!success) {
+        val err = raw["error"] as? String ?: "Punctuation failed"
+        val code =
+          when {
+            err.contains("not found", ignoreCase = true) -> TextErrorCodes.BUFFER_NOT_FOUND
+            err.contains("empty", ignoreCase = true) ||
+              err.contains("not populated", ignoreCase = true) -> TextErrorCodes.BUFFER_EMPTY
+            else -> PunctuationErrorCodes.PUNCTUATE_ERROR
+          }
+        promise.reject(code, err, null)
+        return
+      }
+      outText = raw["text"] as? String ?: ""
+      lang = raw["lang"] as? String ?: ""
     } catch (e: Exception) {
       Log.e("SherpaOnnxPunct", "punctuateOfflineTextBuffers", e)
       promise.reject(

@@ -201,7 +201,7 @@ class OfflineTextEntry(
   val utf16Length: Int
     get() {
       val n = TextBufferNative.nativeOfflineUtf16Length(bufferId)
-      return if (n >= 0) n else text.length
+      return if (n >= 0) n else 0
     }
 
   val tokenCount: Int

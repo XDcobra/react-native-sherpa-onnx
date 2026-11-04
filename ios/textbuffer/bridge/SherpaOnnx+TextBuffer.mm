@@ -514,28 +514,29 @@ static void txt_emit_live_text_segment_event(
 {
     try {
         std::string offId = [offlineBufferId UTF8String] ?: "";
-        std::string seedText;
-
-        {
-            std::lock_guard<std::mutex> lock(g_txt_mutex);
-            auto it = g_txt_offline.find(offId);
-            if (it == g_txt_offline.end()) {
-                reject(kTxtErrBufferNotFound,
-                       [NSString stringWithFormat:@"Offline text buffer not found: %@", offlineBufferId], nil);
-                return;
-            }
-            seedText = it->second->text;
-        }
-
-        std::string bufferId = txt_bridge_generate_id("txt_live");
-        auto entry = std::make_shared<TxtLiveEntry>();
-        entry->bufferId = bufferId;
         NSString *tmpDir = NSTemporaryDirectory();
         if (tmpDir == nil || tmpDir.length == 0) tmpDir = @"/tmp";
         NSString *fileName = [NSString stringWithFormat:@"txt_spool_%@.bin", [[NSUUID UUID] UUIDString]];
         NSString *joined = [tmpDir stringByAppendingPathComponent:fileName];
         std::string spoolPath = [joined UTF8String] ?: "";
-        entry->configureSpooling(TxtLiveEntry::SPOOL_ON, spoolPath, true, 0);
+
+        std::string bufferId;
+        std::string errCode;
+        std::string errMsg;
+        if (!txt_create_live_from_offline(offId, 65536, 4096, false, 0, "on", spoolPath, true,
+                                          &bufferId, &errCode, &errMsg)) {
+            NSString *msg = errMsg.empty()
+                ? [NSString stringWithFormat:@"Offline text buffer not found: %@", offlineBufferId]
+                : [NSString stringWithUTF8String:errMsg.c_str()];
+            reject(kTxtErrBufferNotFound, msg, nil);
+            return;
+        }
+
+        auto entry = txt_get_live_entry(bufferId);
+        if (!entry) {
+            reject(kTxtErrInternalError, @"Live text buffer missing after createLiveFromOffline", nil);
+            return;
+        }
         __weak SherpaOnnx *weakSelf = self;
         std::weak_ptr<TxtLiveEntry> weakEntry = entry;
         NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()] ?: @"";
@@ -548,14 +549,6 @@ static void txt_emit_live_text_segment_event(
             }
             txt_emit_live_text_segment_event(strongSelf, liveBufferId, segment, totalSegments);
         });
-        if (!seedText.empty()) {
-            entry->writePartial(seedText);
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(g_txt_mutex);
-            g_txt_live[bufferId] = entry;
-        }
         resolve(txtLiveToDict(*entry));
     } catch (const std::exception &e) {
         txtRejectWithStdException(reject, e);

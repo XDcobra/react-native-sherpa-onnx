@@ -2,6 +2,7 @@
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "jni/offline_pcm_view.h"
+#include "TextRegistry.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -242,10 +243,33 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeInitializeCustom(
   return map;
 }
 
+namespace {
+
+std::string ResolveTtsText(JNIEnv* env, jstring text, jstring textBufferId, std::string* error) {
+  const std::string textId = CopyJstring(env, textBufferId);
+  if (!textId.empty()) {
+    TxtOfflineTextView view;
+    std::string errCode;
+    std::string errMsg;
+    // Allow empty for phoneme-only generation.
+    if (!txt_acquire_offline_text_view(textId, /*allowEmpty=*/true, &view, &errCode, &errMsg)) {
+      if (error) *error = errMsg.empty() ? "Text buffer not found" : errMsg;
+      return {};
+    }
+    if (view.bytes == 0 || view.data == nullptr) {
+      return {};
+    }
+    return std::string(view.data, view.bytes);
+  }
+  return CopyJstring(env, text);
+}
+
+}  // namespace
+
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerate(
     JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring text, jint sid,
-    jfloat speed) {
+    jfloat speed, jstring textBufferId) {
   auto inst = Lookup(CopyJstring(env, instanceId));
   if (!inst || !inst->isInitialized()) {
     jmethodID mapPut = nullptr;
@@ -255,8 +279,17 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerate(
     sherpaonnx::PutString(env, map, mapPut, "error", "TTS not initialized");
     return map;
   }
-  const auto audio =
-      inst->generate(CopyJstring(env, text), sid, speed);
+  std::string textErr;
+  const std::string resolved = ResolveTtsText(env, text, textBufferId, &textErr);
+  if (!textErr.empty() && !CopyJstring(env, textBufferId).empty()) {
+    jmethodID mapPut = nullptr;
+    jobject map = NewHashMap(env, &mapPut);
+    if (!map) return nullptr;
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", textErr);
+    return map;
+  }
+  const auto audio = inst->generate(resolved, sid, speed);
   return AudioResultToMap(env, audio);
 }
 
@@ -266,7 +299,7 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerateWithOptions(
     jfloat speed, jboolean applyNumSteps, jint numSteps, jfloat silenceScale,
     jfloatArray referenceAudio, jint referenceSampleRate, jstring referenceText,
     jobject extraMap, jobjectArray phonemeCodepoints, jobjectArray tokens,
-    jstring referenceBufferId) {
+    jstring referenceBufferId, jstring textBufferId) {
   auto inst = Lookup(CopyJstring(env, instanceId));
   if (!inst || !inst->isInitialized()) {
     jmethodID mapPut = nullptr;
@@ -320,8 +353,17 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerateWithOptions(
   opts.phoneme_codepoints = ParsePhonemes(env, phonemeCodepoints);
   opts.tokens = ParseTokens(env, tokens);
 
-  const auto audio = inst->generate(CopyJstring(env, text), sid, speed,
-                                    std::optional(opts));
+  std::string textErr;
+  const std::string resolved = ResolveTtsText(env, text, textBufferId, &textErr);
+  if (!textErr.empty() && !CopyJstring(env, textBufferId).empty()) {
+    jmethodID mapPut = nullptr;
+    jobject map = NewHashMap(env, &mapPut);
+    if (!map) return nullptr;
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", textErr);
+    return map;
+  }
+  const auto audio = inst->generate(resolved, sid, speed, std::optional(opts));
   return AudioResultToMap(env, audio);
 }
 

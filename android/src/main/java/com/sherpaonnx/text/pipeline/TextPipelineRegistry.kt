@@ -113,13 +113,35 @@ object TextPipelineRegistry {
   }
 
   fun createLiveFromOffline(offlineBufferId: String): LiveTextEntry {
-    val offline =
-      getOffline(offlineBufferId)
-        ?: throw IllegalArgumentException("Offline text buffer not found: $offlineBufferId")
-    val entry = createLive()
-    if (offline.text.isNotEmpty()) {
-      entry.writePartial(offline.text)
+    if (!TextBufferNative.nativeIsOffline(offlineBufferId)) {
+      throw IllegalArgumentException("Offline text buffer not found: $offlineBufferId")
     }
+    val spoolingMode = TextSpoolingMode.ON
+    val resolvedSpoolPath = defaultSpoolPath()
+    val id =
+      TextBufferNative.nativeCreateLiveFromOffline(
+        offlineBufferId,
+        65536,
+        4096,
+        false,
+        0L,
+        spoolingMode.rawValue(),
+        resolvedSpoolPath,
+        true,
+      ) ?: throw IllegalArgumentException("Offline text buffer not found: $offlineBufferId")
+    val entry =
+      LiveTextEntry(
+        bufferId = id,
+        windowMaxChars = 65536,
+        maxSegments = 4096,
+        emitPartialEvents = false,
+        partialEventMinIntervalMs = 0L,
+        spoolingMode = spoolingMode,
+        spoolPath = resolvedSpoolPath,
+        spoolTemporary = true,
+        spoolThresholdBytes = 0,
+      )
+    liveEntries[id] = entry
     return entry
   }
 

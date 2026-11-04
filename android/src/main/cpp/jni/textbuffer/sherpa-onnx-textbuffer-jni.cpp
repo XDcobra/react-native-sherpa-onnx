@@ -176,6 +176,21 @@ Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeCreateLive(
   return utf8ToJstring(env, id);
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeCreateLiveFromOffline(
+    JNIEnv *env, jclass, jstring offlineBufferId, jint windowMaxChars, jint maxSegments,
+    jboolean emitPartial, jlong partialMinIntervalMs, jstring spoolMode, jstring spoolPath,
+    jboolean spoolTemporary) {
+  std::string id, code, msg;
+  if (!txt_create_live_from_offline(
+          jstringToUtf8(env, offlineBufferId), windowMaxChars, maxSegments,
+          emitPartial == JNI_TRUE, (int64_t)partialMinIntervalMs, jstringToUtf8(env, spoolMode),
+          jstringToUtf8(env, spoolPath), spoolTemporary == JNI_TRUE, &id, &code, &msg)) {
+    return nullptr;
+  }
+  return utf8ToJstring(env, id);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeWritePartial(JNIEnv *env, jclass,
                                                                       jstring liveId,

@@ -64,15 +64,26 @@ static NSString *const kOfflineTtsOomMessage =
         return;
     }
     std::string text;
-    std::string textError;
-    if (!txt_read_offline_text(textInIdStr, &text, &textError)) {
-        NSString *msg = [NSString stringWithUTF8String:textError.c_str()] ?: @"Text buffer read failed";
-        if (NSDictionaryHasPhonemeInput(options) && [msg containsString:@"empty"]) {
+    {
+        TxtOfflineTextView textView;
+        std::string viewCode;
+        std::string viewMsg;
+        if (!txt_acquire_offline_text_view(textInIdStr, /*allowEmpty=*/true, &textView, &viewCode,
+                                           &viewMsg)) {
+            NSString *msg = [NSString stringWithUTF8String:viewMsg.c_str()] ?: @"Text buffer read failed";
+            reject(@"TTS_TEXT_BUFFER_NOT_FOUND", msg, nil);
+            return;
+        }
+        if (textView.bytes == 0 || textView.data == nullptr) {
+            if (!NSDictionaryHasPhonemeInput(options)) {
+                reject(@"TTS_TEXT_BUFFER_EMPTY",
+                       [NSString stringWithFormat:@"Text buffer is empty or not populated: %@", textInBufferId],
+                       nil);
+                return;
+            }
             text.clear();
         } else {
-            NSString *code = [msg containsString:@"not found"] ? @"TTS_TEXT_BUFFER_NOT_FOUND" : @"TTS_TEXT_BUFFER_EMPTY";
-            reject(code, msg, nil);
-            return;
+            text.assign(textView.data, textView.bytes);
         }
     }
 

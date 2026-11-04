@@ -46,7 +46,7 @@ internal class TtsBatchGenerationService(
         promise.reject("TTS_TEXT_BUFFER_KIND_MISMATCH", "Expected offline text buffer (txt_off_*), got: $textInBufferId")
         return
       }
-      if (!textEntry.populated || textEntry.text.isEmpty()) {
+      if (!textEntry.populated || textEntry.utf16Length <= 0) {
         if (!TtsGenerationOptionsParser.hasPhonemeInput(options)) {
           promise.reject("TTS_TEXT_BUFFER_EMPTY", "Text buffer is empty or not populated: $textInBufferId")
           return
@@ -85,7 +85,6 @@ internal class TtsBatchGenerationService(
         return
       }
 
-      val text = textEntry.text
       val sid = TtsGenerationOptionsParser.getSid(options)
       val speed = TtsGenerationOptionsParser.getSpeed(options)
 
@@ -130,7 +129,7 @@ internal class TtsBatchGenerationService(
           val refText = options?.getString("referenceText") ?: ""
           val raw = TtsNative.nativeGenerateWithOptions(
             instanceId = instanceId,
-            text = text,
+            text = "",
             sid = sid,
             speed = speed,
             applyNumSteps = true,
@@ -140,6 +139,7 @@ internal class TtsBatchGenerationService(
             referenceSampleRate = 0,
             referenceText = refText,
             referenceBufferId = refBufferId,
+            textBufferId = textInBufferId,
             extra = TtsGenerationOptionsParser.buildExtraMap(options),
             phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
             tokens = TtsGenerationOptionsParser.parseTokens(options),
@@ -155,7 +155,7 @@ internal class TtsBatchGenerationService(
         } else if (TtsGenerationOptionsParser.needsGenerationOptions(options)) {
           val raw = TtsNative.nativeGenerateWithOptions(
             instanceId = instanceId,
-            text = text,
+            text = "",
             sid = sid,
             speed = speed,
             applyNumSteps = TtsGenerationOptionsParser.hasNumSteps(options),
@@ -164,6 +164,7 @@ internal class TtsBatchGenerationService(
             referenceAudio = null,
             referenceSampleRate = 0,
             referenceText = null,
+            textBufferId = textInBufferId,
             extra = TtsGenerationOptionsParser.buildExtraMap(options),
             phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
             tokens = TtsGenerationOptionsParser.parseTokens(options),
@@ -174,7 +175,7 @@ internal class TtsBatchGenerationService(
               return
             }
         } else {
-          val raw = TtsNative.nativeGenerate(instanceId, text, sid, speed)
+          val raw = TtsNative.nativeGenerate(instanceId, "", sid, speed, textInBufferId)
           TtsNative.readAudioResult(raw)
             ?: run {
               promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")

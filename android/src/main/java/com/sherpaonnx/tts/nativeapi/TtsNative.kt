@@ -33,6 +33,7 @@ internal object TtsNative {
     text: String,
     sid: Int,
     speed: Float,
+    textBufferId: String? = null,
   ): HashMap<String, Any>?
 
   /**
@@ -40,6 +41,7 @@ internal object TtsNative {
    * Pass empty [referenceAudio] and referenceSampleRate=0 for non-clone config.
    * When [referenceBufferId] is set, native reads that offline buffer as the reference
    * and ignores [referenceAudio].
+   * When [textBufferId] is set, native reads offline text SoT and ignores [text].
    */
   @JvmStatic
   external fun nativeGenerateWithOptions(
@@ -57,6 +59,7 @@ internal object TtsNative {
     phonemeCodepoints: Array<IntArray>?,
     tokens: Array<Array<String>>?,
     referenceBufferId: String? = null,
+    textBufferId: String? = null,
   ): HashMap<String, Any>?
 
   @JvmStatic
