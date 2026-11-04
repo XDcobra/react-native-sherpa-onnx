@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
@@ -9,6 +8,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as DocumentPicker from '@react-native-documents/picker';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
@@ -16,8 +17,6 @@ import {
   resolveAudioFileDisplayName,
   toFileSource,
 } from '../../utils/fileSourceFromUri';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import { listAssetModels } from 'react-native-sherpa-onnx/utils';
 import {
   createEmptyLiveAudioBuffer,
   finalizeLiveAudioBuffer,
@@ -44,46 +43,25 @@ import {
   type SegmentMeta,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import {
-  createStreamingVAD,
-  detectVadModel,
-  assertVadCustomConfig,
-  type VADEngine,
-  type VADModelType,
   type VADOfflineRunOptions,
   type VADPipelineHandle,
   type VADPipelineStatus,
-  type VADRuntimeOptions,
   type VADSummary,
 } from 'react-native-sherpa-onnx/vad';
-import {
-  listDownloadedModels,
-  ModelCategory,
-} from 'react-native-sherpa-onnx/download';
 import {
   buildSegmentationOption,
   SegmentationPolicyControls,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
-import {
-  InitModeSelector,
-  ModelFolderGrid,
-  VadCustomInitForm,
-  type ModelInitMode,
-  type VadCustomInitFormState,
-} from '../../components/modelInit';
-import { fillVadCustomConfigFromModelFolder } from '../../utils/vadCustomInitFill';
+import { VadModelInitPanel } from '../../components/VadModelInitPanel';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
   OfflineAudioBufferWidget,
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
-import {
-  getAssetModelPath,
-  getFileModelPath,
-  getModelDisplayName,
-  toDetectSource,
-} from '../../modelConfig';
+import { useVadModelInit } from '../../hooks/useVadModelInit';
+import type { RootStackParamList } from '../../types/navigation';
 import { AUDIO_FILES } from '../../audioConfig';
 
 type Mode = 'live' | 'offline';
@@ -99,28 +77,6 @@ type TimelineEntry = {
 
 const TIMELINE_LIMIT = 200;
 const SEGMENT_PREVIEW_LIMIT = 200;
-
-const DEFAULT_VAD_CUSTOM_INIT: VadCustomInitFormState = {
-  modelType: 'silero_vad',
-  fileSources: {},
-};
-
-function buildVadRuntimeOptions(
-  modelType: VADModelType,
-  threshold: number
-): VADRuntimeOptions {
-  return modelType === 'ten_vad'
-    ? {
-        tenVad: {
-          scoreThreshold: Number.isFinite(threshold) ? threshold : undefined,
-        },
-      }
-    : {
-        sileroVad: {
-          scoreThreshold: Number.isFinite(threshold) ? threshold : undefined,
-        },
-      };
-}
 
 function normalizeErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -138,29 +94,28 @@ function normalizeErrorMessage(error: unknown): string {
 }
 
 export default function VADScreen() {
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
+    undefined
+  );
+
+  const vad = useVadModelInit({
+    onBeforeInit: () => onBeforeInitRef.current?.(),
+  });
+
+  const { engineRef, isEngineInitialized } = vad;
+
   const [mode, setMode] = useState<Mode>('live');
   const [liveSource, setLiveSource] = useState<LiveSource>('file');
   const [status, setStatus] = useState(
-    'Load a model, then run VAD in live or offline mode.'
+    'Initialize a VAD model, then run live or offline.'
   );
   const [error, setError] = useState<string | null>(null);
   const [streamState, setStreamState] = useState<StreamState>('idle');
   const [busyOffline, setBusyOffline] = useState(false);
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] = useState<VadCustomInitFormState>(
-    DEFAULT_VAD_CUSTOM_INIT
-  );
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
-  const [selectedModelFolder, setSelectedModelFolder] = useState<string | null>(
-    null
-  );
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [sampleRateInput, setSampleRateInput] = useState('16000');
   const [chunkSizeInput, setChunkSizeInput] = useState('512');
-  const [thresholdInput, setThresholdInput] = useState('0.5');
   const [speechEventMinInput, setSpeechEventMinInput] = useState('0');
   const [selectedLiveFileUri, setSelectedLiveFileUri] = useState<string | null>(
     null
@@ -184,7 +139,6 @@ export default function VADScreen() {
   const [timelineExpanded, setTimelineExpanded] = useState(true);
   const [segmentsExpanded, setSegmentsExpanded] = useState(true);
 
-  const liveEngineRef = useRef<VADEngine | null>(null);
   const livePipelineRef = useRef<VADPipelineHandle | null>(null);
   const liveAudioRef = useRef<LiveAudioBufferRef | null>(null);
   const liveSegmentRef = useRef<LiveSegmentBufferRef | null>(null);
@@ -196,13 +150,18 @@ export default function VADScreen() {
   const liveUsingMicRef = useRef(false);
   const cleanupLockRef = useRef(false);
 
+  const isBusy =
+    streamState !== 'idle' ||
+    busyOffline ||
+    vad.loading ||
+    vad.customFillLoading;
+
   const canStartLive =
+    isEngineInitialized &&
     streamState === 'idle' &&
     !busyOffline &&
-    !customFillLoading &&
-    (initMode === 'custom'
-      ? !!customInitForm.fileSources.model
-      : !!selectedModelFolder) &&
+    !vad.loading &&
+    !vad.customFillLoading &&
     (liveSource === 'mic' || !!selectedLiveFileUri);
 
   const offlineSegReady =
@@ -210,25 +169,13 @@ export default function VADScreen() {
     (offlineSegConfig.mode === 'auto' && offlineSegConfig.policy != null);
 
   const canStartOffline =
+    isEngineInitialized &&
     !busyOffline &&
-    !customFillLoading &&
+    !vad.loading &&
+    !vad.customFillLoading &&
     streamState === 'idle' &&
-    (initMode === 'custom'
-      ? !!customInitForm.fileSources.model
-      : !!selectedModelFolder) &&
     preparedOfflineInputBuffer != null &&
     offlineSegReady;
-
-  const isBusy = streamState !== 'idle' || busyOffline || customFillLoading;
-
-  const catalogEntries = useMemo(
-    () =>
-      availableModels.map((id) => ({
-        id,
-        label: getModelDisplayName(id),
-      })),
-    [availableModels]
-  );
 
   const pushTimeline = useCallback((type: string, detail: string) => {
     const now = new Date();
@@ -266,175 +213,6 @@ export default function VADScreen() {
     },
     []
   );
-
-  const resolveModelPath = useCallback(
-    (modelFolder: string) => {
-      if (downloadedModelIds.includes(modelFolder)) {
-        return getFileModelPath(modelFolder, ModelCategory.Vad);
-      }
-      return getAssetModelPath(modelFolder);
-    },
-    [downloadedModelIds]
-  );
-
-  const detectResolvedModelType = useCallback(
-    async (modelPath: FileSource): Promise<VADModelType> => {
-      const detection = await detectVadModel(await toDetectSource(modelPath), {
-        modelType: 'auto',
-      });
-      if (!detection.success || !detection.modelType) {
-        throw new Error(
-          detection.error ||
-            'Unable to detect VAD model type for selected model folder.'
-        );
-      }
-      if (
-        detection.modelType !== 'silero_vad' &&
-        detection.modelType !== 'ten_vad'
-      ) {
-        throw new Error(
-          `Unsupported detected VAD model type: ${detection.modelType}`
-        );
-      }
-      return detection.modelType;
-    },
-    []
-  );
-
-  const createVadEngine = useCallback(
-    async (sampleRate: number, threshold: number): Promise<VADEngine> => {
-      if (initMode === 'custom') {
-        const modelSource = customInitForm.fileSources.model;
-        if (!modelSource) {
-          throw new Error('Pick a VAD model file for custom init.');
-        }
-        const customConfig = { model: modelSource };
-        assertVadCustomConfig(
-          customConfig as unknown as Record<string, unknown>
-        );
-        return createStreamingVAD({
-          initMode: 'custom',
-          modelType: customInitForm.modelType,
-          customConfig,
-          sampleRate,
-          runtimeOptions: buildVadRuntimeOptions(
-            customInitForm.modelType,
-            threshold
-          ),
-        });
-      }
-
-      if (!selectedModelFolder) {
-        throw new Error('Select a VAD model folder first.');
-      }
-      const modelPath = resolveModelPath(selectedModelFolder);
-      const resolvedModelType = await detectResolvedModelType(modelPath);
-      return createStreamingVAD({
-        modelSource: modelPath,
-        modelType: resolvedModelType,
-        sampleRate,
-        runtimeOptions: buildVadRuntimeOptions(resolvedModelType, threshold),
-      });
-    },
-    [
-      customInitForm.fileSources.model,
-      customInitForm.modelType,
-      detectResolvedModelType,
-      initMode,
-      resolveModelPath,
-      selectedModelFolder,
-    ]
-  );
-
-  const handleFillFromSelectedModel = useCallback(async () => {
-    const modelFolder = selectedModelFolder;
-    if (!modelFolder) {
-      Alert.alert('Select a model', 'Pick a catalog model folder first.');
-      return;
-    }
-
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    setError(null);
-    try {
-      const modelPath = resolveModelPath(modelFolder);
-      const fillResult = await fillVadCustomConfigFromModelFolder(modelPath, {
-        modelTypeOverride: customInitForm.modelType,
-      });
-      setCustomInitForm({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-      });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setCustomFillHint(
-        `Filled from ${getModelDisplayName(modelFolder)} (${
-          fillResult.modelDir
-        }).${missing}`
-      );
-    } catch (fillErr) {
-      setCustomFillHint(null);
-      setError(normalizeErrorMessage(fillErr));
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [customInitForm.modelType, resolveModelPath, selectedModelFolder]);
-
-  const handlePrepareScatteredTest = useCallback(() => {
-    setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
-    setCustomFillHint(
-      'Scattered test: pick the model file from a different location, then run VAD.'
-    );
-  }, []);
-
-  const loadModels = useCallback(async () => {
-    setLoadingModels(true);
-    setError(null);
-    try {
-      const [assets, downloaded] = await Promise.all([
-        listAssetModels(),
-        listDownloadedModels(ModelCategory.Vad),
-      ]);
-      const assetModels = assets.map((m) => m.folder);
-      const downloadedIds = downloaded.map((m) => m.id);
-      const candidateModels = Array.from(
-        new Set([...assetModels, ...downloadedIds])
-      );
-      const streamingModels: string[] = [];
-      for (const modelFolder of candidateModels) {
-        try {
-          const modelPath = downloadedIds.includes(modelFolder)
-            ? getFileModelPath(modelFolder, ModelCategory.Vad)
-            : getAssetModelPath(modelFolder);
-          const detection = await detectVadModel(
-            await toDetectSource(modelPath),
-            {
-              modelType: 'auto',
-            }
-          );
-          if (detection.success && detection.isStreaming) {
-            streamingModels.push(modelFolder);
-          }
-        } catch {
-          // Ignore candidates that fail detection; keep picker clean.
-        }
-      }
-      setDownloadedModelIds(downloadedIds);
-      setAvailableModels(streamingModels);
-      setSelectedModelFolder((current) =>
-        current && streamingModels.includes(current)
-          ? current
-          : streamingModels[0] ?? null
-      );
-    } catch (loadErr) {
-      setError(normalizeErrorMessage(loadErr));
-      setStatus('Failed to load VAD models.');
-    } finally {
-      setLoadingModels(false);
-    }
-  }, []);
 
   const clearStatusPoll = useCallback(() => {
     if (statusPollRef.current) {
@@ -501,12 +279,6 @@ export default function VADScreen() {
           }
         }
 
-        const engine = liveEngineRef.current;
-        liveEngineRef.current = null;
-        if (engine) {
-          await engine.destroy().catch(() => {});
-        }
-
         const segment = liveSegmentRef.current;
         liveSegmentRef.current = null;
         if (segment) {
@@ -540,6 +312,26 @@ export default function VADScreen() {
     }
   }, []);
 
+  const resetRunPresentation = useCallback(() => {
+    setSummary(null);
+    setSegments([]);
+    setTimeline([]);
+    setPipelineStatus(null);
+    setIngestProgress(null);
+    setIsSpeechDetected(false);
+    setEngineInstanceId(null);
+    setPipelineId(null);
+    setError(null);
+  }, []);
+
+  onBeforeInitRef.current = async () => {
+    await teardownLiveResources(true);
+    await clearOfflineBuffers();
+    resetRunPresentation();
+    setStreamState('idle');
+    setStatus('Initializing VAD engine…');
+  };
+
   const pickLiveFile = useCallback(async () => {
     try {
       const picked = await DocumentPicker.pick({
@@ -572,9 +364,9 @@ export default function VADScreen() {
   }, []);
 
   const startLive = useCallback(async () => {
-    if (initMode === 'auto' && !selectedModelFolder) return;
-    if (initMode === 'custom' && !customInitForm.fileSources.model) {
-      setError('Pick a VAD model file for custom init.');
+    const engine = engineRef.current;
+    if (!engine) {
+      Alert.alert('Engine not ready', 'Initialize the VAD model first.');
       return;
     }
     if (liveSource === 'file' && !selectedLiveFileUri) {
@@ -591,21 +383,15 @@ export default function VADScreen() {
     setIsSpeechDetected(false);
     setStreamState('starting');
     setStatus('Starting VAD live pipeline...');
-    pushTimeline('run.started', 'Preparing live buffers and VAD engine.');
+    pushTimeline('run.started', 'Preparing live buffers and VAD pipeline.');
     logLiveLifecycle(
       'run.start',
-      `source=${liveSource}, model=${selectedModelFolder ?? '-'}, file=${
-        selectedLiveFileName ?? '-'
-      }`
+      `source=${liveSource}, file=${selectedLiveFileName ?? '-'}`
     );
 
     try {
-      const sampleRate = Math.max(
-        8000,
-        Number.parseInt(sampleRateInput, 10) || 16000
-      );
+      const sampleRate = vad.parseSampleRate(vad.sampleRateInput);
       const chunkSize = Math.max(1, Number.parseInt(chunkSizeInput, 10) || 512);
-      const threshold = Number.parseFloat(thresholdInput);
       const speechStateEventMinIntervalMs = Math.max(
         0,
         Number.parseInt(speechEventMinInput, 10) || 0
@@ -654,10 +440,8 @@ export default function VADScreen() {
       liveSegmentRef.current = liveSegment;
       logLiveLifecycle('segment.created', `bufferId=${liveSegment.bufferId}`);
 
-      const engine = await createVadEngine(sampleRate, threshold);
-      liveEngineRef.current = engine;
       setEngineInstanceId(engine.instanceId);
-      logLiveLifecycle('engine.created', `instanceId=${engine.instanceId}`);
+      logLiveLifecycle('engine.reuse', `instanceId=${engine.instanceId}`);
 
       const run = await engine.process({
         audioIn: liveAudio,
@@ -723,7 +507,6 @@ export default function VADScreen() {
           liveAudio,
           toFileSource(selectedLiveFileUri, selectedLiveFileName ?? undefined),
           {
-            // Deterministic template flow: user explicitly finishes the pipeline.
             autoFinalize: false,
             onProgress: (event) => {
               setIngestProgress(event.percent);
@@ -783,24 +566,20 @@ export default function VADScreen() {
       pushTimeline('run.error', message);
       await teardownLiveResources(true);
       setStreamState('idle');
-      setEngineInstanceId(null);
+      setEngineInstanceId(engineRef.current?.instanceId ?? null);
       setPipelineId(null);
     }
   }, [
     chunkSizeInput,
+    engineRef,
     liveSource,
     logLiveLifecycle,
     pushTimeline,
-    createVadEngine,
-    customInitForm.fileSources.model,
-    initMode,
-    sampleRateInput,
     selectedLiveFileName,
     selectedLiveFileUri,
-    selectedModelFolder,
     speechEventMinInput,
     teardownLiveResources,
-    thresholdInput,
+    vad,
   ]);
 
   const stopLiveGraceful = useCallback(async () => {
@@ -926,7 +705,7 @@ export default function VADScreen() {
       await teardownLiveResources(false);
       setStreamState('idle');
       setPipelineStatus(null);
-      setEngineInstanceId(null);
+      setEngineInstanceId(engineRef.current?.instanceId ?? null);
       setPipelineId(null);
     } catch (stopErr) {
       const message = normalizeErrorMessage(stopErr);
@@ -937,10 +716,11 @@ export default function VADScreen() {
       await teardownLiveResources(true);
       setStreamState('idle');
       setPipelineStatus(null);
-      setEngineInstanceId(null);
+      setEngineInstanceId(engineRef.current?.instanceId ?? null);
       setPipelineId(null);
     }
   }, [
+    engineRef,
     liveSource,
     logLiveLifecycle,
     pushTimeline,
@@ -958,18 +738,21 @@ export default function VADScreen() {
     await teardownLiveResources(true);
     setStreamState('idle');
     setPipelineStatus(null);
-    setEngineInstanceId(null);
+    setEngineInstanceId(engineRef.current?.instanceId ?? null);
     setPipelineId(null);
     setStatus('Live run aborted.');
-  }, [logLiveLifecycle, pushTimeline, streamState, teardownLiveResources]);
+  }, [
+    engineRef,
+    logLiveLifecycle,
+    pushTimeline,
+    streamState,
+    teardownLiveResources,
+  ]);
 
   const runOffline = useCallback(async () => {
-    if (initMode === 'auto' && !selectedModelFolder) {
-      setError('Select a VAD model first.');
-      return;
-    }
-    if (initMode === 'custom' && !customInitForm.fileSources.model) {
-      setError('Pick a VAD model file for custom init.');
+    const engine = engineRef.current;
+    if (!engine) {
+      setError('Initialize the VAD model first.');
       return;
     }
     if (!preparedOfflineInputBuffer) {
@@ -981,9 +764,8 @@ export default function VADScreen() {
     setSummary(null);
     setSegments([]);
     pushTimeline('run.started', 'Offline VAD on prepared buffer.');
-    logOfflineLifecycle('run.start', `model=${selectedModelFolder}`);
+    logOfflineLifecycle('run.start', 'cached engine');
 
-    let createdEngine: VADEngine | null = null;
     let createdSegment: OfflineSegmentBufferRef | null = null;
 
     setBusyOffline(true);
@@ -998,11 +780,6 @@ export default function VADScreen() {
         );
       }
 
-      const sampleRate = Math.max(
-        8000,
-        Number.parseInt(sampleRateInput, 10) || 16000
-      );
-      const threshold = Number.parseFloat(thresholdInput);
       const segment = await createEmptyOfflineSegmentBuffer({
         sourceAudioBufferId: preparedOfflineInputBuffer.bufferId,
       });
@@ -1016,9 +793,6 @@ export default function VADScreen() {
           beforeInfo.state
         }`
       );
-
-      const engine = await createVadEngine(sampleRate, threshold);
-      createdEngine = engine;
 
       const builtSeg = buildSegmentationOption(offlineSegConfig);
       let processOptions: VADOfflineRunOptions | undefined;
@@ -1068,8 +842,7 @@ export default function VADScreen() {
           : [];
       setSegments(all.slice(-SEGMENT_PREVIEW_LIMIT));
 
-      await engine.destroy();
-      createdEngine = null;
+      setEngineInstanceId(engine.instanceId);
       setStatus('Offline run completed successfully.');
     } catch (offlineErr) {
       const message = normalizeErrorMessage(offlineErr);
@@ -1078,9 +851,6 @@ export default function VADScreen() {
       pushTimeline('run.error', message);
       logOfflineLifecycle('run.error', message);
     } finally {
-      if (createdEngine) {
-        await createdEngine.destroy().catch(() => {});
-      }
       if (createdSegment) {
         logOfflineLifecycle(
           'segment.release.finally.start',
@@ -1107,16 +877,11 @@ export default function VADScreen() {
       setBusyOffline(false);
     }
   }, [
+    engineRef,
     logOfflineLifecycle,
     offlineSegConfig,
     preparedOfflineInputBuffer,
     pushTimeline,
-    createVadEngine,
-    customInitForm.fileSources.model,
-    initMode,
-    sampleRateInput,
-    selectedModelFolder,
-    thresholdInput,
   ]);
 
   const clearError = useCallback(() => {
@@ -1124,8 +889,10 @@ export default function VADScreen() {
   }, []);
 
   useEffect(() => {
-    loadModels().catch(() => {});
-  }, [loadModels]);
+    if (isEngineInitialized && vad.initResult) {
+      setStatus('VAD engine ready. Choose live or offline run.');
+    }
+  }, [isEngineInitialized, vad.initResult]);
 
   useEffect(() => {
     return () => {
@@ -1195,69 +962,15 @@ export default function VADScreen() {
           </View>
         </View>
 
+        <VadModelInitPanel
+          vad={vad}
+          sectionStart={1}
+          disabled={isBusy}
+          onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+        />
+
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Engine config</Text>
-          <InitModeSelector
-            value={initMode}
-            onChange={setInitMode}
-            disabled={isBusy}
-          />
-          <Text style={styles.mutedText}>
-            {initMode === 'auto'
-              ? 'Select a model folder; type is detected when you start live or offline VAD.'
-              : 'Choose silero_vad or ten_vad, pick the ONNX file (or Fill from catalog), then run VAD.'}
-          </Text>
-          {loadingModels ? (
-            <View style={styles.inlineRow}>
-              <ActivityIndicator />
-              <Text style={styles.mutedText}>
-                Detecting available VAD models...
-              </Text>
-            </View>
-          ) : availableModels.length === 0 ? (
-            <Text style={styles.warningText}>
-              No streaming VAD model found. Download one from Downloadmanager
-              first.
-            </Text>
-          ) : (
-            <ModelFolderGrid
-              entries={catalogEntries}
-              selectedId={selectedModelFolder}
-              initializedId={null}
-              onSelect={setSelectedModelFolder}
-              loading={loadingModels}
-              disabled={isBusy}
-              emptyMessage="No streaming VAD models found."
-            />
-          )}
-          {initMode === 'custom' ? (
-            <VadCustomInitForm
-              value={customInitForm}
-              onChange={setCustomInitForm}
-              selectedCatalogModelId={selectedModelFolder}
-              onFillFromSelectedModel={() => {
-                handleFillFromSelectedModel().catch(() => {});
-              }}
-              onPrepareScatteredTest={handlePrepareScatteredTest}
-              fillLoading={customFillLoading}
-              disabled={isBusy}
-              fillHint={customFillHint}
-            />
-          ) : null}
-          <View style={styles.inlineRowWrap}>
-            <Text style={styles.inputLabel}>sampleRate: {sampleRateInput}</Text>
-            <Pressable
-              style={styles.smallButton}
-              onPress={() =>
-                setSampleRateInput((prev) =>
-                  prev === '16000' ? '8000' : '16000'
-                )
-              }
-              disabled={isBusy}
-            >
-              <Text style={styles.smallButtonText}>Toggle</Text>
-            </Pressable>
-          </View>
+          <Text style={styles.cardTitle}>Run options</Text>
           <View style={styles.inlineRowWrap}>
             <Text style={styles.inputLabel}>
               chunkSize (live drain): {chunkSizeInput}
@@ -1266,18 +979,6 @@ export default function VADScreen() {
               style={styles.smallButton}
               onPress={() =>
                 setChunkSizeInput((prev) => (prev === '512' ? '320' : '512'))
-              }
-              disabled={isBusy}
-            >
-              <Text style={styles.smallButtonText}>Toggle</Text>
-            </Pressable>
-          </View>
-          <View style={styles.inlineRowWrap}>
-            <Text style={styles.inputLabel}>threshold: {thresholdInput}</Text>
-            <Pressable
-              style={styles.smallButton}
-              onPress={() =>
-                setThresholdInput((prev) => (prev === '0.5' ? '0.35' : '0.5'))
               }
               disabled={isBusy}
             >
@@ -1298,15 +999,6 @@ export default function VADScreen() {
               <Text style={styles.smallButtonText}>Toggle</Text>
             </Pressable>
           </View>
-          <Pressable
-            style={[styles.secondaryButton, isBusy && styles.buttonDisabled]}
-            disabled={isBusy}
-            onPress={() => {
-              loadModels().catch(() => {});
-            }}
-          >
-            <Text style={styles.secondaryButtonText}>Reload model list</Text>
-          </Pressable>
         </View>
 
         {mode === 'live' ? (
@@ -1672,36 +1364,6 @@ const styles = StyleSheet.create({
   toggleChipTextActive: {
     color: '#FFFFFF',
   },
-  modelList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  modelChip: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#D1D5DB',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    backgroundColor: '#FFFFFF',
-  },
-  modelChipActive: {
-    backgroundColor: '#EAF2FF',
-    borderColor: '#0F62FE',
-  },
-  modelChipText: {
-    fontSize: 13,
-    color: '#1F2937',
-  },
-  modelChipTextActive: {
-    color: '#0F62FE',
-    fontWeight: '600',
-  },
-  inlineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   inlineRowWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1784,10 +1446,6 @@ const styles = StyleSheet.create({
   mutedText: {
     fontSize: 13,
     color: '#6B7280',
-  },
-  warningText: {
-    fontSize: 13,
-    color: '#92400E',
   },
   errorBox: {
     borderRadius: 10,

@@ -20,6 +20,7 @@ import type { OfflinePunctuationEngine } from 'react-native-sherpa-onnx/punctuat
 import type { AudioTaggingEngine } from 'react-native-sherpa-onnx/audio-tagging';
 import type { LanguageIdentificationEngine } from 'react-native-sherpa-onnx/language-identification';
 import type { KeywordSpottingEngine } from 'react-native-sherpa-onnx/kws';
+import type { VADEngine } from 'react-native-sherpa-onnx/vad';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -289,4 +290,38 @@ export function clearKwsCache(): void {
   kwsEngine = null;
   kwsModelFolder = null;
   kwsInitMessage = null;
+}
+
+// --- VAD cache ---
+
+let vadEngine: VADEngine | null = null;
+let vadModelFolder: string | null = null;
+let vadInitMessage: string | null = null;
+
+export function getVadCache(): {
+  engine: VADEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: vadEngine,
+    modelFolder: vadModelFolder,
+    initMessage: vadInitMessage,
+  };
+}
+
+export function setVadCache(
+  engine: VADEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  vadEngine = engine;
+  vadModelFolder = modelFolder;
+  vadInitMessage = initMessage;
+}
+
+export function clearVadCache(): void {
+  vadEngine = null;
+  vadModelFolder = null;
+  vadInitMessage = null;
 }
