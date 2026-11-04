@@ -4,7 +4,6 @@ import {
   Alert,
   Animated,
   ScrollView,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -16,20 +15,11 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
-  createDiarization,
-  type DiarizationEngine,
-} from 'react-native-sherpa-onnx/diarization';
-import {
   createEmptyOfflineSegmentBuffer,
   getOfflineSegmentBufferSegments,
   releasePipelineSegmentBuffer,
   type DiarizationSegmentMeta,
 } from 'react-native-sherpa-onnx/segmentbuffer';
-import {
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import type { RootStackParamList } from '../../types/navigation';
 import { DIARIZATION_AUDIO_FILES } from '../../audioConfig';
 import {
@@ -37,22 +27,8 @@ import {
   type OfflineAudioBufferInfo,
   type OfflineAudioBufferWidgetHandle,
 } from '../../components/OfflineAudioBufferWidget';
-import { ModelFolderGrid } from '../../components/modelInit/ModelFolderGrid';
-import {
-  InitModeSelector,
-  type ModelInitMode,
-} from '../../components/modelInit/InitModeSelector';
-import { FileSourceSlotPicker } from '../../components/modelInit/FileSourceSlotPicker';
-import {
-  loadDiarizationSegmentationModelCatalog,
-  getDiarizationSegmentationModelPathConfig,
-  type DiarizationSegmentationCatalogSnapshot,
-} from '../../utils/diarizationSegmentationModelCatalog';
-import {
-  loadSpeakerEmbeddingModelCatalog,
-  getSpeakerEmbeddingModelPathConfig,
-  type SpeakerEmbeddingCatalogSnapshot,
-} from '../../utils/speakerEmbeddingModelCatalog';
+import { DiarizationModelInitPanel } from '../../components/DiarizationModelInitPanel';
+import { useDiarizationModelInit } from '../../hooks/useDiarizationModelInit';
 import {
   styles,
   SPEAKER_COLORS,
@@ -75,19 +51,6 @@ type EventLogItem = {
   id: string;
   time: string;
   message: string;
-};
-
-type EngineInfo = {
-  sampleRate: number;
-  segId: string;
-  embId: string;
-  numClusters: number;
-  threshold: number;
-  computeConfidence: boolean;
-  numThreads: number;
-  windowShiftRatio: number;
-  minDurationOn: number;
-  minDurationOff: number;
 };
 
 function formatTime(seconds: number): string {
@@ -117,48 +80,16 @@ function getSpeakerBgColor(index: number): string {
 export default function DiarizationScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
 
-  // Engine & buffer references
-  const engineRef = useRef<DiarizationEngine | null>(null);
   const offlineWidgetRef = useRef<OfflineAudioBufferWidgetHandle | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Model Catalogs & Selection
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [segCatalog, setSegCatalog] =
-    useState<DiarizationSegmentationCatalogSnapshot | null>(null);
-  const [embCatalog, setEmbCatalog] =
-    useState<SpeakerEmbeddingCatalogSnapshot | null>(null);
-  const [selectedSegId, setSelectedSegId] = useState<string | null>(null);
-  const [selectedEmbId, setSelectedEmbId] = useState<string | null>(null);
-  const [customSegSource, setCustomSegSource] = useState<
-    FileSource | undefined
-  >(undefined);
-  const [customEmbSource, setCustomEmbSource] = useState<
-    FileSource | undefined
-  >(undefined);
-
-  // Engine Lifecycle State
-  const [engineInitBusy, setEngineInitBusy] = useState(false);
-  const [engineInfo, setEngineInfo] = useState<EngineInfo | null>(null);
-  const [engineError, setEngineError] = useState<string | null>(null);
-
-  // Advanced Tuning Parameters (Showcase presets optimized for example audios & mobile CPU)
-  const [tuningExpanded, setTuningExpanded] = useState(false);
-  const [clusteringThreshold, setClusteringThreshold] = useState(0.5);
-  const [numClusters, setNumClusters] = useState(4); // default 4 for initial 4-speaker sample audio
-  /** Opt-in silhouette confidence; default false matches SDK / upstream. */
-  const [computeConfidence, setComputeConfidence] = useState(false);
-  const [minDurationOn, setMinDurationOn] = useState(0.3); // 0.3s filters spurious frame-glitches for clean turns
-  const [minDurationOff, setMinDurationOff] = useState(0.5); // 0.5s merges conversational pauses
-  const [windowShiftRatio, setWindowShiftRatio] = useState(0.25); // 0.25 (75% overlap) provides fast execution on mobile CPU
-  const [numThreads, setNumThreads] = useState(2); // default 2 threads for fast inference
+  const [hasDiarizedOnce, setHasDiarizedOnce] = useState(false);
 
   // Audio Ingress & Diarization Execution
   const [offlineInputBuffer, setOfflineInputBuffer] =
     useState<OfflineAudioBufferInfo | null>(null);
   const [diarizeBusy, setDiarizeBusy] = useState(false);
   const [reclusterBusy, setReclusterBusy] = useState(false);
-  const [hasDiarizedOnce, setHasDiarizedOnce] = useState(false);
   const [progress, setProgress] = useState(0);
   const [processingTimeMs, setProcessingTimeMs] = useState(0);
   const [executionError, setExecutionError] = useState<string | null>(null);
@@ -213,195 +144,44 @@ export default function DiarizationScreen() {
     ]);
   }, []);
 
-  // Reload model catalogs
-  const reloadCatalogs = useCallback(async () => {
-    try {
-      const [segSnap, embSnap] = await Promise.all([
-        loadDiarizationSegmentationModelCatalog(),
-        loadSpeakerEmbeddingModelCatalog(),
-      ]);
-      setSegCatalog(segSnap);
-      setSelectedSegId((curr) => {
-        if (curr && segSnap.entries.some((e) => e.id === curr)) return curr;
-        return segSnap.entries[0]?.id ?? null;
-      });
+  const clearDiarizationRunState = useCallback(() => {
+    setHasDiarizedOnce(false);
+    setTurns([]);
+    setProgress(0);
+    setProcessingTimeMs(0);
+    setExecutionError(null);
+  }, []);
 
-      setEmbCatalog(embSnap);
-      setSelectedEmbId((curr) => {
-        if (curr && embSnap.entries.some((e) => e.id === curr)) return curr;
-        return embSnap.entries[0]?.id ?? null;
-      });
-    } catch (e) {
-      appendEvent(
-        `Catalogs load error: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  }, [appendEvent]);
+  const diarization = useDiarizationModelInit({
+    onEngineReady: () => {
+      setHasDiarizedOnce(false);
+    },
+    onAfterRelease: clearDiarizationRunState,
+  });
 
-  useEffect(() => {
-    reloadCatalogs().catch(() => {});
-  }, [reloadCatalogs]);
+  const {
+    engineRef,
+    engineInfo,
+    tuning,
+    patchTuning,
+    loading: engineInitBusy,
+    ensureEngineReady,
+    updateEngineInfoAfterRecluster,
+  } = diarization;
 
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (
-        category === ModelCategory.Diarization ||
-        category === ModelCategory.SpeakerEmbedding
-      ) {
-        reloadCatalogs().catch(() => {});
-      }
-    });
-    return unsubscribe;
-  }, [reloadCatalogs]);
-
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       abortControllerRef.current?.abort();
-      const eng = engineRef.current;
-      engineRef.current = null;
-      eng?.destroy().catch(() => {});
     };
   }, []);
 
-  // Initialize Diarization Engine
-  const initEngine = useCallback(async (): Promise<DiarizationEngine> => {
-    setEngineError(null);
-    setEngineInitBusy(true);
-    try {
-      if (engineRef.current) {
-        await engineRef.current.destroy().catch(() => {});
-        engineRef.current = null;
-        setEngineInfo(null);
-        setHasDiarizedOnce(false);
-      }
-
-      let segSource: FileSource;
-      let embSource: FileSource;
-      let segLabel = '';
-      let embLabel = '';
-
-      if (initMode === 'auto') {
-        if (!segCatalog || !selectedSegId) {
-          throw new Error(
-            'No segmentation model selected. Please select or download a model.'
-          );
-        }
-        if (!embCatalog || !selectedEmbId) {
-          throw new Error(
-            'No speaker embedding model selected. Please select or download a model.'
-          );
-        }
-
-        segSource = getDiarizationSegmentationModelPathConfig(selectedSegId, {
-          padModelIds: segCatalog.padModelIds,
-          padModelsPath: segCatalog.padModelsPath,
-          bundledFolders: segCatalog.bundledFolders,
-          downloadedIds: new Set(segCatalog.downloadedIds),
-          downloadedPaths: segCatalog.downloadedPaths,
-        });
-        embSource = getSpeakerEmbeddingModelPathConfig(selectedEmbId, {
-          padModelIds: embCatalog.padModelIds,
-          padModelsPath: embCatalog.padModelsPath,
-          bundledFolders: embCatalog.bundledFolders,
-          downloadedIds: new Set(embCatalog.downloadedIds),
-          downloadedPaths: embCatalog.downloadedPaths,
-        });
-        segLabel = selectedSegId;
-        embLabel = selectedEmbId;
-      } else {
-        if (!customSegSource) {
-          throw new Error('Please select a custom segmentation model (.onnx).');
-        }
-        if (!customEmbSource) {
-          throw new Error(
-            'Please select a custom speaker embedding model (.onnx).'
-          );
-        }
-        segSource = customSegSource;
-        embSource = customEmbSource;
-        segLabel = 'Custom Seg';
-        embLabel = 'Custom Emb';
-      }
-
-      appendEvent(
-        `Initializing Diarization engine (${segLabel} + ${embLabel})...`
-      );
-
-      const engine = await createDiarization({
-        segmentation: {
-          modelSource: segSource,
-          windowShiftRatio,
-        },
-        embedding: {
-          modelSource: embSource,
-        },
-        clustering: {
-          numClusters: numClusters > 0 ? numClusters : undefined,
-          threshold: clusteringThreshold,
-          computeConfidence,
-        },
-        minDurationOn,
-        minDurationOff,
-        numThreads,
-      });
-
-      engineRef.current = engine;
-      setEngineInfo({
-        sampleRate: 16000,
-        segId: segLabel,
-        embId: embLabel,
-        numClusters,
-        threshold: clusteringThreshold,
-        computeConfidence,
-        numThreads,
-        windowShiftRatio,
-        minDurationOn,
-        minDurationOff,
-      });
-      appendEvent(
-        `Diarization engine initialized successfully (computeConfidence=${computeConfidence})`
-      );
-      return engine;
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setEngineError(msg);
-      appendEvent(`Engine init error: ${msg}`);
-      throw e;
-    } finally {
-      setEngineInitBusy(false);
-    }
-  }, [
-    appendEvent,
+  const {
     clusteringThreshold,
-    computeConfidence,
-    customEmbSource,
-    customSegSource,
-    embCatalog,
-    initMode,
-    minDurationOff,
-    minDurationOn,
     numClusters,
+    computeConfidence,
     numThreads,
-    segCatalog,
-    selectedEmbId,
-    selectedSegId,
     windowShiftRatio,
-  ]);
-
-  // Unload Engine
-  const unloadEngine = useCallback(async () => {
-    if (!engineRef.current) return;
-    try {
-      await engineRef.current.destroy().catch(() => {});
-    } finally {
-      engineRef.current = null;
-      setEngineInfo(null);
-      setEngineError(null);
-      setHasDiarizedOnce(false);
-      appendEvent('Engine unloaded');
-    }
-  }, [appendEvent]);
+  } = tuning;
 
   // Run Diarization
   const runDiarization = useCallback(async () => {
@@ -420,29 +200,7 @@ export default function DiarizationScreen() {
 
     let segOutId: string | null = null;
     try {
-      let engine = engineRef.current;
-      const needsReinit =
-        !engine ||
-        !engineInfo ||
-        engineInfo.numClusters !== numClusters ||
-        engineInfo.numThreads !== numThreads ||
-        engineInfo.threshold !== clusteringThreshold ||
-        engineInfo.computeConfidence !== computeConfidence ||
-        engineInfo.windowShiftRatio !== windowShiftRatio ||
-        engineInfo.minDurationOn !== minDurationOn ||
-        engineInfo.minDurationOff !== minDurationOff;
-
-      if (needsReinit) {
-        if (engine) {
-          await engine.destroy().catch(() => {});
-          engineRef.current = null;
-        }
-        engine = await initEngine();
-      }
-
-      if (!engine) {
-        throw new Error('Diarization engine initialization failed');
-      }
+      const engine = await ensureEngineReady(tuning);
 
       appendEvent(
         `Starting diarization on "${offlineInputBuffer.sourceLabel}"...`
@@ -527,18 +285,13 @@ export default function DiarizationScreen() {
     }
   }, [
     appendEvent,
-    clusteringThreshold,
     computeConfidence,
     diarizeBusy,
-    engineInfo,
-    initEngine,
-    minDurationOff,
-    minDurationOn,
-    numClusters,
-    numThreads,
+    engineRef,
+    ensureEngineReady,
     offlineInputBuffer,
     reclusterBusy,
-    windowShiftRatio,
+    tuning,
   ]);
 
   // Cancel Diarization
@@ -584,16 +337,11 @@ export default function DiarizationScreen() {
             : {}),
         }));
         setTurns(updatedTurns);
-        setEngineInfo((prev) =>
-          prev
-            ? {
-                ...prev,
-                numClusters,
-                threshold: clusteringThreshold,
-                computeConfidence,
-              }
-            : prev
-        );
+        updateEngineInfoAfterRecluster({
+          numClusters,
+          clusteringThreshold,
+          computeConfidence,
+        });
         const withConf = updatedTurns.filter(
           (t) => typeof t.confidence === 'number'
         ).length;
@@ -620,8 +368,10 @@ export default function DiarizationScreen() {
     clusteringThreshold,
     computeConfidence,
     diarizeBusy,
+    engineRef,
     numClusters,
     reclusterBusy,
+    updateEngineInfoAfterRecluster,
   ]);
 
   // Speaker Analytics Computation
@@ -707,437 +457,11 @@ export default function DiarizationScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Module 1: Model Selection & Advanced Tuning */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>1. Model Setup & Tuning</Text>
-          <Text style={styles.cardSubtitle}>
-            Pyannote / Reverb segmentation + WeSpeaker / 3D-Speaker embeddings
-          </Text>
-
-          <InitModeSelector
-            value={initMode}
-            onChange={(m) => {
-              setInitMode(m);
-              setEngineError(null);
-            }}
-          />
-
-          {initMode === 'auto' ? (
-            <View>
-              {/* 1a. Segmentation Model */}
-              <Text style={styles.sectionTitle}>
-                1a. Segmentation Model (Pyannote / Reverb)
-              </Text>
-              {segCatalog && segCatalog.entries.length === 0 ? (
-                <View style={styles.noModelsBanner}>
-                  <Text style={styles.noModelsText}>
-                    No segmentation models found on this device. Download a
-                    Pyannote segmentation model from the Download Showcase.
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.downloadLinkButton}
-                    onPress={() => navigation.navigate('DownloadShowcase')}
-                  >
-                    <Ionicons
-                      name="download-outline"
-                      size={16}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.downloadLinkText}>
-                      Open Download Screen
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <ModelFolderGrid
-                  entries={segCatalog?.entries ?? []}
-                  selectedId={selectedSegId}
-                  initializedId={engineInfo?.segId ?? null}
-                  onSelect={(id) => {
-                    setSelectedSegId(id);
-                    setEngineError(null);
-                  }}
-                  disabled={engineInitBusy || diarizeBusy}
-                />
-              )}
-
-              {/* 1b. Speaker Embedding Model */}
-              <Text style={styles.sectionTitle}>
-                1b. Speaker Embedding Model (WeSpeaker / 3D-Speaker)
-              </Text>
-              {embCatalog && embCatalog.entries.length === 0 ? (
-                <View style={styles.noModelsBanner}>
-                  <Text style={styles.noModelsText}>
-                    No speaker embedding models found on this device. Download a
-                    WeSpeaker or 3D-Speaker model from Download Showcase.
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.downloadLinkButton}
-                    onPress={() => navigation.navigate('DownloadShowcase')}
-                  >
-                    <Ionicons
-                      name="download-outline"
-                      size={16}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.downloadLinkText}>
-                      Open Download Screen
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <ModelFolderGrid
-                  entries={embCatalog?.entries ?? []}
-                  selectedId={selectedEmbId}
-                  initializedId={engineInfo?.embId ?? null}
-                  onSelect={(id) => {
-                    setSelectedEmbId(id);
-                    setEngineError(null);
-                  }}
-                  disabled={engineInitBusy || diarizeBusy}
-                />
-              )}
-            </View>
-          ) : (
-            <View style={styles.marginTop10}>
-              <FileSourceSlotPicker
-                label="Pyannote Segmentation Model (.onnx)"
-                value={customSegSource}
-                onChange={(src) => {
-                  setCustomSegSource(src);
-                  setEngineError(null);
-                }}
-                disabled={engineInitBusy || diarizeBusy}
-                required
-              />
-              <FileSourceSlotPicker
-                label="Speaker Embedding Model (.onnx)"
-                value={customEmbSource}
-                onChange={(src) => {
-                  setCustomEmbSource(src);
-                  setEngineError(null);
-                }}
-                disabled={engineInitBusy || diarizeBusy}
-                required
-              />
-            </View>
-          )}
-
-          {/* Collapsible Advanced Tuning */}
-          <TouchableOpacity
-            style={[styles.secondaryButton, styles.marginTop12]}
-            onPress={() => setTuningExpanded((v) => !v)}
-          >
-            <Ionicons
-              name={tuningExpanded ? 'chevron-up' : 'options-outline'}
-              size={18}
-              color="#374151"
-            />
-            <Text style={styles.secondaryButtonText}>
-              {tuningExpanded
-                ? 'Hide Diarization Tuning'
-                : 'Advanced Diarization Tuning'}
-            </Text>
-          </TouchableOpacity>
-
-          {tuningExpanded && (
-            <View style={styles.tuningSectionContent}>
-              {/* Clustering Threshold */}
-              <View style={styles.paramRow}>
-                <View style={styles.flex1}>
-                  <Text style={styles.paramLabel}>Clustering Threshold</Text>
-                  {numClusters > 0 && (
-                    <Text style={styles.cardSubtitle}>
-                      Ignored when cluster count is fixed
-                    </Text>
-                  )}
-                </View>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setClusteringThreshold((v) =>
-                        Math.max(0.1, Math.round((v - 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {clusteringThreshold.toFixed(2)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setClusteringThreshold((v) =>
-                        Math.min(1.0, Math.round((v + 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Number of Clusters */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Fixed Number of Clusters</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() => setNumClusters((v) => Math.max(0, v - 1))}
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {numClusters === 0 ? 'Auto' : numClusters}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() => setNumClusters((v) => Math.min(8, v + 1))}
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Per-segment silhouette confidence (opt-in) */}
-              <View style={styles.paramRow}>
-                <View style={styles.flex1}>
-                  <Text style={styles.paramLabel}>
-                    Compute segment confidence
-                  </Text>
-                  <Text style={styles.cardSubtitle}>
-                    Silhouette score per turn [-1, 1]. Default off (SDK parity).
-                    Re-run diarize after toggling.
-                  </Text>
-                </View>
-                <Switch
-                  value={computeConfidence}
-                  onValueChange={setComputeConfidence}
-                  disabled={diarizeBusy || reclusterBusy}
-                  accessibilityLabel="Compute segment confidence"
-                />
-              </View>
-
-              {/* Min Duration On */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Min Speech Turn Duration</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setMinDurationOn((v) =>
-                        Math.max(0.0, Math.round((v - 0.1) * 10) / 10)
-                      )
-                    }
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {minDurationOn.toFixed(1)}s
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setMinDurationOn((v) =>
-                        Math.min(2.0, Math.round((v + 0.1) * 10) / 10)
-                      )
-                    }
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Max Gap to Merge (Min Duration Off) */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Max Gap to Merge Turns</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setMinDurationOff((v) =>
-                        Math.max(0.0, Math.round((v - 0.1) * 10) / 10)
-                      )
-                    }
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {minDurationOff.toFixed(1)}s
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setMinDurationOff((v) =>
-                        Math.min(2.0, Math.round((v + 0.1) * 10) / 10)
-                      )
-                    }
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Window Shift Ratio */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Sliding Window Hop Ratio</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setWindowShiftRatio((v) =>
-                        Math.max(0.05, Math.round((v - 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {windowShiftRatio.toFixed(2)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setWindowShiftRatio((v) =>
-                        Math.min(0.5, Math.round((v + 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Number of Threads */}
-              <View style={styles.paramRow}>
-                <View style={styles.flex1}>
-                  <Text style={styles.paramLabel}>Inference Threads</Text>
-                  <Text style={styles.cardSubtitle}>
-                    Parallel CPU threads for model forward passes
-                  </Text>
-                </View>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() => setNumThreads((v) => Math.max(1, v - 1))}
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>{numThreads}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() => setNumThreads((v) => Math.min(8, v + 1))}
-                    disabled={diarizeBusy}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          )}
-
-          {/* Engine Action Controls */}
-          <View style={styles.actionControlRow}>
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                styles.flex1,
-                engineInitBusy && styles.buttonDisabled,
-              ]}
-              onPress={() => {
-                initEngine().catch(() => {});
-              }}
-              disabled={engineInitBusy || diarizeBusy}
-            >
-              {engineInitBusy ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Ionicons
-                  name="hardware-chip-outline"
-                  size={18}
-                  color="#FFFFFF"
-                />
-              )}
-              <Text style={styles.buttonText}>
-                {engineInfo ? 'Re-Initialize Engine' : 'Initialize Engine'}
-              </Text>
-            </TouchableOpacity>
-
-            {engineInfo && (
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                onPress={() => {
-                  unloadEngine().catch(() => {});
-                }}
-                disabled={engineInitBusy || diarizeBusy}
-              >
-                <Ionicons
-                  name="close-circle-outline"
-                  size={18}
-                  color="#374151"
-                />
-                <Text style={styles.secondaryButtonText}>Unload</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Engine Metadata Badges */}
-          {engineInfo && (
-            <View style={styles.metaGrid}>
-              <View style={styles.metaBadge}>
-                <Text style={styles.metaBadgeLabel}>Sample Rate</Text>
-                <Text style={styles.metaBadgeValue}>
-                  {engineInfo.sampleRate} Hz
-                </Text>
-              </View>
-              <View style={styles.metaBadge}>
-                <Text style={styles.metaBadgeLabel}>Clustering Mode</Text>
-                <Text style={styles.metaBadgeValue}>
-                  {engineInfo.numClusters > 0
-                    ? `${engineInfo.numClusters} clusters (fixed)`
-                    : `Threshold ${engineInfo.threshold.toFixed(2)}`}
-                </Text>
-              </View>
-              <View style={styles.metaBadge}>
-                <Text style={styles.metaBadgeLabel}>Confidence</Text>
-                <Text style={styles.metaBadgeValue}>
-                  {engineInfo.computeConfidence ? 'On' : 'Off'}
-                </Text>
-              </View>
-            </View>
-          )}
-
-          {engineError && (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{engineError}</Text>
-            </View>
-          )}
-        </View>
+        <DiarizationModelInitPanel
+          diarization={diarization}
+          disabled={engineInitBusy || diarizeBusy || reclusterBusy}
+          onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+        />
 
         {/* Module 2: Audio Ingress & Diarization Execution */}
         <View style={styles.card}>
@@ -1163,11 +487,11 @@ export default function DiarizationScreen() {
 
               // Auto-set cluster count for example audio
               if (info.sourceLabel.includes('4 Speakers')) {
-                setNumClusters(4);
+                patchTuning({ numClusters: 4 });
               } else if (info.sourceLabel.includes('2 Speakers')) {
-                setNumClusters(2);
+                patchTuning({ numClusters: 2 });
               } else {
-                setNumClusters(0);
+                patchTuning({ numClusters: 0 });
               }
             }}
             onBufferReleased={() => {

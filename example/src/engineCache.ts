@@ -41,6 +41,7 @@ import type {
   SpeakerIdentificationEngine,
   SpeakerEmbeddingModelType,
 } from 'react-native-sherpa-onnx/speaker-identification';
+import type { DiarizationEngine } from 'react-native-sherpa-onnx/diarization';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -612,4 +613,63 @@ export function clearSpeakerIdCache(): void {
   speakerIdInitMessage = null;
   speakerIdSelectedModelKind = null;
   speakerIdModelDim = null;
+}
+
+// --- Offline diarization cache ---
+
+export type DiarizationCachedEngineInfo = {
+  sampleRate: number;
+  segId: string;
+  embId: string;
+  numClusters: number;
+  threshold: number;
+  computeConfidence: boolean;
+  numThreads: number;
+  windowShiftRatio: number;
+  minDurationOn: number;
+  minDurationOff: number;
+};
+
+let diarizationEngine: DiarizationEngine | null = null;
+let diarizationSegModelId: string | null = null;
+let diarizationEmbModelId: string | null = null;
+let diarizationInitMessage: string | null = null;
+let diarizationEngineInfo: DiarizationCachedEngineInfo | null = null;
+
+export function getDiarizationCache(): {
+  engine: DiarizationEngine | null;
+  segModelId: string | null;
+  embModelId: string | null;
+  initMessage: string | null;
+  engineInfo: DiarizationCachedEngineInfo | null;
+} {
+  return {
+    engine: diarizationEngine,
+    segModelId: diarizationSegModelId,
+    embModelId: diarizationEmbModelId,
+    initMessage: diarizationInitMessage,
+    engineInfo: diarizationEngineInfo ? { ...diarizationEngineInfo } : null,
+  };
+}
+
+export function setDiarizationCache(
+  engine: DiarizationEngine,
+  segModelId: string,
+  embModelId: string,
+  initMessage: string | null,
+  engineInfo: DiarizationCachedEngineInfo
+): void {
+  diarizationEngine = engine;
+  diarizationSegModelId = segModelId;
+  diarizationEmbModelId = embModelId;
+  diarizationInitMessage = initMessage;
+  diarizationEngineInfo = { ...engineInfo };
+}
+
+export function clearDiarizationCache(): void {
+  diarizationEngine = null;
+  diarizationSegModelId = null;
+  diarizationEmbModelId = null;
+  diarizationInitMessage = null;
+  diarizationEngineInfo = null;
 }
