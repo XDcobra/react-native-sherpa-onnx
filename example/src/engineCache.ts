@@ -21,6 +21,10 @@ import type { AudioTaggingEngine } from 'react-native-sherpa-onnx/audio-tagging'
 import type { LanguageIdentificationEngine } from 'react-native-sherpa-onnx/language-identification';
 import type { KeywordSpottingEngine } from 'react-native-sherpa-onnx/kws';
 import type { VADEngine } from 'react-native-sherpa-onnx/vad';
+import type {
+  EnhancementConcreteModelType,
+  EnhancementEngine,
+} from 'react-native-sherpa-onnx/enhancement';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -324,4 +328,50 @@ export function clearVadCache(): void {
   vadEngine = null;
   vadModelFolder = null;
   vadInitMessage = null;
+}
+
+// --- Offline enhancement cache ---
+
+let enhancementEngine: EnhancementEngine | null = null;
+let enhancementModelFolder: string | null = null;
+let enhancementInitMessage: string | null = null;
+let enhancementDetectedModels: Array<{ type: string; modelDir: string }> = [];
+let enhancementSelectedModelKind: EnhancementConcreteModelType | null = null;
+
+export function getEnhancementCache(): {
+  engine: EnhancementEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  selectedModelKind: EnhancementConcreteModelType | null;
+} {
+  return {
+    engine: enhancementEngine,
+    modelFolder: enhancementModelFolder,
+    initMessage: enhancementInitMessage,
+    detectedModels: [...enhancementDetectedModels],
+    selectedModelKind: enhancementSelectedModelKind,
+  };
+}
+
+export function setEnhancementCache(
+  engine: EnhancementEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  detectedModels: Array<{ type: string; modelDir: string }>,
+  selectedModelKind: EnhancementConcreteModelType | null
+): void {
+  enhancementEngine = engine;
+  enhancementModelFolder = modelFolder;
+  enhancementInitMessage = initMessage;
+  enhancementDetectedModels = detectedModels;
+  enhancementSelectedModelKind = selectedModelKind;
+}
+
+export function clearEnhancementCache(): void {
+  enhancementEngine = null;
+  enhancementModelFolder = null;
+  enhancementInitMessage = null;
+  enhancementDetectedModels = [];
+  enhancementSelectedModelKind = null;
 }
