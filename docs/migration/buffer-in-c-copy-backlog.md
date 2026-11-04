@@ -17,7 +17,7 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 | **4 — Segment: drop storage mirrors** | **S8 → S6 → S1 → S4** | S8 mirrors T3 (cursor/log in C). S6/S1 stop full snapshot/getter dumps. S4 single validator in C |
 | **5 — Optional event contracts** | **T4, S5, A10** | May change JS payload shape; do after storage mirrors are gone; keep or version public contract |
 | **6 — Engine in C (separate epic)** | **S7 → S2** | S2 landed: shared `SegEngine.cpp`, thin Kotlin JNI + iOS bridge. Host `segengine_host_test` (no ORT). |
-| **7 — Deferred from closed IDs** | **A8 → A9 → T1b** (then any new D\* / A\*/T\* deferred rows) | Explicit follow-ups spawned when a closed ID left residual scope — **never** only a done-note |
+| **7 — Deferred from closed IDs** | **A8 done → A9 → T1b** (then any new D\* / A\*/T\* deferred rows) | Explicit follow-ups spawned when a closed ID left residual scope — **never** only a done-note |
 
 **Skip / already done (primary Audio cutover):** A5, A4, A1, A3, A2, A6, A7, S3.
 
@@ -34,7 +34,7 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 
 | ID | Split from | What was left | Why deferred | Target | Status |
 |----|------------|---------------|--------------|--------|--------|
-| **A8** | A1 | Offline feature helpers (STT/TTS/enhancement/separation/diarization/VAD/SLID/tagging/speaker/alignment, …) still `readAllSamples` → JNI `FloatArray` into engines | A1 closed chunked readers / drain-into / encode-viz only; per-feature `bufferId` / `const float*` JNI handoff is engine surface work | Feature JNI accepts bufferId (or pinned `const float*` view) as default offline path; drop full materialize where safe | **deferred** |
+| **A8** | A1 | Offline feature helpers (STT/TTS/enhancement/separation/diarization/VAD/SLID/tagging/speaker/alignment, …) still `readAllSamples` → JNI `FloatArray` into engines | A1 closed chunked readers / drain-into / encode-viz only; per-feature `bufferId` / `const float*` JNI handoff is engine surface work | Feature JNI accepts bufferId (or pinned `const float*` view) as default offline path; drop full materialize where safe | **done** (`pa_acquire_offline_sample_view` + `*FromBuffer` JNI / iOS pointer handoff; live `FloatArray` paths kept) |
 | **A9** | A2 | JSI `OwnedBuffer` still allocates per slice call (no cross-call pool) | A2 removed intermediate `std::vector` only; pool was aspirational in the A2 target column | Reuse / pool `OwnedBuffer` (or equivalent) across JSI get-slice calls without changing ArrayBuffer contract | **deferred** |
 | **T1b** | T1 | TTS batch / punctuation offline / alignment / offline TEXT segmentation / `createLiveFromOffline` still full `.text` / `txt_read_*` → engine `jstring` | T1 closed TurboModule UTF-16 slice readers only; per-feature `bufferId` / view handoff is engine surface work | Feature JNI accepts bufferId (or pinned text view) as default; drop Kotlin `.text` full materialize where safe | **deferred** |
 
@@ -78,7 +78,7 @@ Buffer behavior must stay as today (append/drain/cursor/finalize/spool/overflow/
 | A5 | Audio | Dead `PipelineAudioRegistry.*Jni` sample methods (JSI no longer calls them) | Left for compatibility during cutover | Delete once no callers | **done** (`refactor/close-audiobuffer-copy-backlog`, `*Jni` helpers removed) |
 | A6 | Audio | Video live-tap → C append | — | Already fixed in Audio SoT PR (`pa_append_samples_to_live`) | **done** |
 | A7 | Audio | Android JSI → Kotlin `PipelineAudioRegistry` hop | — | Already fixed; JSI → `AudioRegistry` like iOS | **done** |
-| A8 | Audio | Offline feature helpers still `readAllSamples` → full `FloatArray` into engine JNI | Split from A1; needs per-feature bufferId / `const float*` handoff | Engine JNI default off full materialize | **deferred** (see [Deferred](#deferred-explicit-follow-ups)) |
+| A8 | Audio | Offline feature helpers still `readAllSamples` → full `FloatArray` into engine JNI | Split from A1; needs per-feature bufferId / `const float*` handoff | Engine JNI default off full materialize | **done** (`pa_acquire_offline_sample_view`; Android `*FromBuffer` JNI; iOS bridges use the same view) |
 | A9 | Audio | JSI `OwnedBuffer` alloc per get-slice (no pool) | Split from A2; pool left out of A2 scope | Cross-call buffer pool / reuse | **deferred** (see [Deferred](#deferred-explicit-follow-ups)) |
 | A10 | Audio | Live `onSegment` still embeds `SpeechSegment` in `LiveAudioBufferSegmentEvent` | S5 slimmed native emit; audio fan-in kept fat TS shape | Notify scalars + `liveAudioNotifyToSpeechSegment` / segmentbuffer pull | **done** (`refactor/close-buffer-copy-backlog-phase-5-7`: notify+pull; no embedded segment) |
 | T1 | Text | Feature/Kotlin helpers still materialize full strings via JNI `txt_read_*` / `nativeReadOfflineText` / live `currentText` mirror (TTS, STT, punctuation, OCR populate) | SoT PR kept TurboModule + worker APIs compiling; no text JSI | Shared UTF-16 views / length-bounded readers into feature workers; drop full-string default where safe | **done** (`txt_copy_*_utf16_slice` + TurboModule slices; deferred → **T1b**) |
