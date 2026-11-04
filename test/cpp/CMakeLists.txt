@@ -762,7 +762,9 @@ else()
 endif()
 add_executable(audiobuffer_host_test
   "${AUDIOBUFFER_TEST_DIR}/audiobuffer_registry_test.cpp"
+  "${AUDIOBUFFER_TEST_DIR}/byte_buffer_pool_test.cpp"
   "${AUDIOBUFFER_CPP_ROOT}/AudioRegistry.cpp"
+  "${AUDIOBUFFER_CPP_ROOT}/ByteBufferPool.cpp"
 )
 target_include_directories(audiobuffer_host_test PRIVATE
   "${AUDIOBUFFER_CPP_ROOT}"

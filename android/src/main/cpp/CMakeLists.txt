@@ -210,6 +210,7 @@ set(SOURCES
     tts/sherpa-onnx-tts-engine-wrapper.cpp
     jni/tts/sherpa-onnx-tts-jni.cpp
     audiobuffer/AudioRegistry.cpp
+    audiobuffer/ByteBufferPool.cpp
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
     jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp
