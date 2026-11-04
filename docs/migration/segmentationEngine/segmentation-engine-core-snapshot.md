@@ -50,12 +50,14 @@ Offline-Pass (`segmentOfflineBuffer`) spiegelt dieselben Parameter (Text: zeiche
 ```mermaid
 sequenceDiagram
   participant JS
-  participant Txt as LiveTextEntry
+  participant Txt as LiveTextEntry_C
+  participant Hook as seg_engine_on_text_write
   participant Reg as SegmentationEngineRegistry
   participant Eng as TextSyntheticAutoEngine
 
   JS->>Txt: setPartial / appendPartial
-  Txt->>Reg: onLiveTextWrite(bufferId)
+  Txt->>Hook: C write path
+  Hook->>Reg: JNI onLiveTextWrite (Android) / SegEngine (iOS)
   Reg->>Eng: evaluateText()
   Eng->>Txt: commitSegment (partial → Segment) / writePartial(rest)
   Txt-->>JS: onPartial / onSegment (native events)
@@ -70,13 +72,15 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
   participant JS
-  participant Live as LiveEntry
+  participant Live as PaLiveEntry_C
+  participant Hook as seg_engine_on_audio_append
   participant Reg as SegmentationEngineRegistry
   participant Eng as SpeechEnergySilenceEngine
   participant SegBuf as LiveSegmentBuffer
 
   JS->>Live: appendSamples (Frames)
-  Live->>Reg: onLiveAudioWrite(bufferId, chunk, sr, totalWritten)
+  Live->>Hook: C append path
+  Hook->>Reg: JNI onLiveAudioWrite (Android) / SegEngine (iOS)
   Reg->>Eng: evaluateAudioChunk(...)
   Eng->>SegBuf: appendSegment (Speech)
   SegBuf-->>JS: pipelineLiveSegmentAppended / onSegment
