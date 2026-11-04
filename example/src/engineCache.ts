@@ -16,7 +16,10 @@ import type {
   OcrConcreteModelType,
   OcrEngine,
 } from 'react-native-sherpa-onnx/ocr';
-import type { OfflinePunctuationEngine } from 'react-native-sherpa-onnx/punctuation';
+import type {
+  OfflinePunctuationEngine,
+  StreamingPunctuationEngine,
+} from 'react-native-sherpa-onnx/punctuation';
 import type { AudioTaggingEngine } from 'react-native-sherpa-onnx/audio-tagging';
 import type { LanguageIdentificationEngine } from 'react-native-sherpa-onnx/language-identification';
 import type { KeywordSpottingEngine } from 'react-native-sherpa-onnx/kws';
@@ -200,6 +203,40 @@ export function clearPunctuationCache(): void {
   punctuationEngine = null;
   punctuationModelFolder = null;
   punctuationInitMessage = null;
+}
+
+// --- Streaming (online) punctuation cache ---
+
+let punctuationStreamingEngine: StreamingPunctuationEngine | null = null;
+let punctuationStreamingModelFolder: string | null = null;
+let punctuationStreamingInitMessage: string | null = null;
+
+export function getPunctuationStreamingCache(): {
+  engine: StreamingPunctuationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: punctuationStreamingEngine,
+    modelFolder: punctuationStreamingModelFolder,
+    initMessage: punctuationStreamingInitMessage,
+  };
+}
+
+export function setPunctuationStreamingCache(
+  engine: StreamingPunctuationEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  punctuationStreamingEngine = engine;
+  punctuationStreamingModelFolder = modelFolder;
+  punctuationStreamingInitMessage = initMessage;
+}
+
+export function clearPunctuationStreamingCache(): void {
+  punctuationStreamingEngine = null;
+  punctuationStreamingModelFolder = null;
+  punctuationStreamingInitMessage = null;
 }
 
 // --- Audio tagging cache ---

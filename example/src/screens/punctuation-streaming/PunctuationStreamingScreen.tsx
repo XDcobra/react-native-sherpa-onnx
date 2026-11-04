@@ -9,18 +9,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import {
-  listDownloadedModels,
-  onModelsListUpdated,
-  ModelCategory,
-} from 'react-native-sherpa-onnx/download';
-import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import {
-  getAssetPackPath,
-  listAssetModels,
-  listModelsAtPath,
-} from 'react-native-sherpa-onnx/utils';
 import {
   createLiveTextBuffer,
   appendLiveTextSegment,
@@ -29,26 +17,11 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import {
-  createStreamingPunctuation,
-  detectPunctuationModel,
-  assertStreamingPunctuationCustomConfig,
-  type PunctuationPipelineHandle,
-  type StreamingPunctuationEngine,
-} from 'react-native-sherpa-onnx/punctuation';
-import {
-  InitModeSelector,
-  PunctuationStreamingCustomInitForm,
-  type ModelInitMode,
-  type PunctuationStreamingCustomInitFormState,
-} from '../../components/modelInit';
-import { fillStreamingPunctuationCustomConfigFromModelFolder } from '../../utils/punctuationCustomInitFill';
-import {
-  getFileModelPath,
-  getAssetModelPath,
-  getModelDisplayName,
-  toDetectSource,
-} from '../../modelConfig';
+import type { PunctuationPipelineHandle } from 'react-native-sherpa-onnx/punctuation';
+import { PunctuationStreamingModelInitPanel } from '../../components/PunctuationStreamingModelInitPanel';
+import { ScreenIntroModal } from '../../components/ScreenIntroModal';
+import { usePunctuationStreamingModelInit } from '../../hooks/usePunctuationStreamingModelInit';
+import { formatPunctuationInitError } from '../../hooks/usePunctuationModelInit';
 import { styles } from '../stt/STTScreen.styles';
 import { puncStyles } from '../punctuation/PunctuationScreen.styles';
 import {
@@ -57,64 +30,17 @@ import {
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
 
-const PAD_PACK_NAME = 'sherpa_models';
 const DEFAULT_STREAMING_TEXT =
   'hello world\nthis is streaming punctuation\nit writes live text segments';
 
-const DEFAULT_STREAMING_PUNCTUATION_CUSTOM_INIT: PunctuationStreamingCustomInitFormState =
-  {
-    fileSources: {},
-  };
-
-function isPunctuationNameCandidate(folder: string): boolean {
-  const f = folder.toLowerCase();
-  return (
-    f.includes('punct') ||
-    f.includes('punctuation') ||
-    f.includes('cnn-bilstm') ||
-    f.includes('cnn_bilstm')
-  );
-}
-
-async function folderIsStreamingCnnBilstm(
-  modelPath: FileSource
-): Promise<boolean> {
-  try {
-    const d = await detectPunctuationModel(await toDetectSource(modelPath), {
-      modelType: 'cnn_bilstm',
-    });
-    return d.success && d.modelType === 'cnn_bilstm' && d.isStreaming === true;
-  } catch {
-    return false;
-  }
-}
-
-function resolvePunctuationModelPathFromScan(
-  modelFolder: string,
-  downloadedIds: string[],
-  padFolders: string[],
-  padBasePath: string | null
-): FileSource {
-  if (downloadedIds.includes(modelFolder)) {
-    return getFileModelPath(modelFolder, ModelCategory.Punctuation);
-  }
-  if (padFolders.includes(modelFolder) && padBasePath) {
-    return getFileModelPath(
-      modelFolder,
-      ModelCategory.Punctuation,
-      padBasePath
-    );
-  }
-  return getAssetModelPath(modelFolder);
-}
-
 export default function PunctuationStreamingScreen() {
-  const [availableModels, setAvailableModels] = useState<string[]>([]);
-  const [padModelIds, setPadModelIds] = useState<string[]>([]);
-  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>([]);
-  const [padModelsPath, setPadModelsPath] = useState<string | null>(null);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
+    undefined
+  );
+  const punctuation = usePunctuationStreamingModelInit({
+    onBeforeInit: () => onBeforeInitRef.current?.(),
+  });
+
   const [inputText, setInputText] = useState(DEFAULT_STREAMING_TEXT);
   const [streamingSegConfig, setStreamingSegConfig] =
     useState<SegmentationControlConfig>({
@@ -125,166 +51,27 @@ export default function PunctuationStreamingScreen() {
         maxLengthChars: 500,
       },
     });
-  const [busy, setBusy] = useState(false);
+  const [runBusy, setRunBusy] = useState(false);
   const [outputText, setOutputText] = useState('');
   const [statusText, setStatusText] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] =
-    useState<PunctuationStreamingCustomInitFormState>(
-      DEFAULT_STREAMING_PUNCTUATION_CUSTOM_INIT
-    );
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
-  const engineRef = useRef<StreamingPunctuationEngine | null>(null);
   const handleRef = useRef<PunctuationPipelineHandle | null>(null);
   const inputRef = useRef<LiveTextBufferRef | null>(null);
   const outputRef = useRef<LiveTextBufferRef | null>(null);
 
-  const resolvePunctuationModelPath = useCallback(
-    (modelFolder: string): FileSource => {
-      if (downloadedModelIds.includes(modelFolder)) {
-        return getFileModelPath(modelFolder, ModelCategory.Punctuation);
-      }
-      if (padModelIds.includes(modelFolder) && padModelsPath) {
-        return getFileModelPath(
-          modelFolder,
-          ModelCategory.Punctuation,
-          padModelsPath
-        );
-      }
-      return getAssetModelPath(modelFolder);
-    },
-    [downloadedModelIds, padModelIds, padModelsPath]
-  );
+  const {
+    engineRef,
+    loading,
+    isEngineInitialized,
+    loadingModels,
+    catalogEntries,
+  } = punctuation;
 
-  const loadAvailableModels = useCallback(async () => {
-    setLoadingModels(true);
-    setError(null);
-    try {
-      const [assets, downloadedList] = await Promise.all([
-        listAssetModels(),
-        listDownloadedModels(ModelCategory.Punctuation),
-      ]);
-      const fromAssets = assets
-        .map((m) => m.folder)
-        .filter(isPunctuationNameCandidate);
-      const fromDownloaded = downloadedList.map((m) => m.id);
-
-      let padFolders: string[] = [];
-      let resolvedPad: string | null = null;
-      try {
-        const padPathFromNative = await getAssetPackPath(PAD_PACK_NAME);
-        const fallback = `${DocumentDirectoryPath}/models`;
-        const base = padPathFromNative ?? fallback;
-        const atPath = await listModelsAtPath(base);
-        padFolders = (atPath || [])
-          .map((m) => m.folder)
-          .filter(isPunctuationNameCandidate);
-        if (padFolders.length > 0) resolvedPad = base;
-      } catch {
-        padFolders = [];
-      }
-
-      const combined = Array.from(
-        new Set([
-          ...fromDownloaded,
-          ...fromAssets,
-          ...padFolders.filter(
-            (f) => !fromDownloaded.includes(f) && !fromAssets.includes(f)
-          ),
-        ])
-      );
-
-      const ok: string[] = [];
-      for (const folder of combined) {
-        const mp = resolvePunctuationModelPathFromScan(
-          folder,
-          fromDownloaded,
-          padFolders,
-          resolvedPad
-        );
-        if (await folderIsStreamingCnnBilstm(mp)) {
-          ok.push(folder);
-        }
-      }
-
-      setPadModelsPath(resolvedPad);
-      setPadModelIds(padFolders);
-      setDownloadedModelIds(fromDownloaded);
-      setAvailableModels(ok);
-      setSelectedFolder((cur) =>
-        cur && ok.includes(cur) ? cur : ok[0] ?? null
-      );
-    } catch (e) {
-      console.error('PunctuationStreamingScreen load models', e);
-      setError('Failed to list punctuation streaming models');
-      setAvailableModels([]);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadAvailableModels();
-  }, [loadAvailableModels]);
-
-  useEffect(() => {
-    return onModelsListUpdated((category) => {
-      if (category === ModelCategory.Punctuation) {
-        loadAvailableModels().catch(() => {});
-      }
-    });
-  }, [loadAvailableModels]);
-
-  const handleFillFromSelectedModel = useCallback(async () => {
-    if (!selectedFolder) {
-      Alert.alert('Select a model', 'Pick a catalog model folder first.');
-      return;
-    }
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    setError(null);
-    try {
-      const modelPath = resolvePunctuationModelPath(selectedFolder);
-      const fillResult =
-        await fillStreamingPunctuationCustomConfigFromModelFolder(
-          await toDetectSource(modelPath)
-        );
-      setCustomInitForm({ fileSources: fillResult.customConfig });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setCustomFillHint(
-        `Filled from ${getModelDisplayName(selectedFolder)} (${
-          fillResult.modelDir
-        }).${missing}`
-      );
-    } catch (fillErr) {
-      setCustomFillHint(null);
-      setError(fillErr instanceof Error ? fillErr.message : String(fillErr));
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [resolvePunctuationModelPath, selectedFolder]);
-
-  const handlePrepareScatteredTest = useCallback(() => {
-    setCustomInitForm({ fileSources: {} });
-    setCustomFillHint(
-      'Scattered test: pick CNN-BiLSTM ONNX and BPE vocab separately, then Run.'
-    );
-  }, []);
-
-  const cleanup = async () => {
+  const releasePipelineResources = useCallback(async () => {
     if (handleRef.current) {
       await handleRef.current.stop().catch(() => {});
       handleRef.current = null;
-    }
-    if (engineRef.current) {
-      await engineRef.current.destroy().catch(() => {});
-      engineRef.current = null;
     }
     if (inputRef.current) {
       await releasePipelineTextBuffer(inputRef.current).catch(() => {});
@@ -294,17 +81,33 @@ export default function PunctuationStreamingScreen() {
       await releasePipelineTextBuffer(outputRef.current).catch(() => {});
       outputRef.current = null;
     }
+  }, []);
+
+  onBeforeInitRef.current = async () => {
+    setOutputText('');
+    setStatusText(null);
+    setRunError(null);
+    await releasePipelineResources();
   };
 
   useEffect(() => {
     return () => {
-      void cleanup();
+      releasePipelineResources().catch(() => {});
     };
-  }, []);
+  }, [releasePipelineResources]);
+
+  const handleFree = async () => {
+    await releasePipelineResources();
+    await punctuation.releaseEngine();
+    setOutputText('');
+    setStatusText(null);
+    setRunError(null);
+  };
 
   const runStreamingPunctuation = async () => {
-    if (initMode === 'auto' && !selectedFolder) {
-      Alert.alert('Model', 'Select a streaming CNN-BiLSTM punctuation model.');
+    const engine = engineRef.current;
+    if (!engine) {
+      Alert.alert('Engine', 'Load a model first (Initialize).');
       return;
     }
     const text = inputText.trim();
@@ -313,38 +116,13 @@ export default function PunctuationStreamingScreen() {
       return;
     }
 
-    setBusy(true);
-    setError(null);
+    setRunBusy(true);
+    setRunError(null);
     setOutputText('');
     setStatusText(null);
 
     try {
-      await cleanup();
-      const nt = 2;
-      const engine =
-        initMode === 'custom'
-          ? await (async () => {
-              const customConfig = { ...customInitForm.fileSources };
-              assertStreamingPunctuationCustomConfig(
-                customConfig as unknown as Record<string, unknown>
-              );
-              return createStreamingPunctuation({
-                initMode: 'custom',
-                modelType: 'cnn_bilstm',
-                customConfig: customConfig as {
-                  cnn_bilstm: FileSource;
-                  bpe_vocab: FileSource;
-                },
-                numThreads: nt,
-                provider: 'cpu',
-              });
-            })()
-          : await createStreamingPunctuation({
-              modelSource: resolvePunctuationModelPath(selectedFolder!),
-              modelType: 'cnn_bilstm',
-              provider: 'cpu',
-            });
-      engineRef.current = engine;
+      await releasePipelineResources();
 
       const input = await createLiveTextBuffer();
       const output = await createLiveTextBuffer();
@@ -380,13 +158,14 @@ export default function PunctuationStreamingScreen() {
       );
       handleRef.current = null;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setRunError(formatPunctuationInitError(e));
     } finally {
-      setBusy(false);
+      setRunBusy(false);
     }
   };
 
-  const canShowWorkflow = !loadingModels && availableModels.length > 0;
+  const canShowWorkflow =
+    !loadingModels && (catalogEntries.length > 0 || isEngineInitialized);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -404,118 +183,57 @@ export default function PunctuationStreamingScreen() {
           </Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            1) Model{loadingModels ? ' (loading…)' : ''}
-          </Text>
-          <InitModeSelector
-            value={initMode}
-            onChange={setInitMode}
-            disabled={busy || customFillLoading}
-          />
-          <Text style={styles.hint}>
-            {initMode === 'auto'
-              ? 'Select a streaming CNN-BiLSTM catalog folder, then Run.'
-              : 'Pick CNN-BiLSTM ONNX + BPE vocab (or Fill from catalog), then Run custom.'}
-          </Text>
-          {loadingModels ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" />
-              <Text style={styles.loadingText}>
-                Discovering streaming punctuation models…
-              </Text>
-            </View>
-          ) : availableModels.length === 0 ? (
-            error ? (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>{error}</Text>
-              </View>
-            ) : (
-              <View style={styles.warningContainer}>
-                <Text style={styles.warningText}>
-                  No streaming CNN-BiLSTM punctuation models were found. Install
-                  one under the punctuation category (Download manager) or add a
-                  matching asset / PAD path (folder name e.g. contains
-                  &quot;cnn-bilstm&quot;).
-                </Text>
-              </View>
-            )
-          ) : (
-            <View style={puncStyles.modelWrap}>
-              {availableModels.map((folder) => {
-                const sel = selectedFolder === folder;
-                return (
-                  <TouchableOpacity
-                    key={folder}
-                    style={[
-                      puncStyles.modelChip,
-                      sel && puncStyles.modelChipSelected,
-                    ]}
-                    onPress={() => setSelectedFolder(folder)}
-                  >
-                    <Text style={puncStyles.modelChipText}>
-                      {getModelDisplayName(folder)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-          {initMode === 'custom' && canShowWorkflow ? (
-            <PunctuationStreamingCustomInitForm
-              value={customInitForm}
-              onChange={setCustomInitForm}
-              selectedCatalogModelId={selectedFolder}
-              onFillFromSelectedModel={() => {
-                handleFillFromSelectedModel().catch(() => {});
-              }}
-              onPrepareScatteredTest={handlePrepareScatteredTest}
-              fillLoading={customFillLoading}
-              disabled={busy}
-              fillHint={customFillHint}
-            />
-          ) : null}
-        </View>
+        {isEngineInitialized ? (
+          <TouchableOpacity
+            style={styles.freeButton}
+            onPress={handleFree}
+            disabled={loading || runBusy}
+          >
+            <Text style={styles.freeButtonText}>Release model</Text>
+          </TouchableOpacity>
+        ) : null}
+
+        <PunctuationStreamingModelInitPanel
+          punctuation={punctuation}
+          disabled={runBusy}
+        />
 
         {canShowWorkflow && (
           <>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>2) Live text input</Text>
+              <Text style={styles.sectionTitle}>3. Live text input</Text>
               <TextInput
                 style={[puncStyles.optionInput, puncStyles.multilineInput]}
                 multiline
                 value={inputText}
                 onChangeText={setInputText}
-                editable={!busy}
+                editable={!runBusy}
               />
               <SegmentationPolicyControls
                 variant="text-streaming"
                 value={streamingSegConfig}
                 onChange={setStreamingSegConfig}
-                disabled={busy}
+                disabled={runBusy}
               />
             </View>
 
             <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                4. Run (live buffer → live buffer)
+              </Text>
               <TouchableOpacity
                 style={[
                   styles.button,
-                  (busy || customFillLoading) && styles.buttonDisabled,
+                  (runBusy || !isEngineInitialized) && styles.buttonDisabled,
                 ]}
-                disabled={
-                  busy ||
-                  customFillLoading ||
-                  (initMode === 'auto' ? !selectedFolder : false)
-                }
+                disabled={runBusy || !isEngineInitialized}
                 onPress={runStreamingPunctuation}
               >
-                {busy ? (
+                {runBusy ? (
                   <ActivityIndicator color="#fff" />
                 ) : (
                   <Text style={styles.buttonText}>
-                    {initMode === 'custom'
-                      ? 'Run streaming (custom init)'
-                      : 'Run streaming punctuation'}
+                    Run streaming punctuation
                   </Text>
                 )}
               </TouchableOpacity>
@@ -526,9 +244,9 @@ export default function PunctuationStreamingScreen() {
               ) : null}
             </View>
 
-            {error ? (
+            {runError ? (
               <View style={styles.section}>
-                <Text style={puncStyles.errorText}>{error}</Text>
+                <Text style={puncStyles.errorText}>{runError}</Text>
               </View>
             ) : null}
 
@@ -539,6 +257,7 @@ export default function PunctuationStreamingScreen() {
           </>
         )}
       </ScrollView>
+      <ScreenIntroModal screenId="PunctuationStreaming" />
     </SafeAreaView>
   );
 }
