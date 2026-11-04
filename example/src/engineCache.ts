@@ -1,7 +1,8 @@
 /**
- * Persists STT/TTS/OCR/punctuation engine instances and UI state across screen navigation.
- * When the user leaves a screen, the instance is not released; when they return,
- * the same state (selected model, Free button visible) is restored.
+ * Persists STT/TTS/OCR/punctuation/audio-tagging engine instances and UI state
+ * across screen navigation. When the user leaves a screen, the instance is not
+ * released; when they return, the same state (selected model, Free button
+ * visible) is restored.
  *
  * **Lifecycle note:** These module-level caches persist for the lifetime of the JS context.
  * If the JS context is reloaded (e.g. on hot reload or app restart), native instances will
@@ -17,6 +18,7 @@ import type {
   OcrEngine,
 } from 'react-native-sherpa-onnx/ocr';
 import type { OfflinePunctuationEngine } from 'react-native-sherpa-onnx/punctuation';
+import type { AudioTaggingEngine } from 'react-native-sherpa-onnx/audio-tagging';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -184,4 +186,38 @@ export function clearPunctuationCache(): void {
   punctuationEngine = null;
   punctuationModelFolder = null;
   punctuationInitMessage = null;
+}
+
+// --- Audio tagging cache ---
+
+let audioTaggingEngine: AudioTaggingEngine | null = null;
+let audioTaggingModelFolder: string | null = null;
+let audioTaggingInitMessage: string | null = null;
+
+export function getAudioTaggingCache(): {
+  engine: AudioTaggingEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: audioTaggingEngine,
+    modelFolder: audioTaggingModelFolder,
+    initMessage: audioTaggingInitMessage,
+  };
+}
+
+export function setAudioTaggingCache(
+  engine: AudioTaggingEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  audioTaggingEngine = engine;
+  audioTaggingModelFolder = modelFolder;
+  audioTaggingInitMessage = initMessage;
+}
+
+export function clearAudioTaggingCache(): void {
+  audioTaggingEngine = null;
+  audioTaggingModelFolder = null;
+  audioTaggingInitMessage = null;
 }

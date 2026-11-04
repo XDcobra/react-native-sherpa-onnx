@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,14 +15,8 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
-  assertAudioTaggingCustomConfig,
-  createAudioTagging,
-  detectAudioTaggingModel,
   DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY,
-  type AudioTaggingCustomConfig,
-  type AudioTaggingEngine,
   type AudioTaggingLiveSegmentEvent,
-  type AudioTaggingModelType,
   type AudioTaggingPipelineHandle,
   type AudioTaggingResult,
   type SegmentedAudioTaggingResult,
@@ -42,12 +36,7 @@ import {
   releasePipelineTextBuffer,
   type LiveTextBufferRef,
 } from 'react-native-sherpa-onnx/textbuffer';
-import {
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
-import { styles as baseStyles } from '../stt/STTScreen.styles';
 import { styles as lpStyles } from '../live-pipeline-showcase/LivePipelineShowcaseScreen.styles';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import {
@@ -60,14 +49,11 @@ import {
   buildSegmentationOption,
   type SegmentationControlConfig,
 } from '../../components/SegmentationPolicyControls';
+import { AudioTaggingModelInitPanel } from '../../components/AudioTaggingModelInitPanel';
 import {
-  InitModeSelector,
-  ModelFolderGrid,
-  AudioTaggingCustomInitForm,
-  type ModelInitMode,
-  type AudioTaggingCustomInitFormState,
-} from '../../components/modelInit';
-import { getModelDisplayName, toDetectSource } from '../../modelConfig';
+  formatAudioTaggingInitError,
+  useAudioTaggingModelInit,
+} from '../../hooks/useAudioTaggingModelInit';
 import {
   AUDIO_TAGGING_AUDIO_FILES,
   TEST_AUDIO_TAGGING_FILES,
@@ -79,18 +65,10 @@ import {
   toFileSource,
 } from '../../utils/fileSourceFromUri';
 import { DECODABLE_AUDIO_PICKER_TYPES } from '../../utils/decodableAudioPickerTypes';
-import { fillAudioTaggingCustomConfigFromModelFolder } from '../../utils/audioTaggingCustomInitFill';
-import {
-  getAudioTaggingModelPathConfig,
-  loadAudioTaggingModelCatalog,
-  type AudioTaggingCatalogSnapshot,
-} from '../../utils/audioTaggingModelCatalog';
 import type { RootStackParamList } from '../../types/navigation';
 import { colorForEvent, styles } from './AudioTaggingScreen.styles';
 
-const NUM_THREADS = 2;
 const LIVE_SAMPLE_RATE = 16000;
-const TOP_K_OPTIONS = [3, 5, 10] as const;
 const AT_OFFLINE_EVALUATORS = ['speech_energy_silence'] as const;
 const AT_LIVE_EVALUATORS = [
   'speech_energy_silence',
@@ -100,24 +78,7 @@ const AT_LIVE_EVALUATORS = [
 type ProcessingMode = 'batch' | 'liveOverload';
 type LiveSourceMode = 'file' | 'mic';
 type LiveFileSourceType = 'example' | 'own';
-type PathCtx = {
-  padModelIds: string[];
-  padModelsPath: string | null;
-  bundledFolders: string[];
-  downloadedIds: Set<string>;
-};
 
-const EMPTY_CATALOG: AudioTaggingCatalogSnapshot = {
-  entries: [],
-  padModelIds: [],
-  padModelsPath: null,
-  bundledFolders: [],
-  downloadedIds: [],
-};
-const DEFAULT_CUSTOM_INIT: AudioTaggingCustomInitFormState = {
-  modelType: 'ced',
-  fileSources: {},
-};
 const LIVE_SEG_DEFAULT: SegmentationControlConfig = {
   mode: 'auto',
   policy: { ...DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
@@ -125,14 +86,6 @@ const LIVE_SEG_DEFAULT: SegmentationControlConfig = {
 const DEFAULT_EXAMPLE_ID: AudioFileId =
   (AUDIO_TAGGING_AUDIO_FILES[0]?.id as AudioFileId | undefined) ??
   TEST_AUDIO_TAGGING_FILES.CAT;
-
-function errMsg(error: unknown): string {
-  if (error instanceof Error) {
-    const code = (error as { code?: string }).code;
-    return code ? `[${code}] ${error.message}` : error.message;
-  }
-  return typeof error === 'string' ? error : String(error);
-}
 
 function formatSeconds(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0.0s';
@@ -227,33 +180,20 @@ export default function AudioTaggingScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  const [processingMode, setProcessingMode] = useState<ProcessingMode>('batch');
-  const [catalog, setCatalog] =
-    useState<AudioTaggingCatalogSnapshot>(EMPTY_CATALOG);
-  const [loadingModels, setLoadingModels] = useState(false);
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customInitForm, setCustomInitForm] =
-    useState<AudioTaggingCustomInitFormState>(DEFAULT_CUSTOM_INIT);
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-  const [selectedModelForInit, setSelectedModelForInit] = useState<
-    string | null
-  >(null);
-  const [currentModelFolder, setCurrentModelFolder] = useState<string | null>(
-    null
+  const onBeforeInitRef = useRef<(() => void | Promise<void>) | undefined>(
+    undefined
   );
-  const [initializedSummary, setInitializedSummary] = useState<string | null>(
-    null
-  );
-  const [initResult, setInitResult] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [tagging, setTagging] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [errorSource, setErrorSource] = useState<
-    'init' | 'tag' | 'live' | null
-  >(null);
+  const audioTagging = useAudioTaggingModelInit({
+    onBeforeInit: () => onBeforeInitRef.current?.(),
+  });
 
-  const [topK, setTopK] = useState<(typeof TOP_K_OPTIONS)[number]>(5);
+  const [processingMode, setProcessingMode] = useState<ProcessingMode>('batch');
+  const [tagging, setTagging] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runErrorSource, setRunErrorSource] = useState<'tag' | 'live' | null>(
+    null
+  );
+
   const [segBatchConfig, setSegBatchConfig] =
     useState<SegmentationControlConfig>({ mode: 'off' });
   const [segLiveConfig, setSegLiveConfig] =
@@ -291,7 +231,6 @@ export default function AudioTaggingScreen() {
     null
   );
 
-  const engineRef = useRef<AudioTaggingEngine | null>(null);
   const pipelineRef = useRef<AudioTaggingPipelineHandle | null>(null);
   const liveInRef = useRef<LiveAudioBufferRef | null>(null);
   const liveTextRef = useRef<LiveTextBufferRef | null>(null);
@@ -299,21 +238,17 @@ export default function AudioTaggingScreen() {
   const cleanupLockRef = useRef(false);
   const liveRunEpochRef = useRef(0);
   const liveAutoExpandDoneRef = useRef(false);
-  const pathCtxRef = useRef<PathCtx | null>(null);
 
-  const pathCtx = useMemo((): PathCtx => {
-    const ctx: PathCtx = {
-      padModelIds: catalog.padModelIds,
-      padModelsPath: catalog.padModelsPath,
-      bundledFolders: catalog.bundledFolders,
-      downloadedIds: new Set(catalog.downloadedIds),
-    };
-    pathCtxRef.current = ctx;
-    return ctx;
-  }, [catalog]);
+  const {
+    engineRef,
+    topK,
+    loading,
+    isEngineInitialized,
+    customFillLoading,
+    releaseEngine,
+  } = audioTagging;
 
-  const catalogEntries = catalog.entries;
-  const engineReady = !!engineRef.current && !!initializedSummary;
+  const engineReady = isEngineInitialized;
   const liveBusy = liveRunState === 'running' || liveRunState === 'stopping';
   const busy = loading || tagging || liveBusy || customFillLoading;
 
@@ -324,36 +259,10 @@ export default function AudioTaggingScreen() {
     setExpandedSegment(null);
   }, []);
 
-  const setErr = useCallback((source: 'init' | 'tag' | 'live', e: unknown) => {
-    setErrorSource(source);
-    setError(errMsg(e));
+  const setRunErr = useCallback((source: 'tag' | 'live', e: unknown) => {
+    setRunErrorSource(source);
+    setRunError(formatAudioTaggingInitError(e));
   }, []);
-
-  const loadCatalog = useCallback(async () => {
-    setLoadingModels(true);
-    try {
-      const snapshot = await loadAudioTaggingModelCatalog();
-      setCatalog(snapshot);
-      setSelectedModelForInit((prev) =>
-        prev && snapshot.entries.some((e) => e.id === prev)
-          ? prev
-          : snapshot.entries[0]?.id ?? null
-      );
-    } catch (e) {
-      setCatalog(EMPTY_CATALOG);
-      setErr('init', e);
-    } finally {
-      setLoadingModels(false);
-    }
-  }, [setErr]);
-
-  useEffect(() => {
-    loadCatalog().catch(() => {});
-    return onModelsListUpdated((category) => {
-      if (category === ModelCategory.AudioTagging)
-        loadCatalog().catch(() => {});
-    });
-  }, [loadCatalog]);
 
   const cleanupLiveRuntime = useCallback(async () => {
     if (cleanupLockRef.current) return;
@@ -383,178 +292,49 @@ export default function AudioTaggingScreen() {
     }
   }, []);
 
+  onBeforeInitRef.current = async () => {
+    await cleanupLiveRuntime();
+    clearResults();
+    setRunError(null);
+    setRunErrorSource(null);
+    setLiveStatus(null);
+    setLiveLastPrimary(null);
+    setLiveSegments([]);
+    setExpandedLiveSegment(null);
+    setLiveRunState('idle');
+  };
+
   useEffect(() => {
     return () => {
       cleanupLiveRuntime().catch(() => {});
-      const engine = engineRef.current;
-      engineRef.current = null;
-      engine?.destroy().catch(() => {});
     };
   }, [cleanupLiveRuntime]);
 
-  const resolveModelPath = useCallback(
-    (modelId: string): FileSource =>
-      getAudioTaggingModelPathConfig(modelId, pathCtxRef.current ?? pathCtx),
-    [pathCtx]
-  );
-
-  const handleFillFromSelectedModel = useCallback(async () => {
-    if (!selectedModelForInit) {
-      Alert.alert('Select a model', 'Pick an audio tagging pack first.');
-      return;
-    }
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    setError(null);
-    setErrorSource(null);
-    try {
-      const fillResult = await fillAudioTaggingCustomConfigFromModelFolder(
-        await toDetectSource(resolveModelPath(selectedModelForInit))
-      );
-      setCustomInitForm({
-        modelType: fillResult.modelType,
-        fileSources: fillResult.customConfig,
-      });
-      const missing =
-        fillResult.missingKeys.length > 0
-          ? ` Missing: ${fillResult.missingKeys.join(', ')}`
-          : '';
-      setCustomFillHint(
-        `Filled from ${getModelDisplayName(selectedModelForInit)}.${missing}`
-      );
-    } catch (e) {
-      setCustomFillHint(null);
-      setErr('init', e);
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [resolveModelPath, selectedModelForInit, setErr]);
-
-  const destroyEngine = useCallback(async () => {
-    await cleanupLiveRuntime();
-    const previous = engineRef.current;
-    engineRef.current = null;
-    if (previous) await previous.destroy().catch(() => {});
-  }, [cleanupLiveRuntime]);
-
-  const handleInitialize = useCallback(
-    async (modelFolder: string) => {
-      if (!modelFolder) {
-        setErr('init', 'Select an audio tagging model folder first.');
-        return;
-      }
-      setLoading(true);
-      setError(null);
-      setErrorSource(null);
-      setInitResult(null);
-      setInitializedSummary(null);
-      clearResults();
-      try {
-        await destroyEngine();
-        const modelSource = await toDetectSource(resolveModelPath(modelFolder));
-        const detectResult = await detectAudioTaggingModel(modelSource, {
-          modelType: 'auto',
-        });
-        if (!detectResult.success) {
-          setErr(
-            'init',
-            detectResult.error?.trim() ||
-              'No audio tagging model detected (need ONNX + labels CSV)'
-          );
-          setInitResult('Initialization failed: detection unsuccessful');
-          return;
-        }
-        const detectedType: AudioTaggingModelType =
-          detectResult.modelType === 'zipformer' ? 'zipformer' : 'ced';
-        engineRef.current = await createAudioTagging({
-          modelSource,
-          numThreads: NUM_THREADS,
-          topK,
-        });
-        setCurrentModelFolder(modelFolder);
-        setInitializedSummary(getModelDisplayName(modelFolder));
-        setInitResult(
-          `Initialized: ${getModelDisplayName(
-            modelFolder
-          )}\nDetected: ${detectedType}`
-        );
-      } catch (e) {
-        setErr('init', e);
-        setInitResult(`Initialization failed: ${errMsg(e)}`);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [clearResults, destroyEngine, resolveModelPath, setErr, topK]
-  );
-
-  const handleInitializeCustom = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setErrorSource(null);
-    setInitResult(null);
-    setInitializedSummary(null);
-    clearResults();
-    try {
-      await destroyEngine();
-      const model = customInitForm.fileSources.model;
-      const labels = customInitForm.fileSources.labels;
-      if (!model || !labels) {
-        throw new Error('Custom init requires model ONNX and labels CSV.');
-      }
-      const customConfig = { model, labels } as AudioTaggingCustomConfig;
-      assertAudioTaggingCustomConfig(
-        customConfig as unknown as Record<string, unknown>
-      );
-      engineRef.current = await createAudioTagging({
-        initMode: 'custom',
-        modelType: customInitForm.modelType,
-        customConfig,
-        numThreads: NUM_THREADS,
-        topK,
-      });
-      setCurrentModelFolder(null);
-      setInitializedSummary(`custom:${customInitForm.modelType}`);
-      setInitResult(
-        `Initialized (custom): ${customInitForm.modelType} model + labels`
-      );
-    } catch (e) {
-      setErr('init', e);
-      setInitResult(`Custom initialization failed: ${errMsg(e)}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    clearResults,
-    customInitForm.fileSources,
-    customInitForm.modelType,
-    destroyEngine,
-    setErr,
-    topK,
-  ]);
-
   const handleFree = useCallback(async () => {
-    await destroyEngine();
-    setCurrentModelFolder(null);
-    setInitializedSummary(null);
-    setInitResult(null);
+    await cleanupLiveRuntime();
+    await releaseEngine();
     clearResults();
     setLiveStatus(null);
     setLiveLastPrimary(null);
     setLiveSegments([]);
     setExpandedLiveSegment(null);
     setLiveRunState('idle');
-  }, [clearResults, destroyEngine]);
+    setRunError(null);
+    setRunErrorSource(null);
+  }, [cleanupLiveRuntime, clearResults, releaseEngine]);
 
   const handleTagBatch = useCallback(async () => {
     const engine = engineRef.current;
     if (!engine || !preparedInputBuffer) {
-      setErr('tag', 'Initialize a model and prepare an offline buffer first.');
+      setRunErr(
+        'tag',
+        'Initialize a model and prepare an offline buffer first.'
+      );
       return;
     }
     setTagging(true);
-    setError(null);
-    setErrorSource(null);
+    setRunError(null);
+    setRunErrorSource(null);
     clearResults();
     setTagProgress({ label: 'Tagging…', percent: null });
     try {
@@ -592,12 +372,19 @@ export default function AudioTaggingScreen() {
       else setOneshotResult(result);
       setTagProgress(useAuto ? { label: 'Done', percent: 100 } : null);
     } catch (e) {
-      setErr('tag', e);
+      setRunErr('tag', e);
       setTagProgress(null);
     } finally {
       setTagging(false);
     }
-  }, [clearResults, preparedInputBuffer, segBatchConfig, setErr, topK]);
+  }, [
+    clearResults,
+    engineRef,
+    preparedInputBuffer,
+    segBatchConfig,
+    setRunErr,
+    topK,
+  ]);
 
   const resolveLiveFileSource = useCallback((): FileSource => {
     if (liveFileSourceType === 'own') {
@@ -633,7 +420,7 @@ export default function AudioTaggingScreen() {
   const handleStartLive = useCallback(async () => {
     const engine = engineRef.current;
     if (!engine) {
-      setErr('live', 'Initialize an audio tagging model first.');
+      setRunErr('live', 'Initialize an audio tagging model first.');
       return;
     }
     const segOption = buildSegmentationOption(segLiveConfig);
@@ -644,7 +431,7 @@ export default function AudioTaggingScreen() {
       (segOption.policy.evaluator !== 'speech_energy_silence' &&
         segOption.policy.evaluator !== 'continuous_frames')
     ) {
-      setErr(
+      setRunErr(
         'live',
         'Live overload needs Auto + speech_energy_silence or continuous_frames.'
       );
@@ -653,8 +440,8 @@ export default function AudioTaggingScreen() {
 
     setLiveRunState('running');
     const runEpoch = ++liveRunEpochRef.current;
-    setError(null);
-    setErrorSource(null);
+    setRunError(null);
+    setRunErrorSource(null);
     setLiveStatus(null);
     setLiveLastPrimary(null);
     setLiveSegments([]);
@@ -713,7 +500,7 @@ export default function AudioTaggingScreen() {
       }
     } catch (e) {
       if (runEpoch !== liveRunEpochRef.current) return;
-      setErr('live', e);
+      setRunErr('live', e);
       setLiveRunState('idle');
       setLiveStatus(null);
       await cleanupLiveRuntime().catch(() => {});
@@ -721,11 +508,12 @@ export default function AudioTaggingScreen() {
   }, [
     cleanupLiveRuntime,
     clearResults,
+    engineRef,
     handleLiveSegment,
     liveSourceMode,
     resolveLiveFileSource,
     segLiveConfig,
-    setErr,
+    setRunErr,
     topK,
   ]);
 
@@ -782,21 +570,15 @@ export default function AudioTaggingScreen() {
         ) ||
         (e as { code?: string })?.code === 'DOCUMENT_PICKER_CANCELED' ||
         (e as { name?: string })?.name === 'DocumentPickerCanceled';
-      if (!cancelled) setErr('live', e);
+      if (!cancelled) setRunErr('live', e);
     }
-  }, [setErr]);
+  }, [setRunErr]);
 
   const copyJson = useCallback((payload: unknown, label: string) => {
     Clipboard.setString(JSON.stringify(payload, null, 2));
     Alert.alert('Copied', `${label} JSON copied.`);
   }, []);
 
-  const canInitAuto = initMode === 'auto' && !!selectedModelForInit && !busy;
-  const canInitCustom =
-    initMode === 'custom' &&
-    !!customInitForm.fileSources.model &&
-    !!customInitForm.fileSources.labels &&
-    !busy;
   const canRunBatch =
     processingMode === 'batch' &&
     engineReady &&
@@ -846,165 +628,23 @@ export default function AudioTaggingScreen() {
           />
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Model</Text>
-          <Text style={styles.sectionHint}>
-            Dedicated packs (ONNX + class_labels_indices.csv).
-          </Text>
-          <InitModeSelector
-            value={initMode}
-            onChange={setInitMode}
+        {engineReady ? (
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => {
+              handleFree().catch(() => {});
+            }}
             disabled={busy}
-          />
+          >
+            <Text style={styles.secondaryButtonText}>Release engine</Text>
+          </TouchableOpacity>
+        ) : null}
 
-          {initMode === 'auto' ? (
-            <>
-              {catalogEntries.length === 0 && !loadingModels ? (
-                <View style={styles.emptyCatalog}>
-                  <Text style={styles.bodyText}>
-                    No audio tagging models found. Download from Download
-                    Showcase.
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.primaryButton}
-                    onPress={() => navigation.navigate('DownloadShowcase')}
-                  >
-                    <Text style={styles.primaryButtonText}>
-                      Open Download Showcase
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <ModelFolderGrid
-                  entries={catalogEntries}
-                  selectedId={selectedModelForInit}
-                  initializedId={currentModelFolder}
-                  onSelect={setSelectedModelForInit}
-                  loading={loadingModels}
-                  disabled={busy}
-                  emptyMessage="No audio tagging models found."
-                />
-              )}
-              <TouchableOpacity
-                style={[
-                  styles.primaryButton,
-                  !canInitAuto && styles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  if (selectedModelForInit) {
-                    handleInitialize(selectedModelForInit).catch(() => {});
-                  }
-                }}
-                disabled={!canInitAuto}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Initialize model</Text>
-                )}
-              </TouchableOpacity>
-            </>
-          ) : (
-            <>
-              {catalogEntries.length > 0 ? (
-                <ModelFolderGrid
-                  entries={catalogEntries}
-                  selectedId={selectedModelForInit}
-                  initializedId={currentModelFolder}
-                  onSelect={setSelectedModelForInit}
-                  loading={loadingModels}
-                  disabled={busy}
-                  emptyMessage="No catalog models for Fill."
-                />
-              ) : null}
-              <AudioTaggingCustomInitForm
-                value={customInitForm}
-                onChange={setCustomInitForm}
-                selectedCatalogModelId={selectedModelForInit}
-                onFillFromSelectedModel={() => {
-                  handleFillFromSelectedModel().catch(() => {});
-                }}
-                onPrepareScatteredTest={() => {
-                  setCustomInitForm((prev) => ({ ...prev, fileSources: {} }));
-                  setCustomFillHint(
-                    'Scattered test: pick model ONNX + labels CSV, then Init.'
-                  );
-                }}
-                fillLoading={customFillLoading}
-                disabled={busy}
-                fillHint={customFillHint}
-              />
-              <TouchableOpacity
-                style={[
-                  styles.primaryButton,
-                  !canInitCustom && styles.buttonDisabled,
-                ]}
-                onPress={() => {
-                  handleInitializeCustom().catch(() => {});
-                }}
-                disabled={!canInitCustom}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>
-                    Initialize (custom)
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </>
-          )}
-
-          {initializedSummary ? (
-            <Text style={baseStyles.currentModelText}>
-              Ready: {initializedSummary}
-            </Text>
-          ) : null}
-          {initResult && !(error && errorSource === 'init') ? (
-            <Text style={styles.bodyText}>{initResult}</Text>
-          ) : null}
-          {error && errorSource === 'init' ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
-          {engineReady ? (
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => {
-                handleFree().catch(() => {});
-              }}
-              disabled={busy}
-            >
-              <Text style={styles.secondaryButtonText}>Release engine</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>topK</Text>
-          <View style={styles.chipRow}>
-            {TOP_K_OPTIONS.map((value) => {
-              const active = topK === value;
-              return (
-                <TouchableOpacity
-                  key={value}
-                  style={[styles.chip, active && styles.chipActive]}
-                  onPress={() => {
-                    if (!busy) setTopK(value);
-                  }}
-                  disabled={busy}
-                >
-                  <Text
-                    style={[styles.chipText, active && styles.chipTextActive]}
-                  >
-                    {value}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
+        <AudioTaggingModelInitPanel
+          audioTagging={audioTagging}
+          disabled={tagging || liveBusy}
+          onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+        />
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Segmentation</Text>
@@ -1095,9 +735,9 @@ export default function AudioTaggingScreen() {
                 <Text style={styles.primaryButtonText}>Tag</Text>
               )}
             </TouchableOpacity>
-            {error && errorSource === 'tag' ? (
+            {runError && runErrorSource === 'tag' ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{error}</Text>
+                <Text style={styles.errorText}>{runError}</Text>
               </View>
             ) : null}
           </View>
@@ -1149,7 +789,7 @@ export default function AudioTaggingScreen() {
                   </TouchableOpacity>
                 ) : (
                   <View style={styles.selectedFileRow}>
-                    <View style={{ flex: 1 }}>
+                    <View style={styles.selectedFileInfo}>
                       <Text style={styles.sectionHint}>Selected file</Text>
                       <Text style={styles.bodyText} numberOfLines={2}>
                         {selectedFileName ?? selectedFileUri}
@@ -1264,9 +904,9 @@ export default function AudioTaggingScreen() {
               </TouchableOpacity>
             )}
 
-            {error && errorSource === 'live' ? (
+            {runError && runErrorSource === 'live' ? (
               <View style={styles.errorBox}>
-                <Text style={styles.errorText}>{error}</Text>
+                <Text style={styles.errorText}>{runError}</Text>
               </View>
             ) : null}
           </View>

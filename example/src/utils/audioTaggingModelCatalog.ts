@@ -97,14 +97,27 @@ function prioritizeEntries(
   return [...recommended, ...remaining];
 }
 
+export type AudioTaggingModelPathContext = {
+  padModelIds: string[];
+  padModelsPath: string | null;
+  bundledFolders: string[];
+  downloadedIds: Set<string>;
+};
+
+export function createAudioTaggingModelPathContext(
+  snapshot: AudioTaggingCatalogSnapshot
+): AudioTaggingModelPathContext {
+  return {
+    padModelIds: snapshot.padModelIds,
+    padModelsPath: snapshot.padModelsPath,
+    bundledFolders: snapshot.bundledFolders,
+    downloadedIds: new Set(snapshot.downloadedIds),
+  };
+}
+
 export function getAudioTaggingModelPathConfig(
   modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
-  }
+  ctx: AudioTaggingModelPathContext
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath

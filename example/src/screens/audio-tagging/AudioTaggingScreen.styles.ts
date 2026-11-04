@@ -361,4 +361,7 @@ export const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     backgroundColor: '#F9FAFB',
   },
+  selectedFileInfo: {
+    flex: 1,
+  },
 });
