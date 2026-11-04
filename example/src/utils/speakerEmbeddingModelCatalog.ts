@@ -94,15 +94,29 @@ function prioritizeEntries(
   return [...recommended, ...remaining];
 }
 
+export type SpeakerEmbeddingModelPathContext = {
+  padModelIds: string[];
+  padModelsPath: string | null;
+  bundledFolders: string[];
+  downloadedIds: Set<string>;
+  downloadedPaths?: Record<string, string>;
+};
+
+export function createSpeakerEmbeddingModelPathContext(
+  snapshot: SpeakerEmbeddingCatalogSnapshot
+): SpeakerEmbeddingModelPathContext {
+  return {
+    padModelIds: snapshot.padModelIds,
+    padModelsPath: snapshot.padModelsPath,
+    bundledFolders: snapshot.bundledFolders,
+    downloadedIds: new Set(snapshot.downloadedIds),
+    downloadedPaths: snapshot.downloadedPaths,
+  };
+}
+
 export function getSpeakerEmbeddingModelPathConfig(
   modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
-    downloadedPaths?: Record<string, string>;
-  }
+  ctx: SpeakerEmbeddingModelPathContext
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
     return ctx.padModelsPath

@@ -29,6 +29,10 @@ import type {
   SeparationEngine,
   SeparationModelType,
 } from 'react-native-sherpa-onnx/separation';
+import type {
+  SpeakerIdentificationEngine,
+  SpeakerEmbeddingModelType,
+} from 'react-native-sherpa-onnx/speaker-identification';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -430,4 +434,50 @@ export function clearSeparationCache(): void {
   separationSelectedModelKind = null;
   separationNumStems = null;
   separationModelSampleRate = null;
+}
+
+// --- Speaker identification (embedding) cache ---
+
+let speakerIdEngine: SpeakerIdentificationEngine | null = null;
+let speakerIdModelFolder: string | null = null;
+let speakerIdInitMessage: string | null = null;
+let speakerIdSelectedModelKind: SpeakerEmbeddingModelType | null = null;
+let speakerIdModelDim: number | null = null;
+
+export function getSpeakerIdCache(): {
+  engine: SpeakerIdentificationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  selectedModelKind: SpeakerEmbeddingModelType | null;
+  modelDim: number | null;
+} {
+  return {
+    engine: speakerIdEngine,
+    modelFolder: speakerIdModelFolder,
+    initMessage: speakerIdInitMessage,
+    selectedModelKind: speakerIdSelectedModelKind,
+    modelDim: speakerIdModelDim,
+  };
+}
+
+export function setSpeakerIdCache(
+  engine: SpeakerIdentificationEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  selectedModelKind: SpeakerEmbeddingModelType | null,
+  modelDim: number
+): void {
+  speakerIdEngine = engine;
+  speakerIdModelFolder = modelFolder;
+  speakerIdInitMessage = initMessage;
+  speakerIdSelectedModelKind = selectedModelKind;
+  speakerIdModelDim = modelDim;
+}
+
+export function clearSpeakerIdCache(): void {
+  speakerIdEngine = null;
+  speakerIdModelFolder = null;
+  speakerIdInitMessage = null;
+  speakerIdSelectedModelKind = null;
+  speakerIdModelDim = null;
 }
