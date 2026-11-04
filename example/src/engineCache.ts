@@ -1,5 +1,5 @@
 /**
- * Persists STT/TTS/OCR engine instances and UI state across screen navigation.
+ * Persists STT/TTS/OCR/punctuation engine instances and UI state across screen navigation.
  * When the user leaves a screen, the instance is not released; when they return,
  * the same state (selected model, Free button visible) is restored.
  *
@@ -16,6 +16,7 @@ import type {
   OcrConcreteModelType,
   OcrEngine,
 } from 'react-native-sherpa-onnx/ocr';
+import type { OfflinePunctuationEngine } from 'react-native-sherpa-onnx/punctuation';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -149,4 +150,38 @@ export function clearOcrCache(): void {
   ocrEngineFamily = null;
   ocrInitMessage = null;
   ocrDetectSummary = null;
+}
+
+// --- Offline punctuation cache ---
+
+let punctuationEngine: OfflinePunctuationEngine | null = null;
+let punctuationModelFolder: string | null = null;
+let punctuationInitMessage: string | null = null;
+
+export function getPunctuationCache(): {
+  engine: OfflinePunctuationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+} {
+  return {
+    engine: punctuationEngine,
+    modelFolder: punctuationModelFolder,
+    initMessage: punctuationInitMessage,
+  };
+}
+
+export function setPunctuationCache(
+  engine: OfflinePunctuationEngine,
+  modelFolder: string,
+  initMessage: string | null
+): void {
+  punctuationEngine = engine;
+  punctuationModelFolder = modelFolder;
+  punctuationInitMessage = initMessage;
+}
+
+export function clearPunctuationCache(): void {
+  punctuationEngine = null;
+  punctuationModelFolder = null;
+  punctuationInitMessage = null;
 }

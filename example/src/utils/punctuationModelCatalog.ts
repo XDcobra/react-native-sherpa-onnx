@@ -71,17 +71,30 @@ async function folderIsOfflineCtTransformer(
   }
 }
 
+export type PunctuationModelPathContext = {
+  padModelIds: string[];
+  padModelsPath: string | null;
+  bundledFolders: string[];
+  downloadedIds: Set<string>;
+};
+
+export function createPunctuationModelPathContext(
+  snapshot: PunctuationCatalogSnapshot
+): PunctuationModelPathContext {
+  return {
+    padModelIds: snapshot.padPunctuationModelIds,
+    padModelsPath: snapshot.padModelsPath,
+    bundledFolders: snapshot.bundledPunctuationFolders,
+    downloadedIds: new Set(snapshot.downloadedPunctuationIds),
+  };
+}
+
 /**
  * Resolve a discovered folder id to FileSource (matches PunctuationScreen).
  */
 export function getPunctuationModelPathConfig(
   modelId: string,
-  ctx: {
-    padModelIds: string[];
-    padModelsPath: string | null;
-    bundledFolders: string[];
-    downloadedIds: Set<string>;
-  }
+  ctx: PunctuationModelPathContext
 ): FileSource {
   if (ctx.downloadedIds.has(modelId)) {
     return getFileModelPath(modelId, ModelCategory.Punctuation);
