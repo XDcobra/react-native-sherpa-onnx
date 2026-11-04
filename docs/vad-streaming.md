@@ -23,6 +23,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createLiveSegmentBuffer,
+  readLiveSegment,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 
@@ -39,8 +40,12 @@ const segmentOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
   spooling: { mode: 'on' },
   streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
-  onSegmentAppended: (e) => {
+  onSegmentAppended: async (e) => {
+    // cheap: enough for UI timing / count
     console.log('[vad]', e.segmentId, `${e.startSample}-${e.endSample}`, `${e.durationMs}ms`);
+    // only when you need richness:
+    const meta = await readLiveSegment(e);
+    console.log(meta?.payload);
   },
 });
 
@@ -94,6 +99,7 @@ import {
   getLiveTextBufferPartialSlice,
   getLiveTextBufferSegmentCount,
   getLiveTextBufferSegments,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 
@@ -103,7 +109,13 @@ const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn,
 const textOut = await createLiveTextBuffer({
   windowMaxChars: 65536,
   maxSegments: 2048,
-  onSegment: (e) => console.log('[stt]', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`stt #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('[stt]', seg?.text);
+  },
 });
 
 const vad = await createStreamingVAD({
@@ -421,17 +433,32 @@ More end-to-end patterns: [feature-pipelines.md#vad-streaming-patterns](feature-
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
 | `onSpeechStateChanged` | `VADSpeechStateChangedEvent` | speech / non-speech transition | assign on `VADPipelineHandle`; throttle with `speechStateEventMinIntervalMs` |
-| `onSegmentAppended` | `LiveSegmentBufferSegmentEvent` | committed speech segment on output buffer | set on `createLiveSegmentBuffer`; live path only |
+| `onSegmentAppended` | `LiveSegmentBufferSegmentAppendedEvent` (notify scalars) | committed speech span on `segmentOut` | set on `createLiveSegmentBuffer`; **no `payload` on the event** — pull with `readLiveSegment` |
 | `onProgress` | `OrchestrationProgress` | start of each offline segment step | offline segmented only (`mode: 'auto'`); live path: none |
+
+Live segment commits are **notify + pull**. Timing/routing fields come on the event; `payload` (e.g. `source: 'vad'`, score) only after pull. Canonical detail: [segmentbuffer-streaming — Committed segments](segmentbuffer-streaming.md#committed-segments-onsegmentappended-notify--pull).
 
 Shapes: [Types](#types).
 
 ```ts
+import {
+  createLiveSegmentBuffer,
+  readLiveSegment,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
 pipeline.onSpeechStateChanged = (e) => console.log(e.isSpeechDetected);
 
 const segmentOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
-  onSegmentAppended: (e) => console.log(e.segmentId, e.durationMs),
+  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  onSegmentAppended: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`#${e.segmentIndex}`, e.startSample, e.endSample, `${e.durationMs}ms`);
+
+    // only when you need richness:
+    const meta = await readLiveSegment(e);
+    console.log('vad payload', meta?.payload);
+  },
 });
 ```
 
@@ -513,13 +540,24 @@ Increase `minSilenceDurationMs` and lower `scoreThreshold` to avoid premature se
 ```ts
 import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
 import { createEmptyLiveAudioBuffer, finalizeLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
-import { createLiveSegmentBuffer, getLiveSegmentBufferSegmentCount, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
+import {
+  createLiveSegmentBuffer,
+  getLiveSegmentBufferSegmentCount,
+  readLiveSegment,
+  releasePipelineSegmentBuffer,
+} from 'react-native-sherpa-onnx/segmentbuffer';
 
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const segmentOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
   spooling: { mode: 'on' },
-  onSegmentAppended: (e) => console.log('segment', e.segmentId, `${e.durationMs}ms`),
+  onSegmentAppended: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log('segment', e.segmentId, `${e.durationMs}ms`);
+    // only when you need richness:
+    const meta = await readLiveSegment(e);
+    console.log(meta?.payload);
+  },
 });
 
 const vad = await createStreamingVAD({
@@ -567,13 +605,23 @@ import { createStreamingVAD } from 'react-native-sherpa-onnx/vad';
 import { createStreamingSTT } from 'react-native-sherpa-onnx/stt';
 import { createEmptyLiveAudioBuffer, releasePipelineAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
 import { createLiveSegmentBuffer, releasePipelineSegmentBuffer } from 'react-native-sherpa-onnx/segmentbuffer';
-import { createLiveTextBuffer, releasePipelineTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+  releasePipelineTextBuffer,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const segmentOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spooling: { mode: 'on' } });
 const textOut = await createLiveTextBuffer({
   maxSegments: 2048,
-  onSegment: (e) => console.log('[stt]', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`stt #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('[stt]', seg?.text);
+  },
 });
 
 const vad = await createStreamingVAD({ modelSource: { kind: 'app', base: 'apkAsset', path: 'models/vad' }, modelType: 'auto', sampleRate: 16000 });

@@ -18,9 +18,9 @@
 #import <AVFoundation/AVFoundation.h>
 #import "audio/session/PaAudioSessionCoordinator.h"
 #include "pcm/PcmPlayerRegistry.h"
-#include "audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
-#include "segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "AudioRegistry.h"
+#include "TextRegistry.h"
+#include "SegmentRegistry.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif
@@ -50,6 +50,8 @@ extern "C" void slm_release_all_link_maps(void);
     if (self) {
         txt_set_partial_event_module(self);
         [self autoInstallJSI];
+        pa_configure_cache_dir([NSTemporaryDirectory() UTF8String]);
+        pa_configure_threshold([[NSProcessInfo processInfo] physicalMemory]);
         // Sweep orphaned mmap temp files from previous sessions
         pa_sweepOrphanedTempFiles();
         // Sweep orphaned orchestration temp files from previous sessions

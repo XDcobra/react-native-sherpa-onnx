@@ -220,11 +220,9 @@ internal class SherpaOnnxDiarizationHelper(
             "segmentsOut=$segmentsOutBufferId " +
             "numSamples=${audioInEntry.numSamples} sampleRate=${audioInEntry.sampleRate}",
         )
-        val inputSamples = audioInEntry.readAllSamples()
-        val result = nativeProcessDiarization(
+        val result = nativeProcessDiarizationFromBuffer(
           instanceId,
-          inputSamples,
-          audioInEntry.sampleRate,
+          audioInBufferId,
           includeOverlap,
         )
         if (result == null) {
@@ -783,8 +781,7 @@ internal class SherpaOnnxDiarizationHelper(
 
     executor.execute {
       try {
-        val inputSamples = inEntry.readAllSamples()
-        val result = nativeFeedStreamingDiarization(instanceId, inputSamples)
+        val result = nativeFeedStreamingDiarizationFromBuffer(instanceId, audioInBufferId)
         if (result == null) {
           promise.reject(DiarizationErrorCodes.DIARIZATION_ERROR, "Feed returned null")
           return@execute
@@ -951,6 +948,12 @@ internal class SherpaOnnxDiarizationHelper(
     ): HashMap<String, Any>?
 
     @JvmStatic
+    private external fun nativeFeedStreamingDiarizationFromBuffer(
+      instanceId: String,
+      bufferId: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
     private external fun nativeFlushStreamingDiarization(
       instanceId: String,
     ): HashMap<String, Any>?
@@ -986,6 +989,13 @@ internal class SherpaOnnxDiarizationHelper(
       instanceId: String,
       samples: FloatArray,
       sampleRate: Int,
+      includeOverlap: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeProcessDiarizationFromBuffer(
+      instanceId: String,
+      bufferId: String,
       includeOverlap: Boolean,
     ): HashMap<String, Any>?
 

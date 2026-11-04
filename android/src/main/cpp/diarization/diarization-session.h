@@ -80,6 +80,9 @@ class DiarizationSession {
   void requestCancel();
   void clearCancel();
 
+  ProcessResult Process(const float* mono_samples, int32_t num_samples,
+                        int32_t sample_rate, const ProcessOptions& options);
+
   ProcessResult Process(const std::vector<float>& mono_samples,
                         int32_t sample_rate, const ProcessOptions& options);
 

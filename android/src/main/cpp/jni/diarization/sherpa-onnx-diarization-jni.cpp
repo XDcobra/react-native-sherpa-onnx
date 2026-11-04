@@ -1,6 +1,7 @@
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-diarization-wrapper.h"
 #include "sherpa-onnx-streaming-diarization-wrapper.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -353,7 +354,8 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeProcess
   }
 
   sherpaonnx::DiarizationProcessResult result =
-      wrapper->processMonoSamples(input, sampleRate, includeOverlap == JNI_TRUE, {});
+      wrapper->processMonoSamples(input.data(), static_cast<int32_t>(input.size()), sampleRate,
+                                  includeOverlap == JNI_TRUE, {});
   if (!result.success) {
     LOGE(
         "nativeProcessDiarization failed: %s code=%s",
@@ -368,6 +370,54 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeProcess
         result.numSpeakers
     );
   }
+  return DiarizationProcessResultToJava(env, result);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeProcessDiarizationFromBuffer(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring instanceId,
+    jstring bufferId,
+    jboolean includeOverlap
+) {
+  const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, -1, -1, &view, &errCode, &errMsg)) {
+    sherpaonnx::DiarizationProcessResult bad;
+    bad.success = false;
+    bad.errorCode = errCode.empty() ? "DIARIZATION_INVALID_ARGUMENT" : errCode;
+    bad.error = errMsg.empty() ? "Offline audio buffer not found" : errMsg;
+    return DiarizationProcessResultToJava(env, bad);
+  }
+  if (view.count == 0 || view.data == nullptr || view.sampleRate <= 0) {
+    sherpaonnx::DiarizationProcessResult bad;
+    bad.success = false;
+    bad.errorCode = "DIARIZATION_INVALID_ARGUMENT";
+    bad.error = "Invalid samples or sampleRate";
+    return DiarizationProcessResultToJava(env, bad);
+  }
+
+  auto wrapper = LookupDiarization(instanceIdStr);
+  if (!wrapper) {
+    sherpaonnx::DiarizationProcessResult missing;
+    missing.success = false;
+    missing.errorCode = "DIARIZATION_NOT_INITIALIZED";
+    missing.error = "Diarization instance not found: " + instanceIdStr;
+    return DiarizationProcessResultToJava(env, missing);
+  }
+
+  const int32_t n = static_cast<int32_t>(view.count);
+  LOGI(
+      "nativeProcessDiarizationFromBuffer: instanceId=%s n=%d sampleRate=%d",
+      instanceIdStr.c_str(),
+      n,
+      view.sampleRate
+  );
+  sherpaonnx::DiarizationProcessResult result =
+      wrapper->processMonoSamples(view.data, n, view.sampleRate, includeOverlap == JNI_TRUE, {});
   return DiarizationProcessResultToJava(env, result);
 }
 
@@ -677,6 +727,38 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeFeedStr
   }
 
   auto res = wrapper->feed(buf.empty() ? nullptr : buf.data(), buf.size());
+  return StreamingFeedResultToHashMap(env, res);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeFeedStreamingDiarizationFromBuffer(
+    JNIEnv* env,
+    jclass /* clazz */,
+    jstring instanceId,
+    jstring bufferId
+) {
+  const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
+  auto wrapper = LookupStreamingDiarization(instanceIdStr);
+  if (!wrapper) {
+    sherpaonnx::StreamingDiarizationFeedResult res;
+    res.success = false;
+    res.error = "Streaming diarization instance not found: " + instanceIdStr;
+    res.errorCode = "NOT_INITIALIZED";
+    return StreamingFeedResultToHashMap(env, res);
+  }
+
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, -1, -1, &view, &errCode, &errMsg)) {
+    sherpaonnx::StreamingDiarizationFeedResult res;
+    res.success = false;
+    res.error = errMsg.empty() ? "Offline audio buffer not found" : errMsg;
+    res.errorCode = errCode.empty() ? "AUDIO_BUFFER_NOT_FOUND" : errCode;
+    return StreamingFeedResultToHashMap(env, res);
+  }
+
+  auto res = wrapper->feed(view.count > 0 ? view.data : nullptr, view.count);
   return StreamingFeedResultToHashMap(env, res);
 }
 

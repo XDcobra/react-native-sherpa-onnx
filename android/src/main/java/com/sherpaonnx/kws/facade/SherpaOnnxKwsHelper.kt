@@ -8,16 +8,12 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.k2fsa.sherpa.onnx.FeatureConfig
-import com.k2fsa.sherpa.onnx.KeywordSpotter
-import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
-import com.k2fsa.sherpa.onnx.OnlineModelConfig
-import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.kws.pipeline.KwsStreamingPipelineWorker
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -26,8 +22,8 @@ internal class SherpaOnnxKwsHelper(
   private val context: ReactApplicationContext,
 ) {
   private data class KwsInstance(
-    val spotter: KeywordSpotter,
     val sampleRate: Int,
+    val keywordsFile: String,
     var activePipelineId: String? = null,
   )
 
@@ -65,32 +61,44 @@ internal class SherpaOnnxKwsHelper(
 
     try {
       val sampleRate = 16000
-      val modelConfig = OnlineModelConfig(
-        transducer = OnlineTransducerModelConfig(
-          encoder = paths.getValue("encoder"),
-          decoder = paths.getValue("decoder"),
-          joiner = paths.getValue("joiner"),
-        ),
-        tokens = paths.getValue("tokens"),
-        numThreads = optionInt(options, "numThreads", 1).coerceAtLeast(1),
-        debug = optionBoolean(options, "debug", false),
-        provider = optionString(options, "provider", "cpu"),
-        modelType = "zipformer2",
-      )
-      val config = KeywordSpotterConfig(
-        featConfig = FeatureConfig(sampleRate = sampleRate, featureDim = 80),
-        modelConfig = modelConfig,
-        maxActivePaths = optionInt(options, "maxActivePaths", 4),
+      val keywordsScore = optionFloat(options, "keywordsScore", 1.5f)
+      val keywordsThreshold = optionFloat(options, "keywordsThreshold", 0.25f)
+      val maxActivePaths = optionInt(options, "maxActivePaths", 4)
+      val numTrailingBlanks = optionInt(options, "numTrailingBlanks", 2)
+      val numThreads = optionInt(options, "numThreads", 1).coerceAtLeast(1)
+      val debug = optionBoolean(options, "debug", false)
+      val provider = optionString(options, "provider", "cpu")
+
+      @Suppress("UNCHECKED_CAST")
+      val raw = nativeInitialize(
+        instanceId,
+        paths.getValue("encoder"),
+        paths.getValue("decoder"),
+        paths.getValue("joiner"),
+        paths.getValue("tokens"),
+        paths.getValue("keywords"),
+        keywordsScore,
+        keywordsThreshold,
+        numTrailingBlanks,
+        maxActivePaths,
+        numThreads,
+        provider,
+        debug,
+      ) as? HashMap<String, Any>
+      val ok = raw?.get("success") as? Boolean ?: false
+      if (!ok) {
+        val err = raw?.get("error") as? String ?: "Keyword spotting init failed"
+        promise.reject(ERROR_INIT, err)
+        return
+      }
+
+      val inst = KwsInstance(
+        sampleRate = sampleRate,
         keywordsFile = paths.getValue("keywords"),
-        keywordsScore = optionFloat(options, "keywordsScore", 1.5f),
-        keywordsThreshold = optionFloat(options, "keywordsThreshold", 0.25f),
-        numTrailingBlanks = optionInt(options, "numTrailingBlanks", 2),
       )
-      val spotter = KeywordSpotter(assetManager = null, config = config)
-      val inst = KwsInstance(spotter = spotter, sampleRate = sampleRate)
       val existing = instances.putIfAbsent(instanceId, inst)
       if (existing != null) {
-        spotter.release()
+        nativeUnload(instanceId)
         promise.reject(ERROR_INIT, "Keyword spotting instance already exists: $instanceId")
         return
       }
@@ -108,14 +116,16 @@ internal class SherpaOnnxKwsHelper(
         TAG,
         "$PREFIX initialized instanceId=$instanceId " +
           "keywordsFile=$keywordsFilePath keywordsFileLines=$keywordsFileLines " +
-          "keywordsScore=${optionFloat(options, "keywordsScore", 1.5f)} " +
-          "keywordsThreshold=${optionFloat(options, "keywordsThreshold", 0.25f)} " +
-          "maxActivePaths=${optionInt(options, "maxActivePaths", 4)} " +
-          "numTrailingBlanks=${optionInt(options, "numTrailingBlanks", 2)}",
+          "keywordsScore=$keywordsScore keywordsThreshold=$keywordsThreshold " +
+          "maxActivePaths=$maxActivePaths numTrailingBlanks=$numTrailingBlanks",
       )
       promise.resolve(Arguments.createMap().apply { putBoolean("success", true) })
     } catch (e: Exception) {
       Log.e(TAG, "$PREFIX initialize failed instanceId=$instanceId: ${e.message}", e)
+      try {
+        nativeUnload(instanceId)
+      } catch (_: Exception) {
+      }
       promise.reject(ERROR_INIT, "Keyword spotting init failed: ${e.message}", e)
     }
   }
@@ -196,6 +206,7 @@ internal class SherpaOnnxKwsHelper(
       }
 
       val pipelineId = UUID.randomUUID().toString()
+      val streamId = "kws_stream_$pipelineId"
       val keywordsOverride = normalizeCreateStreamKeywords(keywords?.trim().orEmpty())
       val overrideLines = if (keywordsOverride.isEmpty()) {
         0
@@ -204,36 +215,24 @@ internal class SherpaOnnxKwsHelper(
       }
       Log.i(
         TAG,
-        "$PREFIX createStream begin instanceId=$instanceId " +
+        "$PREFIX createStream begin instanceId=$instanceId streamId=$streamId " +
           "keywordsOverrideChars=${keywordsOverride.length} " +
           "keywordsOverrideLines=$overrideLines " +
           "keywordsOverridePreview=${keywordsOverride.take(160).ifEmpty { "(empty→keywordsFile)" }} " +
-          "keywordsFile=${inst.spotter.config.keywordsFile}",
+          "keywordsFile=${inst.keywordsFile}",
       )
-      // Empty string is the Kotlin default for createStream() → use config keywordsFile.
-      // Non-empty overrides EncodeKeywords; OOV tokens → nullptr → OnlineStream throws.
-      val stream = try {
-        inst.spotter.createStream(keywordsOverride)
-      } catch (e: IllegalArgumentException) {
+
+      val created = nativeCreateStream(instanceId, streamId, keywordsOverride)
+      if (!created) {
         Log.e(
           TAG,
-          "$PREFIX createStream encode/construct failed instanceId=$instanceId: ${e.message} " +
+          "$PREFIX createStream failed instanceId=$instanceId " +
             "preview=${keywordsOverride.take(160)}",
         )
         promise.reject(
           "STREAMING_PIPELINE_ERROR",
           "Keyword stream creation failed: keywords could not be encoded against this model's tokens.txt. " +
-            "Omit keywords to use the engine keywords file, or pass only in-vocabulary tokens. " +
-            "(${e.message})",
-          e,
-        )
-        return
-      }
-      if (stream.ptr == 0L) {
-        promise.reject(
-          "STREAMING_PIPELINE_ERROR",
-          "Keyword stream creation failed: createStream returned a null stream. " +
-            "Keywords must encode against this model's tokens.txt.",
+            "Omit keywords to use the engine keywords file, or pass only in-vocabulary tokens.",
         )
         return
       }
@@ -241,8 +240,8 @@ internal class SherpaOnnxKwsHelper(
 
       val worker = KwsStreamingPipelineWorker(
         pipelineId = pipelineId,
-        spotter = inst.spotter,
-        stream = stream,
+        instanceId = instanceId,
+        streamId = streamId,
         inputEntry = inputEntry,
         outputEntry = outputEntry,
         sampleRate = inst.sampleRate,
@@ -266,11 +265,11 @@ internal class SherpaOnnxKwsHelper(
         TAG,
         "$PREFIX pipeline start instanceId=$instanceId pipelineId=$pipelineId " +
           "chunkSize=${chunkSize ?: KwsStreamingPipelineWorker.DEFAULT_CHUNK_SIZE} " +
-          "streamPtr=${stream.ptr} " +
+          "streamId=$streamId " +
           "keywordsOverrideChars=${keywordsOverride.length} " +
           "keywordsOverrideLines=$overrideLines " +
           "keywordLabels=${labels.joinToString("|").ifEmpty { "(none/file)" }} " +
-          "keywordsFile=${inst.spotter.config.keywordsFile}",
+          "keywordsFile=${inst.keywordsFile}",
       )
       promise.resolve(
         Arguments.createMap().apply { putString("pipelineId", pipelineId) },
@@ -300,7 +299,17 @@ internal class SherpaOnnxKwsHelper(
           StreamingPipelineRegistry.stop(pipelineId)
           StreamingPipelineRegistry.remove(pipelineId)
         }
-        inst.spotter.release()
+        val gateKey = "kws:$instanceId"
+        val inFlight = NativeInstanceGate.inFlight(gateKey)
+        if (inFlight > 0) {
+          Log.w(TAG, "$PREFIX UNLOAD_DURING_COMPUTE instanceId=$instanceId inFlight=$inFlight")
+        }
+        NativeInstanceGate.releaseWhenIdle(gateKey) {
+          try {
+            nativeUnload(instanceId)
+          } catch (_: Exception) {
+          }
+        }
       }
       Log.i(TAG, "$PREFIX unloaded instanceId=$instanceId found=${inst != null}")
       promise.resolve(null)
@@ -323,10 +332,19 @@ internal class SherpaOnnxKwsHelper(
           StreamingPipelineRegistry.stop(pipelineId)
           StreamingPipelineRegistry.remove(pipelineId)
         }
-        inst.spotter.release()
+        NativeInstanceGate.releaseWhenIdle("kws:$instanceId") {
+          try {
+            nativeUnload(instanceId)
+          } catch (_: Exception) {
+          }
+        }
       } catch (e: Exception) {
         Log.w(TAG, "$PREFIX shutdown release failed instanceId=$instanceId: ${e.message}")
       }
+    }
+    try {
+      nativeShutdownAll()
+    } catch (_: Exception) {
     }
   }
 
@@ -381,6 +399,68 @@ internal class SherpaOnnxKwsHelper(
     private const val PREFIX = "[SherpaOnnx:kws]"
     private const val ERROR_INIT = "KWS_INIT_FAILED"
     private const val ERROR_INTERNAL = "KWS_INTERNAL_ERROR"
+
+    @JvmStatic
+    private external fun nativeInitialize(
+      instanceId: String,
+      encoder: String,
+      decoder: String,
+      joiner: String,
+      tokens: String,
+      keywordsFile: String,
+      keywordsScore: Float,
+      keywordsThreshold: Float,
+      numTrailingBlanks: Int,
+      maxActivePaths: Int,
+      numThreads: Int,
+      provider: String,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    internal external fun nativeCreateStream(
+      instanceId: String,
+      streamId: String,
+      keywords: String,
+    ): Boolean
+
+    @JvmStatic
+    internal external fun nativeAcceptWaveform(
+      instanceId: String,
+      streamId: String,
+      sampleRate: Int,
+      samples: FloatArray,
+    )
+
+    @JvmStatic
+    internal external fun nativeInputFinished(instanceId: String, streamId: String)
+
+    @JvmStatic
+    internal external fun nativeIsReady(instanceId: String, streamId: String): Boolean
+
+    @JvmStatic
+    internal external fun nativeDecode(instanceId: String, streamId: String)
+
+    @JvmStatic
+    internal external fun nativeGetResult(
+      instanceId: String,
+      streamId: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    internal external fun nativeResetStream(instanceId: String, streamId: String)
+
+    @JvmStatic
+    internal external fun nativeReleaseStream(instanceId: String, streamId: String)
+
+    @JvmStatic
+    private external fun nativeHasInstance(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativeUnload(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAll()
   }
 }
 

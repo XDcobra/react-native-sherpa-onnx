@@ -3,12 +3,12 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-validate-punctuation.h"
-#include "sherpa-onnx/c-api/cxx-api.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "SegmentRegistry.h"
+#include "TextRegistry.h"
 #include "../pipeline/PunctuationOfflineLivePipelineWorker.h"
+#include "../core/PunctuationBridgeState.h"
 #include "../core/PunctuationTextInputNormalization.hpp"
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -18,12 +18,8 @@
 #include <mutex>
 #include <string>
 #include <vector>
-#include <vector>
 
 namespace {
-
-std::mutex g_punct_offline_mutex;
-std::map<std::string, sherpa_onnx::cxx::OfflinePunctuation> g_punct_offline;
 
 static NSString *kInitErr = @"PUNCTUATION_INIT_ERROR";
 static NSString *kPunctErr = @"PUNCTUATION_ERROR";
@@ -77,35 +73,37 @@ static PunctuationInitScalars ParsePunctuationInitScalars(
 }  // namespace
 
 extern "C" void sherpaonnx_punct_offline_invalidate_all(void) {
-  std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-  g_punct_offline.clear();
+  std::lock_guard<std::mutex> lock(
+      sherpaonnx::punctuation::bridge::g_punct_offline_mutex);
+  sherpaonnx::punctuation::bridge::g_punct_offline_instances.clear();
 }
 
 extern "C" bool sherpaonnx_punct_offline_add_punctuation_if_exists(
     const std::string &instanceId,
     const std::string &text,
     std::string *outText) {
-  sherpa_onnx::cxx::OfflinePunctuation *engine = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-    auto it = g_punct_offline.find(instanceId);
-    if (it == g_punct_offline.end()) {
-      return false;
-    }
-    engine = &it->second;
+  auto state =
+      sherpaonnx::punctuation::bridge::LookupOfflinePunctuation(instanceId);
+  if (!state || !state->isReady()) {
+    return false;
   }
   if (outText != nullptr) {
     const std::string normalized =
         punct_text_input_normalization::normalize(text, "lower");
-    *outText = engine->AddPunctuation(normalized);
+    const auto result = state->wrapper->addPunctuation(normalized);
+    if (!result.success) {
+      return false;
+    }
+    *outText = result.text;
   }
   return true;
 }
 
 extern "C" bool sherpaonnx_punct_offline_has_instance(
     const std::string &instanceId) {
-  std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-  return g_punct_offline.find(instanceId) != g_punct_offline.end();
+  auto state =
+      sherpaonnx::punctuation::bridge::LookupOfflinePunctuation(instanceId);
+  return state && state->isReady();
 }
 
 @implementation SherpaOnnx (OfflinePunctuation)
@@ -221,24 +219,28 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
       return;
     }
 
-    sherpa_onnx::cxx::OfflinePunctuationConfig cfg;
-    cfg.model.ct_transformer = ctPath;
-    cfg.model.num_threads = scalars.numThreads;
-    cfg.model.debug = scalars.debug;
-    cfg.model.provider = scalars.provider;
-
-    auto created = sherpa_onnx::cxx::OfflinePunctuation::Create(cfg);
-    if (created.Get() == nullptr) {
-      NSLog(@"[SherpaOnnx:init] punctuation-offline Create Get()==null branch=reject");
-      reject(kInitErr, @"OfflinePunctuation::Create returned null", nil);
+    auto wrapper = std::make_shared<sherpaonnx::OfflinePunctuationWrapper>();
+    const auto init = wrapper->initialize(
+        ctPath, scalars.numThreads, scalars.provider, scalars.debug);
+    if (!init.success) {
+      NSLog(@"[SherpaOnnx:init] punctuation-offline wrapper init failed: %s",
+            init.error.c_str());
+      NSString *msg = init.error.empty()
+          ? @"OfflinePunctuationWrapper::initialize failed"
+          : [NSString stringWithUTF8String:init.error.c_str()];
+      reject(kInitErr, msg, nil);
       return;
     }
+    auto state =
+        std::make_shared<sherpaonnx::punctuation::bridge::OfflinePunctuationInstanceState>();
+    state->wrapper = std::move(wrapper);
+    sherpaonnx::punctuation::bridge::RemoveOfflinePunctuation(idStr);
     {
-      std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-      g_punct_offline.erase(idStr);
-      g_punct_offline.emplace(idStr, std::move(created));
+      std::lock_guard<std::mutex> lock(
+          sherpaonnx::punctuation::bridge::g_punct_offline_mutex);
+      sherpaonnx::punctuation::bridge::g_punct_offline_instances[idStr] = state;
     }
-    NSLog(@"[SherpaOnnx:init] punctuation-offline Create Get() ok");
+    NSLog(@"[SherpaOnnx:init] punctuation-offline wrapper init ok");
 
     resolve(@{
       @"success": @YES,
@@ -262,15 +264,10 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
     return;
   }
   std::string iid = [instanceId UTF8String];
-  sherpa_onnx::cxx::OfflinePunctuation *eng = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-    auto it = g_punct_offline.find(iid);
-    if (it == g_punct_offline.end()) {
-      reject(kNotFound, [NSString stringWithFormat:@"Offline punctuation instance not found: %@", instanceId], nil);
-      return;
-    }
-    eng = &it->second;
+  auto state = sherpaonnx::punctuation::bridge::LookupOfflinePunctuation(iid);
+  if (!state || !state->isReady()) {
+    reject(kNotFound, [NSString stringWithFormat:@"Offline punctuation instance not found: %@", instanceId], nil);
+    return;
   }
   if (textInId == nil || [textInId hasPrefix:@"txt_off_"] == NO) {
     reject(kTxtKind, [NSString stringWithFormat:@"Expected txt_off_* for text in, got %@", textInId], nil);
@@ -284,15 +281,16 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
   std::string lang;
   {
     std::string inId = std::string([textInId UTF8String]);
-    std::string err;
-    if (!txt_read_offline_text_with_lang(inId, &plain, &lang, &err)) {
-      NSString *c = kTxtNotFound;
-      if (err.find("not found") == std::string::npos) {
-        c = kTxtEmpty;
-      }
-      reject(c, [NSString stringWithUTF8String:err.c_str()], nil);
+    TxtOfflineTextView view;
+    std::string errCode;
+    std::string errMsg;
+    if (!txt_acquire_offline_text_view(inId, /*allowEmpty=*/false, &view, &errCode, &errMsg)) {
+      NSString *c = (errCode == "TEXT_BUFFER_NOT_FOUND") ? kTxtNotFound : kTxtEmpty;
+      reject(c, [NSString stringWithUTF8String:errMsg.c_str()], nil);
       return;
     }
+    plain.assign(view.data, view.bytes);
+    lang = view.lang ? view.lang : "";
   }
   std::string outId = std::string([textOutId UTF8String]);
   {
@@ -310,7 +308,15 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
   CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
   std::string outText;
   @try {
-    outText = eng->AddPunctuation(normalizedPlain);
+    const auto result = state->wrapper->addPunctuation(normalizedPlain);
+    if (!result.success) {
+      NSString *msg = result.error.empty()
+          ? @"Punctuation failed"
+          : [NSString stringWithUTF8String:result.error.c_str()];
+      reject(kPunctErr, msg, nil);
+      return;
+    }
+    outText = result.text;
   } @catch (NSException *exception) {
     reject(kPunctErr, [NSString stringWithFormat:@"Punctuation: %@", exception.reason], nil);
     return;
@@ -350,15 +356,10 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
     return;
   }
   std::string iid = [instanceId UTF8String];
-  sherpa_onnx::cxx::OfflinePunctuation *eng = nullptr;
-  {
-    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-    auto it = g_punct_offline.find(iid);
-    if (it == g_punct_offline.end()) {
-      reject(kNotFound, [NSString stringWithFormat:@"Offline punctuation instance not found: %@", instanceId], nil);
-      return;
-    }
-    eng = &it->second;
+  auto state = sherpaonnx::punctuation::bridge::LookupOfflinePunctuation(iid);
+  if (!state || !state->isReady()) {
+    reject(kNotFound, [NSString stringWithFormat:@"Offline punctuation instance not found: %@", instanceId], nil);
+    return;
   }
   if (textOutId == nil || [textOutId hasPrefix:@"txt_off_"] == NO) {
     reject(kTxtKind, [NSString stringWithFormat:@"Expected txt_off_* for text out, got %@", textOutId], nil);
@@ -380,7 +381,15 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
   CFTimeInterval t0 = CFAbsoluteTimeGetCurrent();
   std::string outText;
   @try {
-    outText = eng->AddPunctuation(plainStr);
+    const auto result = state->wrapper->addPunctuation(plainStr);
+    if (!result.success) {
+      NSString *msg = result.error.empty()
+          ? @"Punctuation failed"
+          : [NSString stringWithUTF8String:result.error.c_str()];
+      reject(kPunctErr, msg, nil);
+      return;
+    }
+    outText = result.text;
   } @catch (NSException *exception) {
     reject(kPunctErr, [NSString stringWithFormat:@"Punctuation: %@", exception.reason], nil);
     return;
@@ -413,10 +422,7 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
     return;
   }
   std::string iid = [instanceId UTF8String];
-  {
-    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-    g_punct_offline.erase(iid);
-  }
+  sherpaonnx::punctuation::bridge::RemoveOfflinePunctuation(iid);
   resolve(nil);
 }
 
@@ -459,9 +465,9 @@ extern "C" bool sherpaonnx_punct_offline_has_instance(
   std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
 
   {
-    std::lock_guard<std::mutex> lock(g_punct_offline_mutex);
-    auto it = g_punct_offline.find(instanceIdStr);
-    if (it == g_punct_offline.end()) {
+    auto state =
+        sherpaonnx::punctuation::bridge::LookupOfflinePunctuation(instanceIdStr);
+    if (!state || !state->isReady()) {
       reject(kNotFound,
              [NSString stringWithFormat:@"Offline punctuation instance not found: %@", instanceId],
              nil);

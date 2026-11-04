@@ -4,10 +4,10 @@
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../audio/pipeline/PaLiveEntry.h"
+#include "AudioRegistry.h"
+#include "TextRegistry.h"
+#include "SegmentRegistry.h"
+#include "PaLiveEntry.h"
 
 // Instance → active pipeline tracking
 static std::unordered_map<std::string, std::string> g_tts_instance_to_pipeline;
@@ -188,17 +188,22 @@ static std::mutex g_tts_pipeline_mutex;
                    @"Voice cloning in pipeline mode is only supported for Pocket TTS", nil);
             return;
         }
-        std::vector<float> refSamples;
-        int refSampleRate = 0;
-        if (!pa_read_offline_samples(std::string([refBufferId UTF8String]), &refSamples, &refSampleRate)) {
+        PaOfflineSampleView refView;
+        std::string refErrCode;
+        std::string refErrMsg;
+        if (!pa_acquire_offline_sample_view(std::string([refBufferId UTF8String]), -1, -1, &refView,
+                                            &refErrCode, &refErrMsg) ||
+            refView.count == 0 || refView.data == nullptr) {
             reject(@"TTS_PIPELINE_VOICE_CLONE_REF_NOT_FOUND",
                    [NSString stringWithFormat:@"Reference audio buffer not found: %@", refBufferId], nil);
             return;
         }
 
         sherpaonnx::VoiceCloneOptions clone;
-        clone.reference_audio = std::move(refSamples);
-        clone.reference_sample_rate = static_cast<int32_t>(refSampleRate);
+        clone.reference_pcm = refView.data;
+        clone.reference_pcm_count = static_cast<int32_t>(refView.count);
+        clone.reference_keepalive = refView.entry;
+        clone.reference_sample_rate = static_cast<int32_t>(refView.sampleRate);
         NSString *refText = options.referenceText();
         clone.reference_text = refText != nil ? std::string([refText UTF8String] ?: "") : "";
         if (auto silenceOpt = options.silenceScale()) {

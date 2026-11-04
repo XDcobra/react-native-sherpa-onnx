@@ -113,10 +113,10 @@ SetVoiceSampleResult CallSetVoiceSample(
     bool initialized,
     int32_t modelSampleRate,
     const std::function<int32_t(const float*, int32_t, int32_t)>& nativeCall,
-    const std::vector<float>& samples,
+    const float* samples,
+    int32_t n,
     int32_t sampleRate
 ) {
-    const int32_t n = static_cast<int32_t>(samples.size());
     auto log = [&](const char* ok, const char* reason, int32_t preparedLength) {
         ENH_LOGI(
             "%s setVoiceSample kind=%s n=%d inRate=%d preparedLength=%d ok=%s reason=%s",
@@ -136,7 +136,7 @@ SetVoiceSampleResult CallSetVoiceSample(
         result.error = "Enhancement instance is not initialized";
         return result;
     }
-    if (n <= 0 || sampleRate <= 0) {
+    if (samples == nullptr || n <= 0 || sampleRate <= 0) {
         log("false", "empty-pcm", 0);
         result.error = "Voice sample PCM is empty";
         return result;
@@ -147,7 +147,7 @@ SetVoiceSampleResult CallSetVoiceSample(
         return result;
     }
 
-    const int32_t rc = nativeCall(samples.data(), n, sampleRate);
+    const int32_t rc = nativeCall(samples, n, sampleRate);
     if (rc != 0) {
         log("false", "too-short", 0);
         result.error =
@@ -311,24 +311,37 @@ EnhancementInitializeResult EnhancementWrapper::initializeCustom(
 }
 
 EnhancedAudioResult EnhancementWrapper::runSamples(
-    const std::vector<float>& samples,
+    const float* samples,
+    int32_t numSamples,
     int32_t sampleRate
 ) {
     if (!pImpl->initialized || pImpl->denoiser == nullptr) {
         return {};
     }
+    if (samples == nullptr || numSamples <= 0) {
+        return {};
+    }
     return FromDenoisedAudio(
         SherpaOnnxOfflineSpeechDenoiserRun(
             pImpl->denoiser,
-            samples.data(),
-            static_cast<int32_t>(samples.size()),
+            samples,
+            numSamples,
             sampleRate
         )
     );
 }
 
-SetVoiceSampleResult EnhancementWrapper::setVoiceSample(
+EnhancedAudioResult EnhancementWrapper::runSamples(
     const std::vector<float>& samples,
+    int32_t sampleRate
+) {
+    return runSamples(samples.empty() ? nullptr : samples.data(),
+                      static_cast<int32_t>(samples.size()), sampleRate);
+}
+
+SetVoiceSampleResult EnhancementWrapper::setVoiceSample(
+    const float* samples,
+    int32_t numSamples,
     int32_t sampleRate
 ) {
     return CallSetVoiceSample(
@@ -342,8 +355,17 @@ SetVoiceSampleResult EnhancementWrapper::setVoiceSample(
             );
         },
         samples,
+        numSamples,
         sampleRate
     );
+}
+
+SetVoiceSampleResult EnhancementWrapper::setVoiceSample(
+    const std::vector<float>& samples,
+    int32_t sampleRate
+) {
+    return setVoiceSample(samples.empty() ? nullptr : samples.data(),
+                          static_cast<int32_t>(samples.size()), sampleRate);
 }
 
 int32_t EnhancementWrapper::getSampleRate() const {
@@ -494,20 +516,32 @@ EnhancementInitializeResult OnlineEnhancementWrapper::initializeCustom(
 }
 
 EnhancedAudioResult OnlineEnhancementWrapper::runSamples(
-    const std::vector<float>& samples,
+    const float* samples,
+    int32_t numSamples,
     int32_t sampleRate
 ) {
     if (!pImpl->initialized || pImpl->denoiser == nullptr) {
         return {};
     }
+    if (samples == nullptr || numSamples <= 0) {
+        return {};
+    }
     return FromDenoisedAudio(
         SherpaOnnxOnlineSpeechDenoiserRun(
             pImpl->denoiser,
-            samples.data(),
-            static_cast<int32_t>(samples.size()),
+            samples,
+            numSamples,
             sampleRate
         )
     );
+}
+
+EnhancedAudioResult OnlineEnhancementWrapper::runSamples(
+    const std::vector<float>& samples,
+    int32_t sampleRate
+) {
+    return runSamples(samples.empty() ? nullptr : samples.data(),
+                      static_cast<int32_t>(samples.size()), sampleRate);
 }
 
 EnhancedAudioResult OnlineEnhancementWrapper::flush() {
@@ -523,7 +557,8 @@ void OnlineEnhancementWrapper::reset() {
 }
 
 SetVoiceSampleResult OnlineEnhancementWrapper::setVoiceSample(
-    const std::vector<float>& samples,
+    const float* samples,
+    int32_t numSamples,
     int32_t sampleRate
 ) {
     return CallSetVoiceSample(
@@ -537,8 +572,17 @@ SetVoiceSampleResult OnlineEnhancementWrapper::setVoiceSample(
             );
         },
         samples,
+        numSamples,
         sampleRate
     );
+}
+
+SetVoiceSampleResult OnlineEnhancementWrapper::setVoiceSample(
+    const std::vector<float>& samples,
+    int32_t sampleRate
+) {
+    return setVoiceSample(samples.empty() ? nullptr : samples.data(),
+                          static_cast<int32_t>(samples.size()), sampleRate);
 }
 
 int32_t OnlineEnhancementWrapper::getSampleRate() const {

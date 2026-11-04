@@ -10,7 +10,7 @@
 #include "audio/LiveAudioTap.h"
 #include "audio/VideoAudioExtractor.h"
 #include "core/Uuid.h"
-#include "../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "codec/CodecCatalog.h"
 #include "codec/CodecEvents.h"
 #include "codec/CodecRuntime.h"

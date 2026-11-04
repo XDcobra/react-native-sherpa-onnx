@@ -10,6 +10,8 @@ import {
   createEmptyOfflineTextBuffer,
   getOfflineTextBufferTextSlice,
   getPipelineTextBufferInfo,
+  liveTextNotifyToTextSegment,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
   resolveOfflineTextBufferId,
   resolvePipelineTextBufferId,
@@ -31,7 +33,6 @@ import type {
 } from './types';
 import { runOfflinePunctuationPipeline } from './orchestrate';
 import { resolveTextInputNormalization } from './textInputNormalization';
-import type { TextSegment } from '../segment/segment';
 import type { PunctuationPipelineHandle } from './streamingTypes';
 import { buildOfflinePunctuationInitBridgeOptions } from './punctuationNativeBridge';
 
@@ -155,8 +156,26 @@ async function punctuateLiveOverload(
 
   if (options.onSegment) {
     const cb = options.onSegment;
+    let previousEndOffset = 0;
     const unsub = subscribeLiveTextBufferEvents(textOut, {
-      onSegment: (event) => cb(event.segment as TextSegment),
+      onSegment: (event) => {
+        readLiveTextSegment(event, {
+          includeTokens: true,
+          includeTimestamps: true,
+          includeMeta: true,
+        })
+          .then((segment) => {
+            if (!segment) return;
+            const textSeg = liveTextNotifyToTextSegment(
+              event,
+              segment,
+              previousEndOffset
+            );
+            previousEndOffset = textSeg.endOffset;
+            cb(textSeg);
+          })
+          .catch(() => undefined);
+      },
     });
     handle.completed.then(unsub, unsub);
   }

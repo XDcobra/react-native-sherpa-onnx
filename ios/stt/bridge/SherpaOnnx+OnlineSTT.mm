@@ -10,13 +10,13 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/PaLiveEntry.h"
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "PaLiveEntry.h"
+#include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
 #include "../pipeline/SttPipelineWorker.h"
-#include "../native/sherpa-onnx-online-stt-wrapper.h"
+#include "sherpa-onnx-online-stt-engine-wrapper.h"
 #include "sherpa-onnx-model-path-fill.h"
 
 #include <chrono>

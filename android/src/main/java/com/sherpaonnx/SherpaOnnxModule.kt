@@ -19,7 +19,6 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.module.annotations.ReactModule
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.k2fsa.sherpa.onnx.WaveReader
 import com.sherpaonnx.pcm.PcmPlayerService
 import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
@@ -93,14 +92,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           m.putDouble("createdAtMs", System.currentTimeMillis().toDouble())
         }
         rec.confidence?.let { m.putDouble("confidence", it) }
-        if (!rec.payloadJson.isNullOrEmpty()) {
-          try {
-            val jo = org.json.JSONObject(rec.payloadJson)
-            val p = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(jo)
-            m.putMap("payload", p)
-          } catch (_: Exception) {
-          }
-        }
+        // Notify-only: pull payload via getLiveSegmentBufferSegments / readLiveSegment.
         eventEmitter.emit("pipelineLiveSegmentAppended", m)
       } catch (_: Exception) {
       }
@@ -295,15 +287,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
   private val liveTextPartialLastEmitAtMs = ConcurrentHashMap<String, Long>()
-  private val maxEventTextChars = 4096
-
-  private fun truncateSegmentEventText(text: String): Pair<String, Boolean> {
-    if (text.length <= maxEventTextChars) {
-      return Pair(text, false)
-    }
-    return Pair(text.substring(0, maxEventTextChars), true)
-  }
-
   private fun maybeEmitLiveTextPartial(
     entry: com.sherpaonnx.text.pipeline.LiveTextEntry,
     source: String,
@@ -324,7 +307,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val payload = Arguments.createMap()
       payload.putString("liveBufferId", entry.bufferId)
       payload.putString("source", source)
-      payload.putString("partialText", entry.currentText)
+      payload.putInt("utf16Length", entry.partialUtf16Length)
       payload.putInt("revision", entry.revision)
       eventEmitter.emit("pipelineLiveTextPartial", payload)
     } catch (_: Exception) {
@@ -337,22 +320,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     segment: com.sherpaonnx.text.pipeline.TextSegment,
     totalSegments: Int,
   ) {
-    // Snapshot before main-looper emit — do not retain JNI-backed segment fields
-    // across the hop into the JS event payload.
-    val eventTextPair = truncateSegmentEventText(segment.text)
-    val snapshotText = eventTextPair.first
-    val textTruncated = eventTextPair.second
+    // Notify-only: pull text/meta via getLiveTextBufferSegments.
     val snapshotSource = segment.source
     val snapshotIndex = segment.segmentIndex
-    val snapshotTokens = segment.tokens.map { it.orEmpty() }.toTypedArray()
-    val snapshotTimestamps = segment.timestamps.copyOf()
-    val snapshotMeta: Map<String, Any?>? = segment.meta?.mapValues { (_, v) ->
-      when (v) {
-        is Long -> v.toDouble()
-        is Float -> v.toDouble()
-        else -> v
-      }
-    }
+    val utf16Length = segment.text.length
 
     val emit = Runnable {
       try {
@@ -361,30 +332,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val payload = Arguments.createMap().apply {
           putString("liveBufferId", liveBufferId)
           putInt("totalSegments", totalSegments)
-          putString("text", snapshotText)
-          if (textTruncated) {
-            putBoolean("textTruncated", true)
-          }
           putString("source", snapshotSource)
           putInt("segmentIndex", snapshotIndex)
-
-          if (snapshotTokens.isNotEmpty()) {
-            val tokenArray = Arguments.createArray()
-            snapshotTokens.forEach { tokenArray.pushString(it) }
-            putArray("tokens", tokenArray)
-          }
-
-          if (snapshotTimestamps.isNotEmpty()) {
-            val tsArray = Arguments.createArray()
-            snapshotTimestamps.forEach { tsArray.pushDouble(it.toDouble()) }
-            putArray("timestamps", tsArray)
-          }
-
-          snapshotMeta?.let { rawMeta ->
-            com.sherpaonnx.text.pipeline.LiveTextJsonMeta.packMetaMap(rawMeta)?.let { metaMap ->
-              putMap("meta", metaMap)
-            }
-          }
+          putInt("utf16Length", utf16Length)
         }
         eventEmitter.emit("pipelineLiveTextSegmentAppended", payload)
       } catch (e: Exception) {
@@ -421,7 +371,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  private external fun nativeInstallJSI(jsiRuntimePointer: Long, registry: Any): Boolean
+  private external fun nativeInstallJSI(jsiRuntimePointer: Long): Boolean
 
   private fun tryInstallJsiBindings(): Boolean {
     return try {
@@ -430,7 +380,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       if (jsContext == 0L) {
         false
       } else {
-        nativeInstallJSI(jsContext, PipelineAudioRegistry)
+        // JSI binds directly to shared C++ AudioRegistry (no Kotlin registry hop).
+        nativeInstallJSI(jsContext)
       }
     } catch (_: Exception) {
       false
@@ -1777,34 +1728,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         nativeAttachVisualizationProgressCallback(accumulatorPtr, progressCallback)
       }
       val chunk = FloatArray(8192)
-      when (entry) {
-        is OfflineEntry.MmapBacked -> {
-          var start = 0
-          val total = entry.numSamples
-          while (start < total) {
-            val maxSamples = minOf(chunk.size, total - start)
-            val count = entry.readInto(start, chunk, 0, maxSamples)
-            if (count <= 0) break
-            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
-            start += count
-            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
-              break
-            }
-          }
-        }
-
-        is OfflineEntry.InMemory -> {
-          var start = 0
-          val source = entry.samples
-          while (start < source.size) {
-            val count = minOf(chunk.size, source.size - start)
-            System.arraycopy(source, start, chunk, 0, count)
-            nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
-            start += count
-            if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
-              break
-            }
-          }
+      var start = 0
+      val total = entry.numSamples
+      while (start < total) {
+        val maxSamples = minOf(chunk.size, total - start)
+        val count = entry.readInto(start, chunk, 0, maxSamples)
+        if (count <= 0) break
+        nativeFeedVisualizationAccumulator(accumulatorPtr, chunk, count)
+        start += count
+        if (nativeIsVisualizationAnalysisCapReached(accumulatorPtr)) {
+          break
         }
       }
 
@@ -3146,14 +3079,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       ?: throw IllegalArgumentException("Offline buffer not found: $bufferId")
     if (entry.numSamples == 0) throw IllegalArgumentException("Buffer is empty")
 
-    when (entry) {
-      is com.sherpaonnx.audio.pipeline.OfflineEntry.MmapBacked -> {
-        encodeViaOfflineReader(entry, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
-      }
-      is com.sherpaonnx.audio.pipeline.OfflineEntry.InMemory -> {
-        encodeViaPcm(entry.samples, entry.sampleRate, entry.channelCount, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
-      }
-    }
+    encodeViaOfflineReader(entry, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
   }
 
   private fun saveLiveBuffer(
@@ -5015,13 +4941,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_TOO_LARGE, "maxUtf16 $m exceeds max ${com.sherpaonnx.text.pipeline.TextErrorCodes.TEXT_MAX_SLICE_COUNT}")
         return
       }
-      val text = entry.text
-      if (s >= text.length) {
-        promise.resolve("")
-        return
-      }
-      val end = minOf(s + m, text.length)
-      promise.resolve(text.substring(s, end))
+      val slice =
+        com.sherpaonnx.text.pipeline.TextBufferNative.nativeReadOfflineTextSlice(bufferId, s, m)
+      promise.resolve(slice ?: "")
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -5195,13 +5117,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.SLICE_INVALID, "Invalid slice args")
         return
       }
-      val text = entry.currentText
-      if (s >= text.length) {
-        promise.resolve("")
-        return
-      }
-      val end = minOf(s + m, text.length)
-      promise.resolve(text.substring(s, end))
+      val slice =
+        com.sherpaonnx.text.pipeline.TextBufferNative.nativeSnapshotTextSlice(liveBufferId, s, m)
+      promise.resolve(slice ?: "")
     } catch (e: Exception) {
       promise.reject(com.sherpaonnx.text.pipeline.TextErrorCodes.INTERNAL_ERROR, e.message, e)
     }
@@ -5558,34 +5476,43 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return out
   }
 
-  private fun segmentRecordToWritableMapWithAnnotation(
-    record: com.sherpaonnx.segment.pipeline.SegmentRecord,
+  /** Matches C SEG_TM_MAX_PAGE_COUNT / TS SEGMENT_TM_MAX_PAGE_COUNT. */
+  private val SEGMENT_TM_MAX_PAGE_COUNT = 4096
+
+  private fun clampTmPageCount(requested: Int): Int {
+    if (requested <= 0) return 0
+    return minOf(requested, SEGMENT_TM_MAX_PAGE_COUNT)
+  }
+
+  private fun segmentJsonObjectToWritableMapWithAnnotation(
+    obj: JSONObject,
   ): com.facebook.react.bridge.WritableMap {
     val out = Arguments.createMap()
-    out.putString("id", record.id)
-    out.putString("kind", record.kind)
-    out.putString("sourceAudioBufferId", record.sourceAudioBufferId)
-    out.putInt("startSample", record.startSample)
-    out.putInt("endSample", record.endSample)
-    out.putInt("sampleRate", record.sampleRate)
-    out.putInt("durationMs", record.durationMs)
-    record.confidence?.let { out.putDouble("confidence", it) }
+    val id = obj.optString("id")
+    out.putString("id", id)
+    out.putString("kind", obj.optString("kind", "speech"))
+    out.putString("sourceAudioBufferId", obj.optString("sourceAudioBufferId"))
+    out.putInt("startSample", obj.optInt("startSample"))
+    out.putInt("endSample", obj.optInt("endSample"))
+    out.putInt("sampleRate", obj.optInt("sampleRate"))
+    out.putInt("durationMs", obj.optInt("durationMs"))
+    if (obj.has("confidence")) out.putDouble("confidence", obj.optDouble("confidence"))
 
     val annotation =
-      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.peekSegmentAnnotation(
-        record.id
-      )
+      com.sherpaonnx.segment.engine.SegmentationEngineRegistry.peekSegmentAnnotation(id)
     annotation?.let {
       out.putString("reason", it.reason)
       out.putString("source", it.source)
       out.putDouble("createdAtMs", it.createdAtMs.toDouble())
     }
 
-    record.payloadJson?.let { payloadJson ->
+    val payloadObj = obj.optJSONObject("payload")
+    if (payloadObj != null) {
       try {
-        val json = JSONObject(payloadJson)
-        val payload = com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(json)
-        out.putMap("payload", payload)
+        out.putMap(
+          "payload",
+          com.sherpaonnx.segment.pipeline.JsonToReactUtils.jsonObjectToWritableMap(payloadObj),
+        )
       } catch (_: Exception) {
       }
     }
@@ -5593,12 +5520,16 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     return out
   }
 
-  private fun segmentRecordsToWritableArrayWithAnnotation(
-    records: List<com.sherpaonnx.segment.pipeline.SegmentRecord>,
+  private fun segmentSliceJsonToWritableArrayWithAnnotation(
+    sliceJson: String?,
   ): com.facebook.react.bridge.WritableArray {
     val arr = Arguments.createArray()
-    for (record in records) {
-      arr.pushMap(segmentRecordToWritableMapWithAnnotation(record))
+    if (sliceJson.isNullOrEmpty()) return arr
+    val root = JSONObject(sliceJson)
+    val segments = root.optJSONArray("segments") ?: return arr
+    for (i in 0 until segments.length()) {
+      val obj = segments.optJSONObject(i) ?: continue
+      arr.pushMap(segmentJsonObjectToWritableMapWithAnnotation(obj))
     }
     return arr
   }
@@ -5967,16 +5898,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
-      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getOffline(bufferId)
-      if (entry == null) {
+      if (!com.sherpaonnx.segment.pipeline.SegmentBufferNative.nativeIsOffline(bufferId)) {
         promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Offline segment buffer not found: $bufferId")
         return
       }
       val from = start?.toInt() ?: 0
-      val count = maxCount?.toInt() ?: 1024
-      val segments = entry.snapshotSegments(from, count)
+      val requested = maxCount?.toInt() ?: SEGMENT_TM_MAX_PAGE_COUNT
+      if (from < 0 || requested < 0) {
+        promise.reject(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.SLICE_INVALID,
+          "Invalid segment slice range start=$from maxCount=$requested",
+        )
+        return
+      }
+      val count = clampTmPageCount(requested)
+      val json =
+        com.sherpaonnx.segment.pipeline.SegmentBufferNative.nativeOfflineSegmentsSlice(
+          bufferId,
+          from,
+          count,
+        )
       val out = Arguments.createMap()
-      out.putArray("segments", segmentRecordsToWritableArrayWithAnnotation(segments))
+      out.putArray("segments", segmentSliceJsonToWritableArrayWithAnnotation(json))
       promise.resolve(out)
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
       promise.reject(e.code, e.message, e)
@@ -5992,14 +5935,28 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     try {
-      val entry = com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry.getLive(liveBufferId)
-      if (entry == null) {
+      if (!com.sherpaonnx.segment.pipeline.SegmentBufferNative.nativeIsLive(liveBufferId)) {
         promise.reject(com.sherpaonnx.segment.pipeline.SegmentErrorCodes.BUFFER_NOT_FOUND, "Live segment buffer not found: $liveBufferId")
         return
       }
-      val segments = entry.getSegments(startIndex.toInt(), maxCount.toInt())
+      val from = startIndex.toInt()
+      val requested = maxCount.toInt()
+      if (from < 0 || requested < 0) {
+        promise.reject(
+          com.sherpaonnx.segment.pipeline.SegmentErrorCodes.SLICE_INVALID,
+          "Invalid segment slice range start=$from maxCount=$requested",
+        )
+        return
+      }
+      val count = clampTmPageCount(requested)
+      val json =
+        com.sherpaonnx.segment.pipeline.SegmentBufferNative.nativeLiveSegmentsSlice(
+          liveBufferId,
+          from,
+          count,
+        )
       val out = Arguments.createMap()
-      out.putArray("segments", segmentRecordsToWritableArrayWithAnnotation(segments))
+      out.putArray("segments", segmentSliceJsonToWritableArrayWithAnnotation(json))
       promise.resolve(out)
     } catch (e: com.sherpaonnx.segment.pipeline.SegmentPipelineException) {
       promise.reject(e.code, e.message, e)

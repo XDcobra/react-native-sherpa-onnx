@@ -59,6 +59,25 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/speaker-embedding/*.h",
     # Shared enhancement core (C-API offline/online denoiser). JNI excluded below.
     "android/src/main/cpp/enhancement/*.{h,cpp}",
+    # Shared SLID core (C-API Whisper spoken language ID). JNI excluded below.
+    "android/src/main/cpp/slid/*.{h,cpp}",
+    # Shared audio tagging core (C-API). JNI excluded below.
+    "android/src/main/cpp/audio_tagging/*.{h,cpp}",
+    # Shared punctuation core (C-API offline+online). JNI excluded below.
+    "android/src/main/cpp/punctuation/*.{h,cpp}",
+    # Shared VAD core (C-API VoiceActivityDetector). JNI excluded below.
+    "android/src/main/cpp/vad/*.{h,cpp}",
+    # Shared KWS core (C-API KeywordSpotter). JNI excluded below.
+    "android/src/main/cpp/kws/*.{h,cpp}",
+    # Shared offline + online STT core (CXX Offline/OnlineRecognizer). JNI excluded below.
+    "android/src/main/cpp/stt/*.{h,cpp}",
+    # Shared TTS core (CXX OfflineTts). JNI excluded below.
+    "android/src/main/cpp/tts/*.{h,cpp}",
+    # Shared AudioBuffer registry (Pa* offline/live; JNI excluded below).
+    "android/src/main/cpp/audiobuffer/*.{h,cpp}",
+    # Shared TextBuffer registry (Txt* offline/live; JNI excluded below).
+    "android/src/main/cpp/textbuffer/*.{h,cpp}",
+    "android/src/main/cpp/segmentbuffer/*.{h,cpp}",
     # Shared ImageBuffer core (decode + registry; JNI excluded below).
     "android/src/main/cpp/image/**/*.{h,cpp}",
     # Shared VideoBuffer core (platform/android excluded below).
@@ -97,7 +116,16 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/diarization/sherpa-onnx-diarization-jni.cpp",
     "android/src/main/cpp/jni/speaker-embedding/sherpa-onnx-speaker-embedding-jni.cpp",
     "android/src/main/cpp/jni/enhancement/sherpa-onnx-enhancement-jni.cpp",
+    "android/src/main/cpp/jni/slid/sherpa-onnx-slid-jni.cpp",
+    "android/src/main/cpp/jni/audio_tagging/sherpa-onnx-audio-tagging-jni.cpp",
+    "android/src/main/cpp/jni/punctuation/sherpa-onnx-punctuation-jni.cpp",
+    "android/src/main/cpp/jni/vad/sherpa-onnx-vad-jni.cpp",
+    "android/src/main/cpp/jni/kws/sherpa-onnx-kws-jni.cpp",
+    "android/src/main/cpp/jni/stt/sherpa-onnx-stt-jni.cpp",
     "android/src/main/cpp/jni/image/**/*",
+    "android/src/main/cpp/jni/audiobuffer/**/*",
+    "android/src/main/cpp/jni/textbuffer/**/*",
+    "android/src/main/cpp/jni/segmentbuffer/**/*",
     "android/src/main/cpp/jni/video/**/*",
     "android/src/main/cpp/video/platform/android/**/*",
     "android/src/main/cpp/image/platform/android/**/*",
@@ -256,7 +284,6 @@ Pod::Spec.new do |s|
 
   header_search_paths = [
     "$(inherited)",
-    "\"#{pod_root}/ios/stt/native\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/common\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/stt\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/tts\"",
@@ -268,6 +295,17 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/android/src/main/cpp/diarization\"",
     "\"#{pod_root}/android/src/main/cpp/speaker-embedding\"",
     "\"#{pod_root}/android/src/main/cpp/enhancement\"",
+    "\"#{pod_root}/android/src/main/cpp/slid\"",
+    "\"#{pod_root}/android/src/main/cpp/audio_tagging\"",
+    "\"#{pod_root}/android/src/main/cpp/punctuation\"",
+    "\"#{pod_root}/android/src/main/cpp/vad\"",
+    "\"#{pod_root}/android/src/main/cpp/vad\"",
+    "\"#{pod_root}/android/src/main/cpp/kws\"",
+    "\"#{pod_root}/android/src/main/cpp/stt\"",
+    "\"#{pod_root}/android/src/main/cpp/tts\"",
+    "\"#{pod_root}/android/src/main/cpp/audiobuffer\"",
+    "\"#{pod_root}/android/src/main/cpp/textbuffer\"",
+    "\"#{pod_root}/android/src/main/cpp/segmentbuffer\"",
     "\"#{pod_root}/third_party/onnxruntime/include/onnxruntime/core/session\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/punctuation\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/vad\"",
@@ -299,6 +337,7 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/pdf\"",
     "\"#{pod_root}/ios/pdf/bridge\"",
     "\"#{pod_root}/ios\"",
+    "\"#{pod_root}/ios/textbuffer\"",
     "\"#{pod_root}/ios/videobuffer\"",
     "\"#{pod_root}/ios/videobuffer/preview\"",
     "\"#{pod_root}/ios/imagebuffer\"",
@@ -316,7 +355,6 @@ Pod::Spec.new do |s|
     "\"#{pod_root}/ios/slid/pipeline\"",
     "\"#{pod_root}/ios/kws\"",
     "\"#{pod_root}/ios/kws/bridge\"",
-    "\"#{pod_root}/ios/kws/native\"",
     "\"#{pod_root}/ios/kws/pipeline\"",
     "\"#{pod_root}/ios/audio-tagging\"",
     "\"#{pod_root}/ios/audio-tagging/bridge\"",

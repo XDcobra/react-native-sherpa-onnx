@@ -42,7 +42,6 @@ jest.mock('../../audiobuffer', () => ({
   }),
 }));
 
-const mockSubscribeLiveSegmentBufferEvents = jest.fn();
 jest.mock('../../segmentbuffer', () => ({
   finalizeLiveSegmentBuffer: jest.fn(async () => undefined),
   resolveLiveSegmentBufferId: jest.fn((value: unknown) => {
@@ -56,8 +55,8 @@ jest.mock('../../segmentbuffer', () => ({
     }
     return String(value);
   }),
-  subscribeLiveSegmentBufferEvents: (...args: unknown[]) =>
-    mockSubscribeLiveSegmentBufferEvents(...args),
+  subscribeLiveSegmentBufferEvents: jest.fn(),
+  readLiveSegment: jest.fn(),
 }));
 
 jest.mock('../../segment', () => ({
@@ -101,6 +100,8 @@ describe('labelLiveSegments', () => {
 
   const segs = segmentbuffer as unknown as {
     finalizeLiveSegmentBuffer: jest.Mock;
+    subscribeLiveSegmentBufferEvents: jest.Mock;
+    readLiveSegment: jest.Mock;
   };
 
   const AUDIO_LIVE = 'live_audio';
@@ -166,7 +167,7 @@ describe('labelLiveSegments', () => {
     });
     seg.detachSegmentationEngine.mockResolvedValue(undefined);
 
-    mockSubscribeLiveSegmentBufferEvents.mockImplementation(() => jest.fn());
+    segs.subscribeLiveSegmentBufferEvents.mockImplementation(() => jest.fn());
   });
 
   it('rejects missing segmentation with LIVE_OFFLINE_SEGMENTATION_REQUIRED', async () => {
@@ -227,18 +228,21 @@ describe('labelLiveSegments', () => {
     const onLabeled = jest.fn();
     let onAppended:
       | ((event: {
+          segmentBufferId: string;
+          segmentId: string;
           kind: string;
           segmentIndex: number;
+          totalSegments: number;
+          sourceAudioBufferId: string;
           startSample: number;
           endSample: number;
           sampleRate: number;
           durationMs: number;
           confidence?: number;
-          payload?: { source: string; speakerName: string | null };
         }) => void)
       | undefined;
 
-    mockSubscribeLiveSegmentBufferEvents.mockImplementation(
+    segs.subscribeLiveSegmentBufferEvents.mockImplementation(
       (_id: unknown, callbacks: { onSegmentAppended?: typeof onAppended }) => {
         onAppended = callbacks.onSegmentAppended;
         return jest.fn();
@@ -276,30 +280,60 @@ describe('labelLiveSegments', () => {
     expect(native.speakerEmbeddingManagerSearch).not.toHaveBeenCalled();
     expect(handle.pipelineId).toBe(PIPELINE_ID);
     expect(handle.instanceId).toBe(sid.instanceId);
-    expect(mockSubscribeLiveSegmentBufferEvents).toHaveBeenCalledWith(
+    expect(segs.subscribeLiveSegmentBufferEvents).toHaveBeenCalledWith(
       SEGS_OUT,
       expect.objectContaining({ onSegmentAppended: expect.any(Function) })
     );
 
+    segs.readLiveSegment
+      .mockResolvedValueOnce({
+        id: 'seg_0',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_LIVE,
+        startSample: 0,
+        endSample: 1600,
+        sampleRate: 16000,
+        durationMs: 100,
+        payload: { source: 'sid', speakerName: 'alice' },
+      })
+      .mockResolvedValueOnce({
+        id: 'seg_1',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_LIVE,
+        startSample: 2000,
+        endSample: 3600,
+        sampleRate: 16000,
+        durationMs: 100,
+        payload: { source: 'sid', speakerName: null },
+      });
+
     onAppended?.({
+      segmentBufferId: SEGS_OUT,
+      segmentId: 'seg_0',
       kind: 'speech',
       segmentIndex: 0,
+      totalSegments: 1,
+      sourceAudioBufferId: AUDIO_LIVE,
       startSample: 0,
       endSample: 1600,
       sampleRate: 16000,
       durationMs: 100,
       confidence: 0.9,
-      payload: { source: 'sid', speakerName: 'alice' },
     });
     onAppended?.({
+      segmentBufferId: SEGS_OUT,
+      segmentId: 'seg_1',
       kind: 'speech',
       segmentIndex: 1,
+      totalSegments: 2,
+      sourceAudioBufferId: AUDIO_LIVE,
       startSample: 2000,
       endSample: 3600,
       sampleRate: 16000,
       durationMs: 100,
-      payload: { source: 'sid', speakerName: null },
     });
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(onLabeled).toHaveBeenCalledTimes(2);
     expect(onLabeled).toHaveBeenNthCalledWith(

@@ -2,10 +2,9 @@ package com.sherpaonnx.audiotagging.pipeline
 
 import android.os.SystemClock
 import android.util.Log
-import com.k2fsa.sherpa.onnx.AudioEvent
-import com.k2fsa.sherpa.onnx.AudioTagging
-import com.k2fsa.sherpa.onnx.OfflineStream
 import com.sherpaonnx.audiotagging.core.AudioTaggingErrorCodes
+import com.sherpaonnx.audiotagging.core.AudioTaggingInstance
+import com.sherpaonnx.audiotagging.facade.SherpaOnnxAudioTaggingHelper
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
@@ -15,16 +14,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Live-overload worker: on each speech commit, run offline AudioTagging compute and
- * commit the primary event name (+ top-K meta) to [textOutputEntry]. Optionally also
- * append an AudioTaggingSpeechSegmentPayload to [segmentsOutEntry].
+ * Live-overload worker: on each speech commit, run offline AudioTagging via shared C API
+ * and commit the primary event name (+ top-K meta) to [textOutputEntry].
  */
 internal class AudioTaggingOfflineLivePipelineWorker(
   pipelineId: String,
   attachedSegmentationEngineId: String,
   private val audioInputRef: AudioInput,
   private val audioInBufferId: String,
-  private val tagger: AudioTagging,
+  private val audioTaggingHelper: SherpaOnnxAudioTaggingHelper,
+  private val taggingInstance: AudioTaggingInstance,
   private val topK: Int,
   private val textOutputEntry: LiveTextEntry,
   private val segmentsOutEntry: LiveSegmentEntry?,
@@ -35,14 +34,14 @@ internal class AudioTaggingOfflineLivePipelineWorker(
   textInput = null,
 ) {
 
-  private val taggerIdentity = System.identityHashCode(tagger)
-  private val gateKey = NativeInstanceGate.keyFor(tagger)
+  private val gateKey = taggingInstance.gateKey()
 
   init {
     Log.d(
       TAG,
       "worker.created pipelineId=$pipelineId audioIn=$audioInBufferId " +
-        "tagger=$taggerIdentity topK=$topK segOut=${segmentsOutEntry?.bufferId ?: "-"}",
+        "instanceId=${taggingInstance.instanceId} topK=$topK " +
+        "segOut=${segmentsOutEntry?.bufferId ?: "-"}",
     )
   }
 
@@ -85,19 +84,21 @@ internal class AudioTaggingOfflineLivePipelineWorker(
     if (!NativeInstanceGate.beginUse(gateKey)) {
       Log.w(
         TAG,
-        "live.skipReleased pipelineId=$pipelineId tagger=$taggerIdentity " +
+        "live.skipReleased pipelineId=$pipelineId instanceId=${taggingInstance.instanceId} " +
           "start=${speech.startSample} end=${speech.endSample}",
       )
       return
     }
 
-    var stream: OfflineStream? = null
-    val events: Array<AudioEvent>
+    val events: List<Map<String, Any>>
     val t0 = SystemClock.uptimeMillis()
     try {
-      stream = tagger.createStream()
-      stream.acceptWaveform(samples, speech.sampleRate)
-      events = tagger.compute(stream, topK)
+      events = audioTaggingHelper.computeForLive(
+        taggingInstance.instanceId,
+        samples,
+        speech.sampleRate,
+        topK,
+      )
     } catch (t: Throwable) {
       Log.w(
         TAG,
@@ -105,10 +106,6 @@ internal class AudioTaggingOfflineLivePipelineWorker(
       )
       throw t
     } finally {
-      try {
-        stream?.release()
-      } catch (_: Exception) {
-      }
       Log.d(
         TAG,
         "live.computeLeave pipelineId=$pipelineId elapsedMs=${SystemClock.uptimeMillis() - t0}",
@@ -122,7 +119,7 @@ internal class AudioTaggingOfflineLivePipelineWorker(
     }
 
     val primary = events[0]
-    val primaryName = primary.name.trim()
+    val primaryName = (primary["name"] as? String)?.trim().orEmpty()
     if (primaryName.isEmpty()) {
       Log.d(TAG, "empty primary name for span start=${speech.startSample} end=${speech.endSample}")
       return
@@ -136,22 +133,24 @@ internal class AudioTaggingOfflineLivePipelineWorker(
     val eventMaps = ArrayList<Map<String, Any>>(events.size)
     val eventsJson = JSONArray()
     for (ev in events) {
+      val name = ev["name"] as? String ?: ""
+      val index = (ev["index"] as? Number)?.toInt() ?: 0
+      val prob = (ev["prob"] as? Number)?.toDouble() ?: 0.0
       eventMaps.add(
         mapOf(
-          "name" to ev.name,
-          "index" to ev.index,
-          "prob" to ev.prob.toDouble(),
+          "name" to name,
+          "index" to index,
+          "prob" to prob,
         ),
       )
       eventsJson.put(
         JSONObject()
-          .put("name", ev.name)
-          .put("index", ev.index)
-          .put("prob", ev.prob.toDouble()),
+          .put("name", name)
+          .put("index", index)
+          .put("prob", prob),
       )
     }
 
-    // LiveText meta is a Fabric-safe JSON tree (nested events array).
     textOutputEntry.commitSegment(
       text = primaryName,
       tokens = emptyArray(),

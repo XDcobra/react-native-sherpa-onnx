@@ -15,7 +15,7 @@
 
 `fullIfSpooled` is strict: if spool is unavailable, conversion rejects with `SEGMENT_SPOOL_*`.
 
-**Live events (opt-in):** `createLiveSegmentBuffer` supports `onSegmentAppended` / `onError` and optional throttling via `streamEvents.segmentAppended` (`enabled` + `minIntervalMs`).
+**Live events (opt-in, notify + pull):** `createLiveSegmentBuffer` supports `onSegmentAppended` / `onError` and optional throttling via `streamEvents.segmentAppended` (`enabled` + `minIntervalMs`). Appended events carry **scalar routing/timing fields only** (no `payload` dump on the RN bridge). Pull richness with `readLiveSegment(event)` / `getLiveSegmentBufferSegments`.
 
 `sourceAudioBufferId` accepts `PipelineAudioBufferIdSource` (audio ref/info/handle/id), not only raw strings.
 
@@ -39,7 +39,41 @@ Live segment buffers collect **time-range events** (VAD, future streaming alignm
 - `appendLiveSegment`
 - `getLiveSegmentBufferSegmentCount`
 - `getLiveSegmentBufferSegments`
+- `readLiveSegment`
 - `getPipelineSegmentBufferInfo`
+
+---
+
+## Committed segments: `onSegmentAppended` (notify + pull)
+
+Each time a worker (or `appendLiveSegment`) **commits** a segment, the live segment buffer emits **`onSegmentAppended`** with a notify-only [`LiveSegmentBufferSegmentAppendedEvent`](../src/segmentbuffer/types.ts):
+
+- `segmentBufferId`, `segmentIndex`, `totalSegments`, `kind`, `segmentId`
+- `sourceAudioBufferId`, `startSample`, `endSample`, `sampleRate`, `durationMs`, optional `confidence`
+
+Pull `SegmentMeta` (including `payload`) with **`readLiveSegment(event)`** or `getLiveSegmentBufferSegments(segmentBufferId, segmentIndex, 1)`.
+
+```ts
+import {
+  createLiveSegmentBuffer,
+  readLiveSegment,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+const live = await createLiveSegmentBuffer({
+  sourceAudioBufferId: liveAudio,
+  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  onSegmentAppended: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`#${e.segmentIndex}`, e.kind, `${e.durationMs}ms`);
+
+    // only when you need richness:
+    const meta = await readLiveSegment(e); // includes payload when present
+    console.log(meta?.payload);
+  },
+});
+```
+
+`pipelineLiveSegmentError` remains reserved for future native error emits; `onError` stays on the create/subscribe surface.
 
 ---
 
@@ -76,6 +110,7 @@ import {
   createOfflineSegmentBufferFromLive,
   getLiveSegmentBufferSegmentCount,
   getLiveSegmentBufferSegments,
+  readLiveSegment,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import { createEmptyLiveAudioBuffer } from 'react-native-sherpa-onnx/audiobuffer';
@@ -86,8 +121,13 @@ const live = await createLiveSegmentBuffer({
   maxSegments: 2048,
   spooling: { mode: 'on' },
   streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
-  onSegmentAppended: (e) => {
+  onSegmentAppended: async (e) => {
+    // cheap: enough for UI timing / count
     console.log(`#${e.segmentIndex}`, e.startSample, e.endSample);
+
+    // only when you need richness:
+    const meta = await readLiveSegment(e);
+    console.log(meta?.payload);
   },
 });
 
@@ -156,6 +196,7 @@ function createLiveSegmentBuffer(
 const live = await createLiveSegmentBuffer({
   sourceAudioBufferId: liveAudioRef, // or: 'live_<uuid>'
   streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  // cheap notify scalars — pull with readLiveSegment when you need payload
   onSegmentAppended: (e) => console.log(e.segmentIndex),
 });
 ```
@@ -312,8 +353,13 @@ The following codes are the relevant runtime outcomes for live/streaming segment
 const liveSegments = await createLiveSegmentBuffer({
   sourceAudioBufferId: liveAudio,
   streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
-  onSegmentAppended: (e) => {
+  onSegmentAppended: async (e) => {
+    // cheap: enough for UI timing / count
     console.log(e.segmentIndex, e.kind, `${e.durationMs}ms`);
+
+    // only when you need richness:
+    const meta = await readLiveSegment(e);
+    console.log(meta?.payload);
   },
 });
 ```

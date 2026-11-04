@@ -271,7 +271,30 @@ More end-to-end patterns: [feature-pipelines.md#punctuation-streaming-patterns](
 
 ## JS Events
 
-No pipeline-level JS event callbacks. The native worker processes committed segments automatically; monitor output via the live text buffer's segment events — see [textbuffer-streaming.md](textbuffer-streaming.md).
+No pipeline-level JS event callbacks. The native worker processes committed segments automatically; observe `textOut` via live text buffer events (**notify + pull**). Canonical detail: [textbuffer-streaming — Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling).
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onSegment` | `LiveTextBufferSegmentEvent` (notify scalars) | punctuated text committed to `textOut` | set on `createLiveTextBuffer`; **no text/`meta` on the event** — pull with `readLiveTextSegment` |
+
+```ts
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const textOut = await createLiveTextBuffer({
+  maxSegments: 2048,
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`punct #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness (punctuated body / meta):
+    const seg = await readLiveTextSegment(e);
+    console.log(seg?.text);
+  },
+});
+```
 
 ## Types
 
@@ -334,6 +357,7 @@ import {
   createLiveTextBuffer,
   appendLiveTextSegment,
   finalizeLiveTextBuffer,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 
@@ -344,7 +368,13 @@ const engine = await createStreamingPunctuation({
 const textIn = await createLiveTextBuffer({ maxSegments: 2048 });
 const textOut = await createLiveTextBuffer({
   maxSegments: 2048,
-  onSegment: (e) => console.log('[punct]', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`punct #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('[punct]', seg?.text);
+  },
 });
 
 const pipeline = await engine.punctuate(textIn, textOut, { segmentation: { mode: 'off' } });

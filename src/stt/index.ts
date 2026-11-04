@@ -3,6 +3,8 @@ import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import {
   getOfflineTextBufferTextSlice,
   getPipelineTextBufferInfo,
+  liveTextNotifyToTextSegment,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
   resolvePipelineTextBufferId,
   subscribeLiveTextBufferEvents,
@@ -189,8 +191,26 @@ async function transcribeLiveOverload(
 
   if (options.onSegment) {
     const cb = options.onSegment;
+    let previousEndOffset = 0;
     const unsub = subscribeLiveTextBufferEvents(textOut, {
-      onSegment: (event) => cb(event.segment as TextSegment),
+      onSegment: (event) => {
+        readLiveTextSegment(event, {
+          includeTokens: true,
+          includeTimestamps: true,
+          includeMeta: true,
+        })
+          .then((segment) => {
+            if (!segment) return;
+            const textSeg = liveTextNotifyToTextSegment(
+              event,
+              segment,
+              previousEndOffset
+            );
+            previousEndOffset = textSeg.endOffset;
+            cb(textSeg);
+          })
+          .catch(() => undefined);
+      },
     });
     handle.completed.then(unsub, unsub);
   }

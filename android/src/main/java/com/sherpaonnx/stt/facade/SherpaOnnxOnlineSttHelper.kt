@@ -6,8 +6,6 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.k2fsa.sherpa.onnx.OnlineRecognizer
-import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
@@ -15,7 +13,6 @@ import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.stt.config.OnlineSttInitOptionsParser
 import com.sherpaonnx.stt.pipeline.SttPipelineWorker
-import com.sherpaonnx.stt.core.OnlineSttRecognizerConfigFactory
 import com.sherpaonnx.stt.core.SttErrorCodes
 import com.sherpaonnx.stt.core.SttPathResolver
 import com.sherpaonnx.text.pipeline.TextSegment
@@ -24,18 +21,15 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Helper for streaming (online) STT using sherpa-onnx OnlineRecognizer + OnlineStream.
- * Manages recognizer instances and streams; auto mode scans the model directory.
+ * Helper for streaming (online) STT via shared CXX OnlineSttWrapper (JNI).
+ * Manages recognizer instances and streams; auto mode scans the model directory in C++.
  */
 internal class SherpaOnnxOnlineSttHelper(
   private val context: ReactApplicationContext,
   private val logTag: String
 ) {
-  private val maxEventTextChars = 4096
-
   private data class OnlineSttInstance(
-    val recognizer: OnlineRecognizer,
-    val config: OnlineRecognizerConfig,
+    val sampleRate: Int,
     var activePipelineId: String? = null,
   )
 
@@ -44,14 +38,6 @@ internal class SherpaOnnxOnlineSttHelper(
   private fun getInstance(instanceId: String): OnlineSttInstance? = instances[instanceId]
 
   private val pathResolver = SttPathResolver(context)
-  private val configFactory = OnlineSttRecognizerConfigFactory(pathResolver)
-
-  private fun truncateSegmentEventText(text: String): Pair<String, Boolean> {
-    if (text.length <= maxEventTextChars) {
-      return Pair(text, false)
-    }
-    return Pair(text.substring(0, maxEventTextChars), true)
-  }
 
   private fun emitLiveTextSegmentEvent(
     liveBufferId: String,
@@ -59,46 +45,12 @@ internal class SherpaOnnxOnlineSttHelper(
     totalSegments: Int,
   ) {
     try {
-      val (eventText, textTruncated) = truncateSegmentEventText(segment.text)
       val payload = Arguments.createMap().apply {
         putString("liveBufferId", liveBufferId)
         putInt("totalSegments", totalSegments)
-        putString("text", eventText)
-        if (textTruncated) {
-          putBoolean("textTruncated", true)
-        }
         putString("source", segment.source)
         putInt("segmentIndex", segment.segmentIndex)
-
-        if (segment.tokens.isNotEmpty()) {
-          val tokenArray = Arguments.createArray()
-          segment.tokens.forEach { tokenArray.pushString(it) }
-          putArray("tokens", tokenArray)
-        }
-
-        if (segment.timestamps.isNotEmpty()) {
-          val tsArray = Arguments.createArray()
-          segment.timestamps.forEach { tsArray.pushDouble(it.toDouble()) }
-          putArray("timestamps", tsArray)
-        }
-
-        segment.meta?.let { rawMeta ->
-          val metaMap = Arguments.createMap()
-          for ((key, value) in rawMeta) {
-            when (value) {
-              null -> metaMap.putNull(key)
-              is Boolean -> metaMap.putBoolean(key, value)
-              is Int -> metaMap.putInt(key, value)
-              is Long -> metaMap.putDouble(key, value.toDouble())
-              is Float -> metaMap.putDouble(key, value.toDouble())
-              is Double -> metaMap.putDouble(key, value)
-              is Number -> metaMap.putDouble(key, value.toDouble())
-              is String -> metaMap.putString(key, value)
-              else -> Unit
-            }
-          }
-          putMap("meta", metaMap)
-        }
+        putInt("utf16Length", segment.text.length)
       }
 
       context
@@ -107,6 +59,29 @@ internal class SherpaOnnxOnlineSttHelper(
     } catch (_: Exception) {
       // JS bridge might already be shutting down.
     }
+  }
+
+  private fun resolveOptionalPaths(parsed: OnlineSttInitOptionsParser.Parsed): Triple<String, String, String> {
+    val resolvedRuleFsts = try {
+      pathResolver.resolveFilePaths(parsed.ruleFsts.orEmpty().trim(), "online_stt_rule_fst")
+    } catch (_: Exception) {
+      ""
+    }
+    val resolvedRuleFars = try {
+      pathResolver.resolveFilePaths(parsed.ruleFars.orEmpty().trim(), "online_stt_rule_far")
+    } catch (_: Exception) {
+      ""
+    }
+    var resolvedHotwordsFile = parsed.hotwordsFile?.trim().orEmpty()
+    if (resolvedHotwordsFile.isNotEmpty()) {
+      try {
+        resolvedHotwordsFile =
+          pathResolver.resolveContentUriToFile(resolvedHotwordsFile, "online_stt_hotwords")
+      } catch (_: Exception) {
+        resolvedHotwordsFile = ""
+      }
+    }
+    return Triple(resolvedHotwordsFile, resolvedRuleFsts, resolvedRuleFars)
   }
 
   fun initializeOnlineStt(
@@ -131,72 +106,85 @@ internal class SherpaOnnxOnlineSttHelper(
     val enableEndpoint = parsed.enableEndpoint ?: true
     val decodingMethod = parsed.decodingMethod?.trim().orEmpty().ifEmpty { "greedy_search" }
     val maxActivePaths = parsed.maxActivePaths ?: 4
+    val (hotwordsFile, ruleFsts, ruleFars) = resolveOptionalPaths(parsed)
 
     try {
-      val config = if (parsed.initMode == "custom") {
+      @Suppress("UNCHECKED_CAST")
+      val raw = if (parsed.initMode == "custom") {
         val pathStrings = parsed.modelPaths.orEmpty()
         ModelPathValidationNative.validate("stt_streaming", modelType, pathStrings)?.let { errorMsg ->
           Log.e(logTag, errorMsg)
           promise.reject(SttErrorCodes.INIT_FAILED, errorMsg)
           return
         }
-        configFactory.buildOnlineRecognizerConfigFromPaths(
-          paths = pathStrings,
+        Log.i(logTag, "[SherpaOnnx:init] online-stt Create custom start")
+        nativeInitializeCustom(
+          instanceId = instanceId,
           modelType = modelType,
+          paths = HashMap(pathStrings),
           enableEndpoint = enableEndpoint,
           decodingMethod = decodingMethod,
           maxActivePaths = maxActivePaths,
-          hotwordsFile = parsed.hotwordsFile,
-          hotwordsScore = parsed.hotwordsScore?.toFloat(),
-          numThreads = parsed.numThreads?.toInt(),
-          provider = parsed.provider,
-          ruleFsts = parsed.ruleFsts,
-          ruleFars = parsed.ruleFars,
-          dither = parsed.dither?.toFloat(),
-          blankPenalty = parsed.blankPenalty?.toFloat(),
-          debug = parsed.debug,
-          rule1MustContainNonSilence = parsed.rule1MustContainNonSilence,
-          rule1MinTrailingSilence = parsed.rule1MinTrailingSilence?.toFloat(),
-          rule1MinUtteranceLength = parsed.rule1MinUtteranceLength?.toFloat(),
-          rule2MustContainNonSilence = parsed.rule2MustContainNonSilence,
-          rule2MinTrailingSilence = parsed.rule2MinTrailingSilence?.toFloat(),
-          rule2MinUtteranceLength = parsed.rule2MinUtteranceLength?.toFloat(),
-          rule3MustContainNonSilence = parsed.rule3MustContainNonSilence,
-          rule3MinTrailingSilence = parsed.rule3MinTrailingSilence?.toFloat(),
-          rule3MinUtteranceLength = parsed.rule3MinUtteranceLength?.toFloat()
-        )
+          hotwordsFile = hotwordsFile,
+          hotwordsScore = parsed.hotwordsScore?.toFloat() ?: 1.5f,
+          numThreads = parsed.numThreads?.toInt() ?: 1,
+          provider = parsed.provider ?: "cpu",
+          ruleFsts = ruleFsts,
+          ruleFars = ruleFars,
+          dither = parsed.dither?.toFloat() ?: 0f,
+          blankPenalty = parsed.blankPenalty?.toFloat() ?: 0f,
+          debug = parsed.debug ?: false,
+          rule1MustContainNonSilence = parsed.rule1MustContainNonSilence ?: false,
+          rule1MinTrailingSilence = parsed.rule1MinTrailingSilence?.toFloat() ?: 2.4f,
+          rule1MinUtteranceLength = parsed.rule1MinUtteranceLength?.toFloat() ?: 0f,
+          rule2MustContainNonSilence = parsed.rule2MustContainNonSilence ?: true,
+          rule2MinTrailingSilence = parsed.rule2MinTrailingSilence?.toFloat() ?: 1.4f,
+          rule2MinUtteranceLength = parsed.rule2MinUtteranceLength?.toFloat() ?: 0f,
+          rule3MustContainNonSilence = parsed.rule3MustContainNonSilence ?: false,
+          rule3MinTrailingSilence = parsed.rule3MinTrailingSilence?.toFloat() ?: 0f,
+          rule3MinUtteranceLength = parsed.rule3MinUtteranceLength?.toFloat() ?: 20f,
+        ) as? HashMap<String, Any>
       } else {
-        configFactory.buildOnlineRecognizerConfig(
+        Log.i(logTag, "[SherpaOnnx:init] online-stt Create auto start")
+        nativeInitialize(
+          instanceId = instanceId,
           modelDir = parsed.modelDir.orEmpty(),
           modelType = modelType,
           enableEndpoint = enableEndpoint,
           decodingMethod = decodingMethod,
           maxActivePaths = maxActivePaths,
-          hotwordsFile = parsed.hotwordsFile,
-          hotwordsScore = parsed.hotwordsScore?.toFloat(),
-          numThreads = parsed.numThreads?.toInt(),
-          provider = parsed.provider,
-          ruleFsts = parsed.ruleFsts,
-          ruleFars = parsed.ruleFars,
-          dither = parsed.dither?.toFloat(),
-          blankPenalty = parsed.blankPenalty?.toFloat(),
-          debug = parsed.debug,
-          rule1MustContainNonSilence = parsed.rule1MustContainNonSilence,
-          rule1MinTrailingSilence = parsed.rule1MinTrailingSilence?.toFloat(),
-          rule1MinUtteranceLength = parsed.rule1MinUtteranceLength?.toFloat(),
-          rule2MustContainNonSilence = parsed.rule2MustContainNonSilence,
-          rule2MinTrailingSilence = parsed.rule2MinTrailingSilence?.toFloat(),
-          rule2MinUtteranceLength = parsed.rule2MinUtteranceLength?.toFloat(),
-          rule3MustContainNonSilence = parsed.rule3MustContainNonSilence,
-          rule3MinTrailingSilence = parsed.rule3MinTrailingSilence?.toFloat(),
-          rule3MinUtteranceLength = parsed.rule3MinUtteranceLength?.toFloat()
-        )
+          hotwordsFile = hotwordsFile,
+          hotwordsScore = parsed.hotwordsScore?.toFloat() ?: 1.5f,
+          numThreads = parsed.numThreads?.toInt() ?: 1,
+          provider = parsed.provider ?: "cpu",
+          ruleFsts = ruleFsts,
+          ruleFars = ruleFars,
+          dither = parsed.dither?.toFloat() ?: 0f,
+          blankPenalty = parsed.blankPenalty?.toFloat() ?: 0f,
+          debug = parsed.debug ?: false,
+          rule1MustContainNonSilence = parsed.rule1MustContainNonSilence ?: false,
+          rule1MinTrailingSilence = parsed.rule1MinTrailingSilence?.toFloat() ?: 2.4f,
+          rule1MinUtteranceLength = parsed.rule1MinUtteranceLength?.toFloat() ?: 0f,
+          rule2MustContainNonSilence = parsed.rule2MustContainNonSilence ?: true,
+          rule2MinTrailingSilence = parsed.rule2MinTrailingSilence?.toFloat() ?: 1.4f,
+          rule2MinUtteranceLength = parsed.rule2MinUtteranceLength?.toFloat() ?: 0f,
+          rule3MustContainNonSilence = parsed.rule3MustContainNonSilence ?: false,
+          rule3MinTrailingSilence = parsed.rule3MinTrailingSilence?.toFloat() ?: 0f,
+          rule3MinUtteranceLength = parsed.rule3MinUtteranceLength?.toFloat() ?: 20f,
+        ) as? HashMap<String, Any>
       }
 
-      Log.i(logTag, "[SherpaOnnx:init] online-stt Create start")
-      val recognizer = OnlineRecognizer(assetManager = null, config = config)
-      Log.i(logTag, "[SherpaOnnx:init] online-stt Create ok")
-      instances[instanceId] = OnlineSttInstance(recognizer = recognizer, config = config)
+      val ok = raw?.get("success") as? Boolean ?: false
+      if (!ok) {
+        val err = raw?.get("error") as? String ?: "Online STT init failed"
+        Log.e(logTag, "[SherpaOnnx:init] online-stt Create branch=reject $err")
+        promise.reject(SttErrorCodes.INIT_FAILED, "Online STT init failed: $err")
+        return
+      }
+
+      val sampleRate = nativeGetSampleRate(instanceId)
+      Log.i(logTag, "[SherpaOnnx:init] online-stt Create ok sampleRate=$sampleRate")
+      instances[instanceId] = OnlineSttInstance(sampleRate = sampleRate)
       promise.resolve(Arguments.createMap().apply { putBoolean("success", true) })
     } catch (e: Exception) {
       Log.e(logTag, "[SherpaOnnx:init] online-stt Create branch=reject ${e.message}", e)
@@ -207,6 +195,7 @@ internal class SherpaOnnxOnlineSttHelper(
   fun unloadOnlineStt(instanceId: String, promise: Promise) {
     try {
       val inst = instances.remove(instanceId) ?: run {
+        nativeUnload(instanceId)
         promise.resolve(null)
         return
       }
@@ -219,7 +208,7 @@ internal class SherpaOnnxOnlineSttHelper(
         }
         inst.activePipelineId = null
       }
-      inst.recognizer.release()
+      nativeUnload(instanceId)
       promise.resolve(null)
     } catch (e: Exception) {
       Log.e(logTag, "unloadOnlineStt failed: ${e.message}", e)
@@ -236,7 +225,7 @@ internal class SherpaOnnxOnlineSttHelper(
   ) {
     try {
       val inst = getInstance(instanceId)
-      if (inst == null) {
+      if (inst == null || !nativeHasInstance(instanceId)) {
         promise.reject("STT_PIPELINE_INSTANCE_NOT_FOUND", "Online STT instance not found: $instanceId")
         return
       }
@@ -268,7 +257,7 @@ internal class SherpaOnnxOnlineSttHelper(
         return
       }
 
-      val recognizerSampleRate = inst.config.featConfig.sampleRate
+      val recognizerSampleRate = inst.sampleRate
       if (inputEntry.sampleRate != recognizerSampleRate) {
         promise.reject(
           "STT_PIPELINE_SAMPLE_RATE_MISMATCH",
@@ -291,12 +280,17 @@ internal class SherpaOnnxOnlineSttHelper(
       }
 
       val pipelineId = UUID.randomUUID().toString()
-      val stream = inst.recognizer.createStream()
+      val streamId = pipelineId
+      if (!nativeCreateStream(instanceId, streamId, "")) {
+        promise.reject("STREAMING_PIPELINE_ERROR", "Failed to create online STT stream")
+        return
+      }
 
       val worker = SttPipelineWorker(
         pipelineId = pipelineId,
-        recognizer = inst.recognizer,
-        stream = stream,
+        instanceId = instanceId,
+        streamId = streamId,
+        sampleRate = recognizerSampleRate,
         inputEntry = inputEntry,
         outputEntry = outputEntry,
         chunkSize = chunkSize ?: 6400,
@@ -336,11 +330,12 @@ internal class SherpaOnnxOnlineSttHelper(
           }
           inst.activePipelineId = null
         }
-        inst.recognizer.release()
+        nativeUnload(instanceId)
       } catch (e: Exception) {
         Log.w(logTag, "shutdown: failed to release instance $instanceId: ${e.message}")
       }
     }
+    nativeShutdownAll()
   }
 
   private fun emitPipelineCompletedEvent(completion: StreamingPipelineCompletion) {
@@ -364,5 +359,114 @@ internal class SherpaOnnxOnlineSttHelper(
     } catch (_: Exception) {
       // JS bridge might already be shutting down.
     }
+  }
+
+  companion object {
+    @JvmStatic
+    private external fun nativeInitialize(
+      instanceId: String,
+      modelDir: String,
+      modelType: String,
+      enableEndpoint: Boolean,
+      decodingMethod: String,
+      maxActivePaths: Int,
+      hotwordsFile: String,
+      hotwordsScore: Float,
+      numThreads: Int,
+      provider: String,
+      ruleFsts: String,
+      ruleFars: String,
+      dither: Float,
+      blankPenalty: Float,
+      debug: Boolean,
+      rule1MustContainNonSilence: Boolean,
+      rule1MinTrailingSilence: Float,
+      rule1MinUtteranceLength: Float,
+      rule2MustContainNonSilence: Boolean,
+      rule2MinTrailingSilence: Float,
+      rule2MinUtteranceLength: Float,
+      rule3MustContainNonSilence: Boolean,
+      rule3MinTrailingSilence: Float,
+      rule3MinUtteranceLength: Float,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeInitializeCustom(
+      instanceId: String,
+      modelType: String,
+      paths: HashMap<String, String>,
+      enableEndpoint: Boolean,
+      decodingMethod: String,
+      maxActivePaths: Int,
+      hotwordsFile: String,
+      hotwordsScore: Float,
+      numThreads: Int,
+      provider: String,
+      ruleFsts: String,
+      ruleFars: String,
+      dither: Float,
+      blankPenalty: Float,
+      debug: Boolean,
+      rule1MustContainNonSilence: Boolean,
+      rule1MinTrailingSilence: Float,
+      rule1MinUtteranceLength: Float,
+      rule2MustContainNonSilence: Boolean,
+      rule2MinTrailingSilence: Float,
+      rule2MinUtteranceLength: Float,
+      rule3MustContainNonSilence: Boolean,
+      rule3MinTrailingSilence: Float,
+      rule3MinUtteranceLength: Float,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    internal external fun nativeCreateStream(
+      instanceId: String,
+      streamId: String,
+      hotwords: String,
+    ): Boolean
+
+    @JvmStatic
+    internal external fun nativeAcceptWaveform(
+      instanceId: String,
+      streamId: String,
+      sampleRate: Int,
+      samples: FloatArray,
+    )
+
+    @JvmStatic
+    internal external fun nativeInputFinished(instanceId: String, streamId: String)
+
+    @JvmStatic
+    internal external fun nativeIsReady(instanceId: String, streamId: String): Boolean
+
+    @JvmStatic
+    internal external fun nativeDecode(instanceId: String, streamId: String)
+
+    @JvmStatic
+    internal external fun nativeGetResult(
+      instanceId: String,
+      streamId: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    internal external fun nativeIsEndpoint(instanceId: String, streamId: String): Boolean
+
+    @JvmStatic
+    internal external fun nativeResetStream(instanceId: String, streamId: String)
+
+    @JvmStatic
+    internal external fun nativeReleaseStream(instanceId: String, streamId: String)
+
+    @JvmStatic
+    private external fun nativeGetSampleRate(instanceId: String): Int
+
+    @JvmStatic
+    private external fun nativeHasInstance(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativeUnload(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAll()
   }
 }

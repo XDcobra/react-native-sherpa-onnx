@@ -257,7 +257,7 @@ flowchart LR
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
 | `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only; oneshot: none |
-| `onSegment` | `AudioTaggingSegmentEvent` | after each committed span is tagged | order: progress → tag → optional segment append → `onSegment` |
+| `onSegment` | `AudioTaggingSegmentEvent` | after each committed span is tagged | feature callback — already includes `result` / ranges (no buffer pull); order: progress → tag → optional segment append → `onSegment` |
 
 Shapes: [Types](#types).
 
@@ -265,6 +265,7 @@ Shapes: [Types](#types).
 await tagger.tag(audio, {
   segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
   onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+  // feature callback — already includes result (no pull):
   onSegment: (e) => console.log(e.segmentIndex, e.result.primary?.name),
 });
 ```

@@ -1,11 +1,11 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "SegmentRegistry.h"
+#include "TextRegistry.h"
 #include "../core/AudioTaggingBridgeState.h"
 #include "../pipeline/AudioTaggingOfflineLivePipelineWorker.h"
 
@@ -99,7 +99,7 @@ void StopActiveAudioTaggingLivePipeline(const std::string &instanceIdStr) {
   std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
 
   auto taggingState = sherpaonnx::audio_tagging::bridge::LookupAudioTagging(instanceIdStr);
-  if (!taggingState || taggingState->handle == nullptr) {
+  if (!taggingState || !taggingState->isReady()) {
     reject(@"AUDIO_TAGGING_NOT_INITIALIZED",
            [NSString stringWithFormat:@"Audio tagging instance not found: %@", instanceId],
            nil);

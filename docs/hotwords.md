@@ -241,6 +241,7 @@ import {
   createLiveTextBuffer,
   getLiveTextBufferSegmentCount,
   getLiveTextBufferSegments,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 
@@ -254,7 +255,13 @@ const recognizer = await createStreamingSTT({
 const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCount: 1 });
 const textOut = await createLiveTextBuffer({
   maxSegments: 2048,
-  onSegment: (e) => console.log('[segment]', e.segment.text),
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`);
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log('[segment]', seg?.text);
+  },
 });
 
 const pipeline = await recognizer.transcribe(audioIn, textOut, { chunkSize: 3200 });

@@ -186,6 +186,8 @@ set(SOURCES
     jni/model_detect/slid/sherpa-onnx-model-detect-slid.cpp
     jni/model_detect/slid/sherpa-onnx-validate-slid.cpp
     jni/model_detect/slid/sherpa-onnx-slid-detect-wrapper.cpp
+    slid/sherpa-onnx-slid-wrapper.cpp
+    jni/slid/sherpa-onnx-slid-jni.cpp
     jni/model_detect/kws/sherpa-onnx-model-detect-kws.cpp
     jni/model_detect/kws/sherpa-onnx-validate-kws.cpp
     jni/model_detect/kws/sherpa-onnx-kws-detect-wrapper.cpp
@@ -193,8 +195,34 @@ set(SOURCES
     jni/model_detect/audio_tagging/sherpa-onnx-model-detect-audio-tagging.cpp
     jni/model_detect/audio_tagging/sherpa-onnx-validate-audio-tagging.cpp
     jni/model_detect/audio_tagging/sherpa-onnx-audio-tagging-detect-wrapper.cpp
+    audio_tagging/sherpa-onnx-audio-tagging-wrapper.cpp
+    jni/audio_tagging/sherpa-onnx-audio-tagging-jni.cpp
+    punctuation/sherpa-onnx-punct-engine-wrapper.cpp
+    jni/punctuation/sherpa-onnx-punctuation-jni.cpp
+    vad/sherpa-onnx-vad-engine-wrapper.cpp
+    jni/vad/sherpa-onnx-vad-jni.cpp
+    kws/sherpa-onnx-kws-engine-wrapper.cpp
+    jni/kws/sherpa-onnx-kws-jni.cpp
+    stt/sherpa-onnx-stt-engine-wrapper.cpp
+    jni/stt/sherpa-onnx-stt-jni.cpp
+    stt/sherpa-onnx-online-stt-engine-wrapper.cpp
+    jni/stt/sherpa-onnx-online-stt-jni.cpp
+    tts/sherpa-onnx-tts-engine-wrapper.cpp
+    jni/tts/sherpa-onnx-tts-jni.cpp
+    audiobuffer/AudioRegistry.cpp
+    audiobuffer/ByteBufferPool.cpp
     jni/audiobuffer/SherpaOnnxJSI.cpp
     jni/audiobuffer/SherpaOnnxJSIInstall.cpp
+    jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp
+    textbuffer/TextRegistry.cpp
+    jni/textbuffer/sherpa-onnx-textbuffer-jni.cpp
+    segmentbuffer/SegJson.cpp
+    segmentbuffer/SegPayloadValidate.cpp
+    segmentbuffer/SegmentRegistry.cpp
+    segmentbuffer/SegEngine.cpp
+    segmentbuffer/SegmentLinkMapRegistry.cpp
+    jni/segmentbuffer/sherpa-onnx-segmentbuffer-jni.cpp
+    jni/segmentbuffer/sherpa-onnx-segengine-jni.cpp
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp
     jni/audio/AudioVisualization.cpp
@@ -558,6 +586,16 @@ target_include_directories(sherpaonnx PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/diarization
     ${CMAKE_CURRENT_SOURCE_DIR}/speaker-embedding
     ${CMAKE_CURRENT_SOURCE_DIR}/enhancement
+    ${CMAKE_CURRENT_SOURCE_DIR}/slid
+    ${CMAKE_CURRENT_SOURCE_DIR}/audio_tagging
+    ${CMAKE_CURRENT_SOURCE_DIR}/punctuation
+    ${CMAKE_CURRENT_SOURCE_DIR}/vad
+    ${CMAKE_CURRENT_SOURCE_DIR}/kws
+    ${CMAKE_CURRENT_SOURCE_DIR}/stt
+    ${CMAKE_CURRENT_SOURCE_DIR}/tts
+    ${CMAKE_CURRENT_SOURCE_DIR}/audiobuffer
+    ${CMAKE_CURRENT_SOURCE_DIR}/textbuffer
+    ${CMAKE_CURRENT_SOURCE_DIR}/segmentbuffer
     ${ORT_INCLUDE_DIR}
     # Flat ORT C++ API includes (onnxruntime_cxx_api.h) used by diarization + ort_guard_utils
     ${ORT_INCLUDE_DIR}/onnxruntime/core/session
@@ -647,6 +685,11 @@ endif()
 if(SHERPA_C_API_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${SHERPA_C_API_LIB_DIR})
     target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-c-api)
+    # Offline STT engine wrapper uses CXX RAII (OfflineRecognizer); same jniLibs dir.
+    if(EXISTS "${SHERPA_C_API_LIB_DIR}/libsherpa-onnx-cxx-api.so")
+        target_link_libraries(sherpaonnx PRIVATE sherpa-onnx-cxx-api)
+        message(STATUS "sherpa-onnx CXX-API linked: ${SHERPA_C_API_LIB_DIR}")
+    endif()
 endif()
 target_link_directories(sherpaonnx PRIVATE ${ORT_JNILIB_DIR})
 target_link_libraries(sherpaonnx PRIVATE onnxruntime)
@@ -677,7 +720,7 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor yuv mediandk)
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor yuv mediandk z)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

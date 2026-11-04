@@ -68,6 +68,10 @@ class DiarizationWrapper {
       bool debug);
 
   DiarizationProcessResult processMonoSamples(
+      const float* monoSamples, int32_t numSamples, int32_t sampleRate,
+      bool includeOverlap, const DiarizationProgressFn& onProgress);
+
+  DiarizationProcessResult processMonoSamples(
       const std::vector<float>& monoSamples, int32_t sampleRate,
       bool includeOverlap, const DiarizationProgressFn& onProgress);
 

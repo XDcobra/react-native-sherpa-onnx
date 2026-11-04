@@ -7,12 +7,10 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.modules.core.DeviceEventManagerModule
-import com.k2fsa.sherpa.onnx.OnlinePunctuation
-import com.k2fsa.sherpa.onnx.OnlinePunctuationConfig
-import com.k2fsa.sherpa.onnx.OnlinePunctuationModelConfig
 import com.sherpaonnx.audio.pipeline.StreamingPipelineCompletion
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.punctuation.config.PunctuationInitOptionsParser
 import com.sherpaonnx.punctuation.core.PunctuationErrorCodes
 import com.sherpaonnx.punctuation.core.PunctuationTextInputNormalization
@@ -33,28 +31,83 @@ class SherpaOnnxOnlinePunctuationHelper(
   ) -> HashMap<String, Any>?
 ) {
   companion object {
-    private val onlineEngines = ConcurrentHashMap<String, OnlinePunctuation>()
+    private val onlineInstanceIds = ConcurrentHashMap.newKeySet<String>()
+
+    fun gateKey(instanceId: String): String = "punctOnline:$instanceId"
 
     fun processOnlineIfExists(instanceId: String, text: String): String? {
-      val engine = onlineEngines[instanceId] ?: return null
-      val normalized =
-        PunctuationTextInputNormalization.normalize(text, null)
-      return engine.addPunctuation(normalized)
+      if (!onlineInstanceIds.contains(instanceId) || !nativeHasOnlineInstance(instanceId)) {
+        return null
+      }
+      val gateKey = gateKey(instanceId)
+      if (!NativeInstanceGate.beginUse(gateKey)) return null
+      return try {
+        val normalized =
+          PunctuationTextInputNormalization.normalize(text, null)
+        addPunctuationOnlineOrThrow(instanceId, normalized)
+      } finally {
+        NativeInstanceGate.endUse(gateKey)
+      }
     }
 
     fun hasOnlineInstance(instanceId: String): Boolean {
-      return onlineEngines.containsKey(instanceId)
+      return onlineInstanceIds.contains(instanceId) && nativeHasOnlineInstance(instanceId)
     }
+
+    internal fun addPunctuationOnlineOrThrow(instanceId: String, text: String): String {
+      @Suppress("UNCHECKED_CAST")
+      val raw = nativeAddPunctuationOnline(instanceId, text) as? HashMap<String, Any>
+        ?: throw IllegalStateException("nativeAddPunctuationOnline returned null")
+      val success = raw["success"] as? Boolean ?: false
+      if (!success) {
+        throw IllegalStateException(raw["error"] as? String ?: "Punctuation failed")
+      }
+      return raw["text"] as? String ?: ""
+    }
+
+    private fun releaseOnlineSafely(instanceId: String) {
+      val gateKey = gateKey(instanceId)
+      NativeInstanceGate.releaseWhenIdle(gateKey) {
+        try {
+          nativeUnloadOnline(instanceId)
+        } catch (_: Exception) {
+        }
+      }
+    }
+
+    @JvmStatic
+    private external fun nativeInitializeOnline(
+      instanceId: String,
+      cnnPath: String,
+      bpePath: String,
+      numThreads: Int,
+      provider: String,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeAddPunctuationOnline(
+      instanceId: String,
+      text: String,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeHasOnlineInstance(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativeUnloadOnline(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAllOnline()
   }
 
   fun shutdown() {
-    for (e in onlineEngines.values) {
-      try {
-        e.release()
-      } catch (_: Exception) {
-      }
+    val ids = onlineInstanceIds.toList()
+    onlineInstanceIds.clear()
+    for (id in ids) {
+      releaseOnlineSafely(id)
     }
-    onlineEngines.clear()
+    nativeShutdownAllOnline()
   }
 
   fun initializeOnlinePunctuation(
@@ -207,18 +260,24 @@ class SherpaOnnxOnlinePunctuationHelper(
       return
     }
 
-    val config = OnlinePunctuationConfig(
-      model = OnlinePunctuationModelConfig(
-        cnnBilstm = cnn,
-        bpeVocab = vocab,
-        numThreads = parsed.numThreads.toInt().coerceAtLeast(1),
-        debug = parsed.debug,
-        provider = parsed.provider?.trim().takeIf { !it.isNullOrEmpty() } ?: "cpu",
-      )
-    )
-    val eng = OnlinePunctuation(assetManager = null, config = config)
-    onlineEngines[instanceId]?.release()
-    onlineEngines[instanceId] = eng
+    val threads = parsed.numThreads.toInt().coerceAtLeast(1)
+    val prov = parsed.provider?.trim().takeIf { !it.isNullOrEmpty() } ?: "cpu"
+
+    if (onlineInstanceIds.contains(instanceId)) {
+      releaseOnlineSafely(instanceId)
+      onlineInstanceIds.remove(instanceId)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    val raw = nativeInitializeOnline(instanceId, cnn, vocab, threads, prov, parsed.debug)
+      as? HashMap<String, Any>
+    val ok = raw?.get("success") as? Boolean ?: false
+    if (!ok) {
+      val err = raw?.get("error") as? String ?: "Failed to initialize online punctuation"
+      promise.reject(PunctuationErrorCodes.INIT_ERROR, err, null)
+      return
+    }
+    onlineInstanceIds.add(instanceId)
 
     val out = Arguments.createMap()
     out.putBoolean("success", true)
@@ -240,8 +299,7 @@ class SherpaOnnxOnlinePunctuationHelper(
     textInputNormalization: String?,
     promise: Promise
   ) {
-    val eng = onlineEngines[instanceId]
-    if (eng == null) {
+    if (!hasOnlineInstance(instanceId)) {
       promise.reject(PunctuationErrorCodes.NOT_FOUND, "Online punctuation instance not found: $instanceId")
       return
     }
@@ -249,7 +307,16 @@ class SherpaOnnxOnlinePunctuationHelper(
       val t0 = SystemClock.elapsedRealtime()
       val normalized =
         PunctuationTextInputNormalization.normalize(text, textInputNormalization)
-      val outText = eng.addPunctuation(normalized)
+      val gateKey = gateKey(instanceId)
+      if (!NativeInstanceGate.beginUse(gateKey)) {
+        promise.reject(PunctuationErrorCodes.NOT_FOUND, "Online punctuation instance released: $instanceId")
+        return
+      }
+      val outText = try {
+        addPunctuationOnlineOrThrow(instanceId, normalized)
+      } finally {
+        NativeInstanceGate.endUse(gateKey)
+      }
       val t1 = SystemClock.elapsedRealtime()
       val out = Arguments.createMap()
       out.putString("punctuatedText", outText)
@@ -267,8 +334,7 @@ class SherpaOnnxOnlinePunctuationHelper(
     textInputNormalization: String?,
     promise: Promise
   ) {
-    val eng = onlineEngines[instanceId]
-    if (eng == null) {
+    if (!hasOnlineInstance(instanceId)) {
       promise.reject(PunctuationErrorCodes.NOT_FOUND, "Online punctuation instance not found: $instanceId")
       return
     }
@@ -290,7 +356,7 @@ class SherpaOnnxOnlinePunctuationHelper(
     try {
       val worker = PunctuationPipelineWorker(
         pipelineId = "punct_pipeline_${UUID.randomUUID()}",
-        engine = eng,
+        instanceId = instanceId,
         inputEntry = input,
         outputEntry = output,
         textInputNormalization =
@@ -308,7 +374,8 @@ class SherpaOnnxOnlinePunctuationHelper(
   }
 
   fun unloadOnlinePunctuation(instanceId: String, promise: Promise) {
-    onlineEngines.remove(instanceId)?.release()
+    onlineInstanceIds.remove(instanceId)
+    releaseOnlineSafely(instanceId)
     promise.resolve(null)
   }
 

@@ -399,13 +399,15 @@ internal class PcmPlayerSession(
     liveDrainThread = Thread({
       try {
         while (!destroyed && terminalError == null && drainGeneration.get() == gen) {
-          val chunk = entry.drainCursor(liveCursorId, chunkSize)
-          if (chunk.isNotEmpty()) {
-            if (!enqueueCopiedSamples(chunk, gen)) {
+          val slot = acquireWritableSlot(gen) ?: break
+          val n = entry.drainCursorInto(liveCursorId, slot.data, 0, slot.data.size)
+          if (n > 0) {
+            if (!enqueueFilledSlot(slot, n, gen)) {
               break
             }
             continue
           }
+          recycleSlot(slot)
 
           if (entry.state == LiveEntry.State.FINISHED) {
             break

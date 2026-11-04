@@ -42,6 +42,8 @@ import {
   createLiveTextBuffer,
   getLiveTextBufferSegmentCount,
   getLiveTextBufferSegments,
+  readLiveTextPartial,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
 } from 'react-native-sherpa-onnx/textbuffer';
 
@@ -55,15 +57,17 @@ const liveAudio = await createEmptyLiveAudioBuffer({
 const liveText = await createLiveTextBuffer({
   spooling: { mode: 'on' },
   streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
-  // Event-driven partial stream: no polling timer required.
+  // Notify-only partials: pull text when needed (no payload dump on the bridge).
   onPartial: async (event) => {
-    if (event.partialText.length > 0) {
-      console.log('[partial]', event.partialText);
+    // cheap: enough to know a hypothesis changed / endpoint fired
+    if (!event.isEndpoint) {
+      // only when you need the hypothesis text:
+      const partial = await readLiveTextPartial(event);
+      if (partial.length > 0) console.log('[partial]', partial);
+      return;
     }
 
     // Endpoint is a good checkpoint to pull newly committed segments.
-    if (!event.isEndpoint) return;
-
     const total = await getLiveTextBufferSegmentCount(liveText);
     if (total <= lastSegmentIndex) return;
 
@@ -77,9 +81,14 @@ const liveText = await createLiveTextBuffer({
     }
     lastSegmentIndex = total;
   },
-  // Also fires on every commit — use alone or together with `onPartial` (see section below).
-  onSegment: (e) => {
-    console.log(`[onSegment ${e.segment.segmentIndex}]`, e.segment.text);
+  // Notify-only commits — pull body/meta with readLiveTextSegment.
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e);
+    console.log(`[onSegment ${e.segmentIndex}]`, seg?.text);
   },
 });
 
@@ -110,28 +119,32 @@ await releasePipelineAudioBuffer(liveAudio);
 
 ## Committed text segments: `onSegment` (no polling)
 
-Each time the native worker (or `appendLiveTextSegment`) **commits** a new transcript slice, the live text buffer can emit **`onSegment`** with a [`LiveTextBufferSegmentEvent`](../src/textbuffer/types.ts):
+Each time the native worker (or `appendLiveTextSegment`) **commits** a new transcript slice, the live text buffer emits **`onSegment`** with a notify-only [`LiveTextBufferSegmentEvent`](../src/textbuffer/types.ts):
 
-- `bufferId` — live text buffer id  
-- `segment` — committed segment (`domain: 'text'`, `text`, `segmentIndex`, optional `tokens` / `timestamps` / `meta`)  
-- `totalSegments` — retained segment count **after** this commit (upper bound for pull APIs)
+- `liveBufferId` — live text buffer id  
+- `segmentIndex` / `totalSegments` / `utf16Length` / `source` — enough to know *what* changed  
+- Pull body/meta with **`readLiveTextSegment(event)`** or `getLiveTextBufferSegments(..., { includeMeta: true })`
 
-`meta` is a **Fabric-safe JSON tree** (`Record<string, JsonValue>`): scalars, nested objects, and arrays are preserved across Android emit, iOS passthrough, JS projection, and `getLiveTextBufferSegments(..., { includeMeta: true })`. Soft limits (values beyond these are dropped, not thrown): depth ≤ **4**, array length ≤ **64**, object keys per level ≤ **64**. Non-JSON values (`undefined`, functions, non-finite numbers, host objects) are stripped. Public views also remove reserved `__segment*` keys. TTS `meta.extra` remains string-valued only. **KWS** and other scalar-only producers need no change — scalars remain valid trees.
+`meta` on pulled `LiveTextSegment` is a **Fabric-safe JSON tree** (`Record<string, JsonValue>`): scalars, nested objects, and arrays. Soft limits (values beyond these are dropped, not thrown): depth ≤ **4**, array length ≤ **64**, object keys per level ≤ **64**. Non-JSON values are stripped. Public views also remove reserved `__segment*` keys. TTS `meta.extra` remains string-valued only.
 
 This is the right hook when you want **“new subtitle line”** semantics instead of high-frequency **`onPartial`** updates. It complements (does not replace) **`onPartial`** for streaming STT.
 
 ```ts
-import { createLiveTextBuffer } from 'react-native-sherpa-onnx/textbuffer';
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+} from 'react-native-sherpa-onnx/textbuffer';
 
 const liveText = await createLiveTextBuffer({
   windowMaxChars: 65536,
   maxSegments: 2048,
-  onSegment: (e) => {
-    console.log(
-      `[segment ${e.segment.segmentIndex}]`,
-      e.segment.text,
-      `(total=${e.totalSegments})`
-    );
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`committed #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness:
+    const seg = await readLiveTextSegment(e, { includeMeta: true });
+    console.log(seg?.text, seg?.meta);
   },
 });
 ```
@@ -196,8 +209,9 @@ function createLiveTextBuffer(
 const live = await createLiveTextBuffer({
   spooling: { mode: 'auto', thresholdBytes: 262144 },
   streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
-  onPartial: (e) => console.log(e.partialText),
-  onSegment: (e) => console.log('[commit]', e.segment.text),
+  onPartial: async (e) => console.log(await readLiveTextPartial(e)),
+  onSegment: async (e) =>
+    console.log('[commit]', (await readLiveTextSegment(e))?.text),
   onError: (e) => console.warn(e.message),
 });
 ```
@@ -221,8 +235,9 @@ function subscribeLiveTextBufferEvents(
 
 ```ts
 const unsub = subscribeLiveTextBufferEvents(live, {
-  onPartial: (e) => console.log(e.partialText),
-  onSegment: (e) => console.log(e.segment.text),
+  onPartial: async (e) => console.log(await readLiveTextPartial(e)),
+  onSegment: async (e) =>
+    console.log((await readLiveTextSegment(e))?.text),
   onError: (e) => console.error(e.message),
 });
 
@@ -273,6 +288,26 @@ function getLiveTextBufferPartialSlice(
 
 ```ts
 const partial = await getLiveTextBufferPartialSlice(live, 0, 256);
+```
+
+#### `readLiveTextPartial(event, options?)` / `readLiveTextSegment(event, options?)`
+
+Convenience pull helpers for notify-only events:
+
+```ts
+function readLiveTextPartial(
+  event: LiveTextBufferPartialEvent,
+  options?: { startUtf16?: number; maxUtf16?: number }
+): Promise<string>;
+
+function readLiveTextSegment(
+  event: LiveTextBufferSegmentEvent,
+  options?: {
+    includeTokens?: boolean;
+    includeTimestamps?: boolean;
+    includeMeta?: boolean;
+  }
+): Promise<LiveTextSegment | undefined>;
 ```
 
 #### `appendLiveTextSegment(liveBuffer, text, tokens?, timestamps?, meta?)`
@@ -358,8 +393,10 @@ const live = await createLiveTextBuffer({
     mode: 'auto',
     policy: { evaluator: 'text_synthetic_auto', sentenceBoundary: true, maxLengthChars: 500 },
   },
-  onSegment: (e) =>
-    console.log('text segment', e.segment.segmentIndex, 'total=', e.totalSegments),
+  onSegment: async (e) => {
+    const seg = await readLiveTextSegment(e);
+    console.log('text segment', e.segmentIndex, seg?.text, 'total=', e.totalSegments);
+  },
 });
 ```
 
@@ -430,7 +467,7 @@ let last = 0;
 const liveText = await createLiveTextBuffer({
   streamEvents: { partial: { enabled: true, minIntervalMs: 0 } },
   onPartial: async (event) => {
-    console.log('[partial]', event.partialText);
+    console.log('[partial]', await readLiveTextPartial(event));
     if (!event.isEndpoint) return;
 
     const total = await getLiveTextBufferSegmentCount(liveText);

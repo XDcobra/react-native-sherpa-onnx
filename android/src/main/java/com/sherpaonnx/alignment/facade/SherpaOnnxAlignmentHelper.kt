@@ -32,6 +32,7 @@ internal class SherpaOnnxAlignmentHelper {
     totalSamples: Int,
     sampleRate: Int,
     granularity: String,
+    textBufferId: String?,
   ): HashMap<String, Any>
 
   private external fun nativeAlignEstimated(
@@ -39,6 +40,21 @@ internal class SherpaOnnxAlignmentHelper {
     segmentSampleCounts: IntArray,
     sampleRate: Int,
     granularity: String,
+    textBufferId: String?,
+  ): HashMap<String, Any>
+
+  private external fun nativeAlignAccurateFromBuffer(
+    modelPath: String,
+    text: String,
+    bufferId: String,
+    startSample: Int,
+    endSampleExclusive: Int,
+    sampleRate: Int,
+    granularity: String,
+    vocabPath: String,
+    provider: String,
+    numThreads: Int,
+    textBufferId: String?,
   ): HashMap<String, Any>
 
   private external fun nativeAlignAccurateFromFloatPcm(
@@ -57,6 +73,20 @@ internal class SherpaOnnxAlignmentHelper {
     text: String,
     audioPath: String,
     granularity: String,
+    vocabPath: String,
+    provider: String,
+    numThreads: Int,
+  ): HashMap<String, Any>
+
+  private external fun nativeAlignAccurateForcedCtcFromBuffer(
+    modelPath: String,
+    windowText: String,
+    bufferId: String,
+    startSample: Int,
+    endSampleExclusive: Int,
+    sampleRate: Int,
+    granularity: String,
+    language: String,
     vocabPath: String,
     provider: String,
     numThreads: Int,
@@ -197,8 +227,7 @@ internal class SherpaOnnxAlignmentHelper {
           return@execute
         }
 
-        val text = textEntry.text
-        if (!textEntry.populated || text.isBlank()) {
+        if (!textEntry.populated || textEntry.utf16Length <= 0) {
           promise.reject(
             AlignmentErrorCodes.ERR_TEXT_EMPTY,
             "Offline text buffer is empty or not populated: $textInBufferId",
@@ -278,20 +307,22 @@ internal class SherpaOnnxAlignmentHelper {
         }
         val raw = when (normalizedMode) {
           "proportional" -> nativeAlignProportional(
-            text,
+            "",
             audioEntry.numSamples,
             audioEntry.sampleRate,
             normalizedGranularity,
+            textId,
           )
 
           "estimated" -> {
             val estimatedRate = AlignmentOptionParsers.parseEstimatedSampleRate(options, audioEntry.sampleRate)
             val counts = AlignmentOptionParsers.parseSegmentSampleCounts(options)
             nativeAlignEstimated(
-              text,
+              "",
               counts,
               estimatedRate,
               normalizedGranularity,
+              textId,
             )
           }
 
@@ -336,15 +367,17 @@ internal class SherpaOnnxAlignmentHelper {
                 )
                 return@execute
               }
-              val allSamples = audioEntry.readAllSamples()
-              if (allSamples.isEmpty()) {
+              if (audioEntry.numSamples <= 0) {
                 promise.reject(
                   AlignmentErrorCodes.ERR_AUDIO_EMPTY,
                   "Offline audio buffer is empty: $audioInBufferId",
                 )
                 return@execute
               }
-              val units = splitTextUnits(text, normalizedGranularity)
+              // VAD unit split still needs a local string (window strings remain the escape hatch).
+              val textForUnits =
+                com.sherpaonnx.text.pipeline.TextBufferNative.nativeReadOfflineText(textId).orEmpty()
+              val units = splitTextUnits(textForUnits, normalizedGranularity)
               val mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors)
               val unmappedAnchorCount = mapped.count { it.isEmpty() }
               val records = mutableListOf<SegmentRecord>()
@@ -354,20 +387,22 @@ internal class SherpaOnnxAlignmentHelper {
                 val joined = unitGroup.joinToString(" ").trim()
                 if (joined.isEmpty()) continue
                 val anchor = anchors[i]
-                val start = anchor.startSample.coerceAtLeast(0).coerceAtMost(allSamples.size)
-                val end = anchor.endSample.coerceAtLeast(start).coerceAtMost(allSamples.size)
+                val start = anchor.startSample.coerceAtLeast(0).coerceAtMost(audioEntry.numSamples)
+                val end = anchor.endSample.coerceAtLeast(start).coerceAtMost(audioEntry.numSamples)
                 if (end <= start) continue
-                val slice = allSamples.copyOfRange(start, end)
                 val chunkRaw = try {
-                  nativeAlignAccurateFromFloatPcm(
+                  nativeAlignAccurateFromBuffer(
                     modelPath,
                     joined,
-                    slice,
+                    audioInBufferId,
+                    start,
+                    end,
                     audioEntry.sampleRate,
                     normalizedGranularity,
                     vocabPath,
                     provider,
                     numThreads,
+                    null,
                   )
                 } catch (e: Exception) {
                   throw IllegalStateException(
@@ -420,23 +455,25 @@ internal class SherpaOnnxAlignmentHelper {
               writeAlignmentResult(promise, segmentOutId, outputEntry, records)
               return@execute
             }
-            val samples = audioEntry.readAllSamples()
-            if (samples.isEmpty()) {
+            if (audioEntry.numSamples <= 0) {
               promise.reject(
                 AlignmentErrorCodes.ERR_AUDIO_EMPTY,
                 "Offline audio buffer is empty: $audioInBufferId",
               )
               return@execute
             }
-            nativeAlignAccurateFromFloatPcm(
+            nativeAlignAccurateFromBuffer(
               modelPath,
-              text,
-              samples,
+              "",
+              audioInBufferId,
+              -1,
+              -1,
               audioEntry.sampleRate,
               normalizedGranularity,
               vocabPath,
               provider,
               numThreads,
+              textId,
             )
           }
 
@@ -454,7 +491,9 @@ internal class SherpaOnnxAlignmentHelper {
               writeAlignmentResult(promise, segmentOutId, outputEntry, emptyList())
               return@execute
             }
-            val units = splitTextUnits(text, normalizedGranularity)
+            val textForUnits =
+              com.sherpaonnx.text.pipeline.TextBufferNative.nativeReadOfflineText(textId).orEmpty()
+            val units = splitTextUnits(textForUnits, normalizedGranularity)
             val mapped = mapUnitsToAnchorsMonotonicWeight(units, anchors)
             val records = mutableListOf<SegmentRecord>()
             for (i in anchors.indices) {
@@ -577,10 +616,16 @@ internal class SherpaOnnxAlignmentHelper {
     }
   }
 
-  private fun resolveOfflinePcmSlice(
+  private data class OfflinePcmSpan(
+    val bufferId: String,
+    val startSample: Int,
+    val endSampleExclusive: Int,
+  )
+
+  private fun resolveOfflinePcmSpan(
     pcm: ReadableMap,
     sampleRate: Int,
-  ): FloatArray {
+  ): OfflinePcmSpan {
     val descriptor = AlignmentOptionParsers.parsePcmSliceDescriptor(pcm)
     val entry = PipelineAudioRegistry.getOffline(descriptor.audioBufferId)
       ?: throw IllegalArgumentException(
@@ -599,14 +644,7 @@ internal class SherpaOnnxAlignmentHelper {
         "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm slice must be within offline buffer bounds.",
       )
     }
-
-    val slice = entry.readSlice(descriptor.startSample, descriptor.sampleCount)
-    if (slice.isEmpty()) {
-      throw IllegalArgumentException(
-        "${AlignmentErrorCodes.ERR_ANCHOR_OUT_OF_RANGE}: pcm slice produced no samples.",
-      )
-    }
-    return slice
+    return OfflinePcmSpan(descriptor.audioBufferId, descriptor.startSample, endExclusive)
   }
 
   fun alignAccurateFromPcm(
@@ -654,16 +692,19 @@ internal class SherpaOnnxAlignmentHelper {
         val normalizedVocabPath = vocabPath?.trim().orEmpty()
         val normalizedProvider = provider?.trim().orEmpty()
         val normalizedNumThreads = AlignmentOptionParsers.parseOptionalNumThreads(numThreads)
-        val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
-        val raw = nativeAlignAccurateFromFloatPcm(
+        val span = resolveOfflinePcmSpan(pcm, normalizedSampleRate)
+        val raw = nativeAlignAccurateFromBuffer(
           normalizedModelPath,
           normalizedText,
-          slice,
+          span.bufferId,
+          span.startSample,
+          span.endSampleExclusive,
           normalizedSampleRate,
           normalizedGranularity,
           normalizedVocabPath,
           normalizedProvider,
           normalizedNumThreads,
+          null,
         )
 
         promise.resolve(AlignmentResultMapper.alignmentResultToWritable(raw))
@@ -728,15 +769,17 @@ internal class SherpaOnnxAlignmentHelper {
           .normalizeGranularity(granularity)
           .let { if (it == "character") "word" else it }
 
-        val slice = resolveOfflinePcmSlice(pcm, normalizedSampleRate)
+        val span = resolveOfflinePcmSpan(pcm, normalizedSampleRate)
         val normalizedVocabPath = vocabPath?.trim().orEmpty()
         val normalizedProvider = provider?.trim().orEmpty()
         val normalizedNumThreads = AlignmentOptionParsers.parseOptionalNumThreads(numThreads)
 
-        val raw = nativeAlignAccurateForcedCtcFromFloatPcm(
+        val raw = nativeAlignAccurateForcedCtcFromBuffer(
           normalizedModelPath,
           normalizedWindowText,
-          slice,
+          span.bufferId,
+          span.startSample,
+          span.endSampleExclusive,
           normalizedSampleRate,
           normalizedGranularity,
           language?.trim().orEmpty(),
@@ -796,6 +839,7 @@ internal class SherpaOnnxAlignmentHelper {
             samples.size,
             sampleRate,
             normalizedGranularity,
+            null,
           )
 
           "accurate" -> {

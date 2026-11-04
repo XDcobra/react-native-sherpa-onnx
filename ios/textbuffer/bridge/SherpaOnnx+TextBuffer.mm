@@ -10,7 +10,8 @@
  */
 
 #import "../../SherpaOnnx.h"
-#import "../core/SherpaOnnx+TextBufferGlobals.h"
+#include "TextRegistry.h"
+#include "TxtMetaBridge.h"
 #import <React/RCTLog.h>
 #include <mutex>
 #include <unordered_map>
@@ -83,112 +84,92 @@ static void txtRejectWithStdException(RCTPromiseRejectBlock reject, const std::e
     reject(kTxtErrInternalError, [NSString stringWithUTF8String:raw.c_str()] ?: @"Unknown text buffer error", nil);
 }
 
-// ==================== Offline Text Entry ====================
-struct TxtOfflineEntry {
-    std::string bufferId;
-    std::string text;
-    std::vector<std::string> tokens;
-    std::vector<float> timestamps;
-    std::vector<float> durations;
-    std::vector<TxtSpatialSpan> spatialSpans;
-    std::string lang;
-    std::string emotion;
-    std::string event;
-    bool populated = false;
 
-    int utf16Length() const {
-        // NSString length gives UTF-16 count, which matches JavaScript string.length
-        NSString *ns = [NSString stringWithUTF8String:text.c_str()];
-        return ns ? (int)[ns length] : 0;
+// ==================== RN helpers (SoT lives in TextRegistry / Txt*) ====================
+
+static NSDictionary *txtSpatialSpanToDict(const TxtSpatialSpan &span) {
+    NSMutableArray *quad = [NSMutableArray arrayWithCapacity:8];
+    for (int i = 0; i < 8; i++) {
+        [quad addObject:@(span.quad[i])];
     }
-    int tokenCount() const { return (int)tokens.size(); }
-    int timestampCount() const { return (int)timestamps.size(); }
-    int durationCount() const { return (int)durations.size(); }
-    int spatialSpanCount() const { return (int)spatialSpans.size(); }
-    bool hasLang() const { return !lang.empty(); }
-    bool hasEmotion() const { return !emotion.empty(); }
-    bool hasEvent() const { return !event.empty(); }
-    bool hasSpatialSpans() const { return !spatialSpans.empty(); }
-
-    void populate(const std::string &t, const std::vector<std::string> &tok,
-                  const std::vector<float> &ts, const std::vector<float> &dur,
-                  const std::string &l, const std::string &em, const std::string &ev,
-                  const std::vector<TxtSpatialSpan> &spans = {}) {
-        if (populated) return; // already populated, no-op (or could throw)
-        text = t;
-        tokens = tok;
-        timestamps = ts;
-        durations = dur;
-        spatialSpans = spans;
-        lang = l;
-        emotion = em;
-        event = ev;
-        populated = true;
+    NSMutableDictionary *map = [@{
+        @"utf16Start": @(span.utf16Start),
+        @"utf16End": @(span.utf16End),
+        @"level": [NSString stringWithUTF8String:span.level.c_str()] ?: @"line",
+        @"sourceImageBufferId":
+            [NSString stringWithUTF8String:span.sourceImageBufferId.c_str()] ?: @"",
+        @"frameIndex": @(span.frameIndex),
+        @"quad": quad,
+        @"origin": [NSString stringWithUTF8String:span.origin.c_str()] ?: @"ocr",
+    } mutableCopy];
+    if (span.hasConfidence) map[@"confidence"] = @(span.confidence);
+    if (span.hasPageNumber) map[@"pageNumber"] = @(span.pageNumber);
+    if (span.hasPtsMs) map[@"ptsMs"] = @(span.ptsMs);
+    if (span.hasPageWidth) map[@"pageWidth"] = @(span.pageWidth);
+    if (span.hasPageHeight) map[@"pageHeight"] = @(span.pageHeight);
+    if (span.hasSectionIndex) map[@"sectionIndex"] = @(span.sectionIndex);
+    if (!span.href.empty()) {
+        map[@"href"] = [NSString stringWithUTF8String:span.href.c_str()] ?: @"";
     }
+    return map;
+}
 
-    static NSDictionary *spatialSpanToDict(const TxtSpatialSpan &span) {
-        NSMutableArray *quad = [NSMutableArray arrayWithCapacity:8];
-        for (int i = 0; i < 8; i++) {
-            [quad addObject:@(span.quad[i])];
-        }
-        NSMutableDictionary *map = [@{
-            @"utf16Start": @(span.utf16Start),
-            @"utf16End": @(span.utf16End),
-            @"level": [NSString stringWithUTF8String:span.level.c_str()] ?: @"line",
-            @"sourceImageBufferId":
-                [NSString stringWithUTF8String:span.sourceImageBufferId.c_str()] ?: @"",
-            @"frameIndex": @(span.frameIndex),
-            @"quad": quad,
-            @"origin": [NSString stringWithUTF8String:span.origin.c_str()] ?: @"ocr",
-        } mutableCopy];
-        if (span.hasConfidence) {
-            map[@"confidence"] = @(span.confidence);
-        }
-        if (span.hasPageNumber) {
-            map[@"pageNumber"] = @(span.pageNumber);
-        }
-        if (span.hasPtsMs) {
-            map[@"ptsMs"] = @(span.ptsMs);
-        }
-        if (span.hasPageWidth) {
-            map[@"pageWidth"] = @(span.pageWidth);
-        }
-        if (span.hasPageHeight) {
-            map[@"pageHeight"] = @(span.pageHeight);
-        }
-        if (span.hasSectionIndex) {
-            map[@"sectionIndex"] = @(span.sectionIndex);
-        }
-        if (!span.href.empty()) {
-            map[@"href"] = [NSString stringWithUTF8String:span.href.c_str()] ?: @"";
-        }
-        return map;
+static NSDictionary *txtOfflineToDict(const TxtOfflineEntry &entry) {
+    return @{
+        @"bufferId": [NSString stringWithUTF8String:entry.bufferId.c_str()],
+        @"kind": @"offlineTextBuffer",
+        @"state": @"immutable",
+        @"utf16Length": @(entry.utf16Length()),
+        @"tokenCount": @(entry.tokenCount()),
+        @"timestampCount": @(entry.timestampCount()),
+        @"durationCount": @(entry.durationCount()),
+        @"spatialSpanCount": @(entry.spatialSpanCount()),
+        @"hasLang": @(entry.hasLang()),
+        @"hasEmotion": @(entry.hasEmotion()),
+        @"hasEvent": @(entry.hasEvent()),
+        @"hasSpatialSpans": @(entry.hasSpatialSpans()),
+    };
+}
+
+static NSDictionary *txtLiveToDict(TxtLiveEntry &entry) {
+    std::string stateValue;
+    int64_t totalChars = 0;
+    bool enabled = false;
+    {
+        std::lock_guard<std::mutex> lock(entry.stateMutex);
+        stateValue = entry.state == TxtLiveEntry::RECORDING ? "recording" : "finished";
+        totalChars = entry.totalCharsWritten;
+        enabled = entry.spoolEnabled();
     }
-
-    NSDictionary *toDict() const {
-        return @{
-            @"bufferId": [NSString stringWithUTF8String:bufferId.c_str()],
-            @"kind": @"offlineTextBuffer",
-            @"state": @"immutable",
-            @"utf16Length": @(utf16Length()),
-            @"tokenCount": @(tokenCount()),
-            @"timestampCount": @(timestampCount()),
-            @"durationCount": @(durationCount()),
-            @"spatialSpanCount": @(spatialSpanCount()),
-            @"hasLang": @(hasLang()),
-            @"hasEmotion": @(hasEmotion()),
-            @"hasEvent": @(hasEvent()),
-            @"hasSpatialSpans": @(hasSpatialSpans()),
-        };
+    std::string spoolModeRaw;
+    bool ready = false;
+    int64_t bytes = 0;
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(entry.spoolMutex);
+        spoolModeRaw = TxtLiveEntry::spoolingModeRaw(entry.spoolingMode);
+        ready = entry.spoolReady;
+        bytes = entry.spoolBytes;
+        path = entry.spoolPath;
     }
-};
+    NSMutableDictionary *dict = [@{
+        @"bufferId": [NSString stringWithUTF8String:entry.bufferId.c_str()],
+        @"kind": @"liveTextBuffer",
+        @"state": [NSString stringWithUTF8String:stateValue.c_str()],
+        @"totalCharsWritten": @(totalChars),
+        @"revision": @(entry.revision.load()),
+        @"segmentCount": @(entry.segmentCount()),
+        @"spoolMode": [NSString stringWithUTF8String:spoolModeRaw.c_str()],
+        @"spoolEnabled": @(enabled),
+        @"spoolReady": @(ready),
+        @"spoolBytes": @(bytes),
+    } mutableCopy];
+    if (!path.empty()) {
+        dict[@"spoolPath"] = [NSString stringWithUTF8String:path.c_str()];
+    }
+    return dict;
+}
 
-// ==================== Registry ====================
-
-// Non-static: shared with SherpaOnnx+STT.mm via SherpaOnnx+TextBufferGlobals.h
-std::unordered_map<std::string, std::shared_ptr<TxtOfflineEntry>> g_txt_offline;
-std::unordered_map<std::string, std::shared_ptr<TxtLiveEntry>> g_txt_live;
-std::mutex g_txt_mutex;
 static std::unordered_map<std::string, int64_t> g_txt_partial_last_emit_ms;
 static std::mutex g_txt_partial_emit_mutex;
 static __weak SherpaOnnx *g_txt_partial_event_module = nil;
@@ -202,68 +183,46 @@ extern "C" void txt_set_partial_event_module(SherpaOnnx *module) {
     g_txt_partial_event_module = module;
 }
 
-void txt_dispatch_pipeline_live_text_partial(
+static void txt_ios_partial_emit(
     const std::string &bufferId,
     const char *source,
-    const std::string &partialText,
+    int utf16Length,
     int64_t revisionValue,
     int64_t partialEventMinIntervalMs
 ) {
-#ifdef __OBJC__
-    NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()] ?: @"";
-    const char *src = source && source[0] ? source : "replace";
-
-    bool shouldEmit = true;
-    int64_t nowMs = txt_now_ms();
     {
         std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
-        int64_t last = 0;
+        int64_t nowMs = txt_now_ms();
         auto found = g_txt_partial_last_emit_ms.find(bufferId);
         if (found != g_txt_partial_last_emit_ms.end()) {
-            last = found->second;
+            if (partialEventMinIntervalMs > 0 &&
+                (nowMs - found->second) < partialEventMinIntervalMs) {
+                return;
+            }
         }
-        int64_t minInterval = std::max<int64_t>(0, partialEventMinIntervalMs);
-        if (minInterval > 0 && last > 0 && (nowMs - last) < minInterval) {
-            shouldEmit = false;
-        } else {
-            g_txt_partial_last_emit_ms[bufferId] = nowMs;
-        }
+        g_txt_partial_last_emit_ms[bufferId] = nowMs;
     }
-
-    if (!shouldEmit) {
-        return;
-    }
-
     SherpaOnnx *bridge = g_txt_partial_event_module;
-    if (bridge == nil) {
-        return;
-    }
-
-    NSString *currentText = [NSString stringWithUTF8String:partialText.c_str()] ?: @"";
-    NSString *sourceNs = [NSString stringWithUTF8String:src] ?: @"replace";
-    NSDictionary *body = @{
-        @"liveBufferId": liveBufferId,
-        @"source": sourceNs,
-        @"partialText": currentText,
-        @"revision": @(revisionValue),
-    };
-
-    SherpaOnnx *strongBridge = bridge;
+    if (bridge == nil) return;
+    NSString *bid = [NSString stringWithUTF8String:bufferId.c_str()];
+    NSString *src = source ? [NSString stringWithUTF8String:source] : @"unknown";
     dispatch_async(dispatch_get_main_queue(), ^{
-        [strongBridge sendEventWithName:@"pipelineLiveTextPartial" body:body];
+        [bridge sendEventWithName:@"pipelineLiveTextPartial" body:@{
+            @"liveBufferId": bid ?: @"",
+            @"source": src ?: @"unknown",
+            @"utf16Length": @(utf16Length),
+            @"revision": @(revisionValue),
+        }];
     });
-#endif
 }
 
-static NSString *txt_truncate_event_text(NSString *text, BOOL *truncated) {
-    static const NSUInteger kTxtMaxEventTextChars = 4096;
-    if (truncated) *truncated = NO;
-    if (text == nil) return @"";
-    if (text.length <= kTxtMaxEventTextChars) return text;
+__attribute__((constructor))
+static void txt_register_partial_emit() {
+    txt_set_partial_emit_fn(&txt_ios_partial_emit);
+}
 
-    if (truncated) *truncated = YES;
-    NSRange safeRange = [text rangeOfComposedCharacterSequencesForRange:NSMakeRange(0, kTxtMaxEventTextChars)];
-    return [text substringWithRange:safeRange];
+static std::string txt_bridge_generate_id(const char *prefix) {
+    return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
 }
 
 static void txt_emit_live_text_segment_event(
@@ -277,213 +236,13 @@ static void txt_emit_live_text_segment_event(
     NSMutableDictionary *body = [NSMutableDictionary dictionary];
     body[@"liveBufferId"] = liveBufferId ?: @"";
     body[@"totalSegments"] = @(totalSegments);
-    NSString *fullText = [NSString stringWithUTF8String:segment.text.c_str()] ?: @"";
-    BOOL textTruncated = NO;
-    body[@"text"] = txt_truncate_event_text(fullText, &textTruncated);
-    if (textTruncated) {
-        body[@"textTruncated"] = @YES;
-    }
     body[@"source"] = [NSString stringWithUTF8String:segment.source.c_str()] ?: @"unknown";
     body[@"segmentIndex"] = @(segment.segmentIndex);
-
-    if (!segment.tokens.empty()) {
-        NSMutableArray *tokens = [NSMutableArray arrayWithCapacity:segment.tokens.size()];
-        for (const auto &token : segment.tokens) {
-            [tokens addObject:[NSString stringWithUTF8String:token.c_str()] ?: @""];
-        }
-        body[@"tokens"] = tokens;
-    }
-
-    if (!segment.timestamps.empty()) {
-        NSMutableArray *timestamps = [NSMutableArray arrayWithCapacity:segment.timestamps.size()];
-        for (float ts : segment.timestamps) {
-            [timestamps addObject:@(ts)];
-        }
-        body[@"timestamps"] = timestamps;
-    }
-
-    if (segment.meta != nil) {
-        body[@"meta"] = segment.meta;
-    }
+    body[@"utf16Length"] = @(txt_utf16_length(segment.text));
 
     dispatch_async(dispatch_get_main_queue(), ^{
         [module sendEventWithName:@"pipelineLiveTextSegmentAppended" body:body];
     });
-}
-
-std::shared_ptr<TxtLiveEntry> txt_get_live_entry(const std::string &bufferId) {
-    std::lock_guard<std::mutex> lock(g_txt_mutex);
-    auto it = g_txt_live.find(bufferId);
-    if (it == g_txt_live.end()) {
-        return nullptr;
-    }
-    return it->second;
-}
-
-bool txt_live_is_recording(const std::shared_ptr<TxtLiveEntry> &entry) {
-    if (!entry) return false;
-    return entry->state == TxtLiveEntry::RECORDING;
-}
-
-bool txt_live_write_partial(
-    const std::shared_ptr<TxtLiveEntry> &entry,
-    const std::string &text,
-    std::string *error
-) {
-    if (!entry) {
-        if (error) *error = "Live text buffer not found";
-        return false;
-    }
-    try {
-        entry->writePartial(text);
-        return true;
-    } catch (const std::exception &e) {
-        if (error) *error = e.what();
-        return false;
-    } catch (...) {
-        if (error) *error = "Unknown live text writePartial error";
-        return false;
-    }
-}
-
-bool txt_live_commit_segment(
-    const std::shared_ptr<TxtLiveEntry> &entry,
-    const std::string &text,
-    const std::vector<std::string> &tokens,
-    const std::vector<float> &timestamps,
-    const std::string &source,
-    NSDictionary *meta,
-    std::string *error
-) {
-    if (!entry) {
-        if (error) *error = "Live text buffer not found";
-        return false;
-    }
-    try {
-        entry->commitSegment(text, tokens, timestamps, source, meta);
-        return true;
-    } catch (const std::exception &e) {
-        if (error) *error = e.what();
-        return false;
-    } catch (...) {
-        if (error) *error = "Unknown live text commitSegment error";
-        return false;
-    }
-}
-
-bool txt_read_offline_text(
-    const std::string &bufferId,
-    std::string *text,
-    std::string *error
-) {
-    std::lock_guard<std::mutex> lock(g_txt_mutex);
-    auto it = g_txt_offline.find(bufferId);
-    if (it == g_txt_offline.end() || !it->second) {
-        if (error) *error = "Offline text buffer not found";
-        return false;
-    }
-    if (!it->second->populated || it->second->text.empty()) {
-        if (error) *error = "Text buffer is empty or not populated";
-        return false;
-    }
-    if (text) {
-        *text = it->second->text;
-    }
-    return true;
-}
-
-bool txt_read_offline_text_with_lang(
-    const std::string &bufferId,
-    std::string *text,
-    std::string *lang,
-    std::string *error
-) {
-    std::lock_guard<std::mutex> lock(g_txt_mutex);
-    auto it = g_txt_offline.find(bufferId);
-    if (it == g_txt_offline.end() || !it->second) {
-        if (error) *error = "Offline text buffer not found";
-        return false;
-    }
-    if (!it->second->populated || it->second->text.empty()) {
-        if (error) *error = "Text buffer is empty or not populated";
-        return false;
-    }
-    if (text) {
-        *text = it->second->text;
-    }
-    if (lang) {
-        *lang = it->second->lang;
-    }
-    return true;
-}
-
-bool txt_populate_offline_if_empty(
-    const std::string &bufferId,
-    const std::string &text,
-    const std::vector<std::string> &tokens,
-    const std::vector<float> &timestamps,
-    const std::vector<float> &durations,
-    const std::string &lang,
-    const std::string &emotion,
-    const std::string &event,
-    std::string *error
-) {
-    return txt_populate_offline_if_empty(
-        bufferId, text, tokens, timestamps, durations, lang, emotion, event,
-        std::vector<TxtSpatialSpan>{}, error);
-}
-
-bool txt_populate_offline_if_empty(
-    const std::string &bufferId,
-    const std::string &text,
-    const std::vector<std::string> &tokens,
-    const std::vector<float> &timestamps,
-    const std::vector<float> &durations,
-    const std::string &lang,
-    const std::string &emotion,
-    const std::string &event,
-    const std::vector<TxtSpatialSpan> &spatialSpans,
-    std::string *error
-) {
-    std::lock_guard<std::mutex> lock(g_txt_mutex);
-    auto it = g_txt_offline.find(bufferId);
-    if (it == g_txt_offline.end() || !it->second) {
-        if (error) *error = "Offline text buffer not found";
-        return false;
-    }
-    if (it->second->populated) {
-        if (error) *error = "Text buffer already populated";
-        return false;
-    }
-    it->second->populate(text, tokens, timestamps, durations, lang, emotion, event, spatialSpans);
-    return true;
-}
-
-void txt_release_all_entries() {
-    std::unordered_map<std::string, std::shared_ptr<TxtLiveEntry>> liveToRelease;
-    {
-        std::lock_guard<std::mutex> lock(g_txt_mutex);
-        liveToRelease = std::move(g_txt_live);
-        g_txt_live.clear();
-        g_txt_offline.clear();
-    }
-    {
-        std::lock_guard<std::mutex> emitLock(g_txt_partial_emit_mutex);
-        g_txt_partial_last_emit_ms.clear();
-    }
-    for (auto &pair : liveToRelease) {
-        if (pair.second) {
-            try {
-                pair.second->release();
-            } catch (...) {
-                // best-effort cleanup
-            }
-        }
-    }
-}
-
-static std::string txt_generateId(const char *prefix) {
-    return std::string(prefix) + "_" + [[[NSUUID UUID] UUIDString] UTF8String];
 }
 
 // ==================== TurboModule Methods ====================
@@ -494,14 +253,14 @@ static std::string txt_generateId(const char *prefix) {
                               reject:(RCTPromiseRejectBlock)reject
 {
     @try {
-        std::string bufferId = txt_generateId("txt_off");
+        std::string bufferId = txt_bridge_generate_id("txt_off");
         auto entry = std::make_shared<TxtOfflineEntry>();
         entry->bufferId = bufferId;
         {
             std::lock_guard<std::mutex> lock(g_txt_mutex);
             g_txt_offline[bufferId] = entry;
         }
-        resolve(entry->toDict());
+        resolve(txtOfflineToDict(*entry));
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
     }
@@ -540,7 +299,7 @@ static std::string txt_generateId(const char *prefix) {
             return;
         }
 
-        std::string bufferId = txt_generateId("txt_off");
+        std::string bufferId = txt_bridge_generate_id("txt_off");
         auto entry = std::make_shared<TxtOfflineEntry>();
         entry->bufferId = bufferId;
         if (!text.empty()) {
@@ -551,7 +310,7 @@ static std::string txt_generateId(const char *prefix) {
             std::lock_guard<std::mutex> lock(g_txt_mutex);
             g_txt_offline[bufferId] = entry;
         }
-        resolve(entry->toDict());
+        resolve(txtOfflineToDict(*entry));
     } catch (const std::exception &e) {
         txtRejectWithStdException(reject, e);
     } catch (...) {
@@ -569,7 +328,7 @@ static std::string txt_generateId(const char *prefix) {
             reject(kTxtErrInvalidArgument, @"text is required", nil);
             return;
         }
-        std::string bufferId = txt_generateId("txt_off");
+        std::string bufferId = txt_bridge_generate_id("txt_off");
         auto entry = std::make_shared<TxtOfflineEntry>();
         entry->bufferId = bufferId;
         entry->text = [text UTF8String];
@@ -589,7 +348,7 @@ static std::string txt_generateId(const char *prefix) {
             std::lock_guard<std::mutex> lock(g_txt_mutex);
             g_txt_offline[bufferId] = entry;
         }
-        resolve(entry->toDict());
+        resolve(txtOfflineToDict(*entry));
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
     }
@@ -717,7 +476,7 @@ static std::string txt_generateId(const char *prefix) {
             spoolingPath = [joined UTF8String] ?: "";
         }
 
-        std::string bufferId = txt_generateId("txt_live");
+        std::string bufferId = txt_bridge_generate_id("txt_live");
         auto entry = std::make_shared<TxtLiveEntry>();
         entry->bufferId = bufferId;
         entry->windowMaxChars = windowMaxChars;
@@ -741,7 +500,7 @@ static std::string txt_generateId(const char *prefix) {
             std::lock_guard<std::mutex> lock(g_txt_mutex);
             g_txt_live[bufferId] = entry;
         }
-        resolve(entry->toDict());
+        resolve(txtLiveToDict(*entry));
     } catch (const std::exception &e) {
         txtRejectWithStdException(reject, e);
     } catch (...) {
@@ -755,28 +514,29 @@ static std::string txt_generateId(const char *prefix) {
 {
     try {
         std::string offId = [offlineBufferId UTF8String] ?: "";
-        std::string seedText;
-
-        {
-            std::lock_guard<std::mutex> lock(g_txt_mutex);
-            auto it = g_txt_offline.find(offId);
-            if (it == g_txt_offline.end()) {
-                reject(kTxtErrBufferNotFound,
-                       [NSString stringWithFormat:@"Offline text buffer not found: %@", offlineBufferId], nil);
-                return;
-            }
-            seedText = it->second->text;
-        }
-
-        std::string bufferId = txt_generateId("txt_live");
-        auto entry = std::make_shared<TxtLiveEntry>();
-        entry->bufferId = bufferId;
         NSString *tmpDir = NSTemporaryDirectory();
         if (tmpDir == nil || tmpDir.length == 0) tmpDir = @"/tmp";
         NSString *fileName = [NSString stringWithFormat:@"txt_spool_%@.bin", [[NSUUID UUID] UUIDString]];
         NSString *joined = [tmpDir stringByAppendingPathComponent:fileName];
         std::string spoolPath = [joined UTF8String] ?: "";
-        entry->configureSpooling(TxtLiveEntry::SPOOL_ON, spoolPath, true, 0);
+
+        std::string bufferId;
+        std::string errCode;
+        std::string errMsg;
+        if (!txt_create_live_from_offline(offId, 65536, 4096, false, 0, "on", spoolPath, true,
+                                          &bufferId, &errCode, &errMsg)) {
+            NSString *msg = errMsg.empty()
+                ? [NSString stringWithFormat:@"Offline text buffer not found: %@", offlineBufferId]
+                : [NSString stringWithUTF8String:errMsg.c_str()];
+            reject(kTxtErrBufferNotFound, msg, nil);
+            return;
+        }
+
+        auto entry = txt_get_live_entry(bufferId);
+        if (!entry) {
+            reject(kTxtErrInternalError, @"Live text buffer missing after createLiveFromOffline", nil);
+            return;
+        }
         __weak SherpaOnnx *weakSelf = self;
         std::weak_ptr<TxtLiveEntry> weakEntry = entry;
         NSString *liveBufferId = [NSString stringWithUTF8String:bufferId.c_str()] ?: @"";
@@ -789,15 +549,7 @@ static std::string txt_generateId(const char *prefix) {
             }
             txt_emit_live_text_segment_event(strongSelf, liveBufferId, segment, totalSegments);
         });
-        if (!seedText.empty()) {
-            entry->writePartial(seedText);
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(g_txt_mutex);
-            g_txt_live[bufferId] = entry;
-        }
-        resolve(entry->toDict());
+        resolve(txtLiveToDict(*entry));
     } catch (const std::exception &e) {
         txtRejectWithStdException(reject, e);
     } catch (...) {
@@ -847,12 +599,12 @@ static std::string txt_generateId(const char *prefix) {
         std::lock_guard<std::mutex> lock(g_txt_mutex);
         auto offIt = g_txt_offline.find(bid);
         if (offIt != g_txt_offline.end()) {
-            resolve(offIt->second->toDict());
+            resolve(txtOfflineToDict(*offIt->second));
             return;
         }
         auto liveIt = g_txt_live.find(bid);
         if (liveIt != g_txt_live.end()) {
-            resolve(liveIt->second->toDict());
+            resolve(txtLiveToDict(*liveIt->second));
             return;
         }
         reject(kTxtErrBufferNotFound,
@@ -917,23 +669,14 @@ static std::string txt_generateId(const char *prefix) {
             return;
         }
 
-        std::lock_guard<std::mutex> lock(g_txt_mutex);
-        auto it = g_txt_offline.find(bid);
-        if (it == g_txt_offline.end()) {
+        std::string slice;
+        std::string err;
+        if (!txt_copy_offline_text_utf16_slice(bid, s, m, &slice, &err)) {
             reject(kTxtErrBufferNotFound,
                    [NSString stringWithFormat:@"Offline text buffer not found: %@", bufferId], nil);
             return;
         }
-
-        NSString *full = [NSString stringWithUTF8String:it->second->text.c_str()] ?: @"";
-        int totalLen = (int)[full length];
-        if (s >= totalLen) {
-            resolve(@"");
-            return;
-        }
-        int end = MIN(s + m, totalLen);
-        NSRange range = NSMakeRange(s, end - s);
-        resolve([full substringWithRange:range]);
+        resolve([NSString stringWithUTF8String:slice.c_str()] ?: @"");
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
     }
@@ -1111,7 +854,7 @@ static std::string txt_generateId(const char *prefix) {
         int end = MIN(s + m, total);
         NSMutableArray *arr = [NSMutableArray arrayWithCapacity:(end - s)];
         for (int i = s; i < end; i++) {
-            [arr addObject:TxtOfflineEntry::spatialSpanToDict(spans[i])];
+            [arr addObject:txtSpatialSpanToDict(spans[i])];
         }
         resolve(arr);
     } @catch (NSException *exception) {
@@ -1194,28 +937,14 @@ static std::string txt_generateId(const char *prefix) {
             return;
         }
 
-        std::shared_ptr<TxtLiveEntry> entry;
-        {
-            std::lock_guard<std::mutex> lock(g_txt_mutex);
-            auto it = g_txt_live.find(lid);
-            if (it == g_txt_live.end()) {
-                reject(kTxtErrBufferNotFound,
-                       [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
-                return;
-            }
-            entry = it->second;
-        }
-
-        std::string current = entry->snapshotText();
-        NSString *full = [NSString stringWithUTF8String:current.c_str()] ?: @"";
-        int totalLen = (int)[full length];
-        if (s >= totalLen) {
-            resolve(@"");
+        std::string slice;
+        std::string err;
+        if (!txt_copy_live_snapshot_utf16_slice(lid, s, m, &slice, &err)) {
+            reject(kTxtErrBufferNotFound,
+                   [NSString stringWithFormat:@"Live text buffer not found: %@", liveBufferId], nil);
             return;
         }
-        int end = MIN(s + m, totalLen);
-        NSRange range = NSMakeRange(s, end - s);
-        resolve([full substringWithRange:range]);
+        resolve([NSString stringWithUTF8String:slice.c_str()] ?: @"");
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
     }
@@ -1338,7 +1067,7 @@ static std::string txt_generateId(const char *prefix) {
             }
         }
 
-        int segmentIndex = entry->commitSegment(textStr, tokenVec, timestampVec, "append", meta);
+        int segmentIndex = entry->commitSegment(textStr, tokenVec, timestampVec, "append", txtMetaJsonFromDict(meta));
         resolve(@{ @"segmentIndex": @(segmentIndex) });
     } @catch (NSException *exception) {
         reject(kTxtErrInternalError, exception.reason, nil);
@@ -1418,8 +1147,11 @@ static std::string txt_generateId(const char *prefix) {
                 segmentMap[@"timestamps"] = tsArr;
             }
 
-            if (includeMeta && seg.meta != nil) {
-                segmentMap[@"meta"] = seg.meta;
+            if (includeMeta && !seg.metaJson.empty()) {
+                NSDictionary *metaDict = txtMetaDictFromJson(seg.metaJson);
+                if (metaDict != nil) {
+                    segmentMap[@"meta"] = metaDict;
+                }
             }
 
             [segmentArray addObject:segmentMap];

@@ -29,7 +29,7 @@ data class SystemTtsConfig(
    */
   val sampleTextByHint: Map<String, String> = emptyMap(),
   /**
-   * Optional [com.k2fsa.sherpa.onnx.GenerationConfig.extra] entries per synthesis lang hint
+   * Optional GenerationConfig.extra entries per synthesis lang hint
    * (e.g. Supertonic `{ lang: hint }`). Empty map → plain `generate(text, sid, speed)`.
    */
   val synthesisExtrasForLangHint: (langHint: String) -> Map<String, String> = { emptyMap() },

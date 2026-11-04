@@ -4,8 +4,8 @@ import com.sherpaonnx.audio.pipeline.LiveEntry
 import com.sherpaonnx.audio.pipeline.LiveFramesAppendedEvent
 import com.sherpaonnx.audio.pipeline.StreamingPipelineStatus
 import com.sherpaonnx.audio.pipeline.StreamingPipelineWorker
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.segment.pipeline.LiveSegmentEntry
-import com.sherpaonnx.vad.core.VadDecision
 import com.sherpaonnx.vad.core.VadInstanceConfig
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -16,6 +16,10 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
+/**
+ * Live VAD worker aligned with iOS: rebuffer to windowSize → AcceptWaveform →
+ * IsSpeechDetected → PopSegments → Flush on end.
+ */
 class VadPipelineWorker(
   private val instanceId: String,
   private val inputEntry: LiveEntry,
@@ -36,9 +40,11 @@ class VadPipelineWorker(
   private val dataAvailable = lock.newCondition()
   private var appendListener: ((LiveFramesAppendedEvent) -> Unit)? = null
   private var cursorId: Int = -1
+  private val drainScratch = FloatArray(chunkSize)
   private val pendingCommands = LinkedBlockingQueue<Cmd>()
   private val cmdLock = Any()
   private val queueDepth = AtomicInteger(0)
+  private val gateKey = config.gateKey()
 
   @Volatile private var chunksProcessed = 0L
   @Volatile private var unitsRead = 0L
@@ -46,14 +52,8 @@ class VadPipelineWorker(
   @Volatile private var error: String? = null
   @Volatile private var speech = false
 
-  private var segStartSample = 0L
-  private var speechSamples = 0L
-  private var silenceSamples = 0L
   private var speechDurationMs = 0L
   private var segmentCount = 0
-  private var absoluteSample = 0L
-  private var speechScoreSum = 0.0
-  private var speechScoreCount = 0
   private val vadFrameSize = config.runtimeOptions.windowSize.coerceAtLeast(1)
   private var pendingVadSamples = FloatArray(0)
 
@@ -63,7 +63,14 @@ class VadPipelineWorker(
   }
 
   override fun start() {
-    config.runtime.reset()
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      throw IllegalStateException("VAD instance released: $instanceId")
+    }
+    try {
+      config.runtime.reset()
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
+    }
     isRunning = true
     emitEvent("pipeline.started", emptyMap())
     cursorId = inputEntry.createCursorHandle()
@@ -76,8 +83,8 @@ class VadPipelineWorker(
     try {
       while (isRunning) {
         processCommands()
-        val chunk = inputEntry.drainCursor(cursorId, chunkSize)
-        if (chunk.isEmpty()) {
+        val n = inputEntry.drainCursorInto(cursorId, drainScratch, 0, chunkSize)
+        if (n <= 0) {
           if (inputEntry.state == LiveEntry.State.FINISHED) {
             flushInternal()
             break
@@ -85,6 +92,7 @@ class VadPipelineWorker(
           lock.withLock { dataAvailable.await(10, TimeUnit.MILLISECONDS) }
           continue
         }
+        val chunk = if (n == drainScratch.size) drainScratch else drainScratch.copyOf(n)
         processChunk(chunk)
       }
       emitEvent(
@@ -104,7 +112,6 @@ class VadPipelineWorker(
       if (cursorId >= 0) inputEntry.releaseCursor(cursorId)
       appendListener?.let { inputEntry.removeAppendListener(it) }
       appendListener = null
-      // Drain leftovers under the same lock as flush/reset enqueue, then clear running.
       synchronized(cmdLock) {
         while (true) {
           val cmd = pendingCommands.poll() ?: break
@@ -121,10 +128,6 @@ class VadPipelineWorker(
   }
 
   private fun processChunk(chunk: FloatArray) {
-    // VAD-only rule:
-    // Unlike STT/TTS/enhancement, the Sherpa-ONNX VAD compute path is sensitive to
-    // undersized input windows (seen as model pad/reflect runtime failures on mic jitter).
-    // We therefore batch arbitrary live-buffer reads into fixed model-sized frames here.
     val merged = FloatArray(pendingVadSamples.size + chunk.size)
     pendingVadSamples.copyInto(merged, 0, 0, pendingVadSamples.size)
     chunk.copyInto(merged, pendingVadSamples.size, 0, chunk.size)
@@ -153,71 +156,55 @@ class VadPipelineWorker(
   }
 
   private fun processVadFrame(frame: FloatArray) {
-    val decision = config.runtime.infer(frame, config.sampleRate)
-    val detected = decision.isSpeech
-    if (detected != speech) {
-      speech = detected
-      emitEvent("vad.stateChanged", mapOf("isSpeechDetected" to speech))
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      throw IllegalStateException("VAD instance released: $instanceId")
     }
-    if (detected) {
-      if (speechSamples == 0L) {
-        segStartSample = absoluteSample
+    try {
+      config.runtime.acceptWaveform(frame)
+      val detected = config.runtime.isSpeechDetected()
+      if (detected != speech) {
+        speech = detected
+        emitEvent("vad.stateChanged", mapOf("isSpeechDetected" to speech))
       }
-      speechSamples += frame.size.toLong()
-      silenceSamples = 0L
-      if (decision.score != null) {
-        speechScoreSum += decision.score
-        speechScoreCount += 1
-      }
-    } else if (speechSamples > 0L) {
-      silenceSamples += frame.size.toLong()
-      val silenceMs = samplesToMs(silenceSamples)
-      if (silenceMs >= config.runtimeOptions.minSilenceDurationMs.toLong()) {
-        appendSegment()
-        speechSamples = 0L
-        silenceSamples = 0L
-      }
+      appendDetectedSegments()
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
     }
-    absoluteSample += frame.size.toLong()
   }
 
-  private fun appendSegment() {
-    val speechMs = samplesToMs(speechSamples)
-    if (speechMs < config.runtimeOptions.minSpeechDurationMs.toLong()) return
-    val end = segStartSample + speechSamples
-    val confidence = if (speechScoreCount > 0) {
-      speechScoreSum / speechScoreCount.toDouble()
-    } else {
-      1.0
+  private fun appendDetectedSegments() {
+    val segments = config.runtime.popSegments()
+    for (segment in segments) {
+      val confidence = 1.0
+      outputEntry.appendSegment(
+        kind = "speech",
+        sourceAudioBufferId = inputEntry.bufferId,
+        startSample = segment.startSample,
+        endSample = segment.endSample,
+        sampleRate = config.sampleRate,
+        durationMs = segment.durationMs,
+        confidence = confidence,
+        payloadJson = """{"source":"vad","engine":"vad","decision":"model","score":$confidence}""",
+      )
+      unitsWritten++
+      segmentCount++
+      speechDurationMs += segment.durationMs.toLong()
     }
-    val out = outputEntry.appendSegment(
-      kind = "speech",
-      sourceAudioBufferId = inputEntry.bufferId,
-      startSample = segStartSample.toInt(),
-      endSample = end.toInt(),
-      sampleRate = config.sampleRate,
-      durationMs = speechMs.toInt(),
-      confidence = confidence,
-      payloadJson = """{"source":"vad","engine":"vad","decision":"model","score":$confidence}""",
-    )
-    speechScoreSum = 0.0
-    speechScoreCount = 0
-    unitsWritten++
-    segmentCount++
-    speechDurationMs += speechMs
   }
 
   private fun flushInternal() {
-    if (pendingVadSamples.isNotEmpty()) {
-      val tail = FloatArray(vadFrameSize)
-      pendingVadSamples.copyInto(tail, 0, 0, pendingVadSamples.size)
-      processVadFrame(tail)
-      pendingVadSamples = FloatArray(0)
-    }
-    if (speechSamples > 0L) {
-      appendSegment()
-      speechSamples = 0L
-      silenceSamples = 0L
+    if (!NativeInstanceGate.beginUse(gateKey)) return
+    try {
+      if (pendingVadSamples.isNotEmpty()) {
+        val tail = FloatArray(vadFrameSize)
+        pendingVadSamples.copyInto(tail, 0, 0, pendingVadSamples.size)
+        config.runtime.acceptWaveform(tail)
+        pendingVadSamples = FloatArray(0)
+      }
+      config.runtime.flush()
+      appendDetectedSegments()
+    } finally {
+      NativeInstanceGate.endUse(gateKey)
     }
     emitEvent("pipeline.flushed", emptyMap())
   }
@@ -236,27 +223,26 @@ class VadPipelineWorker(
           }
         }
         is Cmd.Reset -> {
-          config.runtime.reset()
-          speech = false
-          speechSamples = 0L
-          silenceSamples = 0L
-          segStartSample = absoluteSample
-          speechScoreSum = 0.0
-          speechScoreCount = 0
-          cmd.done.complete(Unit)
+          try {
+            if (NativeInstanceGate.beginUse(gateKey)) {
+              try {
+                config.runtime.reset()
+              } finally {
+                NativeInstanceGate.endUse(gateKey)
+              }
+            }
+            speech = false
+            pendingVadSamples = FloatArray(0)
+            cmd.done.complete(Unit)
+          } catch (e: Exception) {
+            cmd.done.completeExceptionally(e)
+          }
         }
       }
     }
   }
 
-  private fun samplesToMs(samples: Long): Long {
-    if (config.sampleRate <= 0) return 0L
-    return (samples * 1000L) / config.sampleRate.toLong()
-  }
-
   override fun stop() {
-    // Always join. Early `!isRunning` return raced unload/release against the
-    // worker finally block (isRunning cleared before teardown completes).
     isRunning = false
     lock.withLock { dataAvailable.signal() }
     if (!executor.isShutdown) {

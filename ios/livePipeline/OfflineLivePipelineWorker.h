@@ -1,9 +1,9 @@
 #pragma once
 
 #include "../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../audio/pipeline/PaLiveEntry.h"
-#include "../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "PaLiveEntry.h"
+#include "SegmentRegistry.h"
+#include "TextRegistry.h"
 
 #include <atomic>
 #include <condition_variable>

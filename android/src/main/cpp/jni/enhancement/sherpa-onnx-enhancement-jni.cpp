@@ -1,6 +1,7 @@
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-enhancement-wrapper.h"
 #include "sherpa-onnx-model-path-fill.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -317,6 +318,46 @@ Java_com_sherpaonnx_enhancement_facade_SherpaOnnxEnhancementHelper_nativeSetVoic
 }
 
 JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_enhancement_facade_SherpaOnnxEnhancementHelper_nativeSetVoiceSampleFromBuffer(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring bufferId) {
+  const std::string id = CopyRequiredJstring(env, instanceId);
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map) return nullptr;
+
+  auto write = [&](bool success, const std::string& error) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", success);
+    if (!error.empty()) {
+      sherpaonnx::PutString(env, map, mapPut, "error", error);
+    }
+  };
+
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, -1, -1, &view, &errCode, &errMsg)) {
+    write(false, errMsg.empty() ? errCode : errMsg);
+    return map;
+  }
+  if (auto offline = LookupOffline(id)) {
+    const auto result = offline->setVoiceSample(
+        view.count > 0 ? view.data : nullptr, static_cast<int32_t>(view.count),
+        view.sampleRate);
+    write(result.success, result.error);
+    return map;
+  }
+  if (auto online = LookupOnline(id)) {
+    const auto result = online->setVoiceSample(
+        view.count > 0 ? view.data : nullptr, static_cast<int32_t>(view.count),
+        view.sampleRate);
+    write(result.success, result.error);
+    return map;
+  }
+  write(false, "Enhancement instance not found: " + id);
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_enhancement_facade_SherpaOnnxEnhancementHelper_nativeOfflineRun(
     JNIEnv* env, jclass /* clazz */, jstring instanceId, jfloatArray samples,
     jint sampleRate) {
@@ -329,6 +370,28 @@ Java_com_sherpaonnx_enhancement_facade_SherpaOnnxEnhancementHelper_nativeOffline
   return AudioResultToJava(env, inst->runSamples(CopyFloatArray(env, samples),
                                                  sampleRate),
                            true, {});
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_enhancement_facade_SherpaOnnxEnhancementHelper_nativeOfflineRunFromBuffer(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring bufferId) {
+  const std::string id = CopyRequiredJstring(env, instanceId);
+  auto inst = LookupOffline(id);
+  if (!inst) {
+    return AudioResultToJava(env, {}, false,
+                             "Enhancement instance not found: " + id);
+  }
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, -1, -1, &view, &errCode, &errMsg)) {
+    return AudioResultToJava(env, {}, false, errMsg.empty() ? errCode : errMsg);
+  }
+  return AudioResultToJava(
+      env,
+      inst->runSamples(view.count > 0 ? view.data : nullptr,
+                       static_cast<int32_t>(view.count), view.sampleRate),
+      true, {});
 }
 
 JNIEXPORT jobject JNICALL

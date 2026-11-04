@@ -167,29 +167,33 @@ SpeakerEmbeddingExtractorWrapper::initializeCustom(
 }
 
 std::vector<float> SpeakerEmbeddingExtractorWrapper::computeFromSamples(
-    const std::vector<float>& samples, int32_t sampleRate) {
+    const float* samples, int32_t numSamples, int32_t sampleRate) {
   pImpl->ClearError();
   if (!pImpl->initialized || !pImpl->runner.isReady()) {
     pImpl->SetError(speaker_embedding::kErrNotInitialized,
                     "Speaker embedding extractor is not initialized");
     return {};
   }
-  if (samples.empty() || sampleRate <= 0) {
+  if (samples == nullptr || numSamples <= 0 || sampleRate <= 0) {
     pImpl->SetError(speaker_embedding::kErrInvalidArgument,
                     "Speaker embedding input samples are empty");
     return {};
   }
 
   std::vector<float> embedding;
-  auto st = pImpl->runner.ComputeFull(samples.data(),
-                                      static_cast<int32_t>(samples.size()),
-                                      sampleRate, &embedding);
+  auto st = pImpl->runner.ComputeFull(samples, numSamples, sampleRate, &embedding);
   if (!st.ok) {
     pImpl->SetError(st.code.empty() ? speaker_embedding::kErrCompute : st.code,
                     st.message);
     return {};
   }
   return embedding;
+}
+
+std::vector<float> SpeakerEmbeddingExtractorWrapper::computeFromSamples(
+    const std::vector<float>& samples, int32_t sampleRate) {
+  return computeFromSamples(samples.empty() ? nullptr : samples.data(),
+                            static_cast<int32_t>(samples.size()), sampleRate);
 }
 
 int32_t SpeakerEmbeddingExtractorWrapper::dim() const { return pImpl->dim; }

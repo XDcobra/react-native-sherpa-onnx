@@ -7,7 +7,6 @@
  */
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
-import type { Segment } from '../segment/segment';
 import type { SegmentationPolicy } from '../segment/engine-types';
 
 // ========== Buffer Kinds ==========
@@ -211,10 +210,25 @@ export interface AudioSegmentationConfig {
   policy?: SegmentationPolicy;
 }
 
+/**
+ * Notify-only speech-segment commit on a live audio buffer.
+ * Timing/routing scalars only — no embedded `SpeechSegment` / payload.
+ * Pull SegmentMeta via segmentbuffer `readLiveSegment` when needed.
+ */
 export interface LiveAudioBufferSegmentEvent {
   bufferId: string;
-  segment: Segment;
+  segmentBufferId: string;
+  segmentId: string;
+  segmentIndex: number;
   totalSegments: number;
+  startSample: number;
+  endSample: number;
+  sampleRate: number;
+  durationMs: number;
+  confidence?: number;
+  reason?: string;
+  source?: string;
+  createdAtMs?: number;
 }
 
 // ========== Creation Options ==========

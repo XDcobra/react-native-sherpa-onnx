@@ -35,6 +35,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createLiveSegmentBuffer,
+  readLiveSegment,
   releasePipelineSegmentBuffer,
   type LiveSegmentBufferRef,
   type LiveSegmentBufferSegmentAppendedEvent,
@@ -468,96 +469,103 @@ export default function DiarizationStreamingScreen() {
       const liveSeg = await createLiveSegmentBuffer({
         sourceAudioBufferId: liveAudio.bufferId,
         onSegmentAppended: (event: LiveSegmentBufferSegmentAppendedEvent) => {
-          const rawSpeaker = (event.payload as any)?.speaker;
-          const speaker = typeof rawSpeaker === 'number' ? rawSpeaker : 0;
-          const sampleRate = event.sampleRate || engine.sampleRate || 16000;
-          const startSec = event.startSample / sampleRate;
-          const endSec = event.endSample / sampleRate;
-          const durationSec = endSec - startSec;
+          readLiveSegment(event)
+            .then((meta) => {
+              const rawSpeaker =
+                meta?.kind === 'diarization'
+                  ? (meta.payload as { speaker?: number } | undefined)?.speaker
+                  : undefined;
+              const speaker = typeof rawSpeaker === 'number' ? rawSpeaker : 0;
+              const sampleRate = event.sampleRate || engine.sampleRate || 16000;
+              const startSec = event.startSample / sampleRate;
+              const endSec = event.endSample / sampleRate;
+              const durationSec = endSec - startSec;
 
-          // Pulse active speaker HUD
-          setActiveSpeaker(speaker);
-          if (activeSpeakerResetTimer.current)
-            clearTimeout(activeSpeakerResetTimer.current);
-          activeSpeakerResetTimer.current = setTimeout(() => {
-            setActiveSpeaker(null);
-          }, 1800);
+              // Pulse active speaker HUD
+              setActiveSpeaker(speaker);
+              if (activeSpeakerResetTimer.current)
+                clearTimeout(activeSpeakerResetTimer.current);
+              activeSpeakerResetTimer.current = setTimeout(() => {
+                setActiveSpeaker(null);
+              }, 1800);
 
-          // Live turn-stitching: extend existing turn if within minDurationOff gap
-          const prev = turnsRef.current;
-          let lastSpeakerTurnIndex = -1;
-          for (let i = prev.length - 1; i >= 0; i--) {
-            const t = prev[i];
-            if (t && t.speaker === speaker) {
-              lastSpeakerTurnIndex = i;
-              break;
-            }
-          }
+              // Live turn-stitching: extend existing turn if within minDurationOff gap
+              const prev = turnsRef.current;
+              let lastSpeakerTurnIndex = -1;
+              for (let i = prev.length - 1; i >= 0; i--) {
+                const t = prev[i];
+                if (t && t.speaker === speaker) {
+                  lastSpeakerTurnIndex = i;
+                  break;
+                }
+              }
 
-          let isExtended = false;
-          let updatedTurn: SpeakerTurn | null = null;
+              let isExtended = false;
+              let updatedTurn: SpeakerTurn | null = null;
 
-          if (lastSpeakerTurnIndex >= 0) {
-            const lastTurn = prev[lastSpeakerTurnIndex];
-            if (
-              lastTurn &&
-              startSec <= lastTurn.endSec + minDurationOff &&
-              endSec >= lastTurn.startSec
-            ) {
-              const newStartSec = Math.min(lastTurn.startSec, startSec);
-              const newEndSec = Math.max(lastTurn.endSec, endSec);
-              const newStartSample = Math.min(
-                lastTurn.startSample,
-                event.startSample
-              );
-              const newEndSample = Math.max(
-                lastTurn.endSample,
-                event.endSample
-              );
-              updatedTurn = {
-                id: lastTurn.id,
-                speaker: lastTurn.speaker,
-                startSec: newStartSec,
-                endSec: newEndSec,
-                durationSec: newEndSec - newStartSec,
-                startSample: newStartSample,
-                endSample: newEndSample,
-              };
-              isExtended = true;
-            }
-          }
+              if (lastSpeakerTurnIndex >= 0) {
+                const lastTurn = prev[lastSpeakerTurnIndex];
+                if (
+                  lastTurn &&
+                  startSec <= lastTurn.endSec + minDurationOff &&
+                  endSec >= lastTurn.startSec
+                ) {
+                  const newStartSec = Math.min(lastTurn.startSec, startSec);
+                  const newEndSec = Math.max(lastTurn.endSec, endSec);
+                  const newStartSample = Math.min(
+                    lastTurn.startSample,
+                    event.startSample
+                  );
+                  const newEndSample = Math.max(
+                    lastTurn.endSample,
+                    event.endSample
+                  );
+                  updatedTurn = {
+                    id: lastTurn.id,
+                    speaker: lastTurn.speaker,
+                    startSec: newStartSec,
+                    endSec: newEndSec,
+                    durationSec: newEndSec - newStartSec,
+                    startSample: newStartSample,
+                    endSample: newEndSample,
+                  };
+                  isExtended = true;
+                }
+              }
 
-          if (isExtended && updatedTurn) {
-            const next = [...prev];
-            next[lastSpeakerTurnIndex] = updatedTurn;
-            turnsRef.current = next;
-            setTurns(next);
-            appendEvent(
-              `Speaker ${speaker} (extended): ${formatTime(
-                updatedTurn.startSec
-              )} → ${formatTime(updatedTurn.endSec)} (+${formatDuration(
-                updatedTurn.durationSec
-              )})`
-            );
-          } else {
-            const newTurn: SpeakerTurn = {
-              id: event.segmentId,
-              speaker,
-              startSec,
-              endSec,
-              durationSec,
-              startSample: event.startSample,
-              endSample: event.endSample,
-            };
-            const next = [...prev, newTurn];
-            turnsRef.current = next;
-            setTurns(next);
-            appendEvent(
-              `Speaker ${speaker} (new turn): ${formatTime(
-                startSec
-              )} → ${formatTime(endSec)} (+${formatDuration(durationSec)})`
-            );
-          }
+              if (isExtended && updatedTurn) {
+                const next = [...prev];
+                next[lastSpeakerTurnIndex] = updatedTurn;
+                turnsRef.current = next;
+                setTurns(next);
+                appendEvent(
+                  `Speaker ${speaker} (extended): ${formatTime(
+                    updatedTurn.startSec
+                  )} → ${formatTime(updatedTurn.endSec)} (+${formatDuration(
+                    updatedTurn.durationSec
+                  )})`
+                );
+              } else {
+                const newTurn: SpeakerTurn = {
+                  id: event.segmentId,
+                  speaker,
+                  startSec,
+                  endSec,
+                  durationSec,
+                  startSample: event.startSample,
+                  endSample: event.endSample,
+                };
+                const next = [...prev, newTurn];
+                turnsRef.current = next;
+                setTurns(next);
+                appendEvent(
+                  `Speaker ${speaker} (new turn): ${formatTime(
+                    startSec
+                  )} → ${formatTime(endSec)} (+${formatDuration(durationSec)})`
+                );
+              }
+            })
+            .catch(() => undefined);
         },
       });
       liveSegRef.current = liveSeg;

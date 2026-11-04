@@ -1,9 +1,9 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "SegmentRegistry.h"
 #include "../core/DiarizationBridgeState.h"
 #include "../pipeline/DiarizationStreamingPipelineWorker.h"
 #include "sherpa-onnx-streaming-diarization-wrapper.h"
@@ -248,15 +248,17 @@ NSDictionary *FeedResultToDict(const sherpaonnx::StreamingDiarizationFeedResult 
   }
 
   std::string audioInIdStr = [audioInBufferId UTF8String];
-  std::vector<float> samples;
-  int sampleRate = 0;
-  if (!pa_read_offline_samples(audioInIdStr, &samples, &sampleRate) || samples.empty()) {
+  auto pcmKeep = std::make_shared<PaOfflineSampleView>();
+  std::string pcmErrCode;
+  std::string pcmErrMsg;
+  if (!pa_acquire_offline_sample_view(audioInIdStr, -1, -1, pcmKeep.get(), &pcmErrCode, &pcmErrMsg) ||
+      pcmKeep->count == 0 || pcmKeep->data == nullptr) {
     reject(@"DIARIZATION_BUFFER_NOT_FOUND", @"Audio buffer not found", nil);
     return;
   }
 
   dispatch_async(StreamingDiarizationSerialQueue(), ^{
-    auto res = wrapper->feed(samples.data(), samples.size());
+    auto res = wrapper->feed(pcmKeep->data, pcmKeep->count);
     resolve(FeedResultToDict(res));
   });
 }

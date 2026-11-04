@@ -1,7 +1,7 @@
 #include "SlidOfflineLivePipelineWorker.h"
 
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "SegmentRegistry.h"
+#include "TextRegistry.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -54,7 +54,7 @@ void SlidOfflineLivePipelineWorker::onSegmentCommitted(
   const CommittedSegmentRef &segment
 ) {
   if (!std::holds_alternative<CommittedSegmentSpeech>(segment)) return;
-  if (!audioInput_ || !textOutput_ || !slidState_ || slidState_->handle == nullptr) {
+  if (!audioInput_ || !textOutput_ || !slidState_ || !slidState_->isReady()) {
     throw std::runtime_error("Invalid SLID live pipeline worker state");
   }
 
@@ -72,34 +72,9 @@ void SlidOfflineLivePipelineWorker::onSegmentCommitted(
   auto samples = audioInput_->getSamplesSlice(speech.startSample, frameCount);
   if (samples.empty()) return;
 
-  std::string lang;
-  SherpaOnnxOfflineStream *stream =
-      SherpaOnnxSpokenLanguageIdentificationCreateOfflineStream(slidState_->handle);
-  if (stream != nullptr) {
-    SherpaOnnxAcceptWaveformOffline(
-        stream,
-        speech.sampleRate,
-        samples.data(),
-        static_cast<int32_t>(samples.size()));
-    const SherpaOnnxSpokenLanguageIdentificationResult *result =
-        SherpaOnnxSpokenLanguageIdentificationCompute(slidState_->handle, stream);
-    SherpaOnnxDestroyOfflineStream(stream);
-    if (result != nullptr && result->lang != nullptr) {
-      lang = result->lang;
-      SherpaOnnxDestroySpokenLanguageIdentificationResult(result);
-    }
-  }
-
-  // Trim whitespace
-  while (!lang.empty() && (lang.back() == ' ' || lang.back() == '\t' || lang.back() == '\n')) {
-    lang.pop_back();
-  }
-  size_t start = 0;
-  while (start < lang.size() && (lang[start] == ' ' || lang[start] == '\t' || lang[start] == '\n')) {
-    start++;
-  }
-  if (start > 0) lang = lang.substr(start);
-
+  const auto computed =
+      slidState_->wrapper->compute(samples, speech.sampleRate);
+  const std::string lang = computed.success ? computed.lang : "";
   if (lang.empty()) return;
 
   const float startTime =

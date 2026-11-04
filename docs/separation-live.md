@@ -139,7 +139,9 @@ More patterns: [feature-pipelines.md#separation-live-overload-patterns](feature-
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onSegment` | `SeparationLiveSegmentEvent` | after each committed chunk is separated | no `onProgress` on the live path |
+| `onSegment` | `SeparationLiveSegmentEvent` | after each committed chunk is separated | feature callback — already includes span indexes / ranges (no buffer pull) |
+
+`separate(..., { onSegment })` is the usual product path (maps live-audio notify → `SpeechSegment` via `liveAudioNotifyToSpeechSegment`). Stem **audio** progress uses live audio buffer events (`onFramesAppended` — scalar metadata, no PCM dump). Raw audio `onSegment` is **notify + pull**. See [audiobuffer-streaming](audiobuffer-streaming.md#live-buffer-callbacks-onframesappended-vs-onsegment).
 
 Shapes: [Types](#types) · offline progress fields: [separation-offline.md](separation-offline.md#types).
 
@@ -149,6 +151,7 @@ const handle = await sep.separate(liveIn, liveOuts, {
     mode: 'auto',
     policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 500 },
   },
+  // feature callback — already includes segmentIndex (no pull):
   onSegment: (seg) => console.log(seg.segmentIndex),
 });
 ```

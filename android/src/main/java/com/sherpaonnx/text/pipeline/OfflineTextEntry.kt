@@ -3,6 +3,8 @@ package com.sherpaonnx.text.pipeline
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Spatial span linking a UTF-16 range of offline text to pixel coordinates
@@ -12,7 +14,6 @@ data class TextSpatialSpan(
   val utf16Start: Int,
   val utf16End: Int,
   val level: String,
-  /** Empty when origin is textLayer (no ImageBuffer). */
   val sourceImageBufferId: String,
   val frameIndex: Int,
   val quad: FloatArray,
@@ -20,7 +21,6 @@ data class TextSpatialSpan(
   val origin: String,
   val pageNumber: Int? = null,
   val ptsMs: Double? = null,
-  /** PDF user-space page size when origin is textLayer. */
   val pageWidth: Float? = null,
   val pageHeight: Float? = null,
   val sectionIndex: Int? = null,
@@ -38,29 +38,38 @@ data class TextSpatialSpan(
       q.pushDouble((quad.getOrNull(i) ?: 0f).toDouble())
     }
     map.putArray("quad", q)
-    if (confidence != null) {
-      map.putDouble("confidence", confidence.toDouble())
-    }
+    if (confidence != null) map.putDouble("confidence", confidence.toDouble())
     map.putString("origin", origin)
-    if (pageNumber != null) {
-      map.putInt("pageNumber", pageNumber)
-    }
-    if (ptsMs != null) {
-      map.putDouble("ptsMs", ptsMs)
-    }
-    if (pageWidth != null) {
-      map.putDouble("pageWidth", pageWidth.toDouble())
-    }
-    if (pageHeight != null) {
-      map.putDouble("pageHeight", pageHeight.toDouble())
-    }
-    if (sectionIndex != null) {
-      map.putInt("sectionIndex", sectionIndex)
-    }
-    if (!href.isNullOrEmpty()) {
-      map.putString("href", href)
-    }
+    if (pageNumber != null) map.putInt("pageNumber", pageNumber)
+    if (ptsMs != null) map.putDouble("ptsMs", ptsMs)
+    if (pageWidth != null) map.putDouble("pageWidth", pageWidth.toDouble())
+    if (pageHeight != null) map.putDouble("pageHeight", pageHeight.toDouble())
+    if (sectionIndex != null) map.putInt("sectionIndex", sectionIndex)
+    if (!href.isNullOrEmpty()) map.putString("href", href)
     return map
+  }
+
+  fun toJsonObject(): JSONObject {
+    val o = JSONObject()
+    o.put("utf16Start", utf16Start)
+    o.put("utf16End", utf16End)
+    o.put("level", level)
+    o.put("sourceImageBufferId", sourceImageBufferId)
+    o.put("frameIndex", frameIndex)
+    val q = JSONArray()
+    for (i in 0 until 8) {
+      q.put((quad.getOrNull(i) ?: 0f).toDouble())
+    }
+    o.put("quad", q)
+    o.put("origin", origin)
+    if (confidence != null) o.put("confidence", confidence.toDouble())
+    if (pageNumber != null) o.put("pageNumber", pageNumber)
+    if (ptsMs != null) o.put("ptsMs", ptsMs)
+    if (pageWidth != null) o.put("pageWidth", pageWidth.toDouble())
+    if (pageHeight != null) o.put("pageHeight", pageHeight.toDouble())
+    if (sectionIndex != null) o.put("sectionIndex", sectionIndex)
+    if (!href.isNullOrEmpty()) o.put("href", href)
+    return o
   }
 
   override fun equals(other: Any?): Boolean {
@@ -99,44 +108,119 @@ data class TextSpatialSpan(
     result = 31 * result + (href?.hashCode() ?: 0)
     return result
   }
+
+  companion object {
+    fun fromJsonObject(obj: JSONObject): TextSpatialSpan {
+      val quadArr = obj.optJSONArray("quad")
+      val quad = FloatArray(8)
+      if (quadArr != null) {
+        for (i in 0 until minOf(8, quadArr.length())) {
+          quad[i] = quadArr.optDouble(i, 0.0).toFloat()
+        }
+      }
+      return TextSpatialSpan(
+        utf16Start = obj.optInt("utf16Start", 0),
+        utf16End = obj.optInt("utf16End", 0),
+        level = obj.optString("level", "line"),
+        sourceImageBufferId = obj.optString("sourceImageBufferId", ""),
+        frameIndex = obj.optInt("frameIndex", 0),
+        quad = quad,
+        confidence = if (obj.has("confidence")) obj.optDouble("confidence").toFloat() else null,
+        origin = obj.optString("origin", "ocr"),
+        pageNumber = if (obj.has("pageNumber")) obj.optInt("pageNumber") else null,
+        ptsMs = if (obj.has("ptsMs")) obj.optDouble("ptsMs") else null,
+        pageWidth = if (obj.has("pageWidth")) obj.optDouble("pageWidth").toFloat() else null,
+        pageHeight = if (obj.has("pageHeight")) obj.optDouble("pageHeight").toFloat() else null,
+        sectionIndex = if (obj.has("sectionIndex")) obj.optInt("sectionIndex") else null,
+        href = obj.optString("href", "").ifEmpty { null },
+      )
+    }
+  }
 }
 
 /**
- * Offline text buffer entry in the pipeline registry.
- * Immutable once populated (either empty on creation, then filled by STT, or seeded from live snapshot).
- *
- * Holds the recognition result: text, tokens, timestamps, durations, lang, emotion, event,
- * and optional spatial spans (OCR / text-layer).
+ * Thin handle over shared C++ TxtOfflineEntry (text/tokens/spans SoT in C).
  */
 class OfflineTextEntry(
   val bufferId: String,
-  @Volatile var text: String = "",
-  @Volatile var tokens: Array<String> = emptyArray(),
-  @Volatile var timestamps: FloatArray = floatArrayOf(),
-  @Volatile var durations: FloatArray = floatArrayOf(),
-  @Volatile var spatialSpans: List<TextSpatialSpan> = emptyList(),
-  @Volatile var lang: String = "",
-  @Volatile var emotion: String = "",
-  @Volatile var event: String = "",
-  @Volatile var populated: Boolean = false
 ) {
   val kind: String = "offlineTextBuffer"
   val state: String = "immutable"
 
-  val utf16Length: Int get() = text.length
-  val tokenCount: Int get() = tokens.size
-  val timestampCount: Int get() = timestamps.size
-  val durationCount: Int get() = durations.size
-  val spatialSpanCount: Int get() = spatialSpans.size
+  val text: String
+    get() = TextBufferNative.nativeReadOfflineText(bufferId) ?: ""
+
+  val tokens: Array<String>
+    get() {
+      val n = tokenCount
+      if (n <= 0) return emptyArray()
+      return parseStringArrayJson(
+        TextBufferNative.nativeOfflineTokensSlice(bufferId, 0, n) ?: "[]",
+      )
+    }
+
+  val timestamps: FloatArray
+    get() {
+      val n = timestampCount
+      if (n <= 0) return floatArrayOf()
+      return parseFloatArrayJson(
+        TextBufferNative.nativeOfflineTimestampsSlice(bufferId, 0, n) ?: "[]",
+      )
+    }
+
+  val durations: FloatArray
+    get() {
+      val n = durationCount
+      if (n <= 0) return floatArrayOf()
+      return parseFloatArrayJson(
+        TextBufferNative.nativeOfflineDurationsSlice(bufferId, 0, n) ?: "[]",
+      )
+    }
+
+  val spatialSpans: List<TextSpatialSpan>
+    get() {
+      val n = spatialSpanCount
+      if (n <= 0) return emptyList()
+      return parseSpatialSpansJson(
+        TextBufferNative.nativeOfflineSpatialSpansSlice(bufferId, 0, n) ?: "[]",
+      )
+    }
+
+  val lang: String
+    get() = TextBufferNative.nativeOfflineLang(bufferId) ?: ""
+
+  val emotion: String
+    get() = TextBufferNative.nativeOfflineEmotion(bufferId) ?: ""
+
+  val event: String
+    get() = TextBufferNative.nativeOfflineEvent(bufferId) ?: ""
+
+  val populated: Boolean
+    get() = TextBufferNative.nativeOfflinePopulated(bufferId)
+
+  val utf16Length: Int
+    get() {
+      val n = TextBufferNative.nativeOfflineUtf16Length(bufferId)
+      return if (n >= 0) n else 0
+    }
+
+  val tokenCount: Int
+    get() = TextBufferNative.nativeOfflineTokenCount(bufferId).coerceAtLeast(0)
+
+  val timestampCount: Int
+    get() = TextBufferNative.nativeOfflineTimestampCount(bufferId).coerceAtLeast(0)
+
+  val durationCount: Int
+    get() = TextBufferNative.nativeOfflineDurationCount(bufferId).coerceAtLeast(0)
+
+  val spatialSpanCount: Int
+    get() = TextBufferNative.nativeOfflineSpatialSpanCount(bufferId).coerceAtLeast(0)
+
   val hasLang: Boolean get() = lang.isNotEmpty()
   val hasEmotion: Boolean get() = emotion.isNotEmpty()
   val hasEvent: Boolean get() = event.isNotEmpty()
-  val hasSpatialSpans: Boolean get() = spatialSpans.isNotEmpty()
+  val hasSpatialSpans: Boolean get() = spatialSpanCount > 0
 
-  /**
-   * Populate the entry with STT/OCR result data. Only allowed once.
-   * @throws IllegalStateException if already populated.
-   */
   @Synchronized
   fun populate(
     text: String,
@@ -149,15 +233,30 @@ class OfflineTextEntry(
     spatialSpans: List<TextSpatialSpan> = emptyList(),
   ) {
     if (populated) throw IllegalStateException("OfflineTextEntry already populated: $bufferId")
-    this.text = text
-    this.tokens = tokens
-    this.timestamps = timestamps
-    this.durations = durations
-    this.spatialSpans = spatialSpans
-    this.lang = lang
-    this.emotion = emotion
-    this.event = event
-    this.populated = true
+    val spansJson =
+      if (spatialSpans.isEmpty()) {
+        null
+      } else {
+        val arr = JSONArray()
+        for (span in spatialSpans) {
+          arr.put(span.toJsonObject())
+        }
+        arr.toString()
+      }
+    if (!TextBufferNative.nativePopulateIfEmpty(
+        bufferId,
+        text,
+        tokens,
+        timestamps,
+        durations,
+        lang,
+        emotion,
+        event,
+        spansJson,
+      )
+    ) {
+      throw IllegalStateException("Native populate failed for $bufferId")
+    }
   }
 
   fun toWritableMap(): WritableMap {
@@ -177,14 +276,43 @@ class OfflineTextEntry(
     return map
   }
 
-  /** Build a WritableArray of spatial span maps for [start, start+maxCount). */
   fun spatialSpansSlice(start: Int, maxCount: Int): WritableArray {
     val arr = Arguments.createArray()
-    if (start >= spatialSpans.size) return arr
-    val end = minOf(start + maxCount, spatialSpans.size)
-    for (i in start until end) {
-      arr.pushMap(spatialSpans[i].toWritableMap())
+    if (start < 0 || maxCount <= 0) return arr
+    val json =
+      TextBufferNative.nativeOfflineSpatialSpansSlice(bufferId, start, maxCount) ?: return arr
+    for (span in parseSpatialSpansJson(json)) {
+      arr.pushMap(span.toWritableMap())
     }
     return arr
+  }
+
+  companion object {
+    fun wrap(bufferId: String): OfflineTextEntry? {
+      if (!TextBufferNative.nativeIsOffline(bufferId)) return null
+      return OfflineTextEntry(bufferId = bufferId)
+    }
+
+    internal fun parseStringArrayJson(json: String): Array<String> {
+      if (json.isEmpty() || json == "[]") return emptyArray()
+      val arr = JSONArray(json)
+      return Array(arr.length()) { i -> arr.optString(i, "") }
+    }
+
+    internal fun parseFloatArrayJson(json: String): FloatArray {
+      if (json.isEmpty() || json == "[]") return floatArrayOf()
+      val arr = JSONArray(json)
+      return FloatArray(arr.length()) { i -> arr.optDouble(i, 0.0).toFloat() }
+    }
+
+    internal fun parseSpatialSpansJson(json: String): List<TextSpatialSpan> {
+      if (json.isEmpty() || json == "[]") return emptyList()
+      val arr = JSONArray(json)
+      val out = ArrayList<TextSpatialSpan>(arr.length())
+      for (i in 0 until arr.length()) {
+        out.add(TextSpatialSpan.fromJsonObject(arr.getJSONObject(i)))
+      }
+      return out
+    }
   }
 }

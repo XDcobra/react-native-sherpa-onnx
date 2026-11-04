@@ -1,6 +1,7 @@
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-speaker-embedding-wrapper.h"
+#include "jni/offline_pcm_view.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -224,6 +225,81 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
     errorCode = "SPEAKER_EMBEDDING_NOT_INITIALIZED";
   } else {
     embedding = extractor->computeFromSamples(input, sampleRate);
+    if (embedding.empty()) {
+      error = extractor->lastError().empty()
+                  ? "Speaker embedding compute failed"
+                  : extractor->lastError();
+      errorCode = extractor->lastErrorCode().empty()
+                      ? "SPEAKER_EMBEDDING_COMPUTE_ERROR"
+                      : extractor->lastErrorCode();
+    } else {
+      ok = true;
+    }
+  }
+
+  sherpaonnx::PutBoolean(env, map, mapPut, "success", ok);
+  if (!ok) {
+    sherpaonnx::PutString(env, map, mapPut, "error", error);
+    sherpaonnx::PutString(env, map, mapPut, "errorCode", errorCode);
+    return map;
+  }
+
+  jfloatArray embArray =
+      env->NewFloatArray(static_cast<jsize>(embedding.size()));
+  if (embArray) {
+    if (!embedding.empty()) {
+      env->SetFloatArrayRegion(
+          embArray, 0, static_cast<jsize>(embedding.size()), embedding.data());
+    }
+    jstring key = env->NewStringUTF("embedding");
+    env->CallObjectMethod(map, mapPut, key, embArray);
+    env->DeleteLocalRef(key);
+    env->DeleteLocalRef(embArray);
+  }
+  return map;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nativeComputeEmbeddingFromBuffer(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring bufferId,
+    jint startSample, jint endSampleExclusive) {
+  const std::string id = CopyRequiredJstring(env, instanceId);
+  jmethodID mapPut = nullptr;
+  jobject map = NewHashMap(env, &mapPut);
+  if (!map) return nullptr;
+
+  PaOfflineSampleView view;
+  std::string errCode;
+  std::string errMsg;
+  if (!JniAcquireOfflinePcm(env, bufferId, startSample, endSampleExclusive, &view,
+                            &errCode, &errMsg)) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", errMsg);
+    sherpaonnx::PutString(env, map, mapPut, "errorCode",
+                          errCode.empty() ? "SPEAKER_EMBEDDING_INVALID_ARGUMENT"
+                                          : errCode);
+    return map;
+  }
+  if (view.sampleRate <= 0) {
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", "invalid compute args");
+    sherpaonnx::PutString(env, map, mapPut, "errorCode",
+                          "SPEAKER_EMBEDDING_INVALID_ARGUMENT");
+    return map;
+  }
+
+  auto extractor = LookupExtractor(id);
+  std::vector<float> embedding;
+  std::string error;
+  std::string errorCode;
+  bool ok = false;
+  if (!extractor) {
+    error = "Speaker embedding extractor not found: " + id;
+    errorCode = "SPEAKER_EMBEDDING_NOT_INITIALIZED";
+  } else {
+    embedding = extractor->computeFromSamples(
+        view.count > 0 ? view.data : nullptr, static_cast<int32_t>(view.count),
+        view.sampleRate);
     if (embedding.empty()) {
       error = extractor->lastError().empty()
                   ? "Speaker embedding compute failed"

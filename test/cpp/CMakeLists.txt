@@ -752,6 +752,105 @@ set_tests_properties(imagebuffer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+# AudioBuffer shared registry host tests (always-on + opt-in mmap via SHERPA_HOST_AUDIO_MMAP=1)
+set(AUDIOBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/audiobuffer")
+set(AUDIOBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/audiobuffer")
+if(TARGET gtest AND TARGET gtest_main)
+  set(AUDIOBUFFER_GTEST_LIBS gtest gtest_main)
+else()
+  set(AUDIOBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+endif()
+add_executable(audiobuffer_host_test
+  "${AUDIOBUFFER_TEST_DIR}/audiobuffer_registry_test.cpp"
+  "${AUDIOBUFFER_TEST_DIR}/byte_buffer_pool_test.cpp"
+  "${AUDIOBUFFER_CPP_ROOT}/AudioRegistry.cpp"
+  "${AUDIOBUFFER_CPP_ROOT}/ByteBufferPool.cpp"
+)
+target_include_directories(audiobuffer_host_test PRIVATE
+  "${AUDIOBUFFER_CPP_ROOT}"
+)
+find_package(Threads REQUIRED)
+target_link_libraries(audiobuffer_host_test PRIVATE ${AUDIOBUFFER_GTEST_LIBS} Threads::Threads)
+add_test(NAME audiobuffer_host_test COMMAND $<TARGET_FILE:audiobuffer_host_test>)
+set_tests_properties(audiobuffer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+# TextBuffer shared registry host tests (always-on + opt-in spool via SHERPA_HOST_TEXT_SPOOL=1)
+set(TEXTBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/textbuffer")
+set(TEXTBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/textbuffer")
+if(TARGET gtest AND TARGET gtest_main)
+  set(TEXTBUFFER_GTEST_LIBS gtest gtest_main)
+else()
+  set(TEXTBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+endif()
+find_package(ZLIB REQUIRED)
+add_executable(textbuffer_host_test
+  "${TEXTBUFFER_TEST_DIR}/textbuffer_registry_test.cpp"
+  "${TEXTBUFFER_CPP_ROOT}/TextRegistry.cpp"
+)
+target_include_directories(textbuffer_host_test PRIVATE
+  "${TEXTBUFFER_CPP_ROOT}"
+)
+target_link_libraries(textbuffer_host_test PRIVATE ${TEXTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
+add_test(NAME textbuffer_host_test COMMAND $<TARGET_FILE:textbuffer_host_test>)
+set_tests_properties(textbuffer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+
+
+# SegmentBuffer shared registry host tests (always-on + opt-in spool via SHERPA_HOST_SEGMENT_SPOOL=1)
+set(SEGMENTBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/segmentbuffer")
+set(SEGMENTBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/segmentbuffer")
+if(TARGET gtest AND TARGET gtest_main)
+  set(SEGMENTBUFFER_GTEST_LIBS gtest gtest_main)
+else()
+  set(SEGMENTBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+endif()
+find_package(ZLIB REQUIRED)
+add_executable(segmentbuffer_host_test
+  "${SEGMENTBUFFER_TEST_DIR}/segmentbuffer_registry_test.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegJson.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegPayloadValidate.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegmentRegistry.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegmentLinkMapRegistry.cpp"
+)
+target_include_directories(segmentbuffer_host_test PRIVATE
+  "${SEGMENTBUFFER_CPP_ROOT}"
+)
+target_link_libraries(segmentbuffer_host_test PRIVATE ${SEGMENTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
+add_test(NAME segmentbuffer_host_test COMMAND $<TARGET_FILE:segmentbuffer_host_test>)
+set_tests_properties(segmentbuffer_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+# SegEngine host tests (always-on, no ORT). VAD/pyannote paths are stubbed.
+set(AUDIOBUFFER_CPP_ROOT_SEG "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/audiobuffer")
+set(TEXTBUFFER_CPP_ROOT_SEG "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/textbuffer")
+add_executable(segengine_host_test
+  "${SEGMENTBUFFER_TEST_DIR}/segengine_registry_test.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegEngine.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegJson.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegPayloadValidate.cpp"
+  "${SEGMENTBUFFER_CPP_ROOT}/SegmentRegistry.cpp"
+  "${AUDIOBUFFER_CPP_ROOT_SEG}/AudioRegistry.cpp"
+  "${TEXTBUFFER_CPP_ROOT_SEG}/TextRegistry.cpp"
+)
+target_include_directories(segengine_host_test PRIVATE
+  "${SEGMENTBUFFER_CPP_ROOT}"
+  "${AUDIOBUFFER_CPP_ROOT_SEG}"
+  "${TEXTBUFFER_CPP_ROOT_SEG}"
+)
+target_compile_definitions(segengine_host_test PRIVATE SHERPA_SEG_ENGINE_STUB_INFERENCE)
+target_link_libraries(segengine_host_test PRIVATE ${SEGMENTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
+add_test(NAME segengine_host_test COMMAND $<TARGET_FILE:segengine_host_test>)
+set_tests_properties(segengine_host_test PROPERTIES
+  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+
+
+
 # PDF text-layer host test (disabled path by default; no PDFium required)
 set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 if(TARGET gtest AND TARGET gtest_main)
@@ -1108,5 +1207,400 @@ endif()
 
 else()
   message(STATUS "videobuffer host tests skipped (git submodule update --init third_party/libyuv)")
+endif()
+
+# --- SLID SpokenLanguageIdWrapper host tests (shared C API) ---
+set(SHERPA_ONNX_HOST_LIBDIR "" CACHE PATH
+  "Directory with libsherpa-onnx-c-api (dylib/so) for slid_host_test")
+set(_SLID_HOST_LIBDIR "${SHERPA_ONNX_HOST_LIBDIR}")
+if(_SLID_HOST_LIBDIR STREQUAL "" AND DEFINED ENV{SHERPA_ONNX_HOST_LIBDIR})
+  set(_SLID_HOST_LIBDIR "$ENV{SHERPA_ONNX_HOST_LIBDIR}")
+endif()
+if(_SLID_HOST_LIBDIR STREQUAL "")
+  if(EXISTS "/Volumes/SSD/dev/sherpa-onnx/build/lib/libsherpa-onnx-c-api.dylib"
+      OR EXISTS "/Volumes/SSD/dev/sherpa-onnx/build/lib/libsherpa-onnx-c-api.so")
+    set(_SLID_HOST_LIBDIR "/Volumes/SSD/dev/sherpa-onnx/build/lib")
+  endif()
+endif()
+
+set(_SLID_ORT_LIBDIR "")
+if(DEFINED _ORT_HOST_LIBDIR AND NOT "${_ORT_HOST_LIBDIR}" STREQUAL "")
+  set(_SLID_ORT_LIBDIR "${_ORT_HOST_LIBDIR}")
+elseif(EXISTS
+    "/Volumes/SSD/dev/sherpa-onnx/build/_deps/onnxruntime-src/lib/libonnxruntime.dylib")
+  set(_SLID_ORT_LIBDIR
+    "/Volumes/SSD/dev/sherpa-onnx/build/_deps/onnxruntime-src/lib")
+endif()
+
+set(_SLID_HAS_C_API FALSE)
+if(EXISTS "${_SLID_HOST_LIBDIR}/libsherpa-onnx-c-api.dylib"
+    OR EXISTS "${_SLID_HOST_LIBDIR}/libsherpa-onnx-c-api.so")
+  set(_SLID_HAS_C_API TRUE)
+endif()
+
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(SLID_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/slid")
+  set(SHERPA_ONNX_SRC_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(slid_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/slid/slid_host_test.cpp"
+    "${SLID_CPP_ROOT}/sherpa-onnx-slid-wrapper.cpp"
+  )
+  target_include_directories(slid_host_test PRIVATE
+    "${SLID_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT}"
+  )
+  target_link_directories(slid_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(slid_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(slid_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(slid_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(slid_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(slid_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME slid_host_test COMMAND $<TARGET_FILE:slid_host_test>)
+  set_tests_properties(slid_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS "slid_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "slid_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
+# --- AudioTaggingWrapper host tests (shared C API) ---
+# Reuses SHERPA_ONNX_HOST_LIBDIR / ORT discovery from slid_host_test above.
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(AUDIO_TAGGING_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/audio_tagging")
+  set(SHERPA_ONNX_SRC_ROOT_AT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(audio_tagging_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/audio_tagging/audio_tagging_host_test.cpp"
+    "${AUDIO_TAGGING_CPP_ROOT}/sherpa-onnx-audio-tagging-wrapper.cpp"
+  )
+  target_include_directories(audio_tagging_host_test PRIVATE
+    "${AUDIO_TAGGING_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT_AT}"
+  )
+  target_link_directories(audio_tagging_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(audio_tagging_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(audio_tagging_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(audio_tagging_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(audio_tagging_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(audio_tagging_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME audio_tagging_host_test
+    COMMAND $<TARGET_FILE:audio_tagging_host_test>)
+  set_tests_properties(audio_tagging_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "audio_tagging_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "audio_tagging_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
+# --- Punctuation Offline+Online wrappers host tests (shared C API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(PUNCTUATION_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/punctuation")
+  set(SHERPA_ONNX_SRC_ROOT_PUNCT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(punctuation_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/punctuation/punctuation_host_test.cpp"
+    "${PUNCTUATION_CPP_ROOT}/sherpa-onnx-punct-engine-wrapper.cpp"
+  )
+  target_include_directories(punctuation_host_test PRIVATE
+    "${PUNCTUATION_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT_PUNCT}"
+  )
+  target_link_directories(punctuation_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(punctuation_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(punctuation_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(punctuation_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(punctuation_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(punctuation_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME punctuation_host_test
+    COMMAND $<TARGET_FILE:punctuation_host_test>)
+  set_tests_properties(punctuation_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "punctuation_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "punctuation_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
+# --- VadEngineWrapper host tests (shared C API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(VAD_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/vad")
+  set(SHERPA_ONNX_SRC_ROOT_VAD
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(vad_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/vad/vad_host_test.cpp"
+    "${VAD_CPP_ROOT}/sherpa-onnx-vad-engine-wrapper.cpp"
+  )
+  target_include_directories(vad_host_test PRIVATE
+    "${VAD_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT_VAD}"
+  )
+  target_link_directories(vad_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(vad_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(vad_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(vad_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(vad_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(vad_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME vad_host_test COMMAND $<TARGET_FILE:vad_host_test>)
+  set_tests_properties(vad_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "vad_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "vad_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
+# --- KwsEngineWrapper host tests (shared C API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(KWS_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/kws")
+  set(SHERPA_ONNX_SRC_ROOT_KWS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(kws_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/kws/kws_host_test.cpp"
+    "${KWS_CPP_ROOT}/sherpa-onnx-kws-engine-wrapper.cpp"
+  )
+  target_include_directories(kws_host_test PRIVATE
+    "${KWS_CPP_ROOT}"
+    "${SHERPA_ONNX_SRC_ROOT_KWS}"
+  )
+  target_link_directories(kws_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(kws_host_test PRIVATE sherpa-onnx-c-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(kws_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(kws_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(kws_host_test PRIVATE GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(kws_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME kws_host_test COMMAND $<TARGET_FILE:kws_host_test>)
+  set_tests_properties(kws_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "kws_host_test enabled (sherpa C-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "kws_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
+# --- Offline SttWrapper host tests (shared CXX API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(STT_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/stt")
+  set(STT_DETECT_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni/model_detect")
+  set(SHERPA_ONNX_SRC_ROOT_STT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(stt_offline_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/stt/stt_offline_host_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stt/stt_offline_host_detect_stubs.cpp"
+    "${STT_CPP_ROOT}/sherpa-onnx-stt-engine-wrapper.cpp"
+    "${STT_DETECT_ROOT}/stt/sherpa-onnx-validate-stt.cpp"
+  )
+  target_include_directories(stt_offline_host_test PRIVATE
+    "${STT_CPP_ROOT}"
+    "${STT_DETECT_ROOT}/common"
+    "${STT_DETECT_ROOT}/stt"
+    "${SHERPA_ONNX_SRC_ROOT_STT}"
+  )
+  target_link_directories(stt_offline_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(stt_offline_host_test PRIVATE
+    sherpa-onnx-c-api sherpa-onnx-cxx-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(stt_offline_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(stt_offline_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(stt_offline_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(stt_offline_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME stt_offline_host_test
+    COMMAND $<TARGET_FILE:stt_offline_host_test>)
+  set_tests_properties(stt_offline_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "stt_offline_host_test enabled (sherpa C/CXX-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "stt_offline_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
+# --- Online OnlineSttWrapper host tests (shared CXX API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(STT_ONLINE_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/stt")
+  set(STT_ONLINE_DETECT_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni/model_detect")
+  set(SHERPA_ONNX_SRC_ROOT_STT_ONLINE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(stt_online_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/stt/stt_online_host_test.cpp"
+    "${STT_ONLINE_CPP_ROOT}/sherpa-onnx-online-stt-engine-wrapper.cpp"
+    "${STT_ONLINE_DETECT_ROOT}/stt/sherpa-onnx-validate-online-stt.cpp"
+    "${STT_ONLINE_DETECT_ROOT}/common/sherpa-onnx-model-detect-helper.cpp"
+  )
+  target_include_directories(stt_online_host_test PRIVATE
+    "${STT_ONLINE_CPP_ROOT}"
+    "${STT_ONLINE_DETECT_ROOT}/common"
+    "${STT_ONLINE_DETECT_ROOT}/stt"
+    "${SHERPA_ONNX_SRC_ROOT_STT_ONLINE}"
+  )
+  target_link_directories(stt_online_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(stt_online_host_test PRIVATE
+    sherpa-onnx-c-api sherpa-onnx-cxx-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(stt_online_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(stt_online_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(stt_online_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(stt_online_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME stt_online_host_test
+    COMMAND $<TARGET_FILE:stt_online_host_test>)
+  set_tests_properties(stt_online_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "stt_online_host_test enabled (sherpa C/CXX-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "stt_online_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
+endif()
+
+# --- TTS TtsWrapper host tests (shared CXX API) ---
+if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
+  set(TTS_CPP_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/tts")
+  set(TTS_DETECT_ROOT
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni/model_detect")
+  set(SHERPA_ONNX_SRC_ROOT_TTS
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/sherpa-onnx")
+  add_executable(tts_host_test
+    "${CMAKE_CURRENT_SOURCE_DIR}/tts/tts_host_test.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tts/tts_host_detect_stubs.cpp"
+    "${TTS_CPP_ROOT}/sherpa-onnx-tts-engine-wrapper.cpp"
+    "${TTS_DETECT_ROOT}/tts/sherpa-onnx-validate-tts.cpp"
+    "${TTS_DETECT_ROOT}/common/sherpa-onnx-model-detect-helper.cpp"
+  )
+  target_include_directories(tts_host_test PRIVATE
+    "${TTS_CPP_ROOT}"
+    "${TTS_DETECT_ROOT}/common"
+    "${TTS_DETECT_ROOT}/tts"
+    "${SHERPA_ONNX_SRC_ROOT_TTS}"
+  )
+  target_link_directories(tts_host_test PRIVATE
+    "${_SLID_HOST_LIBDIR}"
+    "${_SLID_ORT_LIBDIR}"
+  )
+  target_link_libraries(tts_host_test PRIVATE
+    sherpa-onnx-c-api sherpa-onnx-cxx-api onnxruntime)
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(tts_host_test PRIVATE dl pthread)
+  endif()
+  set_target_properties(tts_host_test PROPERTIES
+    BUILD_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+    INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
+  )
+  if(TARGET GTest::gtest)
+    target_link_libraries(tts_host_test PRIVATE
+      GTest::gtest GTest::gtest_main)
+  else()
+    target_link_libraries(tts_host_test PRIVATE gtest gtest_main)
+  endif()
+  add_test(NAME tts_host_test COMMAND $<TARGET_FILE:tts_host_test>)
+  set_tests_properties(tts_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+  message(STATUS
+    "tts_host_test enabled (sherpa C/CXX-API: ${_SLID_HOST_LIBDIR})")
+else()
+  message(STATUS
+    "tts_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
 endif()
 

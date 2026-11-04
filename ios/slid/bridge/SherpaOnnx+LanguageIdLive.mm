@@ -1,11 +1,11 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "SegmentRegistry.h"
+#include "TextRegistry.h"
 #include "../core/LanguageIdBridgeState.h"
 #include "../pipeline/SlidOfflineLivePipelineWorker.h"
 
@@ -55,7 +55,7 @@
   std::string segmentBufferIdStr = [segmentLiveBufferId UTF8String];
 
   auto slidState = sherpaonnx::language_id::bridge::LookupLanguageId(instanceIdStr);
-  if (!slidState || slidState->handle == nullptr) {
+  if (!slidState || !slidState->isReady()) {
     reject(@"LANGUAGE_ID_NOT_INITIALIZED",
            [NSString stringWithFormat:@"SLID instance not found: %@", instanceId],
            nil);

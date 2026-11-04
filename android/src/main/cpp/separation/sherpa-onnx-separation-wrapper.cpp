@@ -347,7 +347,8 @@ SeparationInitializeResult SeparationWrapper::initializeCustom(
 }
 
 SeparationProcessResult SeparationWrapper::processMonoSamples(
-    const std::vector<float>& monoSamples,
+    const float* monoSamples,
+    int32_t numSamples,
     int32_t sampleRate
 ) {
     SeparationProcessResult result;
@@ -355,7 +356,7 @@ SeparationProcessResult SeparationWrapper::processMonoSamples(
         result.error = "Separation engine is not initialized";
         return result;
     }
-    if (monoSamples.empty()) {
+    if (monoSamples == nullptr || numSamples <= 0) {
         result.error = "Input audio is empty";
         return result;
     }
@@ -367,9 +368,9 @@ SeparationProcessResult SeparationWrapper::processMonoSamples(
     try {
         // Spleeter's native path always reads channel 0 and 1; mono input alone
         // triggers SHERPA_ONNX_EXIT inside sherpa-onnx. UVR tolerates missing ch1.
-        const int32_t numSamples = static_cast<int32_t>(monoSamples.size());
-        std::vector<float> stereoRight = monoSamples;
-        const float* channels[] = {monoSamples.data(), stereoRight.data()};
+        // Right channel is a copy; left is the caller view (read-only during Process).
+        std::vector<float> stereoRight(monoSamples, monoSamples + numSamples);
+        const float* channels[] = {monoSamples, stereoRight.data()};
         constexpr int32_t kNumChannels = 2;
         LOGI(
             "processMonoSamples: numSamples=%d sampleRate=%d channels=%d (mono upmixed to stereo)",
@@ -408,6 +409,14 @@ SeparationProcessResult SeparationWrapper::processMonoSamples(
         LOGE("processMonoSamples failed: %s", result.error.c_str());
         return result;
     }
+}
+
+SeparationProcessResult SeparationWrapper::processMonoSamples(
+    const std::vector<float>& monoSamples,
+    int32_t sampleRate
+) {
+    return processMonoSamples(monoSamples.empty() ? nullptr : monoSamples.data(),
+                              static_cast<int32_t>(monoSamples.size()), sampleRate);
 }
 
 int32_t SeparationWrapper::getSampleRate() const {

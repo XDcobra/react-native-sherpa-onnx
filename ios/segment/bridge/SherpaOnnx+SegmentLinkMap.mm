@@ -1,92 +1,11 @@
 #import "../../SherpaOnnx.h"
 
 #ifdef __cplusplus
-#include <algorithm>
-#include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
-#include "../core/PaSegmentLink.h"
-
-struct PaSegmentLinkMapStore {
-  std::string linkMapId;
-  std::optional<std::string> textBufferId;
-  std::optional<std::string> audioBufferId;
-  std::unordered_map<std::string, PaSegmentLink> links;
-  std::unordered_multimap<std::string, std::string> textIndex;
-  std::unordered_multimap<std::string, std::string> speechIndex;
-  std::unordered_set<std::string> pairTypeIndex;
-  std::vector<std::string> insertionOrder;
-};
-
-static std::unordered_map<std::string, PaSegmentLinkMapStore> g_segment_link_maps;
-static std::mutex g_segment_link_maps_mutex;
-
-extern "C" void slm_release_all_link_maps() {
-  std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-  g_segment_link_maps.clear();
-}
-
-static std::string slmNewId(const char *prefix) {
-  NSString *uuid = [[NSUUID UUID] UUIDString] ?: @"";
-  return std::string(prefix) + "_" + (uuid.UTF8String ?: "");
-}
-
-static const char *slmLinkTypeRaw(PaSegmentLinkType type) {
-  switch (type) {
-    case PaSegmentLinkType::Alignment:
-      return "alignment";
-    case PaSegmentLinkType::Proportional:
-      return "proportional";
-    case PaSegmentLinkType::VadAssisted:
-      return "vad_assisted";
-    case PaSegmentLinkType::Sequential:
-      return "sequential";
-    case PaSegmentLinkType::TtsProduced:
-      return "tts_produced";
-    case PaSegmentLinkType::SttProduced:
-      return "stt_produced";
-    case PaSegmentLinkType::UserDefined:
-      return "user_defined";
-  }
-  return "user_defined";
-}
-
-static bool slmParseLinkType(NSString *raw, PaSegmentLinkType *out) {
-  NSString *normalized = [[raw ?: @"" lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if ([normalized isEqualToString:@"alignment"]) {
-    *out = PaSegmentLinkType::Alignment;
-    return true;
-  }
-  if ([normalized isEqualToString:@"proportional"]) {
-    *out = PaSegmentLinkType::Proportional;
-    return true;
-  }
-  if ([normalized isEqualToString:@"vad_assisted"]) {
-    *out = PaSegmentLinkType::VadAssisted;
-    return true;
-  }
-  if ([normalized isEqualToString:@"sequential"]) {
-    *out = PaSegmentLinkType::Sequential;
-    return true;
-  }
-  if ([normalized isEqualToString:@"tts_produced"]) {
-    *out = PaSegmentLinkType::TtsProduced;
-    return true;
-  }
-  if ([normalized isEqualToString:@"stt_produced"]) {
-    *out = PaSegmentLinkType::SttProduced;
-    return true;
-  }
-  if ([normalized isEqualToString:@"user_defined"]) {
-    *out = PaSegmentLinkType::UserDefined;
-    return true;
-  }
-  return false;
-}
+#include "SegmentLinkMapRegistry.h"
 
 static NSString *slmMetaJsonFromObject(id metaObj) {
   if (metaObj == nil || metaObj == [NSNull null]) {
@@ -128,7 +47,7 @@ static NSDictionary *slmLinkToDict(const PaSegmentLink &link) {
     @"linkId": [NSString stringWithUTF8String:link.linkId.c_str()] ?: @"",
     @"textSegmentId": [NSString stringWithUTF8String:link.textSegmentId.c_str()] ?: @"",
     @"speechSegmentId": [NSString stringWithUTF8String:link.speechSegmentId.c_str()] ?: @"",
-    @"linkType": [NSString stringWithUTF8String:slmLinkTypeRaw(link.linkType)] ?: @"user_defined",
+    @"linkType": [NSString stringWithUTF8String:slm_link_type_raw(link.linkType)] ?: @"user_defined",
   } mutableCopy];
 
   if (link.confidence.has_value()) {
@@ -143,27 +62,14 @@ static NSDictionary *slmLinkToDict(const PaSegmentLink &link) {
   return dict;
 }
 
-static void slmRemoveIndexEntries(
-  std::unordered_multimap<std::string, std::string> &index,
-  const std::string &key,
-  const std::string &linkId
-) {
-  auto range = index.equal_range(key);
-  for (auto it = range.first; it != range.second;) {
-    if (it->second == linkId) {
-      it = index.erase(it);
-    } else {
-      ++it;
-    }
+static void slmRejectFromError(RCTPromiseRejectBlock reject, const std::string &err) {
+  if (err.find("SEGMENT_LINK_MAP_NOT_FOUND") == 0) {
+    reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithUTF8String:err.c_str()], nil);
+  } else if (err.find("SEGMENT_LINK_INVALID") == 0) {
+    reject(@"SEGMENT_LINK_INVALID", [NSString stringWithUTF8String:err.c_str()], nil);
+  } else {
+    reject(@"SEGMENT_LINK_INTERNAL_ERROR", [NSString stringWithUTF8String:err.c_str()], nil);
   }
-}
-
-static std::string slmPairTypeKey(
-  const std::string &textSegmentId,
-  const std::string &speechSegmentId,
-  PaSegmentLinkType linkType
-) {
-  return textSegmentId + "::" + speechSegmentId + "::" + slmLinkTypeRaw(linkType);
 }
 
 #endif
@@ -178,23 +84,14 @@ static std::string slmPairTypeKey(
   @try {
     NSString *textBufferId = options.textBufferId();
     NSString *audioBufferId = options.audioBufferId();
-
-    PaSegmentLinkMapStore store;
-    store.linkMapId = slmNewId("lnkmap");
-    if ([textBufferId isKindOfClass:[NSString class]] && textBufferId.length > 0) {
-      store.textBufferId = std::string(textBufferId.UTF8String ?: "");
+    std::string id;
+    std::string err;
+    if (!slm_create(textBufferId.length > 0 ? textBufferId.UTF8String : "",
+                    audioBufferId.length > 0 ? audioBufferId.UTF8String : "", &id, &err)) {
+      slmRejectFromError(reject, err);
+      return;
     }
-    if ([audioBufferId isKindOfClass:[NSString class]] && audioBufferId.length > 0) {
-      store.audioBufferId = std::string(audioBufferId.UTF8String ?: "");
-    }
-
-    const std::string createdLinkMapId = store.linkMapId;
-    {
-      std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-      g_segment_link_maps[createdLinkMapId] = std::move(store);
-    }
-
-    resolve(@{ @"linkMapId": [NSString stringWithUTF8String:createdLinkMapId.c_str()] ?: @"" });
+    resolve(@{ @"linkMapId": [NSString stringWithUTF8String:id.c_str()] ?: @"" });
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
@@ -213,64 +110,28 @@ static std::string slmPairTypeKey(
     std::string mapId = linkMapId.UTF8String ?: "";
     NSString *textSegmentIdRaw = link.textSegmentId();
     NSString *speechSegmentIdRaw = link.speechSegmentId();
-    std::string textSegmentId = textSegmentIdRaw != nil
-      ? std::string([textSegmentIdRaw UTF8String] ?: "")
-      : std::string();
-    std::string speechSegmentId = speechSegmentIdRaw != nil
-      ? std::string([speechSegmentIdRaw UTF8String] ?: "")
-      : std::string();
+    std::string textSegmentId =
+      textSegmentIdRaw != nil ? std::string([textSegmentIdRaw UTF8String] ?: "") : std::string();
+    std::string speechSegmentId =
+      speechSegmentIdRaw != nil ? std::string([speechSegmentIdRaw UTF8String] ?: "") : std::string();
 
-    if (textSegmentId.empty()) {
-      reject(@"SEGMENT_LINK_INVALID", @"textSegmentId must be non-empty", nil);
-      return;
-    }
-    if (speechSegmentId.empty()) {
-      reject(@"SEGMENT_LINK_INVALID", @"speechSegmentId must be non-empty", nil);
-      return;
-    }
-
-    PaSegmentLinkType linkType;
-    if (!slmParseLinkType(link.linkType(), &linkType)) {
-      reject(@"SEGMENT_LINK_INVALID", @"linkType is invalid", nil);
-      return;
-    }
-
-    std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-    auto it = g_segment_link_maps.find(mapId);
-    if (it == g_segment_link_maps.end()) {
-      reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithFormat:@"Link map not found: %@", linkMapId], nil);
-      return;
-    }
-
-    auto &store = it->second;
-    std::string pairKey = slmPairTypeKey(textSegmentId, speechSegmentId, linkType);
-    if (store.pairTypeIndex.find(pairKey) != store.pairTypeIndex.end()) {
-      reject(@"SEGMENT_LINK_INVALID", @"duplicate (textSegmentId, speechSegmentId, linkType) is not allowed", nil);
-      return;
-    }
-
-    PaSegmentLink created;
-    created.linkId = slmNewId("lnk");
-    created.textSegmentId = textSegmentId;
-    created.speechSegmentId = speechSegmentId;
-    created.linkType = linkType;
-
+    bool hasConfidence = false;
+    float confidence = 0.f;
     auto confidenceOpt = link.confidence();
     if (confidenceOpt.has_value()) {
-      created.confidence = static_cast<float>(confidenceOpt.value());
+      hasConfidence = true;
+      confidence = static_cast<float>(confidenceOpt.value());
     }
-
     NSString *metaJson = slmMetaJsonFromObject(link.meta());
-    if (metaJson.length > 0) {
-      created.metaJson = std::string(metaJson.UTF8String ?: "");
+    std::string meta = metaJson.length > 0 ? std::string(metaJson.UTF8String ?: "") : std::string();
+
+    PaSegmentLink created;
+    std::string err;
+    if (!slm_add_link(mapId, textSegmentId, speechSegmentId, link.linkType().UTF8String ?: "",
+                      hasConfidence, confidence, meta, &created, &err)) {
+      slmRejectFromError(reject, err);
+      return;
     }
-
-    store.links[created.linkId] = created;
-    store.insertionOrder.push_back(created.linkId);
-    store.pairTypeIndex.insert(pairKey);
-    store.textIndex.emplace(created.textSegmentId, created.linkId);
-    store.speechIndex.emplace(created.speechSegmentId, created.linkId);
-
     resolve(slmLinkToDict(created));
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
@@ -293,70 +154,35 @@ static std::string slmPairTypeKey(
         reject(@"SEGMENT_LINK_INVALID", @"links[] must contain objects", nil);
         return;
       }
-
       NSDictionary *link = (NSDictionary *)item;
       std::string mapId = linkMapId.UTF8String ?: "";
       std::string textSegmentId = [link[@"textSegmentId"] isKindOfClass:[NSString class]]
-        ? std::string([(NSString *)link[@"textSegmentId"] UTF8String] ?: "")
-        : std::string();
+                                    ? std::string([(NSString *)link[@"textSegmentId"] UTF8String] ?: "")
+                                    : std::string();
       std::string speechSegmentId = [link[@"speechSegmentId"] isKindOfClass:[NSString class]]
-        ? std::string([(NSString *)link[@"speechSegmentId"] UTF8String] ?: "")
-        : std::string();
-
-      if (textSegmentId.empty()) {
-        reject(@"SEGMENT_LINK_INVALID", @"textSegmentId must be non-empty", nil);
-        return;
-      }
-      if (speechSegmentId.empty()) {
-        reject(@"SEGMENT_LINK_INVALID", @"speechSegmentId must be non-empty", nil);
-        return;
-      }
-
-      PaSegmentLinkType linkType;
-      if (!slmParseLinkType([link[@"linkType"] isKindOfClass:[NSString class]] ? link[@"linkType"] : @"", &linkType)) {
-        reject(@"SEGMENT_LINK_INVALID", @"linkType is invalid", nil);
-        return;
-      }
-
-      std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-      auto it = g_segment_link_maps.find(mapId);
-      if (it == g_segment_link_maps.end()) {
-        reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithFormat:@"Link map not found: %@", linkMapId], nil);
-        return;
-      }
-
-      auto &store = it->second;
-      std::string pairKey = slmPairTypeKey(textSegmentId, speechSegmentId, linkType);
-      if (store.pairTypeIndex.find(pairKey) != store.pairTypeIndex.end()) {
-        reject(@"SEGMENT_LINK_INVALID", @"duplicate (textSegmentId, speechSegmentId, linkType) is not allowed", nil);
-        return;
-      }
-
-      PaSegmentLink createdLink;
-      createdLink.linkId = slmNewId("lnk");
-      createdLink.textSegmentId = textSegmentId;
-      createdLink.speechSegmentId = speechSegmentId;
-      createdLink.linkType = linkType;
-
+                                      ? std::string([(NSString *)link[@"speechSegmentId"] UTF8String] ?: "")
+                                      : std::string();
+      NSString *linkType =
+        [link[@"linkType"] isKindOfClass:[NSString class]] ? link[@"linkType"] : @"";
+      bool hasConfidence = false;
+      float confidence = 0.f;
       id confidenceObj = link[@"confidence"];
       if ([confidenceObj isKindOfClass:[NSNumber class]]) {
-        createdLink.confidence = [(NSNumber *)confidenceObj floatValue];
+        hasConfidence = true;
+        confidence = [(NSNumber *)confidenceObj floatValue];
       }
-
       NSString *metaJson = slmMetaJsonFromObject(link[@"meta"]);
-      if (metaJson.length > 0) {
-        createdLink.metaJson = std::string(metaJson.UTF8String ?: "");
+      std::string meta = metaJson.length > 0 ? std::string(metaJson.UTF8String ?: "") : std::string();
+
+      PaSegmentLink createdLink;
+      std::string err;
+      if (!slm_add_link(mapId, textSegmentId, speechSegmentId, linkType.UTF8String ?: "",
+                        hasConfidence, confidence, meta, &createdLink, &err)) {
+        slmRejectFromError(reject, err);
+        return;
       }
-
-      store.links[createdLink.linkId] = createdLink;
-      store.insertionOrder.push_back(createdLink.linkId);
-      store.pairTypeIndex.insert(pairKey);
-      store.textIndex.emplace(createdLink.textSegmentId, createdLink.linkId);
-      store.speechIndex.emplace(createdLink.speechSegmentId, createdLink.linkId);
-
       [created addObject:slmLinkToDict(createdLink)];
     }
-
     resolve(@{ @"links": created });
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
@@ -373,35 +199,11 @@ static std::string slmPairTypeKey(
 {
 #ifdef __cplusplus
   @try {
-    std::string mapId = linkMapId.UTF8String ?: "";
-    std::string linkIdRaw = linkId.UTF8String ?: "";
-
-    std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-    auto it = g_segment_link_maps.find(mapId);
-    if (it == g_segment_link_maps.end()) {
-      reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithFormat:@"Link map not found: %@", linkMapId], nil);
+    std::string err;
+    if (!slm_remove_link(linkMapId.UTF8String ?: "", linkId.UTF8String ?: "", &err)) {
+      slmRejectFromError(reject, err);
       return;
     }
-
-    auto &store = it->second;
-    auto linkIt = store.links.find(linkIdRaw);
-    if (linkIt == store.links.end()) {
-      resolve(nil);
-      return;
-    }
-
-    PaSegmentLink removed = linkIt->second;
-    store.links.erase(linkIt);
-
-    std::string pairKey = slmPairTypeKey(removed.textSegmentId, removed.speechSegmentId, removed.linkType);
-    store.pairTypeIndex.erase(pairKey);
-    slmRemoveIndexEntries(store.textIndex, removed.textSegmentId, removed.linkId);
-    slmRemoveIndexEntries(store.speechIndex, removed.speechSegmentId, removed.linkId);
-    store.insertionOrder.erase(
-      std::remove(store.insertionOrder.begin(), store.insertionOrder.end(), removed.linkId),
-      store.insertionOrder.end()
-    );
-
     resolve(nil);
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
@@ -418,26 +220,18 @@ static std::string slmPairTypeKey(
 {
 #ifdef __cplusplus
   @try {
-    std::string mapId = linkMapId.UTF8String ?: "";
-    std::string textId = textSegmentId.UTF8String ?: "";
-
-    NSMutableArray *out = [NSMutableArray array];
-    std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-    auto it = g_segment_link_maps.find(mapId);
-    if (it == g_segment_link_maps.end()) {
-      reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithFormat:@"Link map not found: %@", linkMapId], nil);
+    std::string err;
+    auto links = slm_get_speech_for_text(linkMapId.UTF8String ?: "", textSegmentId.UTF8String ?: "",
+                                         &err);
+    if (!err.empty() && links.empty()) {
+      slmRejectFromError(reject, err);
       return;
     }
-
-    auto range = it->second.textIndex.equal_range(textId);
-    for (auto idx = range.first; idx != range.second; ++idx) {
-      auto linkIt = it->second.links.find(idx->second);
-      if (linkIt != it->second.links.end()) {
-        [out addObject:slmLinkToDict(linkIt->second)];
-      }
+    NSMutableArray *arr = [NSMutableArray arrayWithCapacity:links.size()];
+    for (const auto &l : links) {
+      [arr addObject:slmLinkToDict(l)];
     }
-
-    resolve(@{ @"links": out });
+    resolve(arr);
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
@@ -447,32 +241,24 @@ static std::string slmPairTypeKey(
 }
 
 - (void)getTextSegmentsForSpeech:(NSString *)linkMapId
-                  speechSegmentId:(NSString *)speechSegmentId
-                          resolve:(RCTPromiseResolveBlock)resolve
-                           reject:(RCTPromiseRejectBlock)reject
+                 speechSegmentId:(NSString *)speechSegmentId
+                         resolve:(RCTPromiseResolveBlock)resolve
+                          reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
   @try {
-    std::string mapId = linkMapId.UTF8String ?: "";
-    std::string speechId = speechSegmentId.UTF8String ?: "";
-
-    NSMutableArray *out = [NSMutableArray array];
-    std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-    auto it = g_segment_link_maps.find(mapId);
-    if (it == g_segment_link_maps.end()) {
-      reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithFormat:@"Link map not found: %@", linkMapId], nil);
+    std::string err;
+    auto links = slm_get_text_for_speech(linkMapId.UTF8String ?: "",
+                                         speechSegmentId.UTF8String ?: "", &err);
+    if (!err.empty() && links.empty()) {
+      slmRejectFromError(reject, err);
       return;
     }
-
-    auto range = it->second.speechIndex.equal_range(speechId);
-    for (auto idx = range.first; idx != range.second; ++idx) {
-      auto linkIt = it->second.links.find(idx->second);
-      if (linkIt != it->second.links.end()) {
-        [out addObject:slmLinkToDict(linkIt->second)];
-      }
+    NSMutableArray *arr = [NSMutableArray arrayWithCapacity:links.size()];
+    for (const auto &l : links) {
+      [arr addObject:slmLinkToDict(l)];
     }
-
-    resolve(@{ @"links": out });
+    resolve(arr);
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
@@ -482,58 +268,24 @@ static std::string slmPairTypeKey(
 }
 
 - (void)getAllSegmentLinks:(NSString *)linkMapId
-                startIndex:(NSNumber *)startIndex
-                  maxCount:(NSNumber *)maxCount
+                startIndex:(double)startIndex
+                  maxCount:(double)maxCount
                    resolve:(RCTPromiseResolveBlock)resolve
                     reject:(RCTPromiseRejectBlock)reject
 {
 #ifdef __cplusplus
   @try {
-    const double startIndexVal = startIndex != nil ? startIndex.doubleValue : 0.0;
-    const double maxCountVal = maxCount != nil ? maxCount.doubleValue : 4096.0;
-    int start = std::max(0, (int)startIndexVal);
-    int count = std::max(0, (int)maxCountVal);
-
-    NSMutableArray *out = [NSMutableArray array];
-    std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-    auto it = g_segment_link_maps.find(linkMapId.UTF8String ?: "");
-    if (it == g_segment_link_maps.end()) {
-      reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithFormat:@"Link map not found: %@", linkMapId], nil);
+    std::string err;
+    auto links = slm_get_all(linkMapId.UTF8String ?: "", (int)startIndex, (int)maxCount, &err);
+    if (!err.empty() && links.empty() && startIndex == 0) {
+      slmRejectFromError(reject, err);
       return;
     }
-
-    auto &store = it->second;
-    int end = std::min((int)store.insertionOrder.size(), start + count);
-    for (int i = start; i < end; ++i) {
-      const std::string &linkIdRaw = store.insertionOrder[(size_t)i];
-      auto linkIt = store.links.find(linkIdRaw);
-      if (linkIt != store.links.end()) {
-        [out addObject:slmLinkToDict(linkIt->second)];
-      }
+    NSMutableArray *arr = [NSMutableArray arrayWithCapacity:links.size()];
+    for (const auto &l : links) {
+      [arr addObject:slmLinkToDict(l)];
     }
-
-    resolve(@{ @"links": out });
-  } @catch (NSException *exception) {
-    reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
-  }
-#else
-  reject(@"SEGMENT_LINK_INTERNAL_ERROR", @"SegmentLinkMap unavailable", nil);
-#endif
-}
-
-- (void)getSegmentLinkCount:(NSString *)linkMapId
-                    resolve:(RCTPromiseResolveBlock)resolve
-                     reject:(RCTPromiseRejectBlock)reject
-{
-#ifdef __cplusplus
-  @try {
-    std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-    auto it = g_segment_link_maps.find(linkMapId.UTF8String ?: "");
-    if (it == g_segment_link_maps.end()) {
-      reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithFormat:@"Link map not found: %@", linkMapId], nil);
-      return;
-    }
-    resolve(@((int)it->second.links.size()));
+    resolve(arr);
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
@@ -548,26 +300,23 @@ static std::string slmPairTypeKey(
 {
 #ifdef __cplusplus
   @try {
-    std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-    auto it = g_segment_link_maps.find(linkMapId.UTF8String ?: "");
-    if (it == g_segment_link_maps.end()) {
-      reject(@"SEGMENT_LINK_MAP_NOT_FOUND", [NSString stringWithFormat:@"Link map not found: %@", linkMapId], nil);
+    PaSegmentLinkMapInfo info;
+    std::string err;
+    if (!slm_get_info(linkMapId.UTF8String ?: "", &info, &err)) {
+      slmRejectFromError(reject, err);
       return;
     }
-
-    NSMutableDictionary *out = [@{
-      @"linkMapId": [NSString stringWithUTF8String:it->second.linkMapId.c_str()] ?: @"",
-      @"linkCount": @((int)it->second.links.size()),
+    NSMutableDictionary *dict = [@{
+      @"linkMapId": [NSString stringWithUTF8String:info.linkMapId.c_str()] ?: @"",
+      @"linkCount": @(info.linkCount),
     } mutableCopy];
-
-    if (it->second.textBufferId.has_value()) {
-      out[@"textBufferId"] = [NSString stringWithUTF8String:it->second.textBufferId->c_str()] ?: @"";
+    if (info.textBufferId.has_value()) {
+      dict[@"textBufferId"] = [NSString stringWithUTF8String:info.textBufferId->c_str()] ?: @"";
     }
-    if (it->second.audioBufferId.has_value()) {
-      out[@"audioBufferId"] = [NSString stringWithUTF8String:it->second.audioBufferId->c_str()] ?: @"";
+    if (info.audioBufferId.has_value()) {
+      dict[@"audioBufferId"] = [NSString stringWithUTF8String:info.audioBufferId->c_str()] ?: @"";
     }
-
-    resolve(out);
+    resolve(dict);
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
@@ -582,8 +331,7 @@ static std::string slmPairTypeKey(
 {
 #ifdef __cplusplus
   @try {
-    std::lock_guard<std::mutex> lock(g_segment_link_maps_mutex);
-    g_segment_link_maps.erase(linkMapId.UTF8String ?: "");
+    slm_release(linkMapId.UTF8String ?: "");
     resolve(nil);
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);

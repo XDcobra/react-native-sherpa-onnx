@@ -29,7 +29,8 @@ export type SpeechSegmentPayloadSource =
   | 'sid'
   | 'pyannote'
   | 'languageId'
-  | 'audioTagging';
+  | 'audioTagging'
+  | 'manual';
 
 export interface VadSpeechSegmentPayload {
   source: 'vad';
@@ -78,6 +79,10 @@ export interface AudioTaggingSpeechSegmentPayload {
   events?: Array<{ name: string; index: number; prob: number }>;
 }
 
+export interface ManualSpeechSegmentPayload {
+  source: 'manual';
+}
+
 export type SpeechSegmentPayload =
   | VadSpeechSegmentPayload
   | SttSpeechSegmentPayload
@@ -85,7 +90,8 @@ export type SpeechSegmentPayload =
   | SidSpeechSegmentPayload
   | PyannoteSpeechSegmentPayload
   | LanguageIdSpeechSegmentPayload
-  | AudioTaggingSpeechSegmentPayload;
+  | AudioTaggingSpeechSegmentPayload
+  | ManualSpeechSegmentPayload;
 
 export interface AlignmentSegmentPayload {
   [key: string]: unknown;
@@ -262,43 +268,22 @@ export type OfflineSegmentBufferFromLiveMode =
   | 'fullIfSpooled'
   | 'windowSnapshot';
 
-interface LiveSegmentBufferSegmentAppendedEventBase {
+/**
+ * Notify-only: a segment was appended to a live segment buffer.
+ * Pull body/payload with `readLiveSegment` / `getLiveSegmentBufferSegments`.
+ */
+export interface LiveSegmentBufferSegmentAppendedEvent {
   segmentBufferId: string;
-  totalSegments: number;
-  segmentId: string;
   segmentIndex: number;
+  totalSegments: number;
+  kind: SegmentKind;
+  segmentId: string;
   sourceAudioBufferId: string;
   startSample: number;
   endSample: number;
   sampleRate: number;
   durationMs: number;
   confidence?: number;
-}
-
-/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
-export interface LiveSpeechSegmentAppendedEvent
-  extends LiveSegmentBufferSegmentAppendedEventBase {
-  kind: 'speech';
-  payload?: SpeechSegmentPayload;
-}
-
-/** Fired when a new segment is appended to a live segment buffer (native → JS; fat metadata). */
-export interface LiveAlignmentSegmentAppendedEvent
-  extends LiveSegmentBufferSegmentAppendedEventBase {
-  kind: 'alignment';
-  payload?: AlignmentSegmentPayload;
-}
-
-export type LiveSegmentBufferSegmentAppendedEvent =
-  | LiveSpeechSegmentAppendedEvent
-  | LiveAlignmentSegmentAppendedEvent
-  | LiveDiarizationSegmentAppendedEvent;
-
-/** Fired when a new diarization segment is appended to a live segment buffer. */
-export interface LiveDiarizationSegmentAppendedEvent
-  extends LiveSegmentBufferSegmentAppendedEventBase {
-  kind: 'diarization';
-  payload?: DiarizationSegmentPayload;
 }
 
 /** Error tied to a live segment buffer (e.g. spool I/O in future paths). */

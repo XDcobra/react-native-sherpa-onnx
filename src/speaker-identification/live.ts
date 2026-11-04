@@ -18,6 +18,7 @@ import {
 } from '../segment';
 import {
   finalizeLiveSegmentBuffer,
+  readLiveSegment,
   resolveLiveSegmentBufferId,
   subscribeLiveSegmentBufferEvents,
 } from '../segmentbuffer';
@@ -25,7 +26,9 @@ import type {
   LiveSegmentBufferIdSource,
   LiveSegmentBufferRef,
   LiveSegmentBufferSegmentAppendedEvent,
+  SegmentMeta,
   SidSpeechSegmentPayload,
+  SpeechSegmentMeta,
 } from '../segmentbuffer/types';
 import type {
   SpeakerEmbeddingEngine,
@@ -89,10 +92,14 @@ export function isLiveSegmentSource(
 }
 
 function mapAppendedEventToLabeled(
-  event: LiveSegmentBufferSegmentAppendedEvent
+  event: LiveSegmentBufferSegmentAppendedEvent,
+  meta: SegmentMeta | undefined
 ): SidLiveLabeledSegmentEvent | null {
   if (event.kind !== 'speech') return null;
-  const payload = event.payload as SidSpeechSegmentPayload | undefined;
+  if (!meta || meta.kind !== 'speech') return null;
+  const payload = (meta as SpeechSegmentMeta).payload as
+    | SidSpeechSegmentPayload
+    | undefined;
   if (payload?.source !== 'sid') return null;
 
   const labeled: SidLiveLabeledSegmentEvent = {
@@ -123,8 +130,12 @@ function createSidPipelineHandle(
   if (onLabeled) {
     unsubEvents = subscribeLiveSegmentBufferEvents(segmentsOutId, {
       onSegmentAppended: (event) => {
-        const labeled = mapAppendedEventToLabeled(event);
-        if (labeled) onLabeled(labeled);
+        readLiveSegment(event)
+          .then((meta) => {
+            const labeled = mapAppendedEventToLabeled(event, meta);
+            if (labeled) onLabeled(labeled);
+          })
+          .catch(() => undefined);
       },
     });
   }

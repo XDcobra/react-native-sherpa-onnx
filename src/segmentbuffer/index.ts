@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import type { SpeechSegment } from '../segment/segment';
+import { toSegmentReason, toSegmentSource } from '../segment/utils';
 import { PipelineSegmentErrorCode } from './types';
 import type {
   AlignmentSegmentPayload,
@@ -67,6 +69,11 @@ const ALIGNMENT_PAYLOAD_ALLOWED_KEYS = new Set([
   'wordMetadata',
   'languageHints',
 ]);
+const SPEECH_PAYLOAD_ANNOTATION_KEYS = [
+  '__annotationReason',
+  '__annotationSource',
+  '__annotationCreatedAtMs',
+] as const;
 const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'vad',
   'stt',
@@ -75,18 +82,48 @@ const SPEECH_PAYLOAD_SOURCE_VALUES = new Set<SpeechSegmentPayloadSource>([
   'pyannote',
   'languageId',
   'audioTagging',
+  'manual',
 ]);
 const SPEECH_PAYLOAD_KEYS_BY_SOURCE: Record<
   SpeechSegmentPayloadSource,
   Set<string>
 > = {
-  vad: new Set(['source', 'engine', 'decision', 'score']),
-  stt: new Set(['source', 'transcript', 'tokenCount', 'isFinal']),
-  tts: new Set(['source', 'text', 'chunkIndex', 'isFinalChunk']),
-  sid: new Set(['source', 'speakerName']),
-  pyannote: new Set(['source']),
-  languageId: new Set(['source', 'lang', 'confidence']),
-  audioTagging: new Set(['source', 'primaryName', 'events']),
+  vad: new Set([
+    'source',
+    'engine',
+    'decision',
+    'score',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  stt: new Set([
+    'source',
+    'transcript',
+    'tokenCount',
+    'isFinal',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  tts: new Set([
+    'source',
+    'text',
+    'chunkIndex',
+    'isFinalChunk',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  sid: new Set(['source', 'speakerName', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
+  pyannote: new Set(['source', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
+  languageId: new Set([
+    'source',
+    'lang',
+    'confidence',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  audioTagging: new Set([
+    'source',
+    'primaryName',
+    'events',
+    ...SPEECH_PAYLOAD_ANNOTATION_KEYS,
+  ]),
+  manual: new Set(['source', ...SPEECH_PAYLOAD_ANNOTATION_KEYS]),
 };
 
 function assertValidSegmentBufferId(value: string, sourceName: string): string {
@@ -216,7 +253,7 @@ function assertSpeechPayload(
   const source = obj.source;
   if (!SPEECH_PAYLOAD_SOURCE_VALUES.has(source as SpeechSegmentPayloadSource)) {
     throw new Error(
-      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging.`
+      `${PipelineSegmentErrorCode.INVALID_ARGUMENT}: ${sourceName}.source must be one of vad, stt, tts, sid, pyannote, languageId, audioTagging, manual.`
     );
   }
   const typedSource = source as SpeechSegmentPayloadSource;
@@ -594,9 +631,31 @@ const segmentErrorCallbacks = new Map<
   string,
   Set<(event: LiveSegmentBufferErrorEvent) => void>
 >();
+const lastSegmentIndexByBuffer = new Map<string, number>();
 
 let segmentAppendedSub: NativeSubscription | null = null;
 let segmentErrorSub: NativeSubscription | null = null;
+
+function dispatchLiveSegmentNotify(
+  event: LiveSegmentBufferSegmentAppendedEvent
+): void {
+  const cbs = segmentAppendedCallbacks.get(event.segmentBufferId);
+  if (!cbs || cbs.size === 0) return;
+
+  const last = lastSegmentIndexByBuffer.get(event.segmentBufferId);
+  if (typeof last === 'number' && event.segmentIndex <= last) {
+    return;
+  }
+  lastSegmentIndexByBuffer.set(event.segmentBufferId, event.segmentIndex);
+
+  for (const cb of cbs) {
+    try {
+      cb(event);
+    } catch {
+      /* swallow callback errors */
+    }
+  }
+}
 
 function ensureLiveSegmentEventSubscriptions(): void {
   if (segmentAppendedSub && segmentErrorSub) return;
@@ -617,37 +676,25 @@ function ensureLiveSegmentEventSubscriptions(): void {
         sampleRate?: number;
         durationMs?: number;
         confidence?: number;
-        payload?: Record<string, unknown>;
       }) => {
         const segmentBufferId = raw?.segmentBufferId;
         if (!segmentBufferId) return;
-        const cbs = segmentAppendedCallbacks.get(segmentBufferId);
-        if (!cbs || cbs.size === 0) return;
-        let candidateKind = raw.kind;
-        if (!candidateKind && raw.payload && typeof raw.payload === 'object') {
-          const src = (raw.payload as Record<string, unknown>).source;
-          if (src === 'diarization') {
-            candidateKind = 'diarization';
-          } else if (src === 'alignment') {
-            candidateKind = 'alignment';
-          }
-        }
+        if (typeof raw.segmentIndex !== 'number') return;
+
         const eventKind = assertValidSegmentKind(
-          candidateKind ?? 'speech',
+          raw.kind ?? 'speech',
           'event.kind'
         );
-        const segmentIndexTrunc =
-          typeof raw.segmentIndex === 'number'
-            ? Math.trunc(raw.segmentIndex)
-            : 0;
-        const eventBase = {
+        const segmentIndex = Math.trunc(raw.segmentIndex);
+        const event: LiveSegmentBufferSegmentAppendedEvent = {
           segmentBufferId,
+          segmentIndex,
           totalSegments:
             typeof raw.totalSegments === 'number'
               ? Math.trunc(raw.totalSegments)
-              : Math.max(1, segmentIndexTrunc + 1),
+              : Math.max(1, segmentIndex + 1),
+          kind: eventKind,
           segmentId: typeof raw.segmentId === 'string' ? raw.segmentId : '',
-          segmentIndex: segmentIndexTrunc,
           sourceAudioBufferId:
             typeof raw.sourceAudioBufferId === 'string'
               ? raw.sourceAudioBufferId
@@ -666,48 +713,7 @@ function ensureLiveSegmentEventSubscriptions(): void {
             ? { confidence: raw.confidence }
             : {}),
         };
-        const event: LiveSegmentBufferSegmentAppendedEvent =
-          eventKind === 'alignment'
-            ? {
-                ...eventBase,
-                kind: 'alignment',
-                ...(raw.payload !== undefined
-                  ? {
-                      payload: assertAlignmentPayload(
-                        raw.payload,
-                        'event.payload'
-                      ),
-                    }
-                  : {}),
-              }
-            : eventKind === 'diarization'
-            ? {
-                ...eventBase,
-                kind: 'diarization',
-                ...(raw.payload !== undefined
-                  ? {
-                      payload: assertDiarizationPayload(
-                        raw.payload,
-                        'event.payload'
-                      ),
-                    }
-                  : {}),
-              }
-            : {
-                ...eventBase,
-                kind: 'speech',
-                ...(raw.payload !== undefined
-                  ? {
-                      payload: assertSpeechPayload(
-                        raw.payload,
-                        'event.payload'
-                      ),
-                    }
-                  : {}),
-              };
-        for (const cb of cbs) {
-          cb(event);
-        }
+        dispatchLiveSegmentNotify(event);
       }
     );
   }
@@ -978,8 +984,12 @@ export async function getPipelineSegmentBufferInfo(
   return mapPipelineInfo(raw);
 }
 
+/** Max segments returned by one TurboModule getter call; paginate for more. */
+const SEGMENT_TM_MAX_PAGE_COUNT = 4096;
+
 /**
  * Read committed segments from an offline segment buffer.
+ * Returns at most {@link SEGMENT_TM_MAX_PAGE_COUNT} records per call — paginate with `start` for more.
  * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid returned payload.
  * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
  * @throws {Error} `SEGMENT_SLICE_INVALID` — start or count is out of range.
@@ -988,13 +998,17 @@ export async function getPipelineSegmentBufferInfo(
 export async function getOfflineSegmentBufferSegments(
   buffer: OfflineSegmentBufferIdSource,
   start = 0,
-  maxCount = 4096
+  maxCount = SEGMENT_TM_MAX_PAGE_COUNT
 ): Promise<SegmentMeta[]> {
   const id = resolveOfflineSegmentBufferId(buffer);
-  const sliceMaxCount =
+  const requested =
     maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
-      ? 4096
+      ? SEGMENT_TM_MAX_PAGE_COUNT
       : maxCount;
+  const sliceMaxCount = Math.min(
+    Math.max(0, requested),
+    SEGMENT_TM_MAX_PAGE_COUNT
+  );
   const raw = await getNative().getOfflineSegmentBufferSegments(
     id,
     start,
@@ -1055,6 +1069,7 @@ export async function getOfflineSegmentBufferSegments(
 
 /**
  * Read committed segments from a live segment buffer.
+ * Returns at most {@link SEGMENT_TM_MAX_PAGE_COUNT} records per call — paginate with `startIndex` for more.
  * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — malformed id or invalid returned payload.
  * @throws {Error} `SEGMENT_BUFFER_NOT_FOUND` — buffer was released.
  * @throws {Error} `SEGMENT_SLICE_INVALID` — start or count is out of range.
@@ -1066,10 +1081,14 @@ export async function getLiveSegmentBufferSegments(
   maxCount: number
 ): Promise<SegmentMeta[]> {
   const id = resolveLiveSegmentBufferId(liveBuffer);
-  const sliceMaxCount =
+  const requested =
     maxCount === undefined || maxCount === null || Number.isNaN(maxCount)
-      ? 4096
+      ? SEGMENT_TM_MAX_PAGE_COUNT
       : maxCount;
+  const sliceMaxCount = Math.min(
+    Math.max(0, requested),
+    SEGMENT_TM_MAX_PAGE_COUNT
+  );
   const raw = await getNative().getLiveSegmentBufferSegments(
     id,
     startIndex,
@@ -1150,7 +1169,72 @@ export async function releasePipelineSegmentBuffer(
   buffer: PipelineSegmentBufferIdSource
 ): Promise<void> {
   const id = resolvePipelineSegmentBufferId(buffer);
+  segmentAppendedCallbacks.delete(id);
+  segmentErrorCallbacks.delete(id);
+  lastSegmentIndexByBuffer.delete(id);
   await getNative().releasePipelineSegmentBuffer(id);
+}
+
+/**
+ * Pull one committed segment for a notify-only appended event.
+ */
+export async function readLiveSegment(
+  event: LiveSegmentBufferSegmentAppendedEvent
+): Promise<SegmentMeta | undefined> {
+  const segments = await getLiveSegmentBufferSegments(
+    event.segmentBufferId,
+    event.segmentIndex,
+    1
+  );
+  return segments[0];
+}
+
+/**
+ * Map a notify event (+ optional pulled SegmentMeta) into a domain SpeechSegment
+ * for audio-side product callbacks.
+ */
+export function liveSegmentNotifyToSpeechSegment(
+  event: LiveSegmentBufferSegmentAppendedEvent,
+  meta?: SegmentMeta,
+  annotation?: {
+    reason?: string;
+    source?: string;
+    createdAtMs?: number;
+  }
+): SpeechSegment {
+  const reason = toSegmentReason(
+    annotation?.reason ??
+      (typeof meta?.reason === 'string' ? meta.reason : undefined)
+  );
+  const source = toSegmentSource(
+    annotation?.source ??
+      (typeof meta?.source === 'string' ? meta.source : undefined)
+  );
+  const createdAtMs =
+    typeof annotation?.createdAtMs === 'number'
+      ? Math.trunc(annotation.createdAtMs)
+      : typeof meta?.createdAtMs === 'number'
+      ? Math.trunc(meta.createdAtMs)
+      : Date.now();
+
+  return {
+    segmentId:
+      event.segmentId || `seg_${event.segmentBufferId}_${event.segmentIndex}`,
+    domain: 'speech',
+    startOffset: event.startSample,
+    endOffset: event.endSample,
+    reason,
+    source,
+    createdAtMs,
+    segmentIndex: event.segmentIndex,
+    sourceAudioBufferId: event.sourceAudioBufferId,
+    sampleRate: event.sampleRate,
+    durationMs: event.durationMs,
+    ...(typeof event.confidence === 'number'
+      ? { confidence: event.confidence }
+      : {}),
+    ...(meta?.payload != null ? { meta: { payload: meta.payload } } : {}),
+  };
 }
 
 export type {

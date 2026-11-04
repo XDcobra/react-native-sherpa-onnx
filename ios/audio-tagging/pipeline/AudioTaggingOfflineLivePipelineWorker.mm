@@ -2,11 +2,12 @@
 
 #import <Foundation/Foundation.h>
 
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "SegmentRegistry.h"
+#include "TextRegistry.h"
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -93,7 +94,7 @@ void AudioTaggingOfflineLivePipelineWorker::onSegmentCommitted(
   const CommittedSegmentRef &segment
 ) {
   if (!std::holds_alternative<CommittedSegmentSpeech>(segment)) return;
-  if (!audioInput_ || !textOutput_ || !taggingState_ || taggingState_->handle == nullptr) {
+  if (!audioInput_ || !textOutput_ || !taggingState_ || !taggingState_->isReady()) {
     throw std::runtime_error("Invalid audio tagging live pipeline worker state");
   }
 
@@ -111,37 +112,25 @@ void AudioTaggingOfflineLivePipelineWorker::onSegmentCommitted(
   auto samples = audioInput_->getSamplesSlice(speech.startSample, frameCount);
   if (samples.empty()) return;
 
-  NSMutableArray *events = [NSMutableArray array];
-  std::string primaryName;
+  const auto computed = taggingState_->wrapper->compute(
+      samples, speech.sampleRate, std::optional<int32_t>(topK_));
+  if (!computed.success) {
+    throw std::runtime_error(
+      computed.error.empty() ? "Audio tagging live compute failed" : computed.error);
+  }
 
-  const SherpaOnnxOfflineStream *stream =
-      SherpaOnnxAudioTaggingCreateOfflineStream(taggingState_->handle);
-  if (stream != nullptr) {
-    SherpaOnnxAcceptWaveformOffline(
-        stream,
-        speech.sampleRate,
-        samples.data(),
-        static_cast<int32_t>(samples.size()));
-    const SherpaOnnxAudioEvent *const *results =
-        SherpaOnnxAudioTaggingCompute(taggingState_->handle, stream, topK_);
-    if (results != nullptr) {
-      for (int32_t i = 0; results[i] != nullptr; ++i) {
-        const SherpaOnnxAudioEvent *ev = results[i];
-        NSString *name = ev->name != nullptr
-            ? [NSString stringWithUTF8String:ev->name]
-            : @"";
-        [events addObject:@{
-          @"name": name ?: @"",
-          @"index": @(ev->index),
-          @"prob": @(ev->prob),
-        }];
-        if (primaryName.empty() && name != nil && [name length] > 0) {
-          primaryName = [name UTF8String];
-        }
-      }
-      SherpaOnnxAudioTaggingFreeResults(results);
+  NSMutableArray *events = [NSMutableArray arrayWithCapacity:computed.events.size()];
+  std::string primaryName;
+  for (const auto &ev : computed.events) {
+    NSString *name = [NSString stringWithUTF8String:ev.name.c_str()] ?: @"";
+    [events addObject:@{
+      @"name": name,
+      @"index": @(ev.index),
+      @"prob": @(ev.prob),
+    }];
+    if (primaryName.empty() && [name length] > 0) {
+      primaryName = [name UTF8String];
     }
-    SherpaOnnxDestroyOfflineStream(stream);
   }
 
   if (primaryName.empty() || events.count == 0) return;

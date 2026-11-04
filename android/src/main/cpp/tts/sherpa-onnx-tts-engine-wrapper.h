@@ -1,0 +1,171 @@
+/**
+ * sherpa-onnx-tts-engine-wrapper.h
+ *
+ * Shared CXX OfflineTts wrapper for TTS (Android + iOS).
+ * Distinct from jni/model_detect/tts/sherpa-onnx-tts-wrapper (detect marshalling only).
+ */
+
+#ifndef SHERPA_ONNX_TTS_ENGINE_WRAPPER_H
+#define SHERPA_ONNX_TTS_ENGINE_WRAPPER_H
+
+#include "sherpa-onnx-common.h"
+#include "sherpa-onnx-model-detect.h"
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace sherpaonnx {
+
+/** Voice cloning / zero-shot options for Zipvoice and Pocket (matches JS referenceAudio + referenceSampleRate + optional fields). */
+struct VoiceCloneOptions {
+    std::vector<float> reference_audio;
+    /** Non-owning PCM used when reference_audio is empty. reference_keepalive keeps that storage alive. */
+    const float* reference_pcm = nullptr;
+    int32_t reference_pcm_count = 0;
+    std::shared_ptr<void> reference_keepalive;
+    int32_t reference_sample_rate = 0;
+    std::string reference_text;
+    int32_t num_steps = 5;
+    /** When true, non-clone GenerationConfig path must set `num_steps` (even if extra is empty). */
+    bool apply_num_steps = false;
+    float silence_scale = 0.2f;
+    std::unordered_map<std::string, std::string> extra;
+    std::vector<std::vector<int32_t>> phoneme_codepoints;
+    std::vector<std::vector<std::string>> tokens;
+};
+
+/**
+ * Result of TTS initialization.
+ */
+struct TtsInitializeResult {
+    bool success;
+    std::vector<DetectedModel> detectedModels;  // List of detected models with type and path
+    /** When success is false, optional error message (e.g. from DetectTtsModel or OfflineTts::Create). */
+    std::string error;
+};
+
+/**
+ * Wrapper class for sherpa-onnx OfflineTts.
+ */
+class TtsWrapper {
+public:
+    TtsWrapper();
+    ~TtsWrapper();
+
+    TtsInitializeResult initialize(
+        const std::string& modelDir,
+        const std::string& modelType = "auto",
+        int32_t numThreads = 2,
+        bool debug = false,
+        const std::optional<float>& noiseScale = std::nullopt,
+        const std::optional<float>& noiseScaleW = std::nullopt,
+        const std::optional<float>& lengthScale = std::nullopt,
+        const std::optional<std::string>& ruleFsts = std::nullopt,
+        const std::optional<std::string>& ruleFars = std::nullopt,
+        const std::optional<int32_t>& maxNumSentences = std::nullopt,
+        const std::optional<float>& silenceScale = std::nullopt,
+        const std::optional<std::string>& provider = std::nullopt,
+        const std::optional<std::string>& lexiconLanguageId = std::nullopt,
+        const std::optional<std::string>& kokoroLang = std::nullopt
+    );
+
+    TtsInitializeResult initializeCustom(
+        const std::string& modelType,
+        const TtsModelPaths& paths,
+        int32_t numThreads = 2,
+        bool debug = false,
+        const std::optional<float>& noiseScale = std::nullopt,
+        const std::optional<float>& noiseScaleW = std::nullopt,
+        const std::optional<float>& lengthScale = std::nullopt,
+        const std::optional<std::string>& ruleFsts = std::nullopt,
+        const std::optional<std::string>& ruleFars = std::nullopt,
+        const std::optional<int32_t>& maxNumSentences = std::nullopt,
+        const std::optional<float>& silenceScale = std::nullopt,
+        const std::optional<std::string>& provider = std::nullopt,
+        const std::optional<std::string>& kokoroLang = std::nullopt
+    );
+
+    struct AudioResult {
+        std::vector<float> samples;  // Audio samples in range [-1.0, 1.0]
+        int32_t sampleRate;          // Sample rate in Hz
+    };
+
+    using TtsStreamCallback = std::function<int32_t(
+        const float *samples,
+        int32_t numSamples,
+        float progress
+    )>;
+
+    AudioResult generate(
+        const std::string& text,
+        int32_t sid = 0,
+        float speed = 1.0f
+    );
+
+    /** Non-clone path with explicit flow-/diffusion steps via GenerationConfig.num_steps. */
+    AudioResult generate(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        int32_t numSteps
+    );
+
+    /**
+     * When cloning is set (non-empty reference_audio and reference_sample_rate > 0), calls
+     * OfflineTts::Generate(text, GenerationConfig). Otherwise same as generate(text, sid, speed).
+     */
+    AudioResult generate(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        const std::optional<VoiceCloneOptions>& cloning
+    );
+
+    bool generateStream(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        const TtsStreamCallback& callback
+    );
+
+    /** Non-clone streaming with explicit num_steps via GenerationConfig. */
+    bool generateStream(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        const TtsStreamCallback& callback,
+        int32_t numSteps
+    );
+
+    /** Pocket: streaming with reference audio. Zipvoice + cloning is not supported (match Android). */
+    bool generateStream(
+        const std::string& text,
+        int32_t sid,
+        float speed,
+        const TtsStreamCallback& callback,
+        const std::optional<VoiceCloneOptions>& cloning
+    );
+
+    int32_t getSampleRate() const;
+
+    int32_t getNumSpeakers() const;
+
+    bool isInitialized() const;
+
+    /** Model kind from last successful initialize() (for voice-cloning validation). */
+    TtsModelKind getModelKind() const;
+
+    void release();
+
+private:
+    class Impl;
+    std::unique_ptr<Impl> pImpl;
+};
+
+} // namespace sherpaonnx
+
+#endif // SHERPA_ONNX_TTS_ENGINE_WRAPPER_H

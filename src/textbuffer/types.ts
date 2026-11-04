@@ -10,7 +10,6 @@
  */
 
 import type { StreamEventSpec } from '../pipeline/streamEvents';
-import type { Segment } from '../segment/segment';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type { JsonValue } from './jsonMeta';
 
@@ -154,8 +153,6 @@ export interface LiveTextBufferInfo {
 /** A committed text segment from a live text buffer segment log. */
 export interface LiveTextSegment {
   text: string;
-  /** True when event payload text was truncated by maxEventTextChars. */
-  textTruncated?: boolean;
   source: LiveTextBufferPartialSource;
   segmentIndex: number;
   tokens?: string[];
@@ -269,12 +266,15 @@ export type LiveTextBufferPartialSource =
   | 'unknown'
   | 'mixed';
 
-/** Producer-agnostic event: new partial text was written to a live buffer. */
+/**
+ * Notify-only: new partial text was written to a live buffer.
+ * Pull text with `readLiveTextPartial` / `getLiveTextBufferPartialSlice`.
+ */
 export interface LiveTextBufferPartialEvent {
   liveBufferId: string;
   source: LiveTextBufferPartialSource;
-  /** Full partial hypothesis string for this event round. */
-  partialText: string;
+  /** Current partial window length in UTF-16 code units. */
+  utf16Length: number;
   revision: number;
   /** Present when online recognizer detects endpoint. */
   isEndpoint?: boolean;
@@ -300,10 +300,17 @@ export interface TextSegmentationConfig {
   policy?: SegmentationPolicy;
 }
 
+/**
+ * Notify-only: a text segment was committed to the live segment log.
+ * Pull body/meta with `readLiveTextSegment` / `getLiveTextBufferSegments`.
+ */
 export interface LiveTextBufferSegmentEvent {
-  bufferId: string;
-  segment: Segment;
+  liveBufferId: string;
+  segmentIndex: number;
   totalSegments: number;
+  /** Committed segment text length in UTF-16 code units. */
+  utf16Length: number;
+  source: LiveTextBufferPartialSource;
 }
 
 // ========== Creation Options ==========

@@ -6,40 +6,39 @@ import com.facebook.react.bridge.WritableMap
 import org.json.JSONArray
 import org.json.JSONObject
 
+/**
+ * Thin handle over shared C++ SegOfflineEntry (S6: no Kotlin segment List mirror).
+ */
 class OfflineSegmentEntry(
   val bufferId: String,
   private val sourceAudioBufferId: String? = null,
 ) {
-  @Volatile
-  private var populated = false
-  private val lock = Any()
-  private var segments: List<SegmentRecord> = emptyList()
-
   fun populate(records: List<SegmentRecord>) {
-    synchronized(lock) {
-      if (populated) {
-        throw SegmentPipelineException(
-          SegmentErrorCodes.INVALID_STATE,
-          "Offline segment buffer already populated: $bufferId"
-        )
-      }
-      segments = records.toList()
-      populated = true
+    val ok = SegmentBufferNative.nativePopulateOffline(bufferId, segmentsToJson(records))
+    if (!ok) {
+      throw SegmentPipelineException(
+        SegmentErrorCodes.INVALID_STATE,
+        "Offline segment buffer already populated: $bufferId",
+      )
     }
   }
 
   fun snapshotSegments(start: Int = 0, maxCount: Int = Int.MAX_VALUE): List<SegmentRecord> {
-    synchronized(lock) {
-      if (start < 0 || maxCount < 0) {
-        throw SegmentPipelineException(
-          SegmentErrorCodes.SLICE_INVALID,
-          "Invalid segment slice range start=$start maxCount=$maxCount"
-        )
-      }
-      if (start >= segments.size) return emptyList()
-      val end = minOf(start + maxCount, segments.size)
-      return segments.subList(start, end)
+    if (start < 0 || maxCount < 0) {
+      throw SegmentPipelineException(
+        SegmentErrorCodes.SLICE_INVALID,
+        "Invalid segment slice range start=$start maxCount=$maxCount",
+      )
     }
+    val json =
+      SegmentBufferNative.nativeOfflineSegmentsSlice(bufferId, start, maxCount)
+        ?: return emptyList()
+    return segmentsFromJson(json)
+  }
+
+  fun segmentCount(): Int {
+    val n = SegmentBufferNative.nativeOfflineSegmentCount(bufferId)
+    return if (n >= 0) n else 0
   }
 
   fun toWritableMap(): WritableMap {
@@ -47,7 +46,7 @@ class OfflineSegmentEntry(
     map.putString("bufferId", bufferId)
     map.putString("kind", "offlineSegmentBuffer")
     map.putString("state", "immutable")
-    map.putInt("segmentCount", synchronized(lock) { segments.size })
+    map.putInt("segmentCount", segmentCount())
     if (!sourceAudioBufferId.isNullOrEmpty()) {
       map.putString("sourceAudioBufferId", sourceAudioBufferId)
     }
@@ -55,6 +54,11 @@ class OfflineSegmentEntry(
   }
 
   companion object {
+    fun wrap(bufferId: String): OfflineSegmentEntry? {
+      if (!SegmentBufferNative.nativeIsOffline(bufferId)) return null
+      return OfflineSegmentEntry(bufferId)
+    }
+
     fun toWritableArray(records: List<SegmentRecord>): WritableArray {
       val arr = Arguments.createArray()
       for (r in records) {
@@ -112,7 +116,7 @@ class OfflineSegmentEntry(
             durationMs = obj.optInt("durationMs"),
             confidence = if (obj.has("confidence")) obj.optDouble("confidence") else null,
             payloadJson = if (obj.has("payload")) obj.optJSONObject("payload")?.toString() else null,
-          )
+          ),
         )
       }
       return out

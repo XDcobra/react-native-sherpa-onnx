@@ -8,17 +8,15 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
-import com.k2fsa.sherpa.onnx.OfflineTts
 import com.sherpaonnx.detect.ModelPathValidationNative
 import com.sherpaonnx.tts.config.TtsInitOptionsParser
-import com.sherpaonnx.tts.config.TtsOfflineConfigBuilder
 import com.sherpaonnx.tts.core.TtsEngineInstance
 import com.sherpaonnx.tts.core.TtsEngineRepository
 import com.sherpaonnx.tts.core.TtsInitState
-import com.sherpaonnx.lifecycle.NativeInstanceGate
+import com.sherpaonnx.tts.nativeapi.TtsNative
 
 /**
- * Single-thread executor for TTS init so the RN bridge thread is not blocked (avoids Inspector/dev WebSocket races in debug builds).
+ * Single-thread executor for TTS init so the RN bridge thread is not blocked.
  */
 internal class TtsInitializationService(
   private val context: ReactApplicationContext,
@@ -46,6 +44,12 @@ internal class TtsInitializationService(
       ?: return paths
     return paths + ("lexicon" to resolved)
   }
+
+  /** Android AAR defaults when options are nil — preserve via JNI args. */
+  private fun noiseScaleOrDefault(v: Double?): Float = v?.toFloat() ?: 0.667f
+  private fun noiseScaleWOrDefault(v: Double?): Float = v?.toFloat() ?: 0.8f
+  private fun lengthScaleOrDefault(v: Double?): Float = v?.toFloat() ?: 1.0f
+  private fun silenceScaleOrDefault(v: Double?): Float = v?.toFloat()?.coerceIn(0f, 10f) ?: 0.2f
 
   fun initializeTts(
     instanceId: String,
@@ -175,14 +179,11 @@ internal class TtsInitializationService(
     parsed: TtsInitOptionsParser.Parsed,
     promise: Promise
   ) {
-    val inst = repository.getOrPut(instanceId) { TtsEngineInstance() }
+    val inst = repository.getOrPut(instanceId) { TtsEngineInstance(instanceId) }
     inst.releaseEngines()
 
-    val sampleRate: Int
-    val numSpeakers: Int
-
     if (modelTypeStr == "zipvoice") {
-      val vocoderPath = TtsOfflineConfigBuilder.path(paths, "vocoder")
+      val vocoderPath = paths["vocoder"].orEmpty()
       if (vocoderPath.isBlank()) {
         val msg = "Zipvoice distill models (encoder+decoder only, no vocoder) are not supported. Use the full Zipvoice model that includes vocos_24khz.onnx (or similar vocoder file)."
         Log.e("SherpaOnnxTts", "TTS_INIT_ERROR: $msg")
@@ -202,49 +203,39 @@ internal class TtsInitializationService(
         }
       }
       System.gc()
-      if (am != null) {
-        val memInfoBefore = ActivityManager.MemoryInfo()
-        am.getMemoryInfo(memInfoBefore)
-        Log.i("SherpaOnnxTts", "Zipvoice init: availMem=${memInfoBefore.availMem / (1024 * 1024)} MB (before load)")
-      }
-      val zipvoiceNumThreads = 1
-      val config = TtsOfflineConfigBuilder.buildTtsConfig(
-        paths, "zipvoice", zipvoiceNumThreads, parsed.debug,
-        parsed.noiseScale, parsed.noiseScaleW, parsed.lengthScale,
-        parsed.ruleFsts, parsed.ruleFars, parsed.maxNumSentences?.toInt(), parsed.silenceScale,
-        parsed.provider,
-        parsed.kokoroLang
-      )
-      if (am != null) {
-        val memInfo = ActivityManager.MemoryInfo()
-        am.getMemoryInfo(memInfo)
-        Log.i("SherpaOnnxTts", "Zipvoice init: availMem=${memInfo.availMem / (1024 * 1024)} MB (after load)")
-      }
-      try {
-        Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts zipvoice Create start")
-        inst.tts = OfflineTts(config = config)
-        Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts zipvoice Create ok")
-      } catch (e: Exception) {
-        Log.e("SherpaOnnxTts", "[SherpaOnnx:init] tts zipvoice Create branch=reject ${e.message}", e)
-        rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to create Zipvoice TTS engine: ${e.message}", e)
-        return
-      }
-      sampleRate = inst.tts!!.sampleRate()
-      numSpeakers = inst.tts!!.numSpeakers()
-    } else {
-      val config = TtsOfflineConfigBuilder.buildTtsConfig(
-        paths, modelTypeStr, parsed.numThreads.toInt(), parsed.debug,
-        parsed.noiseScale, parsed.noiseScaleW, parsed.lengthScale,
-        parsed.ruleFsts, parsed.ruleFars, parsed.maxNumSentences?.toInt(), parsed.silenceScale,
-        parsed.provider,
-        parsed.kokoroLang
-      )
-      Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts Create start modelType=$modelTypeStr")
-      inst.tts = OfflineTts(config = config)
-      Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts Create ok")
-      sampleRate = inst.tts!!.sampleRate()
-      numSpeakers = inst.tts!!.numSpeakers()
     }
+
+    val numThreads = if (modelTypeStr == "zipvoice") 1 else parsed.numThreads.toInt()
+    Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts Create start modelType=$modelTypeStr")
+    @Suppress("UNCHECKED_CAST")
+    val raw = TtsNative.nativeInitializeCustom(
+      instanceId = instanceId,
+      modelType = modelTypeStr,
+      paths = HashMap(paths),
+      numThreads = numThreads,
+      debug = parsed.debug,
+      noiseScale = noiseScaleOrDefault(parsed.noiseScale),
+      noiseScaleW = noiseScaleWOrDefault(parsed.noiseScaleW),
+      lengthScale = lengthScaleOrDefault(parsed.lengthScale),
+      ruleFsts = parsed.ruleFsts?.takeIf { it.isNotBlank() },
+      ruleFars = parsed.ruleFars?.takeIf { it.isNotBlank() },
+      maxNumSentences = parsed.maxNumSentences?.toInt()?.coerceAtLeast(1) ?: 1,
+      silenceScale = silenceScaleOrDefault(parsed.silenceScale),
+      provider = parsed.provider?.takeIf { it.isNotBlank() } ?: "cpu",
+      kokoroLang = parsed.kokoroLang?.takeIf { it.isNotBlank() },
+    ) as? HashMap<String, Any>
+
+    val err = TtsNative.initError(raw)
+    if (err != null) {
+      Log.e("SherpaOnnxTts", "[SherpaOnnx:init] tts Create branch=reject $err")
+      rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to create TTS engine: $err")
+      return
+    }
+
+    inst.ready = true
+    val sampleRate = TtsNative.nativeGetSampleRate(instanceId)
+    val numSpeakers = TtsNative.nativeGetNumSpeakers(instanceId)
+    Log.i("SherpaOnnxTts", "[SherpaOnnx:init] tts Create ok")
 
     val modelsArray = Arguments.createArray()
     detectedModels?.forEach { modelObj ->
@@ -259,7 +250,7 @@ internal class TtsInitializationService(
     inst.ttsInitState = TtsInitState(
       modelDir,
       modelTypeStr,
-      if (modelTypeStr == "zipvoice") 1 else parsed.numThreads.toInt(),
+      numThreads,
       parsed.debug,
       parsed.noiseScale?.takeUnless { it.isNaN() },
       parsed.noiseScaleW?.takeUnless { it.isNaN() },
@@ -269,10 +260,11 @@ internal class TtsInitializationService(
       parsed.maxNumSentences?.toInt()?.takeIf { it > 0 },
       parsed.silenceScale?.takeUnless { it.isNaN() },
       parsed.provider?.takeIf { it.isNotBlank() },
-      parsed.quantization?.takeIf { it.isNotBlank() }
+      parsed.quantization?.takeIf { it.isNotBlank() },
+      parsed.kokoroLang?.takeIf { it.isNotBlank() },
     )
 
-    Log.i("SherpaOnnxTts", "initializeTts: instanceId=$instanceId, engine=kotlin-api modelType=$modelTypeStr, sampleRate=$sampleRate, numSpeakers=$numSpeakers")
+    Log.i("SherpaOnnxTts", "initializeTts: instanceId=$instanceId, engine=cxx-api modelType=$modelTypeStr, sampleRate=$sampleRate, numSpeakers=$numSpeakers")
 
     val resultMap = Arguments.createMap()
     resultMap.putBoolean("success", true)
@@ -331,24 +323,33 @@ internal class TtsInitializationService(
       val modelTypeStr = result["modelType"] as? String ?: state.modelType
       val detectedModels = result["detectedModels"] as? ArrayList<*>
 
-      inst.tts?.let { old ->
-        NativeInstanceGate.releaseWhenIdle(NativeInstanceGate.keyFor(old)) {
-          try {
-            old.release()
-          } catch (_: Exception) {
-          }
-        }
-      }
-      inst.tts = null
-      val config = TtsOfflineConfigBuilder.buildTtsConfig(
-        paths, modelTypeStr, state.numThreads, state.debug,
-        nextNoiseScale, nextNoiseScaleW, nextLengthScale,
-        state.ruleFsts, state.ruleFars, state.maxNumSentences, state.silenceScale,
-        state.provider
-      )
-      inst.tts = OfflineTts(config = config)
-      val ttsInstance = inst.tts!!
+      inst.releaseEngines()
 
+      @Suppress("UNCHECKED_CAST")
+      val raw = TtsNative.nativeInitializeCustom(
+        instanceId = instanceId,
+        modelType = modelTypeStr,
+        paths = HashMap(paths),
+        numThreads = state.numThreads,
+        debug = state.debug,
+        noiseScale = noiseScaleOrDefault(nextNoiseScale),
+        noiseScaleW = noiseScaleWOrDefault(nextNoiseScaleW),
+        lengthScale = lengthScaleOrDefault(nextLengthScale),
+        ruleFsts = state.ruleFsts,
+        ruleFars = state.ruleFars,
+        maxNumSentences = state.maxNumSentences ?: 1,
+        silenceScale = silenceScaleOrDefault(state.silenceScale),
+        provider = state.provider ?: "cpu",
+        kokoroLang = state.kokoroLang,
+      ) as? HashMap<String, Any>
+
+      val err = TtsNative.initError(raw)
+      if (err != null) {
+        promise.reject("TTS_UPDATE_ERROR", "Failed to update TTS params: $err")
+        return
+      }
+
+      inst.ready = true
       val modelsArray = Arguments.createArray()
       detectedModels?.forEach { modelObj ->
         if (modelObj is HashMap<*, *>) {
@@ -368,8 +369,8 @@ internal class TtsInitializationService(
       val resultMap = Arguments.createMap()
       resultMap.putBoolean("success", true)
       resultMap.putArray("detectedModels", modelsArray)
-      resultMap.putInt("sampleRate", ttsInstance.sampleRate())
-      resultMap.putInt("numSpeakers", ttsInstance.numSpeakers())
+      resultMap.putInt("sampleRate", TtsNative.nativeGetSampleRate(instanceId))
+      resultMap.putInt("numSpeakers", TtsNative.nativeGetNumSpeakers(instanceId))
       promise.resolve(resultMap)
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "TTS_UPDATE_ERROR: Failed to update TTS params", e)

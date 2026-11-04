@@ -4,12 +4,10 @@ import android.util.Log
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
-import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.sherpaonnx.tts.core.TtsEngineInstance
 
-/** ReadableMap option helpers for TTS generation. */
+/** ReadableMap option helpers for TTS generation (no AAR types). */
 internal object TtsGenerationOptionsParser {
-  /** Parse sid and speed from options with defaults. */
   fun getSid(options: ReadableMap?): Int =
     if (options != null && options.hasKey("sid")) options.getDouble("sid").toInt() else 0
 
@@ -101,35 +99,8 @@ internal object TtsGenerationOptionsParser {
     return options.getArray(key)
   }
 
-  /** Non-clone GenerationConfig when numSteps, extra/lang, and/or phonemes are present. */
-  fun buildNonCloneGenerationConfig(
-    options: ReadableMap?,
-    sid: Int,
-    speed: Float,
-  ): GenerationConfig {
-    val extraMap = buildExtraMap(options)
-    return if (hasNumSteps(options)) {
-      GenerationConfig(
-        speed = speed,
-        sid = sid,
-        numSteps = getNumSteps(options),
-        extra = extraMap,
-        phonemeCodepoints = parsePhonemeCodepoints(options),
-        tokens = parseTokens(options),
-      )
-    } else {
-      GenerationConfig(
-        speed = speed,
-        sid = sid,
-        extra = extraMap,
-        phonemeCodepoints = parsePhonemeCodepoints(options),
-        tokens = parseTokens(options),
-      )
-    }
-  }
-
   /** Merge `extra` map; top-level `lang` wins over `extra.lang`. */
-  fun buildExtraMap(options: ReadableMap?): Map<String, String>? {
+  fun buildExtraMap(options: ReadableMap?): HashMap<String, String>? {
     if (options == null) return null
     val out = linkedMapOf<String, String>()
     if (options.hasKey("extra") && !options.isNull("extra")) {
@@ -143,6 +114,11 @@ internal object TtsGenerationOptionsParser {
     if (options.hasKey("lang") && !options.isNull("lang")) {
       options.getString("lang")?.trim()?.takeIf { it.isNotEmpty() }?.let { out["lang"] = it }
     }
-    return out.takeIf { it.isNotEmpty() }
+    return out.takeIf { it.isNotEmpty() }?.let { HashMap(it) }
   }
+
+  fun needsGenerationOptions(options: ReadableMap?): Boolean =
+    hasNumSteps(options) ||
+      hasPhonemeInput(options) ||
+      !buildExtraMap(options).isNullOrEmpty()
 }

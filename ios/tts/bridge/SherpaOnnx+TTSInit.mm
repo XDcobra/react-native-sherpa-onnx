@@ -11,7 +11,7 @@
 #include "sherpa-onnx-model-detect.h"
 #include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "sherpa-onnx-model-path-fill.h"
-#include "native/sherpa-onnx-tts-wrapper.h"
+#include "sherpa-onnx-tts-engine-wrapper.h"
 
 #include <memory>
 #include <map>

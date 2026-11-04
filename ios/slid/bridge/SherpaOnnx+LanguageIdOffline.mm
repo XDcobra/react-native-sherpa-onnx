@@ -1,8 +1,8 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "AudioRegistry.h"
+#include "SegmentRegistry.h"
 #include "../core/LanguageIdBridgeState.h"
 
 #include <chrono>
@@ -63,27 +63,19 @@ dispatch_queue_t LanguageIdSerialQueue() {
 
   dispatch_async(LanguageIdSerialQueue(), ^{
     @try {
-      SherpaOnnxSpokenLanguageIdentificationConfig config;
-      std::memset(&config, 0, sizeof(config));
-      config.whisper.encoder = encoderStr.c_str();
-      config.whisper.decoder = decoderStr.c_str();
-      config.whisper.tail_paddings = tailPaddings;
-      config.num_threads = numThreads;
-      config.debug = debug ? 1 : 0;
-      config.provider = provider.c_str();
-
-      const SherpaOnnxSpokenLanguageIdentification *handle =
-          SherpaOnnxCreateSpokenLanguageIdentification(&config);
-
-      if (handle == nullptr) {
-        reject(@"LANGUAGE_ID_INIT_ERROR",
-               @"Failed to create native SherpaOnnxSpokenLanguageIdentification instance",
-               nil);
+      auto wrapper = std::make_shared<sherpaonnx::SpokenLanguageIdWrapper>();
+      const auto init = wrapper->initialize(
+          encoderStr, decoderStr, tailPaddings, numThreads, provider, debug);
+      if (!init.success) {
+        NSString *msg = init.error.empty()
+            ? @"Failed to create SpokenLanguageIdWrapper"
+            : [NSString stringWithUTF8String:init.error.c_str()];
+        reject(@"LANGUAGE_ID_INIT_ERROR", msg, nil);
         return;
       }
 
       auto state = std::make_shared<sherpaonnx::language_id::bridge::LanguageIdInstanceState>();
-      state->handle = handle;
+      state->wrapper = std::move(wrapper);
       state->numThreads = numThreads;
       state->provider = provider;
 
@@ -138,7 +130,7 @@ dispatch_queue_t LanguageIdSerialQueue() {
   }
 
   auto state = sherpaonnx::language_id::bridge::LookupLanguageId(instanceIdStr);
-  if (!state || state->handle == nullptr) {
+  if (!state || !state->isReady()) {
     reject(@"LANGUAGE_ID_NOT_INITIALIZED",
            [NSString stringWithFormat:@"SLID instance not found: %@", instanceId],
            nil);
@@ -164,22 +156,14 @@ dispatch_queue_t LanguageIdSerialQueue() {
 
   dispatch_async(LanguageIdSerialQueue(), ^{
     @try {
-      std::vector<float> samples;
       int sampleRate = inSampleRate;
-
-      if (!hasStart) {
-        if (!pa_read_offline_samples(audioInId, &samples, &sampleRate) || samples.empty()) {
-          reject(@"LANGUAGE_ID_AUDIO_BUFFER_EMPTY",
-                 [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioBufferId],
-                 nil);
-          return;
-        }
-      } else {
+      int rangeStart = -1;
+      int rangeEnd = -1;
+      if (hasStart) {
         const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
         const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
         const int end = std::min(endRaw, inNumSamples);
-        const int frameCount = std::max(0, end - start);
-        if (frameCount == 0) {
+        if (end <= start) {
           resolve(@{
             @"lang": @"",
             @"audioDuration": @(0.0),
@@ -187,54 +171,47 @@ dispatch_queue_t LanguageIdSerialQueue() {
           });
           return;
         }
-        std::string sliceErrCode;
-        std::string sliceErrMsg;
-        if (!pa_get_offline_samples_slice(
-                audioInId, start, frameCount, &samples, &sliceErrCode, &sliceErrMsg)) {
-          NSString *code = sliceErrCode.empty()
-              ? @"LANGUAGE_ID_IDENTIFY_FAILED"
-              : [NSString stringWithUTF8String:sliceErrCode.c_str()];
-          NSString *msg = sliceErrMsg.empty()
-              ? @"Failed to read offline audio slice"
-              : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
-          reject(code, msg, nil);
+        rangeStart = start;
+        rangeEnd = end;
+      }
+
+      PaOfflineSampleView pcmView;
+      std::string sliceErrCode;
+      std::string sliceErrMsg;
+      if (!pa_acquire_offline_sample_view(audioInId, rangeStart, rangeEnd, &pcmView, &sliceErrCode,
+                                          &sliceErrMsg) ||
+          pcmView.count == 0 || pcmView.data == nullptr) {
+        if (!sliceErrCode.empty() && sliceErrCode != "AUDIO_BUFFER_NOT_FOUND") {
+          reject([NSString stringWithUTF8String:sliceErrCode.c_str()],
+                 sliceErrMsg.empty()
+                     ? @"Failed to read offline audio slice"
+                     : [NSString stringWithUTF8String:sliceErrMsg.c_str()],
+                 nil);
           return;
         }
+        reject(@"LANGUAGE_ID_AUDIO_BUFFER_EMPTY",
+               [NSString stringWithFormat:@"Offline audio buffer is empty: %@", audioBufferId],
+               nil);
+        return;
       }
+      sampleRate = pcmView.sampleRate;
 
       const auto t0 = std::chrono::steady_clock::now();
       const double audioDuration = (sampleRate > 0)
-          ? static_cast<double>(samples.size()) / static_cast<double>(sampleRate)
+          ? static_cast<double>(pcmView.count) / static_cast<double>(sampleRate)
           : 0.0;
 
-      SherpaOnnxOfflineStream *stream =
-          SherpaOnnxSpokenLanguageIdentificationCreateOfflineStream(state->handle);
-      if (stream == nullptr) {
-        reject(@"LANGUAGE_ID_IDENTIFY_FAILED", @"Failed to create offline stream", nil);
+      const auto computed = state->wrapper->compute(
+          pcmView.data, static_cast<int32_t>(pcmView.count), sampleRate);
+      if (!computed.success) {
+        NSString *msg = computed.error.empty()
+            ? @"Language identification compute failed"
+            : [NSString stringWithUTF8String:computed.error.c_str()];
+        reject(@"LANGUAGE_ID_IDENTIFY_FAILED", msg, nil);
         return;
       }
 
-      SherpaOnnxAcceptWaveformOffline(
-          stream,
-          sampleRate,
-          samples.data(),
-          static_cast<int32_t>(samples.size()));
-
-      const SherpaOnnxSpokenLanguageIdentificationResult *result =
-          SherpaOnnxSpokenLanguageIdentificationCompute(state->handle, stream);
-
-      SherpaOnnxDestroyOfflineStream(stream);
-
-      if (result == nullptr || result->lang == nullptr) {
-        if (result != nullptr) {
-          SherpaOnnxDestroySpokenLanguageIdentificationResult(result);
-        }
-        reject(@"LANGUAGE_ID_IDENTIFY_FAILED", @"Language identification compute returned null", nil);
-        return;
-      }
-
-      NSString *langStr = [NSString stringWithUTF8String:result->lang];
-      SherpaOnnxDestroySpokenLanguageIdentificationResult(result);
+      NSString *langStr = [NSString stringWithUTF8String:computed.lang.c_str()];
 
       const auto t1 = std::chrono::steady_clock::now();
       const double elapsedMs =
@@ -317,7 +294,7 @@ dispatch_queue_t LanguageIdSerialQueue() {
   }
 
   auto state = sherpaonnx::language_id::bridge::LookupLanguageId(instanceIdStr);
-  if (!state || state->handle == nullptr) {
+  if (!state || !state->isReady()) {
     reject(@"LANGUAGE_ID_NOT_INITIALIZED",
            [NSString stringWithFormat:@"SLID instance not found: %@", instanceId],
            nil);
@@ -410,12 +387,13 @@ dispatch_queue_t LanguageIdSerialQueue() {
         const int end = std::min(span.endSample, inNumSamples);
         const int frameCount = std::max(0, end - start);
 
-        std::vector<float> samples;
+        PaOfflineSampleView pcmView;
         std::string sliceErrCode;
         std::string sliceErrMsg;
+        bool havePcm = false;
         if (frameCount > 0) {
-          if (!pa_get_offline_samples_slice(
-                  audioInIdStr, start, frameCount, &samples, &sliceErrCode, &sliceErrMsg)) {
+          if (!pa_acquire_offline_sample_view(audioInIdStr, start, end, &pcmView, &sliceErrCode,
+                                              &sliceErrMsg)) {
             NSString *code = sliceErrCode.empty()
                 ? @"LANGUAGE_ID_IDENTIFY_FAILED"
                 : [NSString stringWithUTF8String:sliceErrCode.c_str()];
@@ -425,22 +403,15 @@ dispatch_queue_t LanguageIdSerialQueue() {
             reject(code, msg, nil);
             return;
           }
+          havePcm = pcmView.count > 0 && pcmView.data != nullptr;
         }
 
         NSString *langStr = @"";
-        if (!samples.empty()) {
-          SherpaOnnxOfflineStream *stream =
-              SherpaOnnxSpokenLanguageIdentificationCreateOfflineStream(state->handle);
-          if (stream != nullptr) {
-            SherpaOnnxAcceptWaveformOffline(
-                stream, inSampleRate, samples.data(), static_cast<int32_t>(samples.size()));
-            const SherpaOnnxSpokenLanguageIdentificationResult *result =
-                SherpaOnnxSpokenLanguageIdentificationCompute(state->handle, stream);
-            SherpaOnnxDestroyOfflineStream(stream);
-            if (result != nullptr && result->lang != nullptr) {
-              langStr = [NSString stringWithUTF8String:result->lang];
-              SherpaOnnxDestroySpokenLanguageIdentificationResult(result);
-            }
+        if (havePcm) {
+          const auto computed = state->wrapper->compute(
+              pcmView.data, static_cast<int32_t>(pcmView.count), inSampleRate);
+          if (computed.success && !computed.lang.empty()) {
+            langStr = [NSString stringWithUTF8String:computed.lang.c_str()];
           }
         }
 

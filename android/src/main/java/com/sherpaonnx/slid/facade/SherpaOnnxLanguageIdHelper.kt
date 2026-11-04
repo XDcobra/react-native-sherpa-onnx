@@ -5,58 +5,79 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
-import com.k2fsa.sherpa.onnx.OfflineStream
-import com.k2fsa.sherpa.onnx.SpokenLanguageIdentification
-import com.k2fsa.sherpa.onnx.SpokenLanguageIdentificationConfig
-import com.k2fsa.sherpa.onnx.SpokenLanguageIdentificationWhisperConfig
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
+import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
 import com.sherpaonnx.segment.pipeline.SegmentRecord
-import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.slid.core.LanguageIdDebug
 import com.sherpaonnx.slid.core.LanguageIdErrorCodes
+import com.sherpaonnx.slid.core.LanguageIdInstance
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
 internal class SherpaOnnxLanguageIdHelper {
   private val executor = Executors.newSingleThreadExecutor()
-  private val instances = ConcurrentHashMap<String, SpokenLanguageIdentification>()
+  private val instances = ConcurrentHashMap<String, LanguageIdInstance>()
 
   fun shutdown() {
     executor.shutdownNow()
-    for ((_, instance) in instances) {
-      releaseSlidSafely(instance, where = "shutdown")
+    for ((id, inst) in instances) {
+      releaseSlidSafely(inst, where = "shutdown:$id")
     }
     instances.clear()
+    nativeShutdownAll()
   }
 
-  private fun releaseSlidSafely(slid: SpokenLanguageIdentification, where: String) {
-    val gateKey = NativeInstanceGate.keyFor(slid)
-    val slidIdentity = System.identityHashCode(slid)
+  private fun releaseSlidSafely(inst: LanguageIdInstance, where: String) {
+    val gateKey = inst.gateKey()
     val inFlight = NativeInstanceGate.inFlight(gateKey)
     if (inFlight > 0) {
       LanguageIdDebug.warn(
-        "UNLOAD_DURING_COMPUTE where=$where slid=$slidIdentity gateKey=$gateKey inFlight=$inFlight",
+        "UNLOAD_DURING_COMPUTE where=$where instanceId=${inst.instanceId} " +
+          "gateKey=$gateKey inFlight=$inFlight",
       )
     }
     val released = NativeInstanceGate.releaseWhenIdle(gateKey) {
       try {
-        slid.release()
+        nativeUnload(inst.instanceId)
       } catch (e: Exception) {
         LanguageIdDebug.warn(
-          "unload.releaseError where=$where slid=$slidIdentity msg=${e.message}",
+          "unload.releaseError where=$where instanceId=${inst.instanceId} msg=${e.message}",
         )
       }
     }
     LanguageIdDebug.lifecycle(
       "unload.releaseWhenIdle",
-      "where=$where slid=$slidIdentity gateKey=$gateKey nativeReleased=$released inFlightWas=$inFlight",
+      "where=$where instanceId=${inst.instanceId} gateKey=$gateKey " +
+        "nativeReleased=$released inFlightWas=$inFlight",
     )
   }
 
-  fun getInstance(instanceId: String): SpokenLanguageIdentification? =
-    instances[instanceId]
+  fun hasInstance(instanceId: String): Boolean =
+    instances.containsKey(instanceId) && nativeHasInstance(instanceId)
+
+  fun getInstance(instanceId: String): LanguageIdInstance? = instances[instanceId]
+
+  /**
+   * Compute without acquiring [NativeInstanceGate] — caller must already hold the gate
+   * (live pipeline worker).
+   */
+  internal fun computeForLive(
+    instanceId: String,
+    samples: FloatArray,
+    sampleRate: Int,
+  ): String {
+    @Suppress("UNCHECKED_CAST")
+    val raw = nativeCompute(instanceId, samples, sampleRate) as? HashMap<String, Any>
+      ?: throw IllegalStateException("nativeCompute returned null")
+    val success = raw["success"] as? Boolean ?: false
+    if (!success) {
+      val err = raw["error"] as? String ?: "compute failed"
+      throw IllegalStateException(err)
+    }
+    return (raw["lang"] as? String)?.trim().orEmpty()
+  }
 
   fun initializeLanguageId(
     instanceId: String,
@@ -91,21 +112,24 @@ internal class SherpaOnnxLanguageIdHelper {
           releaseSlidSafely(old, where = "reinit:$instanceId")
         }
 
-        val whisperConfig = SpokenLanguageIdentificationWhisperConfig(
-          encoder = encoder,
-          decoder = decoder,
-          tailPaddings = tailPaddings,
-        )
-        val config = SpokenLanguageIdentificationConfig(
-          whisper = whisperConfig,
-          numThreads = numThreads,
-          debug = debug,
-          provider = provider,
-        )
+        @Suppress("UNCHECKED_CAST")
+        val raw = nativeInitialize(
+          instanceId,
+          encoder,
+          decoder,
+          tailPaddings,
+          numThreads,
+          provider,
+          debug,
+        ) as? HashMap<String, Any>
+        val success = raw?.get("success") as? Boolean ?: false
+        if (!success) {
+          val err = raw?.get("error") as? String ?: "Failed to initialize SLID"
+          promise.reject(LanguageIdErrorCodes.INIT_ERROR, err)
+          return@execute
+        }
 
-        val slid = SpokenLanguageIdentification(config = config)
-        instances[instanceId] = slid
-
+        instances[instanceId] = LanguageIdInstance(instanceId)
         val result = Arguments.createMap()
         result.putBoolean("success", true)
         promise.resolve(result)
@@ -127,6 +151,49 @@ internal class SherpaOnnxLanguageIdHelper {
     }
   }
 
+  private fun computeLang(
+    instanceId: String,
+    bufferId: String,
+    startSample: Int,
+    endSampleExclusive: Int,
+    sampleRate: Int,
+    where: String,
+  ): String {
+    val inst = instances[instanceId]
+      ?: throw IllegalStateException("SLID instance not found: $instanceId")
+    val gateKey = inst.gateKey()
+    if (!NativeInstanceGate.beginUse(gateKey)) {
+      throw IllegalStateException("SLID instance released: $instanceId")
+    }
+    val opId = LanguageIdDebug.nextOpId()
+    LanguageIdDebug.computeEnter(
+      slidIdentity = instanceId.hashCode(),
+      where = where,
+      opId = opId,
+      detail = "instanceId=$instanceId bufferId=$bufferId start=$startSample end=$endSampleExclusive sr=$sampleRate",
+    )
+    try {
+      @Suppress("UNCHECKED_CAST")
+      val raw = nativeComputeFromBuffer(instanceId, bufferId, startSample, endSampleExclusive)
+        as? HashMap<String, Any>
+        ?: throw IllegalStateException("nativeComputeFromBuffer returned null")
+      val success = raw["success"] as? Boolean ?: false
+      if (!success) {
+        val err = raw["error"] as? String ?: "compute failed"
+        throw IllegalStateException(err)
+      }
+      return (raw["lang"] as? String)?.trim().orEmpty()
+    } finally {
+      LanguageIdDebug.computeLeave(
+        slidIdentity = instanceId.hashCode(),
+        where = where,
+        opId = opId,
+        detail = "instanceId=$instanceId",
+      )
+      NativeInstanceGate.endUse(gateKey)
+    }
+  }
+
   fun identifyLanguageOffline(
     instanceId: String,
     audioBufferId: String,
@@ -134,8 +201,7 @@ internal class SherpaOnnxLanguageIdHelper {
     endSample: Double?,
     promise: Promise
   ) {
-    val slid = instances[instanceId]
-    if (slid == null) {
+    if (!hasInstance(instanceId)) {
       promise.reject(LanguageIdErrorCodes.NOT_INITIALIZED, "SLID instance not found: $instanceId")
       return
     }
@@ -168,18 +234,21 @@ internal class SherpaOnnxLanguageIdHelper {
     }
 
     executor.execute {
-      var stream: OfflineStream? = null
       try {
         val t0 = SystemClock.uptimeMillis()
         val sampleRate = audioEntry.sampleRate
-        val samples: FloatArray
+        val start: Int
+        val end: Int
+        val frameCount: Int
         if (!hasStart) {
-          samples = audioEntry.readAllSamples()
+          start = -1
+          end = -1
+          frameCount = audioEntry.numSamples
         } else {
-          val start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
+          start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
           val endRaw = kotlin.math.floor(endSample!!).toInt().coerceAtLeast(start)
-          val end = endRaw.coerceAtMost(audioEntry.numSamples)
-          val frameCount = (end - start).coerceAtLeast(0)
+          end = endRaw.coerceAtMost(audioEntry.numSamples)
+          frameCount = (end - start).coerceAtLeast(0)
           if (frameCount == 0) {
             val result = Arguments.createMap()
             result.putString("lang", "")
@@ -188,40 +257,11 @@ internal class SherpaOnnxLanguageIdHelper {
             promise.resolve(result)
             return@execute
           }
-          samples = audioEntry.readSlice(start, frameCount)
         }
-        val audioDuration = if (sampleRate > 0) samples.size.toDouble() / sampleRate.toDouble() else 0.0
+        val audioDuration =
+          if (sampleRate > 0) frameCount.toDouble() / sampleRate.toDouble() else 0.0
 
-        val slidIdentity = System.identityHashCode(slid)
-        val gateKey = NativeInstanceGate.keyFor(slid)
-        if (!NativeInstanceGate.beginUse(gateKey)) {
-          promise.reject(
-            LanguageIdErrorCodes.NOT_INITIALIZED,
-            "SLID instance released: $instanceId",
-          )
-          return@execute
-        }
-        val opId = LanguageIdDebug.nextOpId()
-        LanguageIdDebug.computeEnter(
-          slidIdentity = slidIdentity,
-          where = "offline.identify",
-          opId = opId,
-          detail = "instanceId=$instanceId samples=${samples.size} sr=$sampleRate",
-        )
-        val lang: String
-        try {
-          stream = slid.createStream()
-          stream.acceptWaveform(samples, sampleRate)
-          lang = slid.compute(stream)
-        } finally {
-          LanguageIdDebug.computeLeave(
-            slidIdentity = slidIdentity,
-            where = "offline.identify",
-            opId = opId,
-            detail = "instanceId=$instanceId",
-          )
-          NativeInstanceGate.endUse(gateKey)
-        }
+        val lang = computeLang(instanceId, audioBufferId, start, end, sampleRate, "offline.identify")
         val elapsedMs = (SystemClock.uptimeMillis() - t0).toDouble()
 
         val result = Arguments.createMap()
@@ -238,15 +278,16 @@ internal class SherpaOnnxLanguageIdHelper {
         )
       } catch (e: Exception) {
         Log.e(LanguageIdErrorCodes.TAG, "Language identification failed", e)
-        promise.reject(
-          LanguageIdErrorCodes.IDENTIFY_FAILED,
-          "Language identification failed: ${e.message}",
-          e
-        )
-      } finally {
-        try {
-          stream?.release()
-        } catch (_: Exception) {}
+        val msg = e.message.orEmpty()
+        if (msg.contains("released") || msg.contains("not found")) {
+          promise.reject(LanguageIdErrorCodes.NOT_INITIALIZED, msg, e)
+        } else {
+          promise.reject(
+            LanguageIdErrorCodes.IDENTIFY_FAILED,
+            "Language identification failed: ${e.message}",
+            e
+          )
+        }
       }
     }
   }
@@ -262,8 +303,7 @@ internal class SherpaOnnxLanguageIdHelper {
       promise.reject(LanguageIdErrorCodes.INIT_ERROR, "instanceId is required")
       return
     }
-    val slid = instances[instanceId]
-    if (slid == null) {
+    if (!hasInstance(instanceId)) {
       promise.reject(LanguageIdErrorCodes.NOT_INITIALIZED, "SLID instance not found: $instanceId")
       return
     }
@@ -357,49 +397,17 @@ internal class SherpaOnnxLanguageIdHelper {
 
         for (i in speechSpans.indices) {
           val span = speechSpans[i]
-          val frameCount = (span.endSample - span.startSample).coerceAtLeast(0)
-          val samples = audioInEntry.readSlice(span.startSample, frameCount)
-
-          var stream: OfflineStream? = null
-          val lang: String
-          val slidIdentity = System.identityHashCode(slid)
-          val gateKey = NativeInstanceGate.keyFor(slid)
-          if (!NativeInstanceGate.beginUse(gateKey)) {
-            promise.reject(
-              LanguageIdErrorCodes.NOT_INITIALIZED,
-              "SLID instance released: $instanceId",
-            )
-            return@execute
-          }
-          val opId = LanguageIdDebug.nextOpId()
-          LanguageIdDebug.computeEnter(
-            slidIdentity = slidIdentity,
-            where = "offline.label",
-            opId = opId,
-            detail = "instanceId=$instanceId span=$i samples=${samples.size}",
-          )
-          try {
-            stream = slid.createStream()
-            stream.acceptWaveform(samples, sampleRate)
-            lang = slid.compute(stream).trim()
-          } finally {
-            try {
-              stream?.release()
-            } catch (_: Exception) {}
-            LanguageIdDebug.computeLeave(
-              slidIdentity = slidIdentity,
-              where = "offline.label",
-              opId = opId,
-              detail = "instanceId=$instanceId span=$i",
-            )
-            NativeInstanceGate.endUse(gateKey)
-          }
+          val start = span.startSample.coerceAtLeast(0)
+          val end = span.endSample.coerceAtMost(audioInEntry.numSamples)
+          val lang = computeLang(instanceId, audioInId, start, end, sampleRate, "offline.label")
 
           val durationMs = if (span.durationMs > 0) span.durationMs else {
             if (sampleRate > 0) ((span.endSample - span.startSample) * 1000) / sampleRate else 0
           }
-          val startTime = if (sampleRate > 0) span.startSample.toDouble() / sampleRate.toDouble() else 0.0
-          val endTime = if (sampleRate > 0) span.endSample.toDouble() / sampleRate.toDouble() else 0.0
+          val startTime =
+            if (sampleRate > 0) span.startSample.toDouble() / sampleRate.toDouble() else 0.0
+          val endTime =
+            if (sampleRate > 0) span.endSample.toDouble() / sampleRate.toDouble() else 0.0
 
           records.add(
             SegmentRecord(
@@ -476,11 +484,16 @@ internal class SherpaOnnxLanguageIdHelper {
         )
       } catch (e: Exception) {
         Log.e(LanguageIdErrorCodes.TAG, "Language identification labeling failed", e)
-        promise.reject(
-          LanguageIdErrorCodes.IDENTIFY_FAILED,
-          "Language identification labeling failed: ${e.message}",
-          e
-        )
+        val msg = e.message.orEmpty()
+        if (msg.contains("released") || msg.contains("not found")) {
+          promise.reject(LanguageIdErrorCodes.NOT_INITIALIZED, msg, e)
+        } else {
+          promise.reject(
+            LanguageIdErrorCodes.IDENTIFY_FAILED,
+            "Language identification labeling failed: ${e.message}",
+            e
+          )
+        }
       }
     }
   }
@@ -491,20 +504,17 @@ internal class SherpaOnnxLanguageIdHelper {
   ) {
     executor.execute {
       try {
-        val slid = instances.remove(instanceId)
-        if (slid != null) {
-          val slidIdentity = System.identityHashCode(slid)
+        val inst = instances.remove(instanceId)
+        if (inst != null) {
           LanguageIdDebug.lifecycle(
             "unload.begin",
-            "instanceId=$instanceId slid=$slidIdentity " +
-              "inFlight=${NativeInstanceGate.inFlight(NativeInstanceGate.keyFor(slid))}",
+            "instanceId=$instanceId inFlight=${NativeInstanceGate.inFlight(inst.gateKey())}",
           )
-          releaseSlidSafely(slid, where = "unload:$instanceId")
-          LanguageIdDebug.lifecycle(
-            "unload.done",
-            "instanceId=$instanceId slid=$slidIdentity",
-          )
+          releaseSlidSafely(inst, where = "unload:$instanceId")
+          LanguageIdDebug.lifecycle("unload.done", "instanceId=$instanceId")
         } else {
+          // Ensure JNI map is cleared even if Kotlin bookkeeping missed it.
+          nativeUnload(instanceId)
           LanguageIdDebug.lifecycle("unload.miss", "instanceId=$instanceId")
         }
         promise.resolve(null)
@@ -513,5 +523,42 @@ internal class SherpaOnnxLanguageIdHelper {
         promise.resolve(null)
       }
     }
+  }
+
+  companion object {
+    @JvmStatic
+    private external fun nativeInitialize(
+      instanceId: String,
+      encoder: String,
+      decoder: String,
+      tailPaddings: Int,
+      numThreads: Int,
+      provider: String,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeCompute(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeComputeFromBuffer(
+      instanceId: String,
+      bufferId: String,
+      startSample: Int,
+      endSampleExclusive: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeHasInstance(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativeUnload(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAll()
   }
 }

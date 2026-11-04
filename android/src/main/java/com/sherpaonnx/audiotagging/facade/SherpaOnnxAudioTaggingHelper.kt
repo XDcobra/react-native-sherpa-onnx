@@ -5,10 +5,9 @@ import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
-import com.k2fsa.sherpa.onnx.AudioTagging
-import com.k2fsa.sherpa.onnx.OfflineStream
 import com.sherpaonnx.audiotagging.config.AudioTaggingInitOptionsParser
 import com.sherpaonnx.audiotagging.core.AudioTaggingErrorCodes
+import com.sherpaonnx.audiotagging.core.AudioTaggingInstance
 import com.sherpaonnx.audiotagging.core.AudioTaggingModelConfigFactory
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.detect.ModelPathValidationNative
@@ -26,21 +25,19 @@ internal class SherpaOnnxAudioTaggingHelper(
     quantization: String?
   ) -> HashMap<String, Any>?,
 ) {
-  internal data class Instance(
-    val tagger: AudioTagging,
-    val defaultTopK: Int,
-  )
-
   private sealed class ResolveResult {
     data class Ok(val modelType: String, val paths: Map<String, String>) : ResolveResult()
     data class Err(val code: String, val message: String) : ResolveResult()
   }
 
   private val executor = Executors.newSingleThreadExecutor()
-  private val instances = ConcurrentHashMap<String, Instance>()
+  private val instances = ConcurrentHashMap<String, AudioTaggingInstance>()
   private val activeLivePipelineByInstance = ConcurrentHashMap<String, String>()
 
-  fun getInstance(instanceId: String): Instance? = instances[instanceId]
+  fun getInstance(instanceId: String): AudioTaggingInstance? = instances[instanceId]
+
+  fun hasInstance(instanceId: String): Boolean =
+    instances.containsKey(instanceId) && nativeHasInstance(instanceId)
 
   fun trackLivePipeline(instanceId: String, pipelineId: String) {
     activeLivePipelineByInstance[instanceId] = pipelineId
@@ -63,36 +60,75 @@ internal class SherpaOnnxAudioTaggingHelper(
       stopActiveLivePipeline(id)
     }
     executor.shutdownNow()
-    for ((_, instance) in instances) {
-      releaseTaggerSafely(instance.tagger, where = "shutdown")
+    for ((id, instance) in instances) {
+      releaseTaggerSafely(instance, where = "shutdown:$id")
     }
     instances.clear()
+    nativeShutdownAll()
   }
 
-  private fun releaseTaggerSafely(tagger: AudioTagging, where: String) {
-    val gateKey = NativeInstanceGate.keyFor(tagger)
-    val identity = System.identityHashCode(tagger)
+  private fun releaseTaggerSafely(inst: AudioTaggingInstance, where: String) {
+    val gateKey = inst.gateKey()
     val inFlight = NativeInstanceGate.inFlight(gateKey)
     if (inFlight > 0) {
       Log.w(
         AudioTaggingErrorCodes.TAG,
-        "UNLOAD_DURING_COMPUTE where=$where tagger=$identity gateKey=$gateKey inFlight=$inFlight",
+        "UNLOAD_DURING_COMPUTE where=$where instanceId=${inst.instanceId} " +
+          "gateKey=$gateKey inFlight=$inFlight",
       )
     }
     val released = NativeInstanceGate.releaseWhenIdle(gateKey) {
       try {
-        tagger.release()
+        nativeUnload(inst.instanceId)
       } catch (e: Exception) {
         Log.w(
           AudioTaggingErrorCodes.TAG,
-          "unload.releaseError where=$where tagger=$identity msg=${e.message}",
+          "unload.releaseError where=$where instanceId=${inst.instanceId} msg=${e.message}",
         )
       }
     }
     Log.d(
       AudioTaggingErrorCodes.TAG,
-      "unload.releaseWhenIdle where=$where tagger=$identity nativeReleased=$released inFlightWas=$inFlight",
+      "unload.releaseWhenIdle where=$where instanceId=${inst.instanceId} " +
+        "nativeReleased=$released inFlightWas=$inFlight",
     )
+  }
+
+  /**
+   * Compute without acquiring [NativeInstanceGate] — caller must already hold the gate
+   * (live pipeline worker).
+   */
+  internal fun computeForLive(
+    instanceId: String,
+    samples: FloatArray,
+    sampleRate: Int,
+    topK: Int,
+  ): List<Map<String, Any>> {
+    @Suppress("UNCHECKED_CAST")
+    val raw = nativeCompute(instanceId, samples, sampleRate, topK) as? HashMap<String, Any>
+      ?: throw IllegalStateException("nativeCompute returned null")
+    val success = raw["success"] as? Boolean ?: false
+    if (!success) {
+      val err = raw["error"] as? String ?: "compute failed"
+      throw IllegalStateException(err)
+    }
+    @Suppress("UNCHECKED_CAST")
+    val events = raw["events"] as? List<*>
+    return mapEvents(events)
+  }
+
+  private fun mapEvents(events: List<*>?): List<Map<String, Any>> {
+    if (events == null) return emptyList()
+    val out = ArrayList<Map<String, Any>>(events.size)
+    for (item in events) {
+      @Suppress("UNCHECKED_CAST")
+      val map = item as? Map<String, Any> ?: continue
+      val name = map["name"] as? String ?: ""
+      val index = (map["index"] as? Number)?.toInt() ?: 0
+      val prob = (map["prob"] as? Number)?.toDouble() ?: 0.0
+      out.add(mapOf("name" to name, "index" to index, "prob" to prob))
+    }
+    return out
   }
 
   fun initializeAudioTagging(
@@ -130,25 +166,37 @@ internal class SherpaOnnxAudioTaggingHelper(
           }
           is ResolveResult.Ok -> {
             instances.remove(instanceId)?.let { old ->
-              releaseTaggerSafely(old.tagger, where = "reinit:$instanceId")
+              releaseTaggerSafely(old, where = "reinit:$instanceId")
             }
 
+            val modelPath = resolved.paths["model"].orEmpty()
+            val labelsPath = resolved.paths["labels"].orEmpty()
             Log.d(
               AudioTaggingErrorCodes.TAG,
               "init branch=${parsed.initMode} instanceId=$instanceId modelType=${resolved.modelType} " +
-                "topK=${parsed.topK} model=${resolved.paths["model"]} labels=${resolved.paths["labels"]}",
+                "topK=${parsed.topK} model=$modelPath labels=$labelsPath",
             )
 
-            val config = AudioTaggingModelConfigFactory.build(
-              modelType = resolved.modelType,
-              paths = resolved.paths,
-              topK = parsed.topK,
-              numThreads = parsed.numThreads,
-              provider = parsed.provider,
-              debug = parsed.debug,
-            )
-            val tagger = AudioTagging(config = config)
-            instances[instanceId] = Instance(tagger = tagger, defaultTopK = parsed.topK)
+            @Suppress("UNCHECKED_CAST")
+            val raw = nativeInitialize(
+              instanceId,
+              resolved.modelType,
+              modelPath,
+              labelsPath,
+              parsed.topK,
+              parsed.numThreads,
+              parsed.provider ?: "cpu",
+              parsed.debug,
+            ) as? HashMap<String, Any>
+            val success = raw?.get("success") as? Boolean ?: false
+            if (!success) {
+              val err = raw?.get("error") as? String ?: "Failed to initialize audio tagging"
+              promise.reject(AudioTaggingErrorCodes.INIT_ERROR, err)
+              return@execute
+            }
+
+            instances[instanceId] =
+              AudioTaggingInstance(instanceId = instanceId, defaultTopK = parsed.topK)
 
             val result = Arguments.createMap()
             result.putBoolean("success", true)
@@ -227,7 +275,7 @@ internal class SherpaOnnxAudioTaggingHelper(
     promise: Promise,
   ) {
     val instance = instances[instanceId]
-    if (instance == null) {
+    if (instance == null || !nativeHasInstance(instanceId)) {
       promise.reject(
         AudioTaggingErrorCodes.NOT_INITIALIZED,
         "Audio tagging instance not found: $instanceId",
@@ -264,18 +312,21 @@ internal class SherpaOnnxAudioTaggingHelper(
     val effectiveTopK = (topK?.toInt() ?: instance.defaultTopK).coerceAtLeast(1)
 
     executor.execute {
-      var stream: OfflineStream? = null
       try {
         val t0 = SystemClock.uptimeMillis()
         val sampleRate = audioEntry.sampleRate
-        val samples: FloatArray
+        val start: Int
+        val end: Int
+        val frameCount: Int
         if (!hasStart) {
-          samples = audioEntry.readAllSamples()
+          start = -1
+          end = -1
+          frameCount = audioEntry.numSamples
         } else {
-          val start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
+          start = kotlin.math.floor(startSample!!).toInt().coerceAtLeast(0)
           val endRaw = kotlin.math.floor(endSample!!).toInt().coerceAtLeast(start)
-          val end = endRaw.coerceAtMost(audioEntry.numSamples)
-          val frameCount = (end - start).coerceAtLeast(0)
+          end = endRaw.coerceAtMost(audioEntry.numSamples)
+          frameCount = (end - start).coerceAtLeast(0)
           if (frameCount == 0) {
             val result = Arguments.createMap()
             result.putArray("events", Arguments.createArray())
@@ -285,7 +336,6 @@ internal class SherpaOnnxAudioTaggingHelper(
             promise.resolve(result)
             return@execute
           }
-          samples = audioEntry.readSlice(start, frameCount)
           Log.d(
             AudioTaggingErrorCodes.TAG,
             "tagOffline slice instanceId=$instanceId bufferId=$audioBufferId " +
@@ -293,16 +343,15 @@ internal class SherpaOnnxAudioTaggingHelper(
           )
         }
         val audioDuration =
-          if (sampleRate > 0) samples.size.toDouble() / sampleRate.toDouble() else 0.0
+          if (sampleRate > 0) frameCount.toDouble() / sampleRate.toDouble() else 0.0
 
         Log.d(
           AudioTaggingErrorCodes.TAG,
           "tagOffline instanceId=$instanceId bufferId=$audioBufferId " +
-            "sampleRate=$sampleRate numSamples=${samples.size} topK=$effectiveTopK",
+            "sampleRate=$sampleRate numSamples=$frameCount topK=$effectiveTopK",
         )
 
-        val tagger = instance.tagger
-        val gateKey = NativeInstanceGate.keyFor(tagger)
+        val gateKey = instance.gateKey()
         if (!NativeInstanceGate.beginUse(gateKey)) {
           promise.reject(
             AudioTaggingErrorCodes.NOT_INITIALIZED,
@@ -311,10 +360,25 @@ internal class SherpaOnnxAudioTaggingHelper(
           return@execute
         }
 
-        val events = try {
-          stream = tagger.createStream()
-          stream.acceptWaveform(samples, sampleRate)
-          tagger.compute(stream, effectiveTopK)
+        val events: List<Map<String, Any>>
+        try {
+          @Suppress("UNCHECKED_CAST")
+          val raw = nativeComputeFromBuffer(
+            instanceId,
+            audioBufferId,
+            start,
+            end,
+            effectiveTopK,
+          )
+            as? HashMap<String, Any>
+            ?: throw IllegalStateException("nativeCompute returned null")
+          val success = raw["success"] as? Boolean ?: false
+          if (!success) {
+            val err = raw["error"] as? String ?: "compute failed"
+            throw IllegalStateException(err)
+          }
+          @Suppress("UNCHECKED_CAST")
+          events = mapEvents(raw["events"] as? List<*>)
         } finally {
           NativeInstanceGate.endUse(gateKey)
         }
@@ -328,9 +392,9 @@ internal class SherpaOnnxAudioTaggingHelper(
         val eventArray = Arguments.createArray()
         for (event in events) {
           val map = Arguments.createMap()
-          map.putString("name", event.name)
-          map.putInt("index", event.index)
-          map.putDouble("prob", event.prob.toDouble())
+          map.putString("name", event["name"] as? String ?: "")
+          map.putInt("index", (event["index"] as? Number)?.toInt() ?: 0)
+          map.putDouble("prob", (event["prob"] as? Number)?.toDouble() ?: 0.0)
           eventArray.pushMap(map)
         }
 
@@ -354,11 +418,6 @@ internal class SherpaOnnxAudioTaggingHelper(
           "Audio tagging failed: ${e.message}",
           e,
         )
-      } finally {
-        try {
-          stream?.release()
-        } catch (_: Exception) {
-        }
       }
     }
   }
@@ -370,10 +429,56 @@ internal class SherpaOnnxAudioTaggingHelper(
     }
     executor.execute {
       stopActiveLivePipeline(instanceId)
-      instances.remove(instanceId)?.let { old ->
-        releaseTaggerSafely(old.tagger, where = "unload:$instanceId")
+      val old = instances.remove(instanceId)
+      if (old != null) {
+        releaseTaggerSafely(old, where = "unload:$instanceId")
+      } else {
+        nativeUnload(instanceId)
       }
       promise.resolve(null)
     }
+  }
+
+  companion object {
+    @JvmStatic
+    private external fun nativeInitialize(
+      instanceId: String,
+      modelType: String,
+      modelPath: String,
+      labelsPath: String,
+      topK: Int,
+      numThreads: Int,
+      provider: String,
+      debug: Boolean,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeCompute(
+      instanceId: String,
+      samples: FloatArray,
+      sampleRate: Int,
+      topK: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeComputeFromBuffer(
+      instanceId: String,
+      bufferId: String,
+      startSample: Int,
+      endSampleExclusive: Int,
+      topK: Int,
+    ): HashMap<String, Any>?
+
+    @JvmStatic
+    private external fun nativeDefaultTopK(instanceId: String): Int
+
+    @JvmStatic
+    private external fun nativeHasInstance(instanceId: String): Boolean
+
+    @JvmStatic
+    private external fun nativeUnload(instanceId: String)
+
+    @JvmStatic
+    private external fun nativeShutdownAll()
   }
 }

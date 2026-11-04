@@ -2,9 +2,6 @@
 // Resolution: env --> ANDROID_RELEASE_TAG files --> project property --> default.
 apply from: file("${project.projectDir}/prebuilt-versions.gradle")
 
-// Used by dependencies below and by prebuilt-download.gradle (extractSherpaOnnxClasses, downloadNativeLibsIfNeeded).
-def sherpaOnnxClassesDir = file("${buildDir}/sherpa-onnx-classes")
-
 buildscript {
   ext.SherpaOnnx = [
     kotlinVersion: "2.0.21",
@@ -183,10 +180,10 @@ repositories {
 }
 
 // Configurations used by prebuilt-download.gradle: downloadNativeLibsIfNeeded (AAR --> jniLibs + headers),
-// extractSherpaOnnxClasses (sherpa-onnx classes.jar), extractOnnxruntimeClasses (onnxruntime classes.jar).
+// extractOnnxruntimeClasses (onnxruntime classes.jar). sherpa-onnx default AAR is native-only (no Kotlin/Java API).
 configurations { sherpaOnnxAar; ffmpegAar; libarchiveAar; lexborAar; libyuvAar; libwebpAar; pdfiumAar; onnxruntimeAar }
 
-// Registers downloadNativeLibsIfNeeded, checkJniLibs, extractSherpaOnnxClasses, extractOnnxruntimeClasses; wires preBuild.dependsOn checkJniLibs.
+// Registers downloadNativeLibsIfNeeded, checkJniLibs, extractOnnxruntimeClasses; wires preBuild.dependsOn checkJniLibs.
 apply from: file("${project.projectDir}/prebuilt-download.gradle")
 
 def kotlin_version = getExtOrDefault("kotlinVersion")
@@ -198,6 +195,7 @@ dependencies {
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
 
   // Versions from prebuilt-versions.gradle; AARs used by prebuilt-download.gradle tasks.
+  // sherpa-onnx: native-only default (@aar) — jni + c-api; Kotlin/Java APIs are :kotlin@aar / :java@aar.
   sherpaOnnxAar "com.xdcobra.sherpa:sherpa-onnx:${sherpaOnnxVersion}@aar"
   def enableVideoSwDecoders = (project.findProperty("sherpaOnnxEnableVideoSwDecoders") ?: "false").toString().toLowerCase() in ["true", "1"]
   ffmpegAar "com.xdcobra.sherpa:ffmpeg${enableVideoSwDecoders ? '-vsw' : ''}:${ffmpegVersion}@aar"
@@ -214,10 +212,6 @@ dependencies {
   }
   onnxruntimeAar "com.xdcobra.sherpa:onnxruntime:${ortVersion}@aar"
 
-  // sherpa-onnx Java API: extractSherpaOnnxClasses (in prebuilt-download.gradle) fills sherpaOnnxClassesDir.
-  // Source: local third_party | Maven AAR | GitHub release. Native .so from same prebuilt pipeline.
-  implementation fileTree(dir: sherpaOnnxClassesDir, include: '*.jar').builtBy(tasks.named('extractSherpaOnnxClasses'))
-
   // ORT Java API (OrtEnvironment, OrtSession, OrtProvider) for getAvailableProviders/getQnnSupport/etc.
   // Extracted classes.jar from onnxruntime AAR (no compileOnly needed; bundled directly in the SDK).
   // libonnxruntime4j_jni.so is also extracted to jniLibs so the Java bridge works at runtime.
@@ -232,20 +226,16 @@ dependencies {
   testImplementation "junit:junit:4.13.2"
 }
 
-// Wire prebuilt tasks: extractSherpaOnnxClasses --> downloadNativeLibsIfNeeded;
-// CMake/compile tasks depend on extractSherpaOnnxClasses and checkJniLibs.
+// Wire prebuilt tasks: CMake/compile depend on ORT classes + jniLibs (not sherpa Kotlin classes.jar).
 afterEvaluate {
   if (tasks.findByName("downloadNativeLibsIfNeeded") != null) {
-    tasks.named("extractSherpaOnnxClasses").configure { dependsOn tasks.named("downloadNativeLibsIfNeeded") }
     tasks.named("extractOnnxruntimeClasses").configure { dependsOn tasks.named("downloadNativeLibsIfNeeded") }
   }
   tasks.matching { it.name.contains("configureCMake") || it.name.contains("externalNativeBuild") }.configureEach {
-    dependsOn tasks.named("extractSherpaOnnxClasses")
     dependsOn tasks.named("extractOnnxruntimeClasses")
     dependsOn tasks.named("checkJniLibs")
   }
   tasks.matching { it.name == "compileReleaseKotlin" || it.name == "compileDebugKotlin" }.configureEach {
-    dependsOn tasks.named("extractSherpaOnnxClasses")
     dependsOn tasks.named("extractOnnxruntimeClasses")
   }
 }

@@ -36,6 +36,7 @@ import {
 import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
+  liveAudioNotifyToSpeechSegment,
   releasePipelineAudioBuffer,
   resolvePipelineAudioBufferId,
   subscribeLiveAudioBufferEvents,
@@ -63,7 +64,6 @@ import {
   getSegmentationEngineInfo,
 } from '../segment';
 import { createStreamingPipelineCompletionPromise } from '../audiobuffer/streamingPipelineCompletion';
-import type { SpeechSegment } from '../segment/segment';
 
 let ttsInstanceCounter = 0;
 
@@ -235,7 +235,7 @@ async function synthesizeLiveOverload(
     const cb = options.onSegment;
     const unsub = subscribeLiveAudioBufferEvents(audioOut, {
       onSegment: (event) => {
-        cb(event.segment as SpeechSegment);
+        cb(liveAudioNotifyToSpeechSegment(event));
       },
     });
     handle.completed.then(unsub, unsub);

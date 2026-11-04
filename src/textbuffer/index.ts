@@ -22,9 +22,9 @@ import {
   registerLiveTextSegmentation,
   releaseSegmentationStateForBuffer,
 } from '../segment/runtime-state';
-import type { TextSegment } from '../segment/segment';
 import { PipelineTextErrorCode, TEXT_MAX_SLICE_COUNT } from './types';
-import { sanitizeJsonMeta, type JsonValue } from './jsonMeta';
+import { sanitizeJsonMeta } from './jsonMeta';
+import type { TextSegment } from '../segment/segment';
 import {
   toSegmentReason,
   toSegmentSource,
@@ -50,6 +50,7 @@ import type {
   LiveTextBufferErrorEvent,
   LiveTextBufferSegmentEvent,
   LiveTextSegment,
+  LiveTextBufferPartialSource,
   TextBufferSpoolingMode,
   LiveTextBufferSpoolInfo,
   TextSpatialSpan,
@@ -170,54 +171,38 @@ const textSegmentCallbacks = new Map<
   Set<(event: LiveTextBufferSegmentEvent) => void>
 >();
 const textLastSegmentIndexByBuffer = new Map<string, number>();
-const textLastSegmentEndOffsetByBuffer = new Map<string, number>();
 
 let partialSubscription: NativeSubscription | null = null;
 let textErrorSubscription: NativeSubscription | null = null;
 let textSegmentSubscription: NativeSubscription | null = null;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value != null && !Array.isArray(value);
+function normalizeLiveTextPartialSource(
+  value: unknown
+): LiveTextBufferPartialSource {
+  return value === 'stt_stream' ||
+    value === 'kws_stream' ||
+    value === 'append' ||
+    value === 'replace' ||
+    value === 'mixed' ||
+    value === 'unknown'
+    ? value
+    : 'unknown';
 }
 
-/**
- * Bridge boundary: project native event `meta` into a Fabric-safe JSON tree.
- */
-function projectNativeSegmentMeta(
-  meta: unknown
-): Record<string, JsonValue> | undefined {
-  return sanitizeJsonMeta(meta);
-}
-
-function toPublicTextMeta(
-  meta: Record<string, JsonValue> | undefined
-): Record<string, JsonValue> | undefined {
-  return sanitizeJsonMeta(meta, { publicView: true });
-}
-
-function dispatchLiveTextSegmentEvent(
-  liveBufferId: string,
-  segment: TextSegment,
-  totalSegments: number
+function dispatchLiveTextSegmentNotify(
+  event: LiveTextBufferSegmentEvent
 ): void {
-  const callbacks = textSegmentCallbacks.get(liveBufferId);
+  const callbacks = textSegmentCallbacks.get(event.liveBufferId);
   if (!callbacks || callbacks.size === 0) return;
 
-  const lastSegmentIndex = textLastSegmentIndexByBuffer.get(liveBufferId);
+  const lastSegmentIndex = textLastSegmentIndexByBuffer.get(event.liveBufferId);
   if (
     typeof lastSegmentIndex === 'number' &&
-    segment.segmentIndex <= lastSegmentIndex
+    event.segmentIndex <= lastSegmentIndex
   ) {
     return;
   }
-  textLastSegmentIndexByBuffer.set(liveBufferId, segment.segmentIndex);
-  textLastSegmentEndOffsetByBuffer.set(liveBufferId, segment.endOffset);
-
-  const event: LiveTextBufferSegmentEvent = {
-    bufferId: liveBufferId,
-    segment,
-    totalSegments,
-  };
+  textLastSegmentIndexByBuffer.set(event.liveBufferId, event.segmentIndex);
 
   for (const cb of callbacks) {
     try {
@@ -226,102 +211,6 @@ function dispatchLiveTextSegmentEvent(
       /* swallow callback errors */
     }
   }
-}
-
-function emitLocalTextSegmentEvent(
-  liveBufferId: string,
-  segment: LiveTextSegment,
-  totalSegments: number
-): void {
-  // Project meta at the boundary so reserved/public meta stay plain objects.
-  const rawMeta = projectNativeSegmentMeta(segment.meta);
-  const previousEnd = textLastSegmentEndOffsetByBuffer.get(liveBufferId) ?? 0;
-  const utf16Length = segment.text.length;
-  const source = toSegmentSource(
-    typeof rawMeta?.__segmentSource === 'string'
-      ? rawMeta.__segmentSource
-      : undefined,
-    segment.source === 'append' ? 'manual' : 'segmentation_engine'
-  );
-  const reason = toSegmentReason(
-    typeof rawMeta?.__segmentReason === 'string'
-      ? rawMeta.__segmentReason
-      : undefined,
-    inferSegmentReasonFromSource(segment.source)
-  );
-  const createdAtMsRaw = rawMeta?.__segmentCreatedAtMs;
-  const segmentIdRaw = rawMeta?.__segmentId;
-  const langRaw = rawMeta?.__segmentLang;
-  const publicMeta = toPublicTextMeta(rawMeta);
-
-  const textSegment: TextSegment = {
-    segmentId:
-      typeof segmentIdRaw === 'string' && segmentIdRaw.length > 0
-        ? segmentIdRaw
-        : `txtseg_${liveBufferId}_${segment.segmentIndex}`,
-    domain: 'text',
-    startOffset: previousEnd,
-    endOffset: previousEnd + utf16Length,
-    reason,
-    source,
-    createdAtMs:
-      typeof createdAtMsRaw === 'number' && Number.isFinite(createdAtMsRaw)
-        ? Math.trunc(createdAtMsRaw)
-        : Date.now(),
-    segmentIndex: segment.segmentIndex,
-    text: segment.text,
-    ...(segment.textTruncated === true ? { textTruncated: true } : {}),
-    utf16Length,
-    ...(Array.isArray(segment.tokens)
-      ? { tokens: segment.tokens.slice() }
-      : {}),
-    ...(Array.isArray(segment.timestamps)
-      ? { timestamps: segment.timestamps.slice() }
-      : {}),
-    ...(typeof langRaw === 'string' && langRaw.length > 0
-      ? { lang: langRaw }
-      : {}),
-    ...(publicMeta ? { meta: publicMeta } : {}),
-  };
-
-  dispatchLiveTextSegmentEvent(liveBufferId, textSegment, totalSegments);
-}
-
-function parseNativeLiveTextSegment(raw: unknown): LiveTextSegment | undefined {
-  if (!isRecord(raw)) return undefined;
-  if (typeof raw.text !== 'string') return undefined;
-  if (typeof raw.segmentIndex !== 'number') return undefined;
-
-  const tokens = Array.isArray(raw.tokens)
-    ? raw.tokens.filter((t): t is string => typeof t === 'string')
-    : undefined;
-  const timestamps = Array.isArray(raw.timestamps)
-    ? raw.timestamps.filter((t): t is number => typeof t === 'number')
-    : undefined;
-
-  const source =
-    raw.source === 'stt_stream' ||
-    raw.source === 'kws_stream' ||
-    raw.source === 'append' ||
-    raw.source === 'replace' ||
-    raw.source === 'mixed' ||
-    raw.source === 'unknown'
-      ? raw.source
-      : 'unknown';
-
-  const meta = projectNativeSegmentMeta(raw.meta);
-
-  return {
-    text: raw.text,
-    ...(raw.textTruncated === true ? { textTruncated: true } : {}),
-    source,
-    segmentIndex: Math.trunc(raw.segmentIndex),
-    ...(tokens && tokens.length > 0 ? { tokens: tokens.slice() } : {}),
-    ...(timestamps && timestamps.length > 0
-      ? { timestamps: timestamps.slice() }
-      : {}),
-    ...(meta ? { meta } : {}),
-  };
 }
 
 function ensureLiveTextEventSubscriptions(): void {
@@ -336,7 +225,7 @@ function ensureLiveTextEventSubscriptions(): void {
       (rawEvent: {
         liveBufferId?: string;
         source?: string;
-        partialText?: string;
+        utf16Length?: number;
         revision?: number;
         isEndpoint?: boolean;
       }) => {
@@ -346,19 +235,10 @@ function ensureLiveTextEventSubscriptions(): void {
         const callbacks = partialCallbacks.get(liveBufferId);
         if (!callbacks || callbacks.size === 0) return;
 
-        const source =
-          rawEvent.source === 'stt_stream' ||
-          rawEvent.source === 'append' ||
-          rawEvent.source === 'replace' ||
-          rawEvent.source === 'mixed' ||
-          rawEvent.source === 'unknown'
-            ? rawEvent.source
-            : 'unknown';
-
         const event: LiveTextBufferPartialEvent = {
           liveBufferId,
-          source,
-          partialText: rawEvent.partialText ?? '',
+          source: normalizeLiveTextPartialSource(rawEvent.source),
+          utf16Length: Math.max(0, Math.trunc(rawEvent.utf16Length ?? 0)),
           revision: rawEvent.revision ?? 0,
           ...(rawEvent.isEndpoint != null
             ? { isEndpoint: rawEvent.isEndpoint }
@@ -409,35 +289,27 @@ function ensureLiveTextEventSubscriptions(): void {
         liveBufferId?: string;
         bufferId?: string;
         totalSegments?: number;
-        segment?: TextSegment;
-        text?: string;
-        textTruncated?: boolean;
         source?: string;
         segmentIndex?: number;
-        tokens?: string[];
-        timestamps?: number[];
-        meta?: Record<string, unknown>;
+        utf16Length?: number;
       }) => {
         const liveBufferId = rawEvent?.liveBufferId ?? rawEvent?.bufferId;
         if (!liveBufferId) return;
+        if (typeof rawEvent.segmentIndex !== 'number') return;
 
-        const rawSegment = rawEvent?.segment;
-        if (rawSegment && rawSegment.domain === 'text') {
-          const totalSegments =
-            typeof rawEvent.totalSegments === 'number'
-              ? Math.trunc(rawEvent.totalSegments)
-              : rawSegment.segmentIndex + 1;
-          dispatchLiveTextSegmentEvent(liveBufferId, rawSegment, totalSegments);
-          return;
-        }
-
-        const normalized = parseNativeLiveTextSegment(rawEvent);
-        if (!normalized) return;
+        const segmentIndex = Math.trunc(rawEvent.segmentIndex);
         const totalSegments =
           typeof rawEvent.totalSegments === 'number'
             ? Math.trunc(rawEvent.totalSegments)
-            : normalized.segmentIndex + 1;
-        emitLocalTextSegmentEvent(liveBufferId, normalized, totalSegments);
+            : segmentIndex + 1;
+
+        dispatchLiveTextSegmentNotify({
+          liveBufferId,
+          segmentIndex,
+          totalSegments,
+          utf16Length: Math.max(0, Math.trunc(rawEvent.utf16Length ?? 0)),
+          source: normalizeLiveTextPartialSource(rawEvent.source),
+        });
       }
     );
   }
@@ -830,7 +702,6 @@ export async function releasePipelineTextBuffer(
   textErrorCallbacks.delete(id);
   textSegmentCallbacks.delete(id);
   textLastSegmentIndexByBuffer.delete(id);
-  textLastSegmentEndOffsetByBuffer.delete(id);
   releaseSegmentationStateForBuffer(id);
   await getNative().releasePipelineTextBuffer(id);
 }
@@ -1210,8 +1081,6 @@ export async function getLiveTextBufferPartialSlice(
   return getNative().getLiveTextBufferPartialSlice(id, startUtf16, maxUtf16);
 }
 
-const MAX_SEGMENT_EVENT_TEXT_CHARS = 4096;
-
 /**
  * Commit a text segment to a live text buffer segment log.
  * @throws {Error} `TEXT_INVALID_ARGUMENT` — malformed live id.
@@ -1235,25 +1104,109 @@ export async function appendLiveTextSegment(
     sanitizedMeta
   );
 
-  const callbacks = textSegmentCallbacks.get(id);
-  if (callbacks && callbacks.size > 0) {
-    const truncated = text.length > MAX_SEGMENT_EVENT_TEXT_CHARS;
-    const eventText = truncated
-      ? text.substring(0, MAX_SEGMENT_EVENT_TEXT_CHARS)
-      : text;
-    const segment: LiveTextSegment = {
-      text: eventText,
-      ...(truncated ? { textTruncated: true } : {}),
-      source: 'append',
-      segmentIndex: out.segmentIndex,
-      ...(tokens && tokens.length > 0 ? { tokens } : {}),
-      ...(timestamps && timestamps.length > 0 ? { timestamps } : {}),
-      ...(sanitizedMeta ? { meta: sanitizedMeta } : {}),
-    };
-    emitLocalTextSegmentEvent(id, segment, out.segmentIndex + 1);
-  }
+  // Local notify for JS-side append when native may also emit — dedupe by index.
+  dispatchLiveTextSegmentNotify({
+    liveBufferId: id,
+    segmentIndex: out.segmentIndex,
+    totalSegments: out.segmentIndex + 1,
+    utf16Length: text.length,
+    source: 'append',
+  });
 
   return out;
+}
+
+/**
+ * Pull the current partial window for a notify-only partial event.
+ */
+export async function readLiveTextPartial(
+  event: LiveTextBufferPartialEvent,
+  options?: { startUtf16?: number; maxUtf16?: number }
+): Promise<string> {
+  const startUtf16 = options?.startUtf16 ?? 0;
+  const maxUtf16 =
+    options?.maxUtf16 ?? Math.max(0, event.utf16Length - startUtf16);
+  return getLiveTextBufferPartialSlice(
+    event.liveBufferId,
+    startUtf16,
+    maxUtf16
+  );
+}
+
+/**
+ * Pull one committed segment for a notify-only segment event.
+ */
+export async function readLiveTextSegment(
+  event: LiveTextBufferSegmentEvent,
+  options?: {
+    includeTokens?: boolean;
+    includeTimestamps?: boolean;
+    includeMeta?: boolean;
+  }
+): Promise<LiveTextSegment | undefined> {
+  const segments = await getLiveTextBufferSegments(
+    event.liveBufferId,
+    event.segmentIndex,
+    1,
+    options
+  );
+  return segments[0];
+}
+
+/**
+ * Map a notify event + pulled LiveTextSegment into a domain TextSegment
+ * for feature facades that keep a rich onSegment product callback.
+ */
+export function liveTextNotifyToTextSegment(
+  event: LiveTextBufferSegmentEvent,
+  segment: LiveTextSegment,
+  previousEndOffset = 0
+): TextSegment {
+  const rawMeta = segment.meta;
+  const source = toSegmentSource(
+    typeof rawMeta?.__segmentSource === 'string'
+      ? rawMeta.__segmentSource
+      : undefined,
+    segment.source === 'append' ? 'manual' : 'segmentation_engine'
+  );
+  const reason = toSegmentReason(
+    typeof rawMeta?.__segmentReason === 'string'
+      ? rawMeta.__segmentReason
+      : undefined,
+    inferSegmentReasonFromSource(segment.source)
+  );
+  const createdAtMsRaw = rawMeta?.__segmentCreatedAtMs;
+  const segmentIdRaw = rawMeta?.__segmentId;
+  const langRaw = rawMeta?.__segmentLang;
+  const utf16Length =
+    event.utf16Length > 0 ? event.utf16Length : segment.text.length;
+
+  return {
+    segmentId:
+      typeof segmentIdRaw === 'string' && segmentIdRaw.length > 0
+        ? segmentIdRaw
+        : `txtseg_${event.liveBufferId}_${event.segmentIndex}`,
+    domain: 'text',
+    startOffset: previousEndOffset,
+    endOffset: previousEndOffset + utf16Length,
+    reason,
+    source,
+    createdAtMs:
+      typeof createdAtMsRaw === 'number' && Number.isFinite(createdAtMsRaw)
+        ? Math.trunc(createdAtMsRaw)
+        : Date.now(),
+    segmentIndex: event.segmentIndex,
+    text: segment.text,
+    utf16Length,
+    ...(Array.isArray(segment.tokens) ? { tokens: segment.tokens } : {}),
+    ...(Array.isArray(segment.timestamps)
+      ? { timestamps: segment.timestamps }
+      : {}),
+    ...(typeof langRaw === 'string' && langRaw.length > 0
+      ? { lang: langRaw }
+      : {}),
+    ...(rawMeta ? { meta: rawMeta } : {}),
+  };
 }
 
 /**

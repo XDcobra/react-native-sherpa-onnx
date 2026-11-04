@@ -48,11 +48,14 @@ import {
 import {
   createLiveTextBuffer,
   finalizeLiveTextBuffer,
-  getLiveTextBufferPartialSlice,
   getLiveTextBufferSegmentCount,
   getLiveTextBufferSegments,
+  readLiveTextPartial,
+  readLiveTextSegment,
   releasePipelineTextBuffer,
+  type LiveTextBufferPartialEvent,
   type LiveTextBufferRef,
+  type LiveTextBufferSegmentEvent,
 } from 'react-native-sherpa-onnx/textbuffer';
 import {
   resolveAudioFileDisplayName,
@@ -83,8 +86,8 @@ const STT_INPUT_SAMPLE_RATE = 16000;
 const PAD_PACK_NAME = 'sherpa_models';
 const NUM_THREADS = 2;
 const MAX_SEGMENT_EVENTS = 20;
-/** Same interval as STTStreamingScreen `syncTranscript` for comparable UI updates. */
-const STT_TRANSCRIPT_POLL_MS = 150;
+/** Throttle high-rate partial notifies for UI; commits stay unthrottled. */
+const STT_PARTIAL_EVENT_MIN_INTERVAL_MS = 50;
 
 type PipelineState = 'idle' | 'starting' | 'running' | 'stopping';
 type SourceMode = 'mic' | 'file';
@@ -171,11 +174,8 @@ export default function LivePipelineShowcaseScreen() {
   const sttPipelineRef = useRef<SttPipelineHandle | null>(null);
   const ttsPipelineRef = useRef<TtsPipelineHandle | null>(null);
   const ingestRef = useRef<FileIngestHandle | null>(null);
-  const sttTranscriptPollRef = useRef<ReturnType<typeof setInterval> | null>(
-    null
-  );
-  /** Segment log cursor for showcase UI only (segment event list); TTS uses native drain on the shared buffer. */
-  const lastUiPolledSegmentCountRef = useRef(0);
+  /** Last committed segment index applied to showcase UI (dedupe / ordering). */
+  const lastUiSegmentIndexRef = useRef(-1);
   /** Monotonic index for segment event log rows. */
   const sttSegmentEventIndexRef = useRef(0);
   const capturedTtsOfflineIdRef = useRef<string | null>(null);
@@ -491,65 +491,44 @@ export default function LivePipelineShowcaseScreen() {
     []
   );
 
-  const stopSttTranscriptPolling = useCallback(() => {
-    if (sttTranscriptPollRef.current) {
-      clearInterval(sttTranscriptPollRef.current);
-      sttTranscriptPollRef.current = null;
-    }
+  const isActiveSharedTextBuffer = useCallback((liveBufferId: string) => {
+    return sharedSttTtsTextRef.current?.bufferId === liveBufferId;
   }, []);
 
-  /**
-   * Same reads as STTStreamingScreen `syncTranscript` for UI parity only.
-   * STT→TTS data flow uses one native `LiveTextBuffer` (no JS forwarding).
-   */
-  const syncTranscriptStt = useCallback(async () => {
-    const textBuffer = sharedSttTtsTextRef.current;
-    if (!textBuffer) return;
+  /** Notify+pull: update partial hypothesis when the live text buffer notifies. */
+  const onSharedTextPartial = useCallback(
+    async (event: LiveTextBufferPartialEvent) => {
+      if (!isActiveSharedTextBuffer(event.liveBufferId)) return;
+      try {
+        const partial = await readLiveTextPartial(event);
+        if (!isActiveSharedTextBuffer(event.liveBufferId)) return;
+        setPartialText(partial.trim());
+      } catch {
+        /* ignore late/teardown reads */
+      }
+    },
+    [isActiveSharedTextBuffer]
+  );
 
-    const bufferId = textBuffer.bufferId;
-    let segmentCountNow: number;
-    try {
-      segmentCountNow = await getLiveTextBufferSegmentCount(bufferId);
-    } catch {
-      return;
-    }
+  /** Notify+pull: append committed STT lines to showcase UI (TTS drains natively). */
+  const onSharedTextSegment = useCallback(
+    async (event: LiveTextBufferSegmentEvent) => {
+      if (!isActiveSharedTextBuffer(event.liveBufferId)) return;
+      if (event.segmentIndex <= lastUiSegmentIndexRef.current) return;
+      try {
+        const seg = await readLiveTextSegment(event);
+        if (!isActiveSharedTextBuffer(event.liveBufferId)) return;
+        if (!seg) return;
+        lastUiSegmentIndexRef.current = event.segmentIndex;
 
-    const segments =
-      segmentCountNow > 0
-        ? await getLiveTextBufferSegments(bufferId, 0, segmentCountNow)
-        : [];
+        const text = seg.text.trim();
+        if (!text) return;
 
-    let partial = '';
-    try {
-      partial = await getLiveTextBufferPartialSlice(bufferId, 0, 4096);
-    } catch {
-      /* ignore */
-    }
-    setPartialText(partial.trim());
+        setCommittedSegments((prev) => {
+          const next = [...prev, text];
+          return next.length > 5 ? next.slice(next.length - 5) : next;
+        });
 
-    const nonEmptyTexts = segments
-      .map((s) => s.text.trim())
-      .filter((t) => t.length > 0);
-    setCommittedSegments(
-      nonEmptyTexts.length > 5
-        ? nonEmptyTexts.slice(nonEmptyTexts.length - 5)
-        : nonEmptyTexts
-    );
-
-    const prevUi = lastUiPolledSegmentCountRef.current;
-    if (segmentCountNow <= prevUi) {
-      return;
-    }
-
-    const newSegments = await getLiveTextBufferSegments(
-      bufferId,
-      prevUi,
-      segmentCountNow - prevUi
-    );
-
-    for (const seg of newSegments) {
-      const text = seg.text.trim();
-      if (text) {
         sttSegmentEventIndexRef.current += 1;
         const idx = sttSegmentEventIndexRef.current;
         setSegmentEvents((prevEvs) => {
@@ -559,9 +538,56 @@ export default function LivePipelineShowcaseScreen() {
             ? next.slice(next.length - MAX_SEGMENT_EVENTS)
             : next;
         });
+
+        // Clear stale partial once a commit lands.
+        setPartialText('');
+      } catch {
+        /* ignore late/teardown reads */
       }
+    },
+    [isActiveSharedTextBuffer]
+  );
+
+  /**
+   * One-shot UI sync before teardown (no interval). Catches any last commits
+   * if the pipeline stops between notifies.
+   */
+  const refreshTranscriptUiOnce = useCallback(async () => {
+    const textBuffer = sharedSttTtsTextRef.current;
+    if (!textBuffer) return;
+    const bufferId = textBuffer.bufferId;
+    try {
+      const segmentCountNow = await getLiveTextBufferSegmentCount(bufferId);
+      const start = Math.max(0, lastUiSegmentIndexRef.current + 1);
+      if (segmentCountNow > start) {
+        const fresh = await getLiveTextBufferSegments(
+          bufferId,
+          start,
+          segmentCountNow - start
+        );
+        for (const seg of fresh) {
+          if (seg.segmentIndex <= lastUiSegmentIndexRef.current) continue;
+          lastUiSegmentIndexRef.current = seg.segmentIndex;
+          const text = seg.text.trim();
+          if (!text) continue;
+          setCommittedSegments((prev) => {
+            const next = [...prev, text];
+            return next.length > 5 ? next.slice(next.length - 5) : next;
+          });
+          sttSegmentEventIndexRef.current += 1;
+          const idx = sttSegmentEventIndexRef.current;
+          setSegmentEvents((prevEvs) => {
+            const ev: SegmentEvent = { index: idx, text };
+            const next = [...prevEvs, ev];
+            return next.length > MAX_SEGMENT_EVENTS
+              ? next.slice(next.length - MAX_SEGMENT_EVENTS)
+              : next;
+          });
+        }
+      }
+    } catch {
+      /* ignore */
     }
-    lastUiPolledSegmentCountRef.current = segmentCountNow;
   }, []);
 
   // ── cleanup helpers ────────────────────────────────────────────────────────
@@ -575,8 +601,7 @@ export default function LivePipelineShowcaseScreen() {
     const releaseToken: { p: Promise<void> | null } = { p: null };
     releaseToken.p = (async () => {
       try {
-        await syncTranscriptStt().catch(() => {});
-        stopSttTranscriptPolling();
+        await refreshTranscriptUiOnce().catch(() => {});
         // Cleanup order: stop mic → ingest → STT pipeline → flush/stop TTS →
         // snapshot TTS live audio → finalize/release shared text + buffers → destroy engines.
         await stopMicToLiveAudioBuffer().catch(() => {});
@@ -647,11 +672,7 @@ export default function LivePipelineShowcaseScreen() {
 
     releaseAllInFlightRef.current = releaseToken.p;
     await releaseToken.p;
-  }, [
-    captureLiveTtsToOfflineSnapshot,
-    stopSttTranscriptPolling,
-    syncTranscriptStt,
-  ]);
+  }, [captureLiveTtsToOfflineSnapshot, refreshTranscriptUiOnce]);
 
   useEffect(() => {
     return () => {
@@ -696,7 +717,7 @@ export default function LivePipelineShowcaseScreen() {
     setPartialText('');
     setCommittedSegments([]);
     setSegmentEvents([]);
-    lastUiPolledSegmentCountRef.current = 0;
+    lastUiSegmentIndexRef.current = -1;
     sttSegmentEventIndexRef.current = 0;
 
     await releasePriorCapturedTts();
@@ -786,8 +807,16 @@ export default function LivePipelineShowcaseScreen() {
       // ── Shared live text buffer (contract: docs/feature-pipelines.md TTS streaming) ──
       // STT commits segments here; `synthesize(LiveText, LiveAudio)` attaches text-domain
       // segmentation and drains commits natively — no second buffer or JS append chain.
+      // Showcase UI: notify+pull (no setInterval polling).
       const sharedSttTtsText = await createLiveTextBuffer({
-        streamEvents: { partial: { enabled: false, minIntervalMs: 0 } },
+        streamEvents: {
+          partial: {
+            enabled: true,
+            minIntervalMs: STT_PARTIAL_EVENT_MIN_INTERVAL_MS,
+          },
+        },
+        onPartial: onSharedTextPartial,
+        onSegment: onSharedTextSegment,
       });
       sharedSttTtsTextRef.current = sharedSttTtsText;
 
@@ -866,11 +895,6 @@ export default function LivePipelineShowcaseScreen() {
           });
       }
 
-      stopSttTranscriptPolling();
-      sttTranscriptPollRef.current = setInterval(() => {
-        syncTranscriptStt().catch(() => {});
-      }, STT_TRANSCRIPT_POLL_MS);
-
       // Watch for pipeline completion
       Promise.all([
         sttPipeline.completed.catch(() => {}),
@@ -902,8 +926,8 @@ export default function LivePipelineShowcaseScreen() {
     releasePriorCapturedTts,
     resolveSttSource,
     resolveTtsSource,
-    syncTranscriptStt,
-    stopSttTranscriptPolling,
+    onSharedTextPartial,
+    onSharedTextSegment,
   ]);
 
   const stopPipeline = useCallback(async () => {

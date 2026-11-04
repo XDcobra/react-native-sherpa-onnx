@@ -53,10 +53,12 @@ jest.mock('../../audiobuffer', () => ({
 }));
 
 const mockSubscribeLiveTextBufferEvents = jest.fn();
+const mockReadLiveTextSegment = jest.fn();
 jest.mock('../../textbuffer', () => ({
   resolvePipelineTextBufferId: jest.fn((value: unknown) => String(value)),
   subscribeLiveTextBufferEvents: (...args: unknown[]) =>
     mockSubscribeLiveTextBufferEvents(...args),
+  readLiveTextSegment: (...args: unknown[]) => mockReadLiveTextSegment(...args),
 }));
 
 const mockAttachSegmentationEngine = jest.fn();
@@ -171,6 +173,28 @@ describe('language identification live overload', () => {
         return jest.fn();
       }
     );
+    mockReadLiveTextSegment
+      .mockResolvedValueOnce({
+        text: 'en',
+        source: 'unknown',
+        segmentIndex: 0,
+        timestamps: [0, 2],
+        meta: { durationMs: 2000 },
+      })
+      .mockResolvedValueOnce({
+        text: 'en',
+        source: 'unknown',
+        segmentIndex: 1,
+        timestamps: [2.5, 4],
+        meta: { durationMs: 1500 },
+      })
+      .mockResolvedValueOnce({
+        text: 'de',
+        source: 'unknown',
+        segmentIndex: 2,
+        timestamps: [5, 7],
+        meta: { durationMs: 2000 },
+      });
 
     const engine = await createEngine();
     const onSegment = jest.fn();
@@ -189,32 +213,28 @@ describe('language identification live overload', () => {
     });
 
     textOnSegment?.({
-      segment: {
-        domain: 'text',
-        segmentIndex: 0,
-        text: 'en',
-        timestamps: [0, 2],
-        meta: { durationMs: 2000 },
-      },
+      liveBufferId: LIVE_TEXT,
+      segmentIndex: 0,
+      totalSegments: 1,
+      utf16Length: 2,
+      source: 'unknown',
     });
     textOnSegment?.({
-      segment: {
-        domain: 'text',
-        segmentIndex: 1,
-        text: 'en',
-        timestamps: [2.5, 4],
-        meta: { durationMs: 1500 },
-      },
+      liveBufferId: LIVE_TEXT,
+      segmentIndex: 1,
+      totalSegments: 2,
+      utf16Length: 2,
+      source: 'unknown',
     });
     textOnSegment?.({
-      segment: {
-        domain: 'text',
-        segmentIndex: 2,
-        text: 'de',
-        timestamps: [5, 7],
-        meta: { durationMs: 2000 },
-      },
+      liveBufferId: LIVE_TEXT,
+      segmentIndex: 2,
+      totalSegments: 3,
+      utf16Length: 2,
+      source: 'unknown',
     });
+    await Promise.resolve();
+    await Promise.resolve();
 
     expect(onSegment).toHaveBeenCalledTimes(3);
     expect(onLanguageChanged).toHaveBeenCalledTimes(2);

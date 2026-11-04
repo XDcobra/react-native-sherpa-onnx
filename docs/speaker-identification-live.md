@@ -29,6 +29,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createLiveSegmentBuffer,
+  readLiveSegment,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 
@@ -42,9 +43,10 @@ const labeledOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
   spooling: { mode: 'on' },
   streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
-  onSegmentAppended: (e) => {
-    if (e.kind === 'speech' && e.payload?.source === 'sid') {
-      console.log('[sid]', e.startSample, e.endSample, e.payload.speakerName);
+  onSegmentAppended: async (e) => {
+    const meta = await readLiveSegment(e);
+    if (meta?.kind === 'speech' && meta.payload?.source === 'sid') {
+      console.log('[sid]', e.startSample, e.endSample, meta.payload.speakerName);
     }
   },
 });
@@ -191,14 +193,38 @@ More patterns: [feature-pipelines.md#speaker-identification-live-patterns](featu
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onLabeled` | `SidLiveLabeledSegmentEvent` | after each committed span is identified | no `onProgress` on the live path; no `totalSegments` |
+| `onLabeled` | `SidLiveLabeledSegmentEvent` | after each committed span is identified | feature callback — already includes `speakerName` / ranges (no buffer pull) |
+| `onSegmentAppended` | `LiveSegmentBufferSegmentAppendedEvent` (notify scalars) | labeled segment appended to `labeledOut` | optional; set on `createLiveSegmentBuffer`; **no `payload` on the event** — pull with `readLiveSegment` |
+
+`onLabeled` is the usual product path (already materializes the SID fields you need). Raw buffer observation is **notify + pull**. Canonical detail: [segmentbuffer-streaming — Committed segments](segmentbuffer-streaming.md#committed-segments-onsegmentappended-notify--pull).
 
 Shapes: [Types](#types) · offline result fields: [speaker-identification-offline.md](speaker-identification-offline.md#types).
 
 ```ts
+import {
+  createLiveSegmentBuffer,
+  readLiveSegment,
+} from 'react-native-sherpa-onnx/segmentbuffer';
+
+const labeledOut = await createLiveSegmentBuffer({
+  sourceAudioBufferId: audioIn,
+  streamEvents: { segmentAppended: { enabled: true, minIntervalMs: 0 } },
+  onSegmentAppended: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`#${e.segmentIndex}`, e.startSample, e.endSample);
+
+    // only when you need richness (SID payload):
+    const meta = await readLiveSegment(e);
+    if (meta?.kind === 'speech' && meta.payload?.source === 'sid') {
+      console.log('speaker', meta.payload.speakerName);
+    }
+  },
+});
+
 await sid.labelLiveSegments(audioIn, labeledOut, {
   segmentation: { policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 } },
   threshold: 0.5,
+  // feature callback — already includes speakerName (no pull):
   onLabeled: (e) => console.log(e.segmentIndex, e.speakerName, e.durationMs),
 });
 ```
@@ -246,6 +272,7 @@ import {
 } from 'react-native-sherpa-onnx/audiobuffer';
 import {
   createLiveSegmentBuffer,
+  readLiveSegment,
   releasePipelineSegmentBuffer,
 } from 'react-native-sherpa-onnx/segmentbuffer';
 
@@ -254,9 +281,10 @@ const audioIn = await createEmptyLiveAudioBuffer({ sampleRate: 16000, channelCou
 const labeledOut = await createLiveSegmentBuffer({
   sourceAudioBufferId: audioIn,
   spooling: { mode: 'on' },
-  onSegmentAppended: (e) => {
-    if (e.kind === 'speech' && e.payload?.source === 'sid') {
-      console.log(e.payload.speakerName, e.startSample, e.endSample);
+  onSegmentAppended: async (e) => {
+    const meta = await readLiveSegment(e);
+    if (meta?.kind === 'speech' && meta.payload?.source === 'sid') {
+      console.log(meta.payload.speakerName, e.startSample, e.endSample);
     }
   },
 });

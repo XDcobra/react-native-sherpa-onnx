@@ -52,8 +52,10 @@ public:
         bool debug = false
     );
 
+    EnhancedAudioResult runSamples(const float* samples, int32_t numSamples, int32_t sampleRate);
     EnhancedAudioResult runSamples(const std::vector<float>& samples, int32_t sampleRate);
 
+    SetVoiceSampleResult setVoiceSample(const float* samples, int32_t numSamples, int32_t sampleRate);
     SetVoiceSampleResult setVoiceSample(
         const std::vector<float>& samples,
         int32_t sampleRate
@@ -91,9 +93,11 @@ public:
         bool debug = false
     );
 
+    EnhancedAudioResult runSamples(const float* samples, int32_t numSamples, int32_t sampleRate);
     EnhancedAudioResult runSamples(const std::vector<float>& samples, int32_t sampleRate);
     EnhancedAudioResult flush();
     void reset();
+    SetVoiceSampleResult setVoiceSample(const float* samples, int32_t numSamples, int32_t sampleRate);
     SetVoiceSampleResult setVoiceSample(
         const std::vector<float>& samples,
         int32_t sampleRate

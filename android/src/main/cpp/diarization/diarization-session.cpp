@@ -112,6 +112,13 @@ std::vector<float> DiarizationSession::ResampleIfNeeded(
 ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples,
                                           int32_t sample_rate,
                                           const ProcessOptions& options) {
+  return Process(mono_samples.empty() ? nullptr : mono_samples.data(),
+                 static_cast<int32_t>(mono_samples.size()), sample_rate, options);
+}
+
+ProcessResult DiarizationSession::Process(const float* mono_samples, int32_t num_samples,
+                                          int32_t sample_rate,
+                                          const ProcessOptions& options) {
   ProcessResult result;
   if (!initialized_) {
     result.status =
@@ -120,16 +127,22 @@ ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples
   }
   clearCancel();
 
-  if (mono_samples.empty() || sample_rate <= 0) {
+  if (mono_samples == nullptr || num_samples <= 0 || sample_rate <= 0) {
     result.status =
         Status::Fail(kErrInvalidArgument, "empty audio or invalid sample rate");
     return result;
   }
 
   const int32_t target_sr = segmentation_.meta().sample_rate;
-  std::vector<float> audio =
-      ResampleIfNeeded(mono_samples, sample_rate, target_sr);
-  const int32_t n = static_cast<int32_t>(audio.size());
+  std::vector<float> resampled;
+  const float* audio_data = mono_samples;
+  int32_t n = num_samples;
+  if (sample_rate != target_sr) {
+    std::vector<float> input(mono_samples, mono_samples + num_samples);
+    resampled = ResampleIfNeeded(input, sample_rate, target_sr);
+    audio_data = resampled.empty() ? nullptr : resampled.data();
+    n = static_cast<int32_t>(resampled.size());
+  }
   const auto& meta = segmentation_.meta();
 
   // --- Segmentation ---
@@ -184,7 +197,9 @@ ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples
 
   if (n <= meta.window_size) {
     std::vector<float> buf(static_cast<size_t>(meta.window_size), 0.f);
-    std::copy(audio.begin(), audio.end(), buf.begin());
+    if (n > 0 && audio_data != nullptr) {
+      std::copy(audio_data, audio_data + n, buf.begin());
+    }
     Status st = process_window(buf.data());
     if (!st.ok) {
       result.status = st;
@@ -192,7 +207,7 @@ ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples
     }
     report("segmentation", 1, 1, 0.f, 0.45f);
   } else {
-    const float* p = audio.data();
+    const float* p = audio_data;
     for (int32_t i = 0; i < num_chunks; ++i, p += meta.window_shift) {
       if (CheckCancel(cancel_)) {
         result.status = Status::Fail(kErrCancelled, "cancelled during segmentation");
@@ -212,7 +227,7 @@ ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples
       }
       std::vector<float> buf(static_cast<size_t>(meta.window_size), 0.f);
       const int32_t remaining =
-          static_cast<int32_t>(audio.data() + n - p);
+          static_cast<int32_t>(audio_data + n - p);
       std::copy(p, p + remaining, buf.begin());
       Status st = process_window(buf.data());
       if (!st.ok) {
@@ -283,7 +298,7 @@ ProcessResult DiarizationSession::Process(const std::vector<float>& mono_samples
       return result;
     }
     std::vector<float> emb;
-    Status st = embedding_.Compute(audio.data(), n, target_sr,
+    Status st = embedding_.Compute(audio_data, n, target_sr,
                                    sample_indexes[static_cast<size_t>(i)].ranges,
                                    &emb);
     report("embedding", i + 1, total_emb, 0.45f, 0.45f);

@@ -170,14 +170,33 @@ Shared lifecycle: [streaming-pipelines-overview.md](streaming-pipelines-overview
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onSegment` | `LanguageIdSegmentEvent` | after each committed span is identified | no `onProgress` on the live path |
+| `onSegment` | `LanguageIdSegmentEvent` | after each committed span is identified | feature callback — already includes `lang` / ranges (no buffer pull) |
 | `onLanguageChanged` | `LanguageChangedEvent` | predicted `lang` differs from previous non-empty language | includes first span (`previousLang: null`) |
+
+`identify(..., { onSegment })` is the usual product path. Raw `LiveTextBuffer` observation on `textOut` is **notify + pull** (`readLiveTextSegment`). Canonical detail: [textbuffer-streaming — Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling).
 
 Shapes: [Types](#types) · offline result fields: [language-identification-offline.md](language-identification-offline.md#types).
 
 ```ts
+import {
+  createLiveTextBuffer,
+  readLiveTextSegment,
+} from 'react-native-sherpa-onnx/textbuffer';
+
+const textOut = await createLiveTextBuffer({
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`textOut #${e.segmentIndex}`, `total=${e.totalSegments}`);
+
+    // only when you need richness (lang label / meta on the buffer):
+    const seg = await readLiveTextSegment(e, { includeMeta: true });
+    console.log(seg?.text, seg?.meta);
+  },
+});
+
 await slid.identify(audioIn, textOut, {
   segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
+  // feature callback — already includes lang (no pull):
   onSegment: (e) => console.log(e.segmentIndex, e.lang),
   onLanguageChanged: (e) => console.log(e.previousLang, '→', e.currentLang),
 });
@@ -234,8 +253,9 @@ const textOut = await createLiveTextBuffer({ maxSegments: 256 });
 
 const pipeline = await slid.identify(audioIn, textOut, {
   segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
-  onSegment: (e) => console.log('lang segment', e.segment.text),
-  onLanguageChanged: (e) => console.log('now', e.language),
+  // feature callback — already includes lang (no pull):
+  onSegment: (e) => console.log('lang segment', e.segmentIndex, e.lang),
+  onLanguageChanged: (e) => console.log('now', e.currentLang),
 });
 const mic = await startMicToLiveAudioBuffer(audioIn);
 
@@ -300,7 +320,8 @@ const segOut = await createLiveSegmentBuffer({ sourceAudioBufferId: audioIn, spo
 const pipeline = await slid.identify(audioIn, textOut, {
   segmentation: { mode: 'auto', policy: DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY },
   targetSegmentBuffer: segOut,
-  onSegment: (e) => console.log(e.segment.text),
+  // feature callback — already includes lang (no pull):
+  onSegment: (e) => console.log(e.segmentIndex, e.lang),
 });
 // ... feed audio, then finalize / await as usual ...
 await releasePipelineSegmentBuffer(segOut);

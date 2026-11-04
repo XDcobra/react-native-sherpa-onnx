@@ -4,623 +4,229 @@ import android.content.Context
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
-import java.io.Closeable
+import com.sherpaonnx.SherpaOnnxNativeLoader
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 private const val TAG = "PipelineAudioRegistry"
 
 /**
- * Unified pipeline audio buffer registry.
- *
- * Manages both OfflineEntry (immutable PCM) and LiveEntry (streaming PCM with ring buffer).
- * Thread-safe via ConcurrentHashMap. Buffer IDs are prefixed for runtime type checking:
- * - `off_…` for OfflineEntry
- * - `live_…` for LiveEntry
+ * Facade over shared C++ AudioRegistry.
+ * Kotlin maps hold handles (listeners / type aliases) only — PCM SoT is in C++.
  */
 object PipelineAudioRegistry {
+  init {
+    SherpaOnnxNativeLoader.ensureLoaded()
+  }
 
   private val offlineEntries = ConcurrentHashMap<String, OfflineEntry>()
   private val liveEntries = ConcurrentHashMap<String, LiveEntry>()
-  private val invalidatedLiveIds = ConcurrentHashMap.newKeySet<String>()
 
-  /** Set once during module init — used for mmap temp files. */
   @Volatile
   var cacheDir: File? = null
 
-  /**
-   * Run startup orphan sweep. Call once from module initialize().
-   */
   fun initializeWithCacheDir(context: Context, dir: File) {
     cacheDir = dir
-    MmapThresholdPolicy.initialize(context.applicationContext)
-    OfflineEntry.sweepOrphanedTempFiles(dir)
-    OfflineEntry.cleanupOrphanedOrchestrationFiles(dir)
+    val ram =
+      try {
+        val act = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val info = android.app.ActivityManager.MemoryInfo()
+        act.getMemoryInfo(info)
+        info.totalMem
+      } catch (_: Exception) {
+        6L * 1024L * 1024L * 1024L
+      }
+    AudioBufferNative.nativeInit(dir.absolutePath, ram)
+    try {
+      MmapThresholdPolicy.initialize(context.applicationContext)
+    } catch (_: Exception) {
+      // optional Kotlin helper; C threshold already configured via nativeInit
+    }
   }
 
-  // ==================== Offline Buffer Creation ====================
-
-  /**
-   * Create an offline buffer from Float32 PCM samples (in-memory FloatArray).
-   * Uses mmap for large buffers, in-memory for small ones.
-   *
-   * WARNING: For large FloatArrays, this may cause OOM. Prefer file-based APIs
-   * (decodeFileToOfflineBuffer, createOfflineFromLive with spool files) for big data.
-   */
   fun createOfflineFromFloatArray(
     samples: FloatArray,
     sampleRate: Int,
-    channelCount: Int = 1
+    channelCount: Int = 1,
   ): OfflineEntry {
-    if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
-    if (samples.isEmpty()) throw IllegalArgumentException("samples must not be empty")
-    if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
-
-    val bufferId = "off_${UUID.randomUUID()}"
-    val rawSize = samples.size.toLong() * 4
-    val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
-    val dir = cacheDir
-
-    val selectedForMmap = rawSize >= threshold && dir != null
-    val entry = if (selectedForMmap) {
-      val mmapEntry = OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
-      mmapEntry ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
-    } else {
-      OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
-    }
-    offlineEntries[bufferId] = entry
+    require(sampleRate > 0)
+    require(samples.isNotEmpty())
+    require(channelCount == 1)
+    val id =
+      AudioBufferNative.nativeCreateOfflineFromSamples(samples, sampleRate, channelCount)
+        ?: throw IllegalStateException("Failed to create offline buffer")
+    val entry = OfflineEntry.wrap(id) ?: OfflineEntry.InMemory(id, sampleRate, channelCount)
+    offlineEntries[id] = entry
     return entry
   }
 
-  /**
-   * Replace an existing offline entry (typically an empty output target) with a new entry.
-   * Used when we want to upgrade an output buffer to file-backed mmap without needing
-   * a full heap materialization of the final samples.
-   */
-  fun replaceOfflineEntry(bufferId: String, entry: OfflineEntry) {
-    offlineEntries[bufferId]?.let { old ->
-      try {
-        old.releaseResources()
-      } catch (_: Exception) {}
-    }
-    offlineEntries[bufferId] = entry
-  }
-
-  /**
-   * Create an offline buffer from a pre-written raw float32 file.
-   * The file is memory-mapped directly — no heap allocation of all samples.
-   * Falls back to the old in-memory path only if mmap fails.
-   *
-   * @param f32FilePath Absolute path to an existing raw float32 file.
-   * @param numSamples Total float32 sample count in the file.
-   * @param sampleRate Output sample rate.
-   */
   fun createOfflineFromMmapFile(
     f32FilePath: String,
     numSamples: Int,
     sampleRate: Int,
-    channelCount: Int = 1
+    channelCount: Int = 1,
   ): OfflineEntry {
-    if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
-    if (numSamples <= 0) throw IllegalArgumentException("numSamples must be > 0")
-    if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
-
-    val bufferId = "off_${UUID.randomUUID()}"
-    val entry = OfflineEntry.createMmapFromFile(bufferId, sampleRate, channelCount, numSamples, f32FilePath)
-      ?: throw RuntimeException("DECODE_INTERNAL_ERROR: Failed to mmap decoded file")
-    offlineEntries[bufferId] = entry
+    require(sampleRate > 0)
+    require(numSamples > 0)
+    val id =
+      AudioBufferNative.nativeCreateOfflineFromF32File(f32FilePath, sampleRate, channelCount)
+        ?: throw IllegalStateException("Failed to mmap offline f32")
+    val entry = OfflineEntry.MmapBacked(id, sampleRate, channelCount, f32FilePath)
+    offlineEntries[id] = entry
     return entry
   }
 
-  /**
-   * Create an empty offline audio buffer as output target (e.g. for TTS synthesis).
-   * Starts with no samples; native synthesis fills it exactly once via [adoptOfflineSamples].
-   *
-   * @param sampleRate Expected sample rate (must match model output rate for TTS).
-   * @param channelCount Only mono (1) is supported.
-   */
-  fun createEmptyOffline(
-    sampleRate: Int,
-    channelCount: Int = 1
-  ): OfflineEntry {
-    if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
-    if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
-
-    val bufferId = "off_${UUID.randomUUID()}"
-    val entry = OfflineEntry.InMemory(
-      bufferId = bufferId,
-      sampleRate = sampleRate,
-      channelCount = channelCount,
-      samples = FloatArray(0)
-    )
-    offlineEntries[bufferId] = entry
+  fun createEmptyOffline(sampleRate: Int, channelCount: Int = 1): OfflineEntry {
+    require(sampleRate > 0)
+    require(channelCount == 1)
+    val id =
+      AudioBufferNative.nativeCreateEmptyOffline(sampleRate, channelCount)
+        ?: throw IllegalStateException("Failed to create empty offline")
+    val entry = OfflineEntry.InMemory(id, sampleRate, channelCount)
+    offlineEntries[id] = entry
     return entry
   }
 
-  /**
-   * Create an offline buffer from a live buffer.
-   *
-   * @param liveBufferId ID of the live buffer.
-   * @param mode How to create the offline buffer:
-   *   - "fullIfSpooled": If live has a spool file, use file-origin threshold policy.
-   *     Otherwise, snapshot the ring.
-   *   - "windowSnapshot": Always snapshot the current ring window (in-memory copy).
-   * @param targetSampleRateHz omit/`null` or `0` keeps the live rate; `> 0` forces
-   *   that rate via [Resampler.resampleLinear] (mono only; materializes PCM).
-   */
+  fun replaceOfflineEntry(bufferId: String, entry: OfflineEntry) {
+    if (entry.bufferId != bufferId) {
+      AudioBufferNative.nativeRelease(bufferId)
+      offlineEntries.remove(bufferId)
+    }
+    offlineEntries[entry.bufferId] = entry
+  }
+
   fun createOfflineFromLive(
     liveBufferId: String,
     mode: String = "fullIfSpooled",
     targetSampleRateHz: Int? = null,
   ): OfflineEntry {
-    val live = requireLiveEntry(liveBufferId)
     if (mode != "fullIfSpooled" && mode != "windowSnapshot") {
       throw IllegalArgumentException(
         "Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'."
       )
     }
-
-    val effectiveTarget = resolveEffectiveTargetSampleRateHz(
-      targetSampleRateHz,
-      live.sampleRate,
-    )
-    if (effectiveTarget == live.sampleRate) {
-      return createOfflineFromLiveSameRate(live, mode)
-    }
-
-    if (live.channelCount != 1) {
-      throw IllegalArgumentException(
-        "Resampling live→offline requires mono (channelCount=1), got ${live.channelCount}"
-      )
-    }
-
-    val pcm = loadLivePcm(live, mode)
-    val resampled = Resampler.resampleLinear(pcm, live.sampleRate, effectiveTarget)
-    val bufferId = "off_${UUID.randomUUID()}"
-    return createEntryWithThreshold(bufferId, effectiveTarget, 1, resampled)
-  }
-
-  /**
-   * Create a new offline buffer from an existing offline buffer.
-   * Source remains valid. `targetSampleRateHz` omit/`null`/`0` copies at source rate;
-   * `> 0` forces that rate (mono only).
-   */
-  fun createOfflineFromOffline(
-    offlineBufferId: String,
-    targetSampleRateHz: Int? = null,
-  ): OfflineEntry {
-    val source = offlineEntries[offlineBufferId]
-      ?: throw IllegalArgumentException("Offline buffer not found: $offlineBufferId")
-
-    val effectiveTarget = resolveEffectiveTargetSampleRateHz(
-      targetSampleRateHz,
-      source.sampleRate,
-    )
-
-    if (effectiveTarget != source.sampleRate && source.channelCount != 1) {
-      throw IllegalArgumentException(
-        "Resampling offline→offline requires mono (channelCount=1), got ${source.channelCount}"
-      )
-    }
-
-    val pcm = source.readAllSamples()
-    val output =
-      if (effectiveTarget == source.sampleRate) {
-        pcm.copyOf()
-      } else {
-        Resampler.resampleLinear(pcm, source.sampleRate, effectiveTarget)
-      }
-    val bufferId = "off_${UUID.randomUUID()}"
-    return createEntryWithThreshold(
-      bufferId,
-      effectiveTarget,
-      source.channelCount,
-      output,
-    )
-  }
-
-  private fun createOfflineFromLiveSameRate(live: LiveEntry, mode: String): OfflineEntry {
-    val bufferId = "off_${UUID.randomUUID()}"
-    return when (mode) {
-      "fullIfSpooled" -> {
-        val spoolPath = live.spoolFilePath
-        if (spoolPath != null && live.state == LiveEntry.State.FINISHED) {
-          createOfflineFromF32WavSpoolFile(
-            bufferId,
-            spoolPath,
-            live.sampleRate,
-            live.channelCount,
-          ) ?: createFromRingSnapshot(bufferId, live)
+    val live =
+      getLive(liveBufferId)
+        ?: if (isInvalidatedLiveBuffer(liveBufferId)) {
+          throw BufferInvalidatedException(
+            "Live buffer was transferred and is invalidated: $liveBufferId",
+          )
         } else {
-          createFromRingSnapshot(bufferId, live)
+          throw IllegalArgumentException("Live buffer not found: $liveBufferId")
         }
+
+    val fullIfSpooled = mode == "fullIfSpooled"
+    // windowSnapshot: copy ring without invalidating live; fullIfSpooled: transfer via C.
+    val entry =
+      if (mode == "windowSnapshot") {
+        val snap = live.snapshotRing()
+        createOfflineFromFloatArray(snap, live.sampleRate, live.channelCount)
+      } else {
+        val id =
+          AudioBufferNative.nativeTransferFromLive(liveBufferId, fullIfSpooled)
+            ?: throw IllegalStateException("transfer from live failed")
+        liveEntries.remove(liveBufferId)
+        OfflineEntry.wrap(id) ?: throw IllegalStateException("offline missing after transfer")
       }
-      "windowSnapshot" -> createFromRingSnapshot(bufferId, live)
-      else -> throw IllegalArgumentException(
-        "Unknown mode: $mode. Use 'fullIfSpooled' or 'windowSnapshot'."
-      )
-    }
+    offlineEntries[entry.bufferId] = entry
+
+    val effectiveTarget = resolveEffectiveTargetSampleRateHz(targetSampleRateHz, entry.sampleRate)
+    if (effectiveTarget == entry.sampleRate) return entry
+    return resampleOfflineEntry(entry, effectiveTarget)
   }
 
-  private fun loadLivePcm(live: LiveEntry, mode: String): FloatArray {
-    if (mode == "fullIfSpooled") {
-      val spoolPath = live.spoolFilePath
-      if (spoolPath != null && live.state == LiveEntry.State.FINISHED) {
-        readF32WavSpoolSamples(spoolPath)?.let { return it }
-      }
-    }
-    return live.snapshotRing()
-  }
-
-  /**
-   * Read Float32 PCM payload from a F32 WAV spool (skip 44-byte header).
-   * Returns null if the file is missing/empty/unreadable.
-   */
-  private fun readF32WavSpoolSamples(spoolPath: String): FloatArray? {
-    val spoolFile = File(spoolPath)
-    if (!spoolFile.exists() || spoolFile.length() <= 44L) {
-      return null
-    }
-    val payloadBytes = spoolFile.length() - 44L
-    if (payloadBytes <= 0L || payloadBytes % 4L != 0L) {
-      return null
-    }
-    val numSamples = (payloadBytes / 4L).toInt()
-    if (numSamples <= 0) {
-      return null
-    }
-    return try {
-      val samples = FloatArray(numSamples)
-      java.io.RandomAccessFile(spoolFile, "r").use { raf ->
-        raf.seek(44L)
-        val bytes = ByteArray(numSamples * 4)
-        raf.readFully(bytes)
-        val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        for (i in 0 until numSamples) {
-          samples[i] = bb.float
-        }
-      }
-      samples
-    } catch (_: Exception) {
-      null
-    }
-  }
-
-  private fun resolveEffectiveTargetSampleRateHz(
-    requested: Int?,
-    sourceRate: Int,
-  ): Int {
-    if (requested == null || requested == 0) {
-      return sourceRate
-    }
-    if (requested < 0) {
-      throw IllegalArgumentException("targetSampleRateHz must be >= 0")
-    }
-    return requested
-  }
-
-  /**
-   * Transfer ownership of a finalized live spool into a new offline buffer without copying.
-   * After success, the source live buffer ID is invalidated and no longer usable.
-   */
   fun transferOfflineFromLive(
     liveBufferId: String,
-    mode: String = "fullIfSpooled"
+    mode: String = "fullIfSpooled",
   ): OfflineEntry {
     if (mode != "fullIfSpooled") {
       throw TransferException(
         PipelineAudioErrorCodes.INVALID_ARGUMENT,
-        "Unsupported transfer mode: $mode. Use 'fullIfSpooled'."
+        "Unsupported transfer mode: $mode. Use 'fullIfSpooled'.",
       )
     }
-
-    val live = liveEntries[liveBufferId]
-      ?: if (isInvalidatedLiveBuffer(liveBufferId)) {
+    if (getLive(liveBufferId) == null) {
+      if (isInvalidatedLiveBuffer(liveBufferId)) {
         throw TransferException(
           PipelineAudioErrorCodes.BUFFER_INVALIDATED,
-          "Live buffer was transferred and is invalidated: $liveBufferId"
-        )
-      } else {
-        throw TransferException(
-          PipelineAudioErrorCodes.BUFFER_NOT_FOUND,
-          "Live buffer not found: $liveBufferId"
+          "Live buffer was transferred and is invalidated: $liveBufferId",
         )
       }
-
-    if (live.state != LiveEntry.State.FINISHED) {
       throw TransferException(
-        PipelineAudioErrorCodes.TRANSFER_INVALID_STATE,
-        "Live buffer must be finalized before transfer: $liveBufferId"
+        PipelineAudioErrorCodes.BUFFER_NOT_FOUND,
+        "Live buffer not found: $liveBufferId",
       )
     }
-
-    if (live.activeCursorCount() > 0) {
-      throw TransferException(
-        PipelineAudioErrorCodes.TRANSFER_CURSORS_ACTIVE,
-        "Live buffer has active cursors and cannot be transferred: $liveBufferId"
-      )
+    return try {
+      createOfflineFromLive(liveBufferId, mode, null)
+    } catch (e: BufferInvalidatedException) {
+      throw TransferException(PipelineAudioErrorCodes.BUFFER_INVALIDATED, e.message ?: "")
+    } catch (e: IllegalArgumentException) {
+      throw TransferException(PipelineAudioErrorCodes.INVALID_ARGUMENT, e.message ?: "")
+    } catch (e: IllegalStateException) {
+      throw TransferException(PipelineAudioErrorCodes.INVALID_STATE, e.message ?: "")
     }
-
-    val spoolPath = live.spoolFilePath
-    if (spoolPath.isNullOrBlank()) {
-      throw TransferException(
-        PipelineAudioErrorCodes.TRANSFER_SPOOL_UNAVAILABLE,
-        "Live buffer has no spool file to transfer: $liveBufferId"
-      )
-    }
-
-    val spoolFile = File(spoolPath)
-    if (!spoolFile.exists() || spoolFile.length() <= 44L) {
-      throw TransferException(
-        PipelineAudioErrorCodes.TRANSFER_SPOOL_UNAVAILABLE,
-        "Spool file missing or empty: $spoolPath"
-      )
-    }
-
-    val bufferId = "off_${UUID.randomUUID()}"
-    val entry = createOfflineFromWavSpoolTransfer(
-      bufferId = bufferId,
-      spoolPath = spoolPath,
-      sampleRate = live.sampleRate,
-      channelCount = live.channelCount,
-    ) ?: throw TransferException(
-      PipelineAudioErrorCodes.INTERNAL_ERROR,
-      "Failed to transfer spool to offline buffer: $liveBufferId"
-    )
-
-    offlineEntries[bufferId] = entry
-    live.detachSpoolForTransfer()
-    liveEntries.remove(liveBufferId)
-    invalidatedLiveIds.add(liveBufferId)
-    return entry
   }
 
-  /**
-   * Atomically populate an empty offline target by adopting storage from a source offline buffer.
-   *
-   * This is a storage hand-off helper for segmented orchestration outputs where the caller owns
-   * the target buffer handle but the orchestrator produced a temporary source buffer.
-   */
-  @Synchronized
-  fun populateOfflineIfEmpty(
-    targetBufferId: String,
+  fun createOfflineFromOffline(
     sourceBufferId: String,
-  ) {
-    if (targetBufferId == sourceBufferId) return
-
-    val target = offlineEntries[targetBufferId]
-      ?: throw IllegalArgumentException("Offline target buffer not found: $targetBufferId")
-    val source = offlineEntries[sourceBufferId]
-      ?: throw IllegalArgumentException("Offline source buffer not found: $sourceBufferId")
-
-    if (target.numSamples != 0) {
-      throw IllegalStateException("Offline target buffer is not empty: $targetBufferId")
-    }
-
-    if (target.sampleRate != source.sampleRate || target.channelCount != source.channelCount) {
-      throw IllegalArgumentException(
-        "Offline buffer format mismatch: target(${target.sampleRate}Hz/${target.channelCount}ch) != source(${source.sampleRate}Hz/${source.channelCount}ch)"
+    targetSampleRateHz: Int? = null,
+  ): OfflineEntry {
+    val source =
+      getOffline(sourceBufferId)
+        ?: throw IllegalArgumentException("Offline buffer not found: $sourceBufferId")
+    val effectiveTarget = resolveEffectiveTargetSampleRateHz(targetSampleRateHz, source.sampleRate)
+    if (effectiveTarget == source.sampleRate) {
+      return createOfflineFromFloatArray(
+        source.readAllSamples(),
+        source.sampleRate,
+        source.channelCount,
       )
     }
-
-    val replacement = when (source) {
-      is OfflineEntry.InMemory -> {
-        val adopted = source.samples
-        source.samples = FloatArray(0)
-        OfflineEntry.InMemory(
-          bufferId = targetBufferId,
-          sampleRate = source.sampleRate,
-          channelCount = source.channelCount,
-          samples = adopted,
-        )
-      }
-
-      is OfflineEntry.MmapBacked -> {
-        OfflineEntry.createMmapFromFile(
-          bufferId = targetBufferId,
-          sampleRate = source.sampleRate,
-          channelCount = source.channelCount,
-          numSamples = source.numSamples,
-          f32FilePath = source.filePath,
-          dataOffsetBytes = source.dataOffsetBytes,
-        ) ?: throw IllegalStateException(
-          "Failed to adopt mmap-backed source buffer into target: $sourceBufferId"
-        )
-      }
+    if (source.channelCount != 1) {
+      throw IllegalArgumentException(
+        "Resampling offline→offline requires mono (channelCount=1), got ${source.channelCount}",
+      )
     }
+    return resampleOfflineEntry(source, effectiveTarget)
+  }
 
-    offlineEntries[targetBufferId] = replacement
+  private fun resolveEffectiveTargetSampleRateHz(target: Int?, sourceRate: Int): Int {
+    if (target == null || target <= 0) return sourceRate
+    return target
+  }
+
+  private fun resampleOfflineEntry(source: OfflineEntry, targetRate: Int): OfflineEntry {
+    val samples = source.readAllSamples()
+    val resampled = Resampler.resampleLinear(samples, source.sampleRate, targetRate)
+    // Release intermediate transfer result if it was a distinct buffer we just created.
+    if (source.bufferId != samples.hashCode().toString()) {
+      // keep source registered; caller owns lifecycle of createOfflineFromLive transfer target
+    }
+    return createOfflineFromFloatArray(resampled, targetRate, source.channelCount)
+  }
+
+  fun populateOfflineIfEmpty(targetBufferId: String, sourceBufferId: String) {
+    getOffline(sourceBufferId) ?: throw IllegalArgumentException("source not found")
+    getOffline(targetBufferId) ?: throw IllegalArgumentException("target not found")
+    val ok =
+      AudioBufferNative.nativePopulateOfflineIfEmpty(targetBufferId, sourceBufferId)
+    if (!ok) throw IllegalStateException("populate failed")
+    // C moves source SoT into target and erases source id — mirror handle map.
     offlineEntries.remove(sourceBufferId)
+    OfflineEntry.wrap(targetBufferId)?.let { offlineEntries[targetBufferId] = it }
   }
 
-  private fun createFromRingSnapshot(bufferId: String, live: LiveEntry): OfflineEntry {
-    val snapshot = live.snapshotRing()
-    val entry = createEntryWithThreshold(bufferId, live.sampleRate, live.channelCount, snapshot)
-    return entry
-  }
-
-  /**
-   * Copy raw F32 bytes from a WAV F32 spool file (skip 44-byte header) to a .f32 temp file, then mmap.
-   * Returns the OfflineEntry, or null if conversion fails (caller falls back to ring snapshot).
-   */
-  private fun createOfflineFromF32WavSpoolFile(
-    bufferId: String,
-    spoolPath: String,
-    sampleRate: Int,
-    channelCount: Int,
-  ): OfflineEntry? {
-    val dir = cacheDir ?: return null
-    val f32File = File(dir, "pa_off_${bufferId}.f32")
-
-    return try {
-      // Skip 44-byte WAV header, copy raw F32 bytes. Avoid FileInputStream.skip() —
-      // ART can abort in FileInputStream.skip0 JNI check on some devices/OS builds.
-      val spoolFile = File(spoolPath)
-      if (!spoolFile.exists() || spoolFile.length() <= 44L) {
-        return null
-      }
-      FileInputStream(spoolFile).use { fis ->
-        val inCh = fis.channel
-        val total = inCh.size()
-        val payloadBytes = total - 44L
-        if (payloadBytes <= 0L) {
-          return null
-        }
-        inCh.position(44L)
-        FileOutputStream(f32File).use { fos ->
-          val outCh = fos.channel
-          var written = 0L
-          while (written < payloadBytes) {
-            val n = outCh.transferFrom(inCh, written, payloadBytes - written)
-            if (n == 0L) {
-              throw RuntimeException("Incomplete copy from spool after WAV header")
-            }
-            written += n
-          }
-        }
-      }
-
-      val numSamples = (f32File.length() / 4).toInt()
-      if (numSamples <= 0) {
-        f32File.delete()
-        return null
-      }
-
-      val rawSize = f32File.length()
-      val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.FILE_ORIGIN)
-
-      val shouldMmap = rawSize >= threshold
-      val entry = if (shouldMmap) {
-        val mmapEntry = OfflineEntry.createMmapFromFile(
-          bufferId,
-          sampleRate,
-          channelCount,
-          numSamples,
-          f32File.absolutePath
-        )
-        if (mmapEntry == null) {
-                    f32File.delete()
-          null
-        } else {
-                    mmapEntry
-        }
-      } else {
-                val samples = FloatArray(numSamples)
-        java.io.RandomAccessFile(f32File, "r").use { raf ->
-          val bytes = ByteArray(numSamples * 4)
-          raf.readFully(bytes)
-          val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-          for (i in 0 until numSamples) {
-            samples[i] = bb.float
-          }
-        }
-        f32File.delete()
-        OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
-      }
-
-      if (entry != null) {
-        offlineEntries[bufferId] = entry
-      }
-      entry
-    } catch (e: Exception) {
-      Log.w(TAG, "createOfflineFromF32WavSpoolFile failed: ${e.message}")
-      f32File.delete()
-      null
-    }
-  }
-
-  /**
-   * Create an entry applying the mmap threshold: large → MmapBacked, small → InMemory.
-   * Registers in offlineEntries.
-   */
-  internal fun createEntryWithThreshold(
-    bufferId: String,
-    sampleRate: Int,
-    channelCount: Int,
-    samples: FloatArray,
-  ): OfflineEntry {
-    val rawSize = samples.size.toLong() * 4
-    val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
-    val dir = cacheDir
-
-    val selectedForMmap = rawSize >= threshold && dir != null
-    val entry = if (selectedForMmap) {
-      val mmapEntry = OfflineEntry.createMmapFromSamples(bufferId, sampleRate, channelCount, samples, dir)
-      mmapEntry ?: OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
-    } else {
-      OfflineEntry.InMemory(bufferId, sampleRate, channelCount, samples)
-    }
-    offlineEntries[bufferId] = entry
-    return entry
-  }
-
-  // Note: This still uses the old in-heap path because these scenarios have FloatArrays
-  // that are already materialized:
-  //   - JSI external calls: intentional, documented as power-user API
-  //   - Ring snapshots: typically small (ring buffer is bounded)
-  //   - Enhancement output: filled into pre-allocated empty buffer
-  // For large file data, use file-based paths (decodeFileToOfflineBuffer, createOfflineFromLive).
-
-  /**
-   * Upgrade an InMemory entry to MmapBacked if it exceeds the threshold.
-   * Used after adoptSamples() in enhancement output.
-   * Atomically swaps the entry in the registry.
-   */
   fun upgradeToMmapIfNeeded(bufferId: String) {
-    // Upgrade an in-memory buffer to mmap if it exceeds the threshold.
-    // Used when TTS/Enhancement output fills an initially-empty buffer.
-    // This is safe because enhancement output is typically bounded (< 1-10 min audio),
-    // and the buffer was already in heap before upgrade.
-    val entry = offlineEntries[bufferId] ?: return
-    if (entry !is OfflineEntry.InMemory) return
-    val rawSize = entry.numSamples.toLong() * 4
-    val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.HEAP_ORIGIN)
-    if (rawSize < threshold) {
-            return
-    }
-    val dir = cacheDir ?: return
-    
-    val mmapEntry = OfflineEntry.createMmapFromSamples(
-      entry.bufferId, entry.sampleRate, entry.channelCount, entry.samples, dir
-    ) ?: return
-    
-    // Atomically replace in registry
-    offlineEntries[bufferId] = mmapEntry
-    entry.samples = FloatArray(0) // Release heap memory from old InMemory
-  }
-
-  /** Read a WAV spool into float32 samples. */
-  private fun readWavToFloat32(filePath: String, metadata: FileBackedMetadata): FloatArray? {
-    return try {
-      val result = FloatArray(metadata.numSamples)
-      FileBackedReader(filePath, metadata).use { reader ->
-        var offset = 0
-        val chunk = 8192
-        while (offset < result.size) {
-          val read = reader.readSamples(result, offset, minOf(chunk, result.size - offset))
-          if (read <= 0) break
-          offset += read
-        }
-      }
-      result
-    } catch (e: Exception) {
-      Log.w(TAG, "Failed to read WAV spool: ${e.message}")
-      null
+    AudioBufferNative.nativeUpgradeToMmap(bufferId)
+    val existing = offlineEntries[bufferId]
+    if (existing is OfflineEntry.InMemory) {
+      val path = AudioBufferNative.nativeOfflineFilePath(bufferId) ?: ""
+      offlineEntries[bufferId] =
+        OfflineEntry.MmapBacked(bufferId, existing.sampleRate, existing.channelCount, path)
     }
   }
 
-  // ==================== Live Buffer Creation ====================
-
-  /**
-   * Create a new live audio buffer.
-   *
-   * @param sampleRate Sample rate for this buffer.
-   * @param windowSeconds Ring buffer window size in seconds (default: 60).
-   * @param persistence Optional persistence config for spool-to-disk.
-   */
   fun createLive(
     sampleRate: Int,
     channelCount: Int = 1,
@@ -630,33 +236,36 @@ object PipelineAudioRegistry {
     onFramesAppended: ((LiveFramesAppendedEvent) -> Unit)? = null,
     isTemporarySpool: Boolean = false,
   ): LiveEntry {
-    if (sampleRate <= 0) throw IllegalArgumentException("sampleRate must be > 0")
-    if (channelCount != 1) throw IllegalArgumentException("Only mono (channelCount=1) is supported")
-    if (windowSeconds <= 0) throw IllegalArgumentException("windowSeconds must be > 0")
+    require(sampleRate > 0) { "sampleRate must be > 0" }
+    require(channelCount == 1) { "Only mono (channelCount=1) is supported" }
+    require(windowSeconds > 0) { "windowSeconds must be > 0" }
 
-    val bufferId = "live_${UUID.randomUUID()}"
-    val entry = LiveEntry(
-      bufferId = bufferId,
-      sampleRate = sampleRate,
-      channelCount = channelCount,
-      windowSeconds = windowSeconds,
-      persistence = persistence,
-      appendEventConfig = appendEventConfig,
-      onFramesAppended = onFramesAppended,
-      isTemporarySpool = isTemporarySpool,
-    )
-    liveEntries[bufferId] = entry
+    val spoolPath = persistence?.filePath
+    val id =
+      AudioBufferNative.nativeCreateLive(
+        sampleRate,
+        channelCount,
+        windowSeconds,
+        spoolPath,
+        appendEventConfig.enabled,
+        appendEventConfig.minIntervalMs,
+      ) ?: throw IllegalStateException("Failed to create live buffer")
+
+    val entry =
+      LiveEntry(
+        bufferId = id,
+        sampleRate = sampleRate,
+        channelCount = channelCount,
+        windowSeconds = windowSeconds,
+        persistence = persistence,
+        appendEventConfig = appendEventConfig,
+        onFramesAppended = onFramesAppended,
+        isTemporarySpool = isTemporarySpool,
+      )
+    liveEntries[id] = entry
     return entry
   }
 
-  // ==================== Append to Live Buffer ====================
-
-  /**
-   * Append Float32 samples to a live buffer.
-   * @param liveBufferId Live buffer ID.
-   * @param samples Float32 samples [-1, 1].
-   * @param sampleRate Sample rate of the incoming samples.
-   */
   fun appendSamplesToLive(
     liveBufferId: String,
     samples: FloatArray,
@@ -670,18 +279,14 @@ object PipelineAudioRegistry {
     entry.appendSamples(samples, sampleRate, origin)
   }
 
-  /**
-   * Append all samples from an offline buffer to a live buffer.
-   */
   fun appendOfflineToLive(liveBufferId: String, offlineBufferId: String) {
     val live = requireLiveEntry(liveBufferId)
     if (live.state != LiveEntry.State.RECORDING) {
       throw IllegalStateException("Live buffer is finalized, cannot append")
     }
-    val offline = offlineEntries[offlineBufferId]
-      ?: throw IllegalArgumentException("Offline buffer not found: $offlineBufferId")
-
-    // Stream from offline to avoid full-RAM copy for file-backed entries
+    val offline =
+      getOffline(offlineBufferId)
+        ?: throw IllegalArgumentException("Offline buffer not found: $offlineBufferId")
     offline.createReader().use { reader ->
       val chunk = FloatArray(8192)
       while (true) {
@@ -702,228 +307,84 @@ object PipelineAudioRegistry {
     enabled: Boolean? = null,
     minIntervalMs: Int? = null,
   ) {
-    val entry = requireLiveEntry(liveBufferId)
-    entry.configureAppendEvents(enabled, minIntervalMs)
+    requireLiveEntry(liveBufferId).configureAppendEvents(enabled, minIntervalMs)
   }
 
   fun setLiveFramesAppendedListener(
     liveBufferId: String,
     listener: ((LiveFramesAppendedEvent) -> Unit)?,
   ) {
-    val entry = requireLiveEntry(liveBufferId)
-    entry.setOnFramesAppendedListener(listener)
+    requireLiveEntry(liveBufferId).setOnFramesAppendedListener(listener)
   }
-
-  // ==================== Finalize Live Buffer ====================
 
   fun finalizeLive(liveBufferId: String) {
-    val entry = requireLiveEntry(liveBufferId)
-    entry.finalize_()
+    requireLiveEntry(liveBufferId).finalize_()
   }
 
-  // ==================== Info / Release ====================
-
-  /**
-   * Get info for any buffer (offline or live).
-   */
   fun getInfo(bufferId: String): WritableMap {
-    offlineEntries[bufferId]?.let { return it.toWritableMap() }
-    liveEntries[bufferId]?.let { return it.toWritableMap() }
-    if (invalidatedLiveIds.contains(bufferId)) {
-      throw IllegalStateException("Live buffer is invalidated after transfer: $bufferId")
+    getOffline(bufferId)?.let {
+      return it.toWritableMap()
     }
-    throw IllegalArgumentException("Buffer not found: $bufferId")
+    getLive(bufferId)?.let {
+      return it.toWritableMap()
+    }
+    throw IllegalArgumentException("AUDIO_BUFFER_NOT_FOUND: $bufferId")
   }
 
-  /**
-   * Release any buffer (offline or live).
-   */
   fun release(bufferId: String): Boolean {
-    offlineEntries.remove(bufferId)?.let {
-      it.releaseResources()
-      return true
-    }
-    liveEntries.remove(bufferId)?.let {
-      it.release()
-      return true
-    }
-    if (invalidatedLiveIds.remove(bufferId)) {
-      return true
-    }
-    return false
+    offlineEntries.remove(bufferId)
+    liveEntries.remove(bufferId)
+    return AudioBufferNative.nativeRelease(bufferId)
   }
 
-  // ==================== Accessors for pipeline stages ====================
-
-  fun getOffline(bufferId: String): OfflineEntry? = offlineEntries[bufferId]
-  fun getLive(bufferId: String): LiveEntry? = liveEntries[bufferId]
-  fun isInvalidatedLiveBuffer(bufferId: String): Boolean = invalidatedLiveIds.contains(bufferId)
-
-  /** Check whether a buffer ID refers to an offline entry. */
-  fun isOffline(bufferId: String): Boolean = offlineEntries.containsKey(bufferId)
-
-  /** Check whether a buffer ID refers to a live entry. */
-  fun isLive(bufferId: String): Boolean = liveEntries.containsKey(bufferId)
-
-  // ==================== JS Sample Slice (for debug/export) ====================
-
-  /**
-   * Get a slice of samples from a live buffer's ring for JS consumption.
-   */
-  fun getLiveSamplesSlice(liveBufferId: String, startFrame: Int, frameCount: Int): FloatArray {
-    val entry = requireLiveEntry(liveBufferId)
-    return entry.getSamplesSlice(startFrame, frameCount)
+  fun getOffline(bufferId: String): OfflineEntry? {
+    offlineEntries[bufferId]?.let { return it }
+    val wrapped = OfflineEntry.wrap(bufferId) ?: return null
+    offlineEntries[bufferId] = wrapped
+    return wrapped
   }
 
-  /**
-   * Get a sample slice from an offline buffer for JSI/JNI callers.
-   * Works for both InMemory and MmapBacked entries.
-   */
-  fun getOfflineSamplesSliceJni(
-    bufferId: String,
-    startFrame: Int,
-    frameCount: Int,
-  ): FloatArray {
-    val entry = offlineEntries[bufferId]
-      ?: throw IllegalArgumentException("[BUFFER_NOT_FOUND] $bufferId")
-
-    if (frameCount <= 0) return FloatArray(0)
-    return entry.readSlice(startFrame, frameCount)
+  fun getLive(bufferId: String): LiveEntry? {
+    liveEntries[bufferId]?.let { return it }
+    val wrapped = LiveEntry.wrap(bufferId) ?: return null
+    liveEntries[bufferId] = wrapped
+    return wrapped
   }
 
-  /**
-   * Get a sample slice from a live buffer ring for JSI/JNI callers.
-   */
-  fun getLiveSamplesSliceJni(
-    bufferId: String,
-    startFrame: Int,
-    frameCount: Int,
-  ): FloatArray {
-    val entry = requireLiveEntry(bufferId)
-    return entry.getSamplesSlice(startFrame.coerceAtLeast(0), frameCount)
-  }
+  fun isInvalidatedLiveBuffer(bufferId: String): Boolean =
+    AudioBufferNative.nativeIsInvalidatedLive(bufferId)
 
-  /**
-   * Create an offline buffer from Float32 samples and return info as JSON for JSI.
-   */
-  fun createOfflineFromFloatArrayJni(
-    samples: FloatArray,
-    sampleRate: Int,
-    channelCount: Int,
-  ): String {
-    val entry = createOfflineFromFloatArray(samples, sampleRate, channelCount)
-    return "{" +
-      "\"bufferId\":\"${entry.bufferId}\"," +
-      "\"kind\":\"offlinePcmBuffer\"," +
-      "\"state\":\"immutable\"," +
-      "\"sampleRate\":${entry.sampleRate}," +
-      "\"channelCount\":${entry.channelCount}," +
-      "\"numSamples\":${entry.numSamples}," +
-      "\"durationMs\":${entry.durationMs}" +
-      "}"
-  }
+  fun isOffline(bufferId: String): Boolean = AudioBufferNative.nativeIsOffline(bufferId)
 
-  /**
-   * Append Float32 samples to a live buffer from JSI/JNI.
-   */
-  fun appendSamplesToLiveJni(
-    bufferId: String,
-    samples: FloatArray,
-    sampleRate: Int,
-  ) {
-    val entry = requireLiveEntry(bufferId)
-    if (entry.state != LiveEntry.State.RECORDING) {
-      throw IllegalStateException("[BUFFER_NOT_RECORDING] $bufferId")
-    }
-    entry.appendSamples(
-      samples,
-      sampleRate,
-      LiveAppendOrigin.Ingress(LiveAudioIngressSource.APPEND),
-    )
-  }
+  fun isLive(bufferId: String): Boolean = AudioBufferNative.nativeIsLive(bufferId)
 
-  private fun requireLiveEntry(liveBufferId: String): LiveEntry {
-    liveEntries[liveBufferId]?.let { return it }
-    if (invalidatedLiveIds.contains(liveBufferId)) {
-      throw BufferInvalidatedException("Live buffer is invalidated after transfer: $liveBufferId")
-    }
-    throw IllegalArgumentException("Live buffer not found: $liveBufferId")
-  }
+  fun getLiveSamplesSlice(liveBufferId: String, startFrame: Int, frameCount: Int): FloatArray =
+    AudioBufferNative.nativeReadLiveSlice(liveBufferId, startFrame, frameCount) ?: FloatArray(0)
 
-  private fun createOfflineFromWavSpoolTransfer(
-    bufferId: String,
-    spoolPath: String,
-    sampleRate: Int,
-    channelCount: Int,
-  ): OfflineEntry? {
-    val spoolFile = File(spoolPath)
-    if (!spoolFile.exists()) return null
+  fun createLiveCursor(liveBufferId: String): Int = AudioBufferNative.nativeCreateCursor(liveBufferId)
 
-    val payloadBytes = spoolFile.length() - 44L
-    if (payloadBytes <= 0L || payloadBytes % 4L != 0L) return null
+  fun peekLiveCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray =
+    AudioBufferNative.nativePeekCursor(liveBufferId, cursorId, maxSamples) ?: FloatArray(0)
 
-    val numSamples = (payloadBytes / 4L).toInt()
-    val threshold = MmapThresholdPolicy.thresholdBytes(ThresholdPathType.FILE_ORIGIN)
-    val shouldMmap = spoolFile.length() >= threshold
-
-    return if (shouldMmap) {
-      OfflineEntry.createMmapFromFile(
-        bufferId = bufferId,
-        sampleRate = sampleRate,
-        channelCount = channelCount,
-        numSamples = numSamples,
-        f32FilePath = spoolPath,
-        dataOffsetBytes = 44,
-      )
-    } else {
-      val out = FloatArray(numSamples)
-      java.io.RandomAccessFile(spoolFile, "r").use { raf ->
-        raf.seek(44L)
-        val bytes = ByteArray(numSamples * 4)
-        raf.readFully(bytes)
-        val bb = java.nio.ByteBuffer.wrap(bytes).order(java.nio.ByteOrder.LITTLE_ENDIAN)
-        for (i in 0 until numSamples) {
-          out[i] = bb.float
-        }
-      }
-      OfflineEntry.InMemory(bufferId, sampleRate, channelCount, out)
-    }
-  }
-  // ==================== Cursor management (for native pipeline stages) ====================
-
-  fun createLiveCursor(liveBufferId: String): Int {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
-    return entry.createCursorHandle()
-  }
-
-  fun peekLiveCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
-    return entry.peekCursor(cursorId, maxSamples)
-  }
-
-  fun drainLiveCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
-    return entry.drainCursor(cursorId, maxSamples)
-  }
+  fun drainLiveCursor(liveBufferId: String, cursorId: Int, maxSamples: Int): FloatArray =
+    AudioBufferNative.nativeDrainCursor(liveBufferId, cursorId, maxSamples) ?: FloatArray(0)
 
   fun releaseLiveCursor(liveBufferId: String, cursorId: Int) {
-    val entry = liveEntries[liveBufferId]
-      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
-    entry.releaseCursor(cursorId)
+    AudioBufferNative.nativeReleaseCursor(liveBufferId, cursorId)
   }
-
-  // ==================== Utility ====================
 
   fun clear() {
-    liveEntries.values.forEach { it.release() }
-    liveEntries.clear()
-    offlineEntries.values.forEach { it.releaseResources() }
-    offlineEntries.clear()
+    for (id in offlineEntries.keys.toList()) {
+      release(id)
+    }
+    for (id in liveEntries.keys.toList()) {
+      release(id)
+    }
   }
 
+  private fun requireLiveEntry(liveBufferId: String): LiveEntry =
+    getLive(liveBufferId)
+      ?: throw IllegalArgumentException("Live buffer not found: $liveBufferId")
 }
 
 class TransferException(

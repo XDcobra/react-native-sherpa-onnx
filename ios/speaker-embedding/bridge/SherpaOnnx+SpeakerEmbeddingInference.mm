@@ -1,8 +1,8 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../../segmentbuffer/core/SherpaOnnx+SegmentBufferGlobals.h"
+#include "AudioRegistry.h"
+#include "SegmentRegistry.h"
 #include "../core/SpeakerEmbeddingBridgeState.h"
 #include "../core/SpeakerEmbeddingBridgeUtils.h"
 #include "sherpa-onnx-speaker-embedding-wrapper.h"
@@ -252,38 +252,38 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   }
 
   @try {
-    std::vector<float> inputSamples;
-    int inputSr = inSampleRate;
-
-    if (!hasStart) {
-      if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
-        reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
-               [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
-               nil);
-        return;
-      }
-    } else {
+    int rangeStart = -1;
+    int rangeEnd = -1;
+    if (hasStart) {
       const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
       const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
       const int end = std::min(endRaw, inNumSamples);
-      const int frameCount = std::max(0, end - start);
-      if (frameCount == 0) {
+      if (end <= start) {
         resolve(@{ @"embedding": @[] });
         return;
       }
-      std::string sliceErrCode;
-      std::string sliceErrMsg;
-      if (!pa_get_offline_samples_slice(
-              audioInId, start, frameCount, &inputSamples, &sliceErrCode, &sliceErrMsg)) {
-        NSString *code = sliceErrCode.empty()
-            ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
-            : [NSString stringWithUTF8String:sliceErrCode.c_str()];
-        NSString *msg = sliceErrMsg.empty()
-            ? @"Failed to read offline audio slice"
-            : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
-        reject(code, msg, nil);
+      rangeStart = start;
+      rangeEnd = end;
+    }
+
+    PaOfflineSampleView pcmView;
+    std::string sliceErrCode;
+    std::string sliceErrMsg;
+    if (!pa_acquire_offline_sample_view(audioInId, rangeStart, rangeEnd, &pcmView, &sliceErrCode,
+                                        &sliceErrMsg) ||
+        pcmView.count == 0 || pcmView.data == nullptr) {
+      if (!sliceErrCode.empty() && sliceErrCode != "AUDIO_BUFFER_NOT_FOUND") {
+        reject([NSString stringWithUTF8String:sliceErrCode.c_str()],
+               sliceErrMsg.empty()
+                   ? @"Failed to read offline audio slice"
+                   : [NSString stringWithUTF8String:sliceErrMsg.c_str()],
+               nil);
         return;
       }
+      reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
+             [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
+             nil);
+      return;
     }
 
     auto extractor =
@@ -294,8 +294,8 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
              nil);
       return;
     }
-    std::vector<float> embedding =
-        extractor->computeFromSamples(inputSamples, inputSr);
+    std::vector<float> embedding = extractor->computeFromSamples(
+        pcmView.data, static_cast<int32_t>(pcmView.count), pcmView.sampleRate);
     if (embedding.empty()) {
       const std::string &computeError = extractor->lastError();
       const std::string &computeErrorCode = extractor->lastErrorCode();
@@ -376,38 +376,38 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   }
 
   @try {
-    std::vector<float> inputSamples;
-    int inputSr = inSampleRate;
-
-    if (!hasStart) {
-      if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
-        reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
-               [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
-               nil);
-        return;
-      }
-    } else {
+    int rangeStart = -1;
+    int rangeEnd = -1;
+    if (hasStart) {
       const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
       const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
       const int end = std::min(endRaw, inNumSamples);
-      const int frameCount = std::max(0, end - start);
-      if (frameCount == 0) {
+      if (end <= start) {
         resolve(@{ @"name": @"" });
         return;
       }
-      std::string sliceErrCode;
-      std::string sliceErrMsg;
-      if (!pa_get_offline_samples_slice(
-              audioInId, start, frameCount, &inputSamples, &sliceErrCode, &sliceErrMsg)) {
-        NSString *code = sliceErrCode.empty()
-            ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
-            : [NSString stringWithUTF8String:sliceErrCode.c_str()];
-        NSString *msg = sliceErrMsg.empty()
-            ? @"Failed to read offline audio slice"
-            : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
-        reject(code, msg, nil);
+      rangeStart = start;
+      rangeEnd = end;
+    }
+
+    PaOfflineSampleView pcmView;
+    std::string sliceErrCode;
+    std::string sliceErrMsg;
+    if (!pa_acquire_offline_sample_view(audioInId, rangeStart, rangeEnd, &pcmView, &sliceErrCode,
+                                        &sliceErrMsg) ||
+        pcmView.count == 0 || pcmView.data == nullptr) {
+      if (!sliceErrCode.empty() && sliceErrCode != "AUDIO_BUFFER_NOT_FOUND") {
+        reject([NSString stringWithUTF8String:sliceErrCode.c_str()],
+               sliceErrMsg.empty()
+                   ? @"Failed to read offline audio slice"
+                   : [NSString stringWithUTF8String:sliceErrMsg.c_str()],
+               nil);
         return;
       }
+      reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
+             [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
+             nil);
+      return;
     }
 
     auto extractor =
@@ -427,7 +427,8 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
       return;
     }
     std::vector<float> embedding =
-        extractor->computeFromSamples(inputSamples, inputSr);
+        extractor->computeFromSamples(
+            pcmView.data, static_cast<int32_t>(pcmView.count), pcmView.sampleRate);
     if (embedding.empty()) {
       const std::string &computeError = extractor->lastError();
       const std::string &computeErrorCode = extractor->lastErrorCode();
@@ -518,38 +519,38 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
   }
 
   @try {
-    std::vector<float> inputSamples;
-    int inputSr = inSampleRate;
-
-    if (!hasStart) {
-      if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) || inputSamples.empty()) {
-        reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
-               [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
-               nil);
-        return;
-      }
-    } else {
+    int rangeStart = -1;
+    int rangeEnd = -1;
+    if (hasStart) {
       const int start = std::max(0, static_cast<int>(std::floor([startSample doubleValue])));
       const int endRaw = std::max(start, static_cast<int>(std::floor([endSample doubleValue])));
       const int end = std::min(endRaw, inNumSamples);
-      const int frameCount = std::max(0, end - start);
-      if (frameCount == 0) {
+      if (end <= start) {
         resolve(@{ @"ok": @NO });
         return;
       }
-      std::string sliceErrCode;
-      std::string sliceErrMsg;
-      if (!pa_get_offline_samples_slice(
-              audioInId, start, frameCount, &inputSamples, &sliceErrCode, &sliceErrMsg)) {
-        NSString *code = sliceErrCode.empty()
-            ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
-            : [NSString stringWithUTF8String:sliceErrCode.c_str()];
-        NSString *msg = sliceErrMsg.empty()
-            ? @"Failed to read offline audio slice"
-            : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
-        reject(code, msg, nil);
+      rangeStart = start;
+      rangeEnd = end;
+    }
+
+    PaOfflineSampleView pcmView;
+    std::string sliceErrCode;
+    std::string sliceErrMsg;
+    if (!pa_acquire_offline_sample_view(audioInId, rangeStart, rangeEnd, &pcmView, &sliceErrCode,
+                                        &sliceErrMsg) ||
+        pcmView.count == 0 || pcmView.data == nullptr) {
+      if (!sliceErrCode.empty() && sliceErrCode != "AUDIO_BUFFER_NOT_FOUND") {
+        reject([NSString stringWithUTF8String:sliceErrCode.c_str()],
+               sliceErrMsg.empty()
+                   ? @"Failed to read offline audio slice"
+                   : [NSString stringWithUTF8String:sliceErrMsg.c_str()],
+               nil);
         return;
       }
+      reject(@"SPEAKER_EMBEDDING_BUFFER_EMPTY",
+             [NSString stringWithFormat:@"Input offline audio buffer is empty: %@", audioBufferId],
+             nil);
+      return;
     }
 
     auto extractor =
@@ -569,7 +570,8 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
       return;
     }
     std::vector<float> embedding =
-        extractor->computeFromSamples(inputSamples, inputSr);
+        extractor->computeFromSamples(
+            pcmView.data, static_cast<int32_t>(pcmView.count), pcmView.sampleRate);
     if (embedding.empty()) {
       const std::string &computeError = extractor->lastError();
       const std::string &computeErrorCode = extractor->lastErrorCode();
@@ -701,9 +703,8 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
         return;
       }
 
-      std::vector<float> inputSamples;
-      int inputSr = inSampleRate;
-      bool useFull = !hasStarts;
+      int rangeStart = -1;
+      int rangeEnd = -1;
       if (hasStarts) {
         id startObj = startSamples[i];
         id endObj = endSamples[i];
@@ -717,9 +718,7 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
                  nil);
           return;
         }
-        if (startNull) {
-          useFull = true;
-        } else {
+        if (!startNull) {
           if (![startObj isKindOfClass:[NSNumber class]] ||
               ![endObj isKindOfClass:[NSNumber class]]) {
             reject(@"SPEAKER_EMBEDDING_INVALID_ARGUMENT",
@@ -734,37 +733,34 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
           const int endRaw =
               std::max(start, static_cast<int>(std::floor([(NSNumber *)endObj doubleValue])));
           const int end = std::min(endRaw, inNumSamples);
-          const int frameCount = std::max(0, end - start);
-          if (frameCount == 0) {
+          if (end <= start) {
             continue;
           }
-          std::string sliceErrCode;
-          std::string sliceErrMsg;
-          if (!pa_get_offline_samples_slice(
-                  audioInId, start, frameCount, &inputSamples, &sliceErrCode, &sliceErrMsg)) {
-            NSString *code = sliceErrCode.empty()
-                ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
-                : [NSString stringWithUTF8String:sliceErrCode.c_str()];
-            NSString *msg = sliceErrMsg.empty()
-                ? @"Failed to read offline audio slice"
-                : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
-            reject(code, msg, nil);
-            return;
-          }
+          rangeStart = start;
+          rangeEnd = end;
         }
       }
-      if (useFull) {
-        if (!pa_read_offline_samples(audioInId, &inputSamples, &inputSr) ||
-            inputSamples.empty()) {
-          continue;
-        }
+      PaOfflineSampleView pcmView;
+      std::string sliceErrCode;
+      std::string sliceErrMsg;
+      if (!pa_acquire_offline_sample_view(audioInId, rangeStart, rangeEnd, &pcmView, &sliceErrCode,
+                                          &sliceErrMsg)) {
+        NSString *code = sliceErrCode.empty()
+            ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
+            : [NSString stringWithUTF8String:sliceErrCode.c_str()];
+        NSString *msg = sliceErrMsg.empty()
+            ? @"Failed to read offline audio slice"
+            : [NSString stringWithUTF8String:sliceErrMsg.c_str()];
+        reject(code, msg, nil);
+        return;
       }
-      if (inputSamples.empty()) {
+      if (pcmView.count == 0 || pcmView.data == nullptr) {
         continue;
       }
 
       std::vector<float> embedding =
-          extractor->computeFromSamples(inputSamples, inputSr);
+          extractor->computeFromSamples(
+            pcmView.data, static_cast<int32_t>(pcmView.count), pcmView.sampleRate);
       if (embedding.empty()) {
         const std::string &computeError = extractor->lastError();
         const std::string &computeErrorCode = extractor->lastErrorCode();
@@ -961,12 +957,13 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
         const int end = std::min(span.endSample, inNumSamples);
         const int frameCount = std::max(0, end - start);
 
-        std::vector<float> inputSamples;
+        PaOfflineSampleView pcmView;
         std::string sliceErrCode;
         std::string sliceErrMsg;
+        bool havePcm = false;
         if (frameCount > 0) {
-          if (!pa_get_offline_samples_slice(
-                  audioInIdStr, start, frameCount, &inputSamples, &sliceErrCode, &sliceErrMsg)) {
+          if (!pa_acquire_offline_sample_view(audioInIdStr, start, end, &pcmView, &sliceErrCode,
+                                              &sliceErrMsg)) {
             NSString *code = sliceErrCode.empty()
                 ? @"SPEAKER_EMBEDDING_COMPUTE_ERROR"
                 : [NSString stringWithUTF8String:sliceErrCode.c_str()];
@@ -976,12 +973,13 @@ NSArray *FloatVectorToNSArray(const std::vector<float> &values) {
             reject(code, msg, nil);
             return;
           }
+          havePcm = pcmView.count > 0 && pcmView.data != nullptr;
         }
 
         std::string speakerName = "";
-        if (!inputSamples.empty()) {
-          std::vector<float> embedding =
-              extractor->computeFromSamples(inputSamples, inSampleRate);
+        if (havePcm) {
+          std::vector<float> embedding = extractor->computeFromSamples(
+              pcmView.data, static_cast<int32_t>(pcmView.count), inSampleRate);
           if (!embedding.empty()) {
             std::string name = manager->search(embedding, static_cast<float>(threshold));
             if (!name.empty()) {

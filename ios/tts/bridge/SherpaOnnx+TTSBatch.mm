@@ -7,9 +7,9 @@
 
 #include "engine/TtsEngineStore.h"
 #include "options/TtsGenerationOptionsHelpers.h"
-#include "native/sherpa-onnx-tts-wrapper.h"
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
+#include "sherpa-onnx-tts-engine-wrapper.h"
+#include "AudioRegistry.h"
+#include "TextRegistry.h"
 
 #include <memory>
 #include <optional>
@@ -64,15 +64,26 @@ static NSString *const kOfflineTtsOomMessage =
         return;
     }
     std::string text;
-    std::string textError;
-    if (!txt_read_offline_text(textInIdStr, &text, &textError)) {
-        NSString *msg = [NSString stringWithUTF8String:textError.c_str()] ?: @"Text buffer read failed";
-        if (NSDictionaryHasPhonemeInput(options) && [msg containsString:@"empty"]) {
+    {
+        TxtOfflineTextView textView;
+        std::string viewCode;
+        std::string viewMsg;
+        if (!txt_acquire_offline_text_view(textInIdStr, /*allowEmpty=*/true, &textView, &viewCode,
+                                           &viewMsg)) {
+            NSString *msg = [NSString stringWithUTF8String:viewMsg.c_str()] ?: @"Text buffer read failed";
+            reject(@"TTS_TEXT_BUFFER_NOT_FOUND", msg, nil);
+            return;
+        }
+        if (textView.bytes == 0 || textView.data == nullptr) {
+            if (!NSDictionaryHasPhonemeInput(options)) {
+                reject(@"TTS_TEXT_BUFFER_EMPTY",
+                       [NSString stringWithFormat:@"Text buffer is empty or not populated: %@", textInBufferId],
+                       nil);
+                return;
+            }
             text.clear();
         } else {
-            NSString *code = [msg containsString:@"not found"] ? @"TTS_TEXT_BUFFER_NOT_FOUND" : @"TTS_TEXT_BUFFER_EMPTY";
-            reject(code, msg, nil);
-            return;
+            text.assign(textView.data, textView.bytes);
         }
     }
 
@@ -152,20 +163,21 @@ static NSString *const kOfflineTtsOomMessage =
                 return;
             }
             std::string refBufferId = [refBufferIdNS UTF8String];
-            std::vector<float> refSamples;
-            int32_t refSampleRate = 0;
             if (refBufferId.find("off_") != 0) {
                 reject(@"TTS_REFERENCE_AUDIO_BUFFER_KIND_MISMATCH",
                        [NSString stringWithFormat:@"Expected offline audio buffer for reference, got: %@", refBufferIdNS], nil);
                 return;
             }
-            int tmpSr = 0;
-            if (!pa_read_offline_samples(refBufferId, &refSamples, &tmpSr)) {
+            PaOfflineSampleView refView;
+            std::string refErrCode;
+            std::string refErrMsg;
+            if (!pa_acquire_offline_sample_view(refBufferId, -1, -1, &refView, &refErrCode, &refErrMsg) ||
+                refView.count == 0 || refView.data == nullptr) {
                 reject(@"TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND",
                        [NSString stringWithFormat:@"Reference audio buffer not found: %@", refBufferIdNS], nil);
                 return;
             }
-            refSampleRate = tmpSr;
+            const int32_t refSampleRate = refView.sampleRate;
             if (kind == Kind::kZipvoice) {
                 NSString *rt = options[@"referenceText"];
                 NSString *trimmed = rt != nil ? [rt stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]] : @"";
@@ -174,7 +186,9 @@ static NSString *const kOfflineTtsOomMessage =
                     return;
                 }
             }
-            cloneOpt = VoiceCloneOptionsFromBuffer(options, refSamples, refSampleRate, kDefaultVoiceCloneNumSteps);
+            cloneOpt = VoiceCloneOptionsFromBuffer(
+                options, refView.data, static_cast<int32_t>(refView.count), refSampleRate,
+                kDefaultVoiceCloneNumSteps, refView.entry);
         } else if (kind == Kind::kPocket) {
             reject(@"TTS_GENERATE_ERROR", @"Pocket TTS requires reference audio for voice cloning. Pass voiceClone in options.", nil);
             return;

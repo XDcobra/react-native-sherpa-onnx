@@ -20,6 +20,7 @@ import {
 } from '../types/modelDetect';
 import {
   getPipelineAudioBufferInfo,
+  liveAudioNotifyToSpeechSegment,
   resolvePipelineAudioBufferId,
   releasePipelineAudioBuffer,
   subscribeLiveAudioBufferEvents,
@@ -36,7 +37,6 @@ import {
   detachSegmentationEngine,
   getSegmentationEngineInfo,
 } from '../segment';
-import type { SpeechSegment } from '../segment/segment';
 import type {
   SeparationDetectResult,
   SeparationEngine,
@@ -190,7 +190,7 @@ async function separateLiveOverload(
     const stem0OutId = outIds[0];
     if (stem0OutId != null) {
       const unsub = subscribeLiveAudioBufferEvents(stem0OutId, {
-        onSegment: (event) => cb(event.segment as SpeechSegment),
+        onSegment: (event) => cb(liveAudioNotifyToSpeechSegment(event)),
       });
       handle.completed.then(unsub, unsub);
     }

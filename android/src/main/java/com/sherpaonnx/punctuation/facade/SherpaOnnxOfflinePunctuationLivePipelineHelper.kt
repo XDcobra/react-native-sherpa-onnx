@@ -28,8 +28,7 @@ internal class SherpaOnnxOfflinePunctuationLivePipelineHelper(
     promise: Promise,
   ) {
     try {
-      val punctuator = punctuationHelper.getOfflineEngine(instanceId)
-      if (punctuator == null) {
+      if (!punctuationHelper.hasOfflineEngine(instanceId)) {
         promise.reject(
           "PUNCTUATION_INSTANCE_NOT_FOUND",
           "Offline punctuation instance not found: $instanceId"
@@ -95,7 +94,7 @@ internal class SherpaOnnxOfflinePunctuationLivePipelineHelper(
         textInput = OfflineLivePipelineWorker.TextInput(
           liveTextEntry = textInEntry,
         ),
-        punctuator = punctuator,
+        instanceId = instanceId,
         textOutputEntry = textOutEntry,
         textInputNormalization =
           PunctuationTextInputNormalization.resolve(textInputNormalization),

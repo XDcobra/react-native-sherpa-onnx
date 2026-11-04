@@ -1,17 +1,17 @@
 package com.sherpaonnx.stt.pipeline
 
-import com.k2fsa.sherpa.onnx.OfflineRecognizer
-import com.k2fsa.sherpa.onnx.OfflineStream
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.livePipeline.CommittedSegmentRef
 import com.sherpaonnx.livePipeline.OfflineLivePipelineWorker
+import com.sherpaonnx.stt.facade.SherpaOnnxSttHelper
 import com.sherpaonnx.text.pipeline.LiveTextEntry
 
 internal class SttOfflineLivePipelineWorker(
   pipelineId: String,
   attachedSegmentationEngineId: String,
   private val audioInputRef: AudioInput,
-  private val recognizer: OfflineRecognizer,
+  private val instanceId: String,
+  private val sttHelper: SherpaOnnxSttHelper,
   private val textOutputEntry: LiveTextEntry,
 ) : OfflineLivePipelineWorker(
   pipelineId = pipelineId,
@@ -20,7 +20,7 @@ internal class SttOfflineLivePipelineWorker(
   textInput = null,
 ) {
 
-  private val gateKey = NativeInstanceGate.keyFor(recognizer)
+  private val gateKey = "stt:$instanceId"
 
   override fun onSegmentCommitted(segment: CommittedSegmentRef) {
     val speech = segment as? CommittedSegmentRef.Speech ?: return
@@ -29,17 +29,13 @@ internal class SttOfflineLivePipelineWorker(
 
     if (!NativeInstanceGate.beginUse(gateKey)) return
 
-    var stream: OfflineStream? = null
     try {
-      stream = recognizer.createStream()
       val samples = audioInputRef.liveAudioEntry.getSamplesSlice(
         startFrame = speech.startSample,
         frameCount = frameCount,
       )
       if (samples.isEmpty()) return
-      stream.acceptWaveform(samples, speech.sampleRate)
-      recognizer.decode(stream)
-      val result = recognizer.getResult(stream)
+      val result = sttHelper.transcribeSamplesInternal(instanceId, samples, speech.sampleRate)
 
       textOutputEntry.commitSegment(
         text = result.text,
@@ -49,10 +45,6 @@ internal class SttOfflineLivePipelineWorker(
       )
       addUnitsWritten(result.text.length.toLong())
     } finally {
-      try {
-        stream?.release()
-      } catch (_: Exception) {
-      }
       NativeInstanceGate.endUse(gateKey)
     }
   }

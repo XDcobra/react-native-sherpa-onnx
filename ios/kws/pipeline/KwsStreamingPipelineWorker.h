@@ -1,9 +1,9 @@
 #pragma once
 
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../audio/pipeline/PaLiveEntry.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
-#include "../native/sherpa-onnx-kws-wrapper.h"
+#include "PaLiveEntry.h"
+#include "TextRegistry.h"
+#include "sherpa-onnx-kws-engine-wrapper.h"
 
 #include <condition_variable>
 #include <deque>
@@ -19,7 +19,7 @@
 class KwsStreamingPipelineWorker : public StreamingPipelineWorker {
  public:
   KwsStreamingPipelineWorker(
-      sherpaonnx::KwsWrapper *wrapper,
+      sherpaonnx::KwsEngineWrapper *wrapper,
       const std::string &streamId,
       std::shared_ptr<PaLiveEntry> inputEntry,
       std::shared_ptr<TxtLiveEntry> outputEntry,
@@ -43,12 +43,12 @@ class KwsStreamingPipelineWorker : public StreamingPipelineWorker {
 
   void runLoop();
   void autoFlushAndCommit(bool endOfAudio);
-  void maybeCommitHit(const sherpaonnx::KwsStreamResult &result);
+  void maybeCommitHit(const sherpaonnx::KwsEngineStreamResult &result);
   void processCommands();
   void drainRemainingCommands();
   void joinThread();
 
-  sherpaonnx::KwsWrapper *wrapper_;
+  sherpaonnx::KwsEngineWrapper *wrapper_;
   std::string streamId_;
   std::shared_ptr<PaLiveEntry> inputEntry_;
   std::shared_ptr<TxtLiveEntry> outputEntry_;

@@ -58,6 +58,8 @@ import {
   appendLiveTextSegment,
   createLiveTextBuffer,
   finalizeLiveTextBuffer,
+  readLiveTextPartial,
+  readLiveTextSegment,
   subscribeLiveTextBufferEvents,
 } from '../index';
 
@@ -104,7 +106,7 @@ describe('textbuffer segment event wiring', () => {
     mockNative.releasePipelineTextBuffer.mockResolvedValue(null);
   });
 
-  it('dispatches onSegment callback after text segment commit', async () => {
+  it('dispatches onSegment notify after text segment commit', async () => {
     const onSegment = jest.fn();
     const ref = await createLiveTextBuffer({ onSegment });
 
@@ -112,13 +114,11 @@ describe('textbuffer segment event wiring', () => {
 
     expect(onSegment).toHaveBeenCalledTimes(1);
     expect(onSegment.mock.calls[0][0]).toMatchObject({
-      bufferId: liveBufferId,
+      liveBufferId,
       totalSegments: 1,
-      segment: {
-        domain: 'text',
-        text: 'hello',
-        segmentIndex: 0,
-      },
+      segmentIndex: 0,
+      utf16Length: 5,
+      source: 'append',
     });
 
     ref.unsubscribeEvents();
@@ -151,38 +151,95 @@ describe('textbuffer segment event wiring', () => {
     );
   });
 
-  it('dispatches onSegment callback from native worker segment events', async () => {
+  it('dispatches onSegment notify from native worker segment events', async () => {
     const onSegment = jest.fn();
     const ref = await createLiveTextBuffer({ onSegment });
 
     emitEvent('pipelineLiveTextSegmentAppended', {
       liveBufferId,
-      text: 'worker commit',
-      textTruncated: true,
       source: 'stt_stream',
       segmentIndex: 2,
       totalSegments: 3,
-      tokens: ['worker', 'commit'],
-      timestamps: [0, 1],
-      meta: {
-        __segmentCreatedAtMs: 777,
-      },
+      utf16Length: 13,
     });
 
     expect(onSegment).toHaveBeenCalledTimes(1);
     expect(onSegment.mock.calls[0][0]).toMatchObject({
-      bufferId: liveBufferId,
+      liveBufferId,
       totalSegments: 3,
-      segment: {
-        domain: 'text',
-        text: 'worker commit',
-        textTruncated: true,
-        reason: 'endpoint',
-        segmentIndex: 2,
-      },
+      segmentIndex: 2,
+      utf16Length: 13,
+      source: 'stt_stream',
     });
 
     ref.unsubscribeEvents();
+  });
+
+  it('dispatches onPartial notify without partialText payload', async () => {
+    const onPartial = jest.fn();
+    const ref = await createLiveTextBuffer({ onPartial });
+
+    emitEvent('pipelineLiveTextPartial', {
+      liveBufferId,
+      source: 'stt_stream',
+      revision: 4,
+      utf16Length: 11,
+    });
+
+    expect(onPartial).toHaveBeenCalledTimes(1);
+    expect(onPartial.mock.calls[0][0]).toEqual({
+      liveBufferId,
+      source: 'stt_stream',
+      revision: 4,
+      utf16Length: 11,
+    });
+
+    ref.unsubscribeEvents();
+  });
+
+  it('readLiveTextPartial and readLiveTextSegment pull via slice APIs', async () => {
+    mockNative.getLiveTextBufferPartialSlice.mockResolvedValue('partial hi');
+    mockNative.getLiveTextBufferSegments.mockResolvedValue({
+      segments: [
+        {
+          text: 'committed',
+          source: 'stt_stream',
+          segmentIndex: 1,
+        },
+      ],
+    });
+
+    const partial = await readLiveTextPartial({
+      liveBufferId,
+      source: 'stt_stream',
+      revision: 1,
+      utf16Length: 10,
+    });
+    expect(partial).toBe('partial hi');
+    expect(mockNative.getLiveTextBufferPartialSlice).toHaveBeenCalledWith(
+      liveBufferId,
+      0,
+      10
+    );
+
+    const segment = await readLiveTextSegment({
+      liveBufferId,
+      segmentIndex: 1,
+      totalSegments: 2,
+      utf16Length: 9,
+      source: 'stt_stream',
+    });
+    expect(segment).toMatchObject({
+      text: 'committed',
+      segmentIndex: 1,
+      source: 'stt_stream',
+    });
+    expect(mockNative.getLiveTextBufferSegments).toHaveBeenCalledWith(
+      liveBufferId,
+      1,
+      1,
+      undefined
+    );
   });
 
   it('subscribeLiveTextBufferEvents works after creation without initial callbacks', async () => {
@@ -200,9 +257,10 @@ describe('textbuffer segment event wiring', () => {
 
     emitEvent('pipelineLiveTextSegmentAppended', {
       liveBufferId: uniqueBufferId,
-      text: 'hello via subscribe',
+      source: 'append',
       segmentIndex: 1,
       totalSegments: 1,
+      utf16Length: 18,
     });
 
     expect(onSegment).toHaveBeenCalledTimes(1);
@@ -211,9 +269,10 @@ describe('textbuffer segment event wiring', () => {
 
     emitEvent('pipelineLiveTextSegmentAppended', {
       liveBufferId: uniqueBufferId,
-      text: 'ignored after unsubscribe',
+      source: 'append',
       segmentIndex: 2,
       totalSegments: 2,
+      utf16Length: 24,
     });
 
     expect(onSegment).toHaveBeenCalledTimes(1); // Still 1
@@ -239,9 +298,10 @@ describe('textbuffer segment event wiring', () => {
 
     emitEvent('pipelineLiveTextSegmentAppended', {
       liveBufferId: uniqueBufferId,
-      text: 'event 1',
+      source: 'append',
       segmentIndex: 1,
       totalSegments: 1,
+      utf16Length: 7,
     });
 
     expect(cb1).toHaveBeenCalledTimes(1);
@@ -251,9 +311,10 @@ describe('textbuffer segment event wiring', () => {
 
     emitEvent('pipelineLiveTextSegmentAppended', {
       liveBufferId: uniqueBufferId,
-      text: 'event 2',
+      source: 'append',
       segmentIndex: 2,
       totalSegments: 2,
+      utf16Length: 7,
     });
 
     expect(cb1).toHaveBeenCalledTimes(1);
@@ -278,9 +339,10 @@ describe('textbuffer segment event wiring', () => {
 
     emitEvent('pipelineLiveTextSegmentAppended', {
       liveBufferId: uniqueBufferId,
-      text: 'event 1',
+      source: 'append',
       segmentIndex: 1,
       totalSegments: 1,
+      utf16Length: 7,
     });
 
     expect(createCb).toHaveBeenCalledTimes(1);
@@ -290,9 +352,10 @@ describe('textbuffer segment event wiring', () => {
 
     emitEvent('pipelineLiveTextSegmentAppended', {
       liveBufferId: uniqueBufferId,
-      text: 'event 2',
+      source: 'append',
       segmentIndex: 2,
       totalSegments: 2,
+      utf16Length: 7,
     });
 
     expect(createCb).toHaveBeenCalledTimes(1);

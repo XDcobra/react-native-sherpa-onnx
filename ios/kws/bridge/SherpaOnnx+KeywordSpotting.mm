@@ -1,12 +1,12 @@
 #import "../../SherpaOnnx.h"
 #import <React/RCTLog.h>
 
-#include "../../audio/pipeline/PaLiveEntry.h"
-#include "../../audio/pipeline/SherpaOnnx+PipelineAudioGlobals.h"
+#include "PaLiveEntry.h"
+#include "AudioRegistry.h"
 #include "../../pipeline/bridge/SherpaOnnx+StreamingPipelineCompletion.h"
 #include "../../pipeline/core/SherpaOnnx+StreamingPipeline.h"
-#include "../../textbuffer/core/SherpaOnnx+TextBufferGlobals.h"
-#include "../native/sherpa-onnx-kws-wrapper.h"
+#include "TextRegistry.h"
+#include "sherpa-onnx-kws-engine-wrapper.h"
 #include "../pipeline/KwsStreamingPipelineWorker.h"
 
 #include <algorithm>
@@ -21,7 +21,7 @@
 
 namespace {
 
-std::unordered_map<std::string, std::unique_ptr<sherpaonnx::KwsWrapper>>
+std::unordered_map<std::string, std::unique_ptr<sherpaonnx::KwsEngineWrapper>>
     g_kws_instances;
 std::unordered_map<std::string, std::string> g_kws_instance_to_pipeline;
 std::mutex g_kws_mutex;
@@ -68,7 +68,7 @@ bool ReadRequiredPath(
   return true;
 }
 
-sherpaonnx::KwsWrapper *GetKwsInstance(NSString *instanceId) {
+sherpaonnx::KwsEngineWrapper *GetKwsInstance(NSString *instanceId) {
   if (instanceId == nil || [instanceId length] == 0) {
     return nullptr;
   }
@@ -130,7 +130,7 @@ sherpaonnx::KwsWrapper *GetKwsInstance(NSString *instanceId) {
       return;
     }
 
-    auto wrapper = std::make_unique<sherpaonnx::KwsWrapper>();
+    auto wrapper = std::make_unique<sherpaonnx::KwsEngineWrapper>();
     const auto result = wrapper->initialize(
         encoder,
         decoder,
@@ -190,7 +190,7 @@ sherpaonnx::KwsWrapper *GetKwsInstance(NSString *instanceId) {
   const std::string inputBufferKey = [audioInLiveBufferId UTF8String];
   const std::string outputBufferKey = [textOutLiveBufferId UTF8String];
 
-  sherpaonnx::KwsWrapper *wrapper = GetKwsInstance(instanceId);
+  sherpaonnx::KwsEngineWrapper *wrapper = GetKwsInstance(instanceId);
   if (!wrapper) {
     reject(@"KWS_PIPELINE_INSTANCE_NOT_FOUND",
            @"Keyword spotting instance not found", nil);
