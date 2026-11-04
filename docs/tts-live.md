@@ -161,7 +161,7 @@ More patterns: [feature-pipelines.md](feature-pipelines.md) · shared lifecycle:
 | --- | --- | --- | --- |
 | `onSegment` | `TtsLiveSegmentEvent` | after each committed text span is synthesized | feature callback — already includes span indexes / ranges (no buffer pull) |
 
-`synthesize(..., { onSegment })` is the usual product path. Live **audio** output progress uses `audioOut` buffer events (`onFramesAppended` — scalar metadata, no PCM dump). If you also observe `textIn` commits, that path is **notify + pull** (`readLiveTextSegment`). Canonical detail: [textbuffer-streaming — Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling) · [audiobuffer-streaming](audiobuffer-streaming.md).
+`synthesize(..., { onSegment })` is the usual product path (maps live-audio notify → `SpeechSegment` via `liveAudioNotifyToSpeechSegment`). Live **audio** output progress uses `audioOut` buffer events (`onFramesAppended` — scalar metadata, no PCM dump). Raw audio `onSegment` is **notify + pull**. If you also observe `textIn` commits, that path is **notify + pull** (`readLiveTextSegment`). Canonical detail: [textbuffer-streaming — Committed text segments](textbuffer-streaming.md#committed-text-segments-onsegment-no-polling) · [audiobuffer-streaming](audiobuffer-streaming.md#live-buffer-callbacks-onframesappended-vs-onsegment).
 
 Shapes: [Types](#types) · offline progress fields: [tts-offline.md](tts-offline.md#types).
 

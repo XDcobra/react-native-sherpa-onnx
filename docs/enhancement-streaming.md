@@ -242,6 +242,9 @@ No pipeline-level JS event callbacks. Observe the output live audio buffer:
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
 | `onFramesAppended` | live-audio chunk notify (scalars) | denoised frames written to `audioOut` | set on `createEmptyLiveAudioBuffer`; **no PCM on the event** — metadata only (`frameCount`, `totalSamplesWritten`, …) |
+| `onSegment` | `LiveAudioBufferSegmentEvent` (notify scalars) | speech segment committed when live segmentation is on | **notify + pull**; map with `liveAudioNotifyToSpeechSegment` or pull SegmentMeta via segmentbuffer |
+
+Feature live overload `enhance(..., { onSegment })` takes a product `SpeechSegment` (already mapped from the notify). Canonical detail: [audiobuffer-streaming](audiobuffer-streaming.md#live-buffer-callbacks-onframesappended-vs-onsegment).
 
 ```ts
 const audioOut = await createEmptyLiveAudioBuffer({
@@ -250,10 +253,12 @@ const audioOut = await createEmptyLiveAudioBuffer({
     // cheap: enough for meters / progress (no PCM materialize on the bridge)
     console.log(e.frameCount, e.totalSamplesWritten, e.appendKind);
   },
+  onSegment: (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`#${e.segmentIndex}`, e.startSample, e.endSample);
+  },
 });
 ```
-
-Canonical detail: [audiobuffer-streaming](audiobuffer-streaming.md).
 
 ## Types
 

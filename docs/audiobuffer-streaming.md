@@ -55,11 +55,45 @@ Both are **optional**, **push-based** callbacks on `createEmptyLiveAudioBuffer` 
 | **`onFramesAppended`** | New **PCM samples** were appended to the ring (ingress: mic, JS `append*`, offline append, `file_ingest`; or pipeline output: enhancement, TTS, separation). | Waveform / levels, ingress throughput, pipeline output progress. |
 | **`onSegment`** | A **speech segment** was **committed** on this live audio buffer (segmentation log updated). | “A new speech slice exists” without polling; drive UI that cares about **segment boundaries**, not raw frame rate. |
 
-**`onSegment` payload (`LiveAudioBufferSegmentEvent`):**
+**`onSegment` payload (`LiveAudioBufferSegmentEvent`) — notify + pull:**
+
+Live speech commits are **notify + pull** (same contract as live segment buffers). Timing/routing scalars come on the event; embedded `SpeechSegment` / `payload` do **not**.
 
 - `bufferId` — live audio buffer id
-- `segment` — committed [`Segment`](../src/segment/segment.ts) metadata (offsets, ids, `domain: 'speech'`, …). **No PCM** is shipped in the event; read samples with `getLiveAudioBufferSamplesSlice` if needed.
-- `totalSegments` — segment count **after** this commit (hint for UI ordering).
+- `segmentBufferId` — associated live segment buffer (for `readLiveSegment`)
+- `segmentId` / `segmentIndex` / `totalSegments`
+- `startSample` / `endSample` / `sampleRate` / `durationMs` / optional `confidence`
+- optional annotation scalars: `reason` / `source` / `createdAtMs`
+
+Map to a domain [`SpeechSegment`](../src/segment/segment.ts) with **`liveAudioNotifyToSpeechSegment(event)`**. Pull `SegmentMeta` (including `payload`) with segmentbuffer **`getLiveSegmentBufferSegments(segmentBufferId, segmentIndex, 1)`** (or `readLiveSegment` when you already have a segment-buffer notify). **No PCM** on the event — read samples with `getLiveAudioBufferSamplesSlice` if needed. Canonical segment detail: [segmentbuffer-streaming — Committed segments](segmentbuffer-streaming.md#committed-segments-onsegmentappended-notify--pull).
+
+```ts
+import {
+  createEmptyLiveAudioBuffer,
+  liveAudioNotifyToSpeechSegment,
+} from 'react-native-sherpa-onnx/audiobuffer';
+import { getLiveSegmentBufferSegments } from 'react-native-sherpa-onnx/segmentbuffer';
+
+const live = await createEmptyLiveAudioBuffer({
+  sampleRate: 16000,
+  segmentation: { mode: 'auto', policy: { evaluator: 'speech_energy_silence' } },
+  onSegment: async (e) => {
+    // cheap: enough for UI timing / count
+    console.log(`#${e.segmentIndex}`, e.startSample, e.endSample, `${e.durationMs}ms`);
+
+    // product SpeechSegment from notify scalars (no pull):
+    const speech = liveAudioNotifyToSpeechSegment(e);
+
+    // only when you need SegmentMeta richness (payload):
+    const [meta] = await getLiveSegmentBufferSegments(
+      e.segmentBufferId,
+      e.segmentIndex,
+      1
+    );
+    console.log(speech.segmentId, meta?.payload);
+  },
+});
+```
 
 **Requirements:** `onSegment` is only meaningful when **live audio segmentation** is active — set `segmentation.mode` to `'auto'` (policy-driven) or `'manual'` (you or native code commits segments). With `segmentation.mode === 'off'` (default), there are **no** speech segment commits, so **`onSegment` will not fire**. See [Segmentation engine](segmentation-engine.md) for policy evaluators.
 
@@ -367,8 +401,10 @@ const liveWithSegments = await createEmptyLiveAudioBuffer({
     mode: 'auto',
     policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 },
   },
-  onSegment: (e) =>
-    console.log('speech segment', e.segment.segmentIndex, 'total=', e.totalSegments),
+  onSegment: (e) => {
+    // cheap: enough for UI timing / count
+    console.log('speech segment', e.segmentIndex, 'total=', e.totalSegments);
+  },
 });
 ```
 
@@ -440,7 +476,8 @@ function subscribeLiveAudioBufferEvents(
 ```ts
 const unsub = subscribeLiveAudioBufferEvents(live, {
   onFramesAppended: (e) => console.log(e.frameCount),
-  onSegment: (e) => console.log('segment', e.segment.segmentIndex),
+  // cheap: notify scalars only
+  onSegment: (e) => console.log('segment', e.segmentIndex),
   onError: (e) => console.error(e.message, e.liveBufferId),
 });
 
@@ -566,8 +603,9 @@ const live = await createEmptyLiveAudioBuffer({
     policy: { evaluator: 'speech_energy_silence', minSegmentMs: 1000 },
   },
   onSegment: (e) => {
+    // cheap: enough for UI timing / count
     console.log(
-      `[speech segment ${e.segment.segmentIndex}]`,
+      `[speech segment ${e.segmentIndex}]`,
       `totalSegments=${e.totalSegments}`
     );
   },
@@ -590,7 +628,7 @@ import type {
   LiveAudioBufferRecordingSource, // recording-only source accepted by append/finalize APIs
   CreateEmptyLiveAudioBufferOptions, // options for createEmptyLiveAudioBuffer
   LiveAudioBufferFramesAppendedEvent, // producer-agnostic append event payload
-  LiveAudioBufferSegmentEvent, // committed speech-segment event payload (`onSegment`)
+  LiveAudioBufferSegmentEvent, // notify-only speech-segment commit (`onSegment`)
   LiveAudioBufferErrorEvent, // error event payload for live buffer
   FileIngestHandle, // controls active file ingest into live buffer
   FileIngestOptions, // options for ingestFileToLiveAudioBuffer
