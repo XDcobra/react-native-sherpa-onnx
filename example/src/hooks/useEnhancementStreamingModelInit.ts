@@ -69,6 +69,17 @@ export function useEnhancementStreamingModelInit(
     useState<EnhancementCustomInitFormState>(DEFAULT_ENHANCEMENT_CUSTOM_INIT);
   const [customFillLoading, setCustomFillLoading] = useState(false);
   const [customFillHint, setCustomFillHint] = useState<string | null>(null);
+
+  const catalogEntriesForMode = useMemo(
+    () =>
+      catalogEntries.filter((entry) =>
+        engineMode === 'streaming'
+          ? streamingModelIdSet.has(entry.id)
+          : offlineCapableModelIdSet.has(entry.id)
+      ),
+    [catalogEntries, engineMode, offlineCapableModelIdSet, streamingModelIdSet]
+  );
+
   const [selectedModelForInit, setSelectedModelForInit] = useState<
     string | null
   >(null);
@@ -98,12 +109,23 @@ export function useEnhancementStreamingModelInit(
   useEffect(() => {
     if (
       selectedModelForInit &&
-      catalogEntries.some((e) => e.id === selectedModelForInit)
+      catalogEntriesForMode.some((e) => e.id === selectedModelForInit)
     ) {
       return;
     }
-    setSelectedModelForInit(catalogEntries[0]?.id ?? null);
-  }, [catalogEntries, selectedModelForInit]);
+    const initial =
+      engineMode === 'streaming'
+        ? catalogEntries.find((e) => streamingModelIdSet.has(e.id))?.id
+        : catalogEntries.find((e) => offlineCapableModelIdSet.has(e.id))?.id;
+    setSelectedModelForInit(initial ?? catalogEntriesForMode[0]?.id ?? null);
+  }, [
+    catalogEntries,
+    catalogEntriesForMode,
+    engineMode,
+    offlineCapableModelIdSet,
+    selectedModelForInit,
+    streamingModelIdSet,
+  ]);
 
   useEffect(() => {
     setSelectedModelForInit((prev) => {
@@ -412,6 +434,7 @@ export function useEnhancementStreamingModelInit(
   return {
     engineRef,
     catalogEntries,
+    catalogEntriesForMode,
     engineMode,
     setEngineMode,
     streamingModelIdSet,

@@ -142,13 +142,6 @@ export function LanguageIdModelInitPanel({
         </View>
       </TouchableOpacity>
 
-      {lid.loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Initializing model...</Text>
-        </View>
-      ) : null}
-
       {lid.initResult && !lid.error ? (
         <View style={styles.resultContainer}>
           <Text style={styles.resultText}>{lid.initResult}</Text>
@@ -235,15 +228,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#8E8E93',
   },
   resultContainer: {
     backgroundColor: '#F2F2F7',

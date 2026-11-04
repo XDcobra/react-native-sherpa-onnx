@@ -7,12 +7,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { getModelDisplayName } from '../modelConfig';
-import { InitModeSelector, StreamingSttCustomInitForm } from './modelInit';
-import { EngineModeModelSelector } from './EngineModeModelSelector';
+import {
+  EngineModeToggle,
+  InitModeSelector,
+  ModelFolderGrid,
+  SttCustomInitForm,
+  StreamingSttCustomInitForm,
+} from './modelInit';
 import type { useSttStreamingModelInit } from '../hooks/useSttStreamingModelInit';
-
-const STT_STREAMING_MODE_HINT =
-  'Streaming mode lists models with isStreaming=true from detectSttModel. Live Overload uses offline STT weights with mandatory segmentation on the same live audio/text buffers.';
 
 type SttStreamingInit = ReturnType<typeof useSttStreamingModelInit>;
 
@@ -29,7 +31,7 @@ export function SttStreamingModelInitPanel({
 }: Props) {
   const n1 = sectionStart;
   const busy = disabled || stt.loading || stt.customFillLoading;
-  const modelIds = stt.catalogEntries.map((entry) => entry.id);
+  const isCustom = stt.initMode === 'custom';
 
   return (
     <View style={styles.section}>
@@ -39,40 +41,27 @@ export function SttStreamingModelInitPanel({
         reuse it until Rebuild or Release.
       </Text>
 
-      <EngineModeModelSelector
-        label="STT Engine"
-        engineMode={stt.engineMode}
-        onEngineModeChange={stt.setEngineMode}
-        models={modelIds}
-        selectedModel={stt.selectedModelForInit}
-        onModelSelect={stt.setSelectedModelForInit}
-        isModelStreamingCapable={(m) => stt.streamingModelIdSet.has(m)}
-        isModelOfflineCapable={(m) => stt.offlineCapableModelIdSet.has(m)}
-        loading={stt.loadingModels}
+      <EngineModeToggle
+        value={stt.engineMode}
+        onChange={stt.setEngineMode}
         disabled={busy}
-        streamingHintOverride={STT_STREAMING_MODE_HINT}
-        mandatorySegmentationHint="Live Overload requires mandatory segmentation to commit speech segments before transcription."
       />
+      <Text style={styles.modeHint}>
+        {stt.engineMode === 'streaming'
+          ? 'Incremental live decoding with streaming-capable models.'
+          : 'Offline STT weights with mandatory segmentation on live buffers.'}
+      </Text>
 
-      {stt.engineMode === 'streaming' ? (
-        <>
-          <InitModeSelector
-            value={stt.initMode}
-            onChange={stt.setInitMode}
-            disabled={busy}
-          />
-          <Text style={styles.sectionDescription}>
-            {stt.initMode === 'auto'
-              ? 'Select a streaming-capable folder, then Use model.'
-              : 'Choose model type, pick ONNX files (or Fill from catalog), then Initialize custom.'}
-          </Text>
-        </>
-      ) : (
-        <Text style={styles.sectionDescription}>
-          Live Overload uses offline STT weights. Select an offline-capable
-          model, then Use model.
-        </Text>
-      )}
+      <InitModeSelector
+        value={stt.initMode}
+        onChange={stt.setInitMode}
+        disabled={busy}
+      />
+      <Text style={styles.sectionDescription}>
+        {isCustom
+          ? 'Choose model type, pick ONNX files (or Fill from catalog), then Initialize custom.'
+          : 'Select a model folder, then tap Use model for auto-detection.'}
+      </Text>
 
       {(stt.initializedSummary ||
         stt.currentModelFolder ||
@@ -92,7 +81,21 @@ export function SttStreamingModelInitPanel({
         </View>
       )}
 
-      {stt.engineMode === 'streaming' && stt.initMode === 'custom' ? (
+      <ModelFolderGrid
+        entries={stt.catalogEntriesForMode}
+        selectedId={stt.selectedModelForInit}
+        initializedId={stt.currentModelFolder}
+        onSelect={stt.setSelectedModelForInit}
+        loading={stt.loadingModels}
+        disabled={busy}
+        emptyMessage={
+          stt.engineMode === 'streaming'
+            ? 'No streaming-capable STT models found.'
+            : 'No offline-capable STT models found for Live Overload.'
+        }
+      />
+
+      {isCustom && stt.engineMode === 'streaming' ? (
         <StreamingSttCustomInitForm
           value={stt.customInitForm}
           onChange={stt.setCustomInitForm}
@@ -103,6 +106,22 @@ export function SttStreamingModelInitPanel({
           fillLoading={stt.customFillLoading}
           disabled={busy}
           fillHint={stt.customFillHint}
+        />
+      ) : null}
+
+      {isCustom && stt.engineMode === 'offline' ? (
+        <SttCustomInitForm
+          value={stt.offlineCustomInitForm}
+          onChange={stt.setOfflineCustomInitForm}
+          selectedCatalogModelId={stt.selectedModelForInit}
+          onFillFromSelectedModel={() => {
+            stt.fillFromSelectedModel().catch(() => {});
+          }}
+          onPrepareScatteredTest={stt.prepareScatteredTest}
+          fillLoading={stt.customFillLoading}
+          disabled={busy}
+          fillHint={stt.customFillHint}
+          showScatteredTest
         />
       ) : null}
 
@@ -117,9 +136,7 @@ export function SttStreamingModelInitPanel({
         }}
         disabled={
           busy ||
-          (stt.engineMode === 'offline' || stt.initMode === 'auto'
-            ? !stt.selectedModelForInit && !stt.currentModelFolder
-            : false)
+          (!isCustom && !stt.selectedModelForInit && !stt.currentModelFolder)
         }
       >
         <View style={styles.applyButtonContent}>
@@ -130,10 +147,10 @@ export function SttStreamingModelInitPanel({
           )}
           <Text style={styles.primaryButtonText}>
             {stt.isEngineInitialized
-              ? stt.engineMode === 'streaming' && stt.initMode === 'custom'
+              ? isCustom
                 ? 'Rebuild custom'
                 : 'Rebuild model'
-              : stt.engineMode === 'streaming' && stt.initMode === 'custom'
+              : isCustom
               ? 'Initialize custom'
               : 'Use model'}
           </Text>
@@ -187,6 +204,12 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginBottom: 12,
   },
+  modeHint: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginTop: -4,
+    marginBottom: 12,
+  },
   currentModelContainer: {
     backgroundColor: '#F2F2F7',
     borderRadius: 8,
@@ -206,20 +229,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  secondaryButton: {
-    marginTop: 10,
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#EEF2FF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    color: '#1D4ED8',
-    fontSize: 15,
-    fontWeight: '600',
-  },
   applyButton: {
     marginTop: 16,
   },
@@ -236,6 +245,20 @@ const styles = StyleSheet.create({
   buttonDisabled: {
     opacity: 0.5,
   },
+  secondaryButton: {
+    marginTop: 10,
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#EEF2FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryButtonText: {
+    color: '#1D4ED8',
+    fontSize: 15,
+    fontWeight: '600',
+  },
   resultContainer: {
     backgroundColor: '#F2F2F7',
     borderRadius: 8,
@@ -245,6 +268,7 @@ const styles = StyleSheet.create({
   resultText: {
     fontSize: 14,
     color: '#000000',
+    marginBottom: 4,
   },
   errorContainer: {
     backgroundColor: '#FFEBEE',

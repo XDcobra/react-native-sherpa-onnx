@@ -7,12 +7,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { getModelDisplayName } from '../modelConfig';
-import { EnhancementCustomInitForm, InitModeSelector } from './modelInit';
-import { EngineModeModelSelector } from './EngineModeModelSelector';
+import {
+  EngineModeToggle,
+  EnhancementCustomInitForm,
+  InitModeSelector,
+  ModelFolderGrid,
+} from './modelInit';
 import type { useEnhancementStreamingModelInit } from '../hooks/useEnhancementStreamingModelInit';
-
-const ENHANCEMENT_STREAMING_MODE_HINT =
-  'Streaming mode lists models with isStreaming=true from detectEnhancementModel. Live Overload lists all detected enhancement models and runs mandatory audio segmentation (continuous_frames by default) on the same streaming pipeline.';
 
 type EnhancementStreamingInit = ReturnType<
   typeof useEnhancementStreamingModelInit
@@ -33,25 +34,38 @@ export function EnhancementStreamingModelInitPanel({
 }: Props) {
   const n1 = sectionStart;
   const busy = disabled || enhancement.loading || enhancement.customFillLoading;
-
-  const modelIds = enhancement.catalogEntries.map((e) => e.id);
+  const isCustom = enhancement.initMode === 'custom';
+  const catalogEmpty =
+    enhancement.catalogEntries.length === 0 && !enhancement.loadingModels;
 
   return (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>{n1}. Initialize model</Text>
       <Text style={styles.sectionDescription}>
         Streaming enhancement (GTCRN / DPDFNet / VoxLock). Init builds the
-        streaming engine; pipeline runs reuse it until Rebuild or Release.
+        engine; pipeline runs reuse it until Rebuild or Release.
       </Text>
+
+      <EngineModeToggle
+        value={enhancement.engineMode}
+        onChange={enhancement.setEngineMode}
+        disabled={busy}
+      />
+      <Text style={styles.modeHint}>
+        {enhancement.engineMode === 'streaming'
+          ? 'Streaming-capable enhancement models for live audio.'
+          : 'All enhancement models with mandatory segmentation (Live Overload).'}
+      </Text>
+
       <InitModeSelector
         value={enhancement.initMode}
         onChange={enhancement.setInitMode}
         disabled={busy}
       />
       <Text style={styles.sectionDescription}>
-        {enhancement.initMode === 'auto'
-          ? 'Select a streaming-capable folder, then Use model.'
-          : 'Choose model type, pick the ONNX file (or Fill from catalog), then Initialize custom.'}
+        {isCustom
+          ? 'Choose model type, pick the ONNX file (or Fill from catalog), then Initialize custom.'
+          : 'Select a model folder, then tap Use model for auto-detection.'}
       </Text>
 
       {(enhancement.initializedSummary ||
@@ -72,9 +86,7 @@ export function EnhancementStreamingModelInitPanel({
         </View>
       )}
 
-      {enhancement.catalogEntries.length === 0 &&
-      !enhancement.loadingModels &&
-      onOpenDownloads ? (
+      {catalogEmpty && onOpenDownloads ? (
         <View style={styles.emptyCatalog}>
           <Text style={styles.sectionDescription}>
             No enhancement models on device. Download from Download Showcase
@@ -90,27 +102,22 @@ export function EnhancementStreamingModelInitPanel({
           </TouchableOpacity>
         </View>
       ) : (
-        <EngineModeModelSelector
-          label="Enhancement Engine"
-          engineMode={enhancement.engineMode}
-          onEngineModeChange={enhancement.setEngineMode}
-          models={modelIds}
-          selectedModel={enhancement.selectedModelForInit}
-          onModelSelect={enhancement.setSelectedModelForInit}
-          isModelStreamingCapable={(m) =>
-            enhancement.streamingModelIdSet.has(m)
-          }
-          isModelOfflineCapable={(m) =>
-            enhancement.offlineCapableModelIdSet.has(m)
-          }
+        <ModelFolderGrid
+          entries={enhancement.catalogEntriesForMode}
+          selectedId={enhancement.selectedModelForInit}
+          initializedId={enhancement.currentModelFolder}
+          onSelect={enhancement.setSelectedModelForInit}
           loading={enhancement.loadingModels}
           disabled={busy}
-          streamingHintOverride={ENHANCEMENT_STREAMING_MODE_HINT}
-          mandatorySegmentationHint="Live Overload uses mandatory segmentation to split audio into enhancement chunks."
+          emptyMessage={
+            enhancement.engineMode === 'streaming'
+              ? 'No streaming-capable enhancement models found.'
+              : 'No enhancement models found for Live Overload.'
+          }
         />
       )}
 
-      {enhancement.initMode === 'custom' ? (
+      {isCustom ? (
         <EnhancementCustomInitForm
           value={enhancement.customInitForm}
           onChange={enhancement.setCustomInitForm}
@@ -136,10 +143,9 @@ export function EnhancementStreamingModelInitPanel({
         }}
         disabled={
           busy ||
-          (enhancement.initMode === 'auto'
-            ? !enhancement.selectedModelForInit &&
-              !enhancement.currentModelFolder
-            : false)
+          (!isCustom &&
+            !enhancement.selectedModelForInit &&
+            !enhancement.currentModelFolder)
         }
       >
         <View style={styles.applyButtonContent}>
@@ -150,10 +156,10 @@ export function EnhancementStreamingModelInitPanel({
           )}
           <Text style={styles.primaryButtonText}>
             {enhancement.isEngineInitialized
-              ? enhancement.initMode === 'custom'
+              ? isCustom
                 ? 'Rebuild custom'
                 : 'Rebuild model'
-              : enhancement.initMode === 'custom'
+              : isCustom
               ? 'Initialize custom'
               : 'Use model'}
           </Text>
@@ -207,6 +213,12 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginBottom: 12,
   },
+  modeHint: {
+    fontSize: 13,
+    color: '#8E8E93',
+    marginTop: -4,
+    marginBottom: 12,
+  },
   currentModelContainer: {
     backgroundColor: '#F2F2F7',
     borderRadius: 8,
@@ -230,6 +242,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 12,
     paddingHorizontal: 16,
+    marginBottom: 12,
   },
   downloadButtonText: {
     color: '#FFFFFF',

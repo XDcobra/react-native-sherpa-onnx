@@ -159,13 +159,6 @@ export function AudioTaggingModelInitPanel({
           </View>
         </TouchableOpacity>
 
-        {at.loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#007AFF" />
-            <Text style={styles.loadingText}>Initializing model...</Text>
-          </View>
-        ) : null}
-
         {at.initResult && !at.error ? (
           <View style={styles.resultContainer}>
             <Text style={styles.resultText}>{at.initResult}</Text>
@@ -283,15 +276,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#8E8E93',
   },
   resultContainer: {
     backgroundColor: '#F2F2F7',
