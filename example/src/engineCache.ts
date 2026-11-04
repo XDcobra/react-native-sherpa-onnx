@@ -25,6 +25,10 @@ import type {
   EnhancementConcreteModelType,
   EnhancementEngine,
 } from 'react-native-sherpa-onnx/enhancement';
+import type {
+  SeparationEngine,
+  SeparationModelType,
+} from 'react-native-sherpa-onnx/separation';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -374,4 +378,56 @@ export function clearEnhancementCache(): void {
   enhancementInitMessage = null;
   enhancementDetectedModels = [];
   enhancementSelectedModelKind = null;
+}
+
+// --- Offline separation cache ---
+
+let separationEngine: SeparationEngine | null = null;
+let separationModelFolder: string | null = null;
+let separationInitMessage: string | null = null;
+let separationSelectedModelKind: SeparationModelType | null = null;
+let separationNumStems: number | null = null;
+let separationModelSampleRate: number | null = null;
+
+export function getSeparationCache(): {
+  engine: SeparationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  selectedModelKind: SeparationModelType | null;
+  numStems: number | null;
+  modelSampleRate: number | null;
+} {
+  return {
+    engine: separationEngine,
+    modelFolder: separationModelFolder,
+    initMessage: separationInitMessage,
+    selectedModelKind: separationSelectedModelKind,
+    numStems: separationNumStems,
+    modelSampleRate: separationModelSampleRate,
+  };
+}
+
+export function setSeparationCache(
+  engine: SeparationEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  selectedModelKind: SeparationModelType | null,
+  numStems: number,
+  modelSampleRate: number
+): void {
+  separationEngine = engine;
+  separationModelFolder = modelFolder;
+  separationInitMessage = initMessage;
+  separationSelectedModelKind = selectedModelKind;
+  separationNumStems = numStems;
+  separationModelSampleRate = modelSampleRate;
+}
+
+export function clearSeparationCache(): void {
+  separationEngine = null;
+  separationModelFolder = null;
+  separationInitMessage = null;
+  separationSelectedModelKind = null;
+  separationNumStems = null;
+  separationModelSampleRate = null;
 }

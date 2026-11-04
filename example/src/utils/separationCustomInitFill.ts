@@ -11,6 +11,14 @@ import {
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import type { SeparationCustomPathKey } from './separationCustomInitLabels';
 
+export function isSeparationFolderHint(folder: string, hint: string): boolean {
+  if (hint === 'separation') {
+    return true;
+  }
+  const n = folder.toLowerCase();
+  return n.includes('spleeter') || n.includes('uvr') || n.includes('mdx');
+}
+
 export type FillSeparationCustomConfigResult = {
   modelType: SeparationConcreteModelType;
   customConfig: Partial<Record<SeparationCustomPathKey, FileSource>>;
