@@ -27,6 +27,7 @@ import type { VADEngine } from 'react-native-sherpa-onnx/vad';
 import type {
   EnhancementConcreteModelType,
   EnhancementEngine,
+  StreamingEnhancementEngine,
 } from 'react-native-sherpa-onnx/enhancement';
 import type {
   SeparationEngine,
@@ -419,6 +420,56 @@ export function clearEnhancementCache(): void {
   enhancementInitMessage = null;
   enhancementDetectedModels = [];
   enhancementSelectedModelKind = null;
+}
+
+// --- Streaming enhancement cache ---
+
+let enhancementStreamingEngine: StreamingEnhancementEngine | null = null;
+let enhancementStreamingModelFolder: string | null = null;
+let enhancementStreamingInitMessage: string | null = null;
+let enhancementStreamingDetectedModels: Array<{
+  type: string;
+  modelDir: string;
+}> = [];
+let enhancementStreamingSelectedModelKind: EnhancementConcreteModelType | null =
+  null;
+
+export function getEnhancementStreamingCache(): {
+  engine: StreamingEnhancementEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  detectedModels: Array<{ type: string; modelDir: string }>;
+  selectedModelKind: EnhancementConcreteModelType | null;
+} {
+  return {
+    engine: enhancementStreamingEngine,
+    modelFolder: enhancementStreamingModelFolder,
+    initMessage: enhancementStreamingInitMessage,
+    detectedModels: [...enhancementStreamingDetectedModels],
+    selectedModelKind: enhancementStreamingSelectedModelKind,
+  };
+}
+
+export function setEnhancementStreamingCache(
+  engine: StreamingEnhancementEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  detectedModels: Array<{ type: string; modelDir: string }>,
+  selectedModelKind: EnhancementConcreteModelType | null
+): void {
+  enhancementStreamingEngine = engine;
+  enhancementStreamingModelFolder = modelFolder;
+  enhancementStreamingInitMessage = initMessage;
+  enhancementStreamingDetectedModels = detectedModels;
+  enhancementStreamingSelectedModelKind = selectedModelKind;
+}
+
+export function clearEnhancementStreamingCache(): void {
+  enhancementStreamingEngine = null;
+  enhancementStreamingModelFolder = null;
+  enhancementStreamingInitMessage = null;
+  enhancementStreamingDetectedModels = [];
+  enhancementStreamingSelectedModelKind = null;
 }
 
 // --- Offline separation cache ---

@@ -14,10 +14,12 @@ import {
   type ModelMeta,
 } from 'react-native-sherpa-onnx/download';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import { detectEnhancementModel } from 'react-native-sherpa-onnx/enhancement';
 import {
   getAssetModelPath,
   getFileModelPath,
   getModelDisplayName,
+  toDetectSource,
 } from '../modelConfig';
 import { RECOMMENDED_MODEL_IDS } from './recommendedModels';
 import { isEnhancementFolderHint } from './enhancementCustomInitFill';
@@ -39,6 +41,13 @@ export type EnhancementCatalogSnapshot = {
   padModelsPath: string | null;
   bundledFolders: string[];
   downloadedIds: string[];
+};
+
+export type EnhancementStreamingCatalogSnapshot = EnhancementCatalogSnapshot & {
+  /** Model folder ids where detectEnhancementModel succeeded. */
+  detectedModelIds: string[];
+  /** Subset of detected models with isStreaming === true. */
+  streamingModelIds: string[];
 };
 
 export function isEnhancementModelFolder(
@@ -182,5 +191,55 @@ export async function loadEnhancementModelCatalog(): Promise<EnhancementCatalogS
     padModelsPath: resolvedPadPath,
     bundledFolders: bundledIds,
     downloadedIds,
+  };
+}
+
+export async function loadEnhancementStreamingModelCatalog(): Promise<EnhancementStreamingCatalogSnapshot> {
+  const base = await loadEnhancementModelCatalog();
+  const ctx = createEnhancementModelPathContext(base);
+  const metaById = new Map(
+    base.entries.map((entry) => [entry.id, entry] as const)
+  );
+
+  const detectedOrdered: string[] = [];
+  const streamingIds: string[] = [];
+
+  for (const entry of base.entries) {
+    try {
+      const modelPath = getEnhancementModelPathConfig(entry.id, ctx);
+      const detection = await detectEnhancementModel(
+        await toDetectSource(modelPath),
+        { modelType: 'auto' }
+      );
+      if (!detection.success) {
+        continue;
+      }
+      detectedOrdered.push(entry.id);
+      if (detection.isStreaming) {
+        streamingIds.push(entry.id);
+      }
+    } catch {
+      // Ignore models that cannot be detected.
+    }
+  }
+
+  const entries = prioritizeEntries(
+    detectedOrdered.map((id) => {
+      const existing = metaById.get(id);
+      return (
+        existing ?? {
+          id,
+          label: getModelDisplayName(id),
+        }
+      );
+    }),
+    RECOMMENDED_ENHANCEMENT_MODEL_IDS
+  );
+
+  return {
+    ...base,
+    entries,
+    detectedModelIds: detectedOrdered,
+    streamingModelIds: streamingIds,
   };
 }
