@@ -16,7 +16,7 @@ Append new rows on every buffer migration. Do not delete resolved items — set 
 | **3 — Text: drop storage mirrors** | **T3 → T5 → T1 → T2** | T3 first (live mirror/cursors = dual SoT). T5 moves offline spans into C. T1 drops full-string default for features. T2 UTF-16 JNI after readers exist |
 | **4 — Segment: drop storage mirrors** | **S8 → S6 → S1 → S4** | S8 mirrors T3 (cursor/log in C). S6/S1 stop full snapshot/getter dumps. S4 single validator in C |
 | **5 — Optional event contracts** | **T4, S5, A10** | May change JS payload shape; do after storage mirrors are gone; keep or version public contract |
-| **6 — Engine in C (separate epic)** | **S7 → S2** | S7 is the dual-hook symptom; S2 is full SegEngine port. **Not** buffer-handle work — schedule after A/T/S mirrors |
+| **6 — Engine in C (separate epic)** | **S7 → S2** | S2 landed: shared `SegEngine.cpp`, thin Kotlin JNI + iOS bridge. Host `segengine_host_test` (no ORT). |
 | **7 — Deferred from closed IDs** | **A8 → A9 → T1b** (then any new D\* / A\*/T\* deferred rows) | Explicit follow-ups spawned when a closed ID left residual scope — **never** only a done-note |
 
 **Skip / already done (primary Audio cutover):** A5, A4, A1, A3, A2, A6, A7, S3.
@@ -61,7 +61,7 @@ When adding future deferred rows, update this table **and** the living backlog i
 | S1 | Getters don’t dump entire arrays by default | Host + TurboModule contract |
 | S4 | One validator | Host: invalid payload reject codes |
 | T4/S5/A10 | Event payload size | Contract tests; optional |
-| S7/S2 | Engine SoT in C | Engine epic; device smoke after host |
+| S7/S2 | Engine SoT in C | Host `segengine_host_test`; device smoke still useful |
 
 ## Test gate (mandatory per closed ID)
 
@@ -88,12 +88,12 @@ Buffer behavior must stay as today (append/drain/cursor/finalize/spool/overflow/
 | T4 | Text | Live JS events still pack full partial / segment text into WritableMap | Event contract unchanged | Optional truncated/delta events or shared handle id without payload dump | **done** (`refactor/close-buffer-copy-backlog-phase-5-7`: notify+pull; `readLiveTextPartial` / `readLiveTextSegment`; no truncation) |
 | T5 | Text | Offline spatial spans / tokens / timestamps remain Kotlin-side mirrors (C holds primary text + metaJson) | Spans not required for TXT2 SoT cutover | Move spans/tokens into `TxtOfflineEntry` SoT + JNI slice APIs | **done** (`refactor/close-textbuffer-copy-backlog`: thin `OfflineTextEntry` + JNI populate/slices; span JSON codec) |
 | S1 | Segment | TurboModule getters materialize full segment arrays (`WritableArray` / JSON snapshots via JNI) | SoT PR kept TurboModule packing in Kotlin/ObjC | Slice/cursor native views; optional truncated getters | **done** (`refactor/close-segmentbuffer-copy-backlog`: 4096-page clamp TS/Android/iOS; Android TM packs slice JSON without SegmentRecord List) |
-| S2 | Segment | Dual segmentation engine orchestration (`SegmentationEngineRegistry.kt` vs iOS `SegEngine` in `.mm`) | Buffer SoT PR deliberately deferred full engine C port | Shared C++ SegEngine + thin platform facades | **open** |
+| S2 | Segment | Dual segmentation engine orchestration (`SegmentationEngineRegistry.kt` vs iOS `SegEngine` in `.mm`) | Buffer SoT PR deliberately deferred full engine C port | Shared C++ SegEngine + thin platform facades | **done** (`SegEngine.cpp` strong hooks + attach/detach/offline/flush; Android `SegmentationEngineNative` JNI; iOS bridge calls `seg_engine_*`; host `segengine_host_test`, VAD/pyannote stubbed) |
 | S3 | Segment | Link-map dual SoT | — | Shared `SegmentLinkMapRegistry` in `cpp/segmentbuffer/` | **done** (this branch) |
 | S4 | Segment | Duplicate payload validation (TS + iOS ObjC strict speech schema) | C append validates kind/samples only; bridge keeps ObjC strict checks | Single shared validator in C++ | **done** (`refactor/close-segmentbuffer-copy-backlog`: `seg_validate_speech_payload_json` on live append; TS `manual` + annotation keys) |
 | S5 | Segment | `pipelineLiveSegmentAppended` ships full segment payloads | Event contract unchanged | Optional truncated/delta events or handle id without payload dump | **done** (`refactor/close-buffer-copy-backlog-phase-5-7`: notify+pull; `readLiveSegment`; scalars only on bridge) |
 | S6 | Segment | Offline-from-live / snapshots copy full `vector`/`List` of records | SoT cutover preserved snapshot APIs | Shared readers / bounded drain without full materialize | **done** (`refactor/close-segmentbuffer-copy-backlog`: `seg_*_get_*_segments` + thin OfflineSegmentEntry; offline-from-live still one C SoT copy) |
-| S7 | Segment | Android text/audio still notify Kotlin `SegmentationEngineRegistry` while C `seg_engine_on_*` are weak no-ops | Engine remains Kotlin on Android; iOS strong SegEngine overrides weak | Single-path hooks when engine SoT moves to C (S2) | **done** (`refactor/close-buffer-copy-backlog-phase-5-7`: Android strong `SegEngineAndroidHooks` JNI → registry; AudioRegistry stubs always weak; Kotlin dual notify removed; engine SoT still Kotlin → **S2**) |
+| S7 | Segment | Android text/audio still notify Kotlin `SegmentationEngineRegistry` while C `seg_engine_on_*` are weak no-ops | Engine remains Kotlin on Android; iOS strong SegEngine overrides weak | Single-path hooks when engine SoT moves to C (S2) | **done** (phase 5–7 JNI hooks, then **S2**: strong hooks live in `SegEngine.cpp`; `SegEngineAndroidHooks` removed) |
 | S8 | Segment | Kotlin `LiveSegmentEntry` mirrors segment log + cursors/listeners alongside C spool/window | Preserve worker drain/listener APIs without rewriting every consumer | Cursor/drain from C store; Kotlin handle only | **done** (`refactor/close-segmentbuffer-copy-backlog`; unknown cursor → empty like C, not former Kotlin throw) |
 
 ## Rules

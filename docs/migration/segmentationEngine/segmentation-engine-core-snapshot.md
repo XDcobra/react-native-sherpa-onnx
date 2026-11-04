@@ -9,9 +9,7 @@ High-Level Referenz für die **aktuelle** Kern-Implementierung der Segmentierung
 ### 1.1 Architektur kurz
 
 - **Single authority:** Die Engine entscheidet über Auto-Segmente; der jeweilige **Buffer** speichert committed Segmente und feuert Events (siehe Sub-Plan 03).
-- **Zwei Plattform-Implementierungen** mit gleichem TurboModule-Contract:
-  - **Android:** `android/src/main/java/com/sherpaonnx/segment/engine/SegmentationEngineRegistry.kt` — Registry (`engineId` ↔ Instanz), Policy-Parsing, konkrete Engine-Klassen für Text und Speech.
-  - **iOS:** `ios/segmentbuffer/bridge/SherpaOnnx+SegmentBuffer.mm` (C++ Hilfslogik: `SegEngine`, Annotation-Map, Offline-Text/Audio-Pass) — gleiche Semantik wie Android.
+- **Eine gemeinsame Engine** in `android/src/main/cpp/segmentbuffer/SegEngine.cpp` (auch von iOS gelinkt). Kotlin `SegmentationEngineRegistry` und `SherpaOnnx+SegmentBuffer.mm` sind dünne Fassaden: Policy rein, `seg_engine_attach` / `detach` / `get_info` / `segment_offline` / `flush` raus. Live-Hooks (`seg_engine_on_*`) sind stark in dieser TU.
 - **Bridge:** `SherpaOnnx` TurboModule (`NativeSherpaOnnx.ts`, Abschnitt „Segmentation Engine Core“): `attachSegmentationEngine`, `detachSegmentationEngine`, `getSegmentationEngineInfo`, `segmentOfflineBuffer`.
 
 ### 1.2 Engine-Instanzen (Policy → Verhalten)
@@ -52,13 +50,11 @@ sequenceDiagram
   participant JS
   participant Txt as LiveTextEntry_C
   participant Hook as seg_engine_on_text_write
-  participant Reg as SegmentationEngineRegistry
-  participant Eng as TextSyntheticAutoEngine
+  participant Eng as SegEngine
 
   JS->>Txt: setPartial / appendPartial
   Txt->>Hook: C write path
-  Hook->>Reg: JNI onLiveTextWrite (Android) / SegEngine (iOS)
-  Reg->>Eng: evaluateText()
+  Hook->>Eng: evaluate text
   Eng->>Txt: commitSegment (partial → Segment) / writePartial(rest)
   Txt-->>JS: onPartial / onSegment (native events)
 ```
@@ -74,14 +70,12 @@ sequenceDiagram
   participant JS
   participant Live as PaLiveEntry_C
   participant Hook as seg_engine_on_audio_append
-  participant Reg as SegmentationEngineRegistry
-  participant Eng as SpeechEnergySilenceEngine
+  participant Eng as SegEngine
   participant SegBuf as LiveSegmentBuffer
 
   JS->>Live: appendSamples (Frames)
   Live->>Hook: C append path
-  Hook->>Reg: JNI onLiveAudioWrite (Android) / SegEngine (iOS)
-  Reg->>Eng: evaluateAudioChunk(...)
+  Hook->>Eng: evaluate audio
   Eng->>SegBuf: appendSegment (Speech)
   SegBuf-->>JS: pipelineLiveSegmentAppended / onSegment
 ```
@@ -91,8 +85,8 @@ sequenceDiagram
 
 ### 2.4 Finalize / Release
 
-- Beim **Finalisieren** des Live-Text- oder Live-Audio-Buffers ruft natives Code **Engine-Flush** und **Detach** auf (siehe `onBufferFinalized` in Registry / iOS-Äquivalent).
-- Bei **Release** des Buffers: Engine wird aus Registry entfernt (`onBufferReleased`).
+- Beim **Finalisieren** des Live-Text- oder Live-Audio-Buffers ruft `seg_engine_on_buffer_finalized` Flush und Detach auf.
+- Bei **Release** des Buffers entfernt `seg_engine_on_buffer_released` die Engine.
 
 ### 2.5 Offline
 
