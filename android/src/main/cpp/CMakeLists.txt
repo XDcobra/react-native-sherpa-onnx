@@ -219,6 +219,7 @@ set(SOURCES
     segmentbuffer/SegPayloadValidate.cpp
     segmentbuffer/SegmentRegistry.cpp
     segmentbuffer/SegmentLinkMapRegistry.cpp
+    jni/segmentbuffer/SegEngineAndroidHooks.cpp
     jni/segmentbuffer/sherpa-onnx-segmentbuffer-jni.cpp
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp

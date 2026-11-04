@@ -13,8 +13,10 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -22,6 +24,20 @@
 namespace fs = std::filesystem;
 
 namespace {
+
+std::mutex g_seg_hook_mu;
+std::atomic<int> g_seg_text_write_n{0};
+std::atomic<int> g_seg_finalized_n{0};
+std::atomic<int> g_seg_released_n{0};
+std::string g_seg_last_text_id;
+
+void ResetSegHooks() {
+  std::lock_guard<std::mutex> lock(g_seg_hook_mu);
+  g_seg_text_write_n = 0;
+  g_seg_finalized_n = 0;
+  g_seg_released_n = 0;
+  g_seg_last_text_id.clear();
+}
 
 class TextRegistryFixture : public ::testing::Test {
  protected:
@@ -41,6 +57,21 @@ class TextRegistryFixture : public ::testing::Test {
 };
 
 }  // namespace
+
+// Strong overrides of weak TextRegistry stubs — assert C write/finalize/release notify.
+void seg_engine_on_text_write(const std::string &liveBufferId) {
+  std::lock_guard<std::mutex> lock(g_seg_hook_mu);
+  g_seg_text_write_n.fetch_add(1);
+  g_seg_last_text_id = liveBufferId;
+}
+
+void seg_engine_on_buffer_finalized(const std::string & /*bufferId*/) {
+  g_seg_finalized_n.fetch_add(1);
+}
+
+void seg_engine_on_buffer_released(const std::string & /*bufferId*/) {
+  g_seg_released_n.fetch_add(1);
+}
 
 TEST_F(TextRegistryFixture, Utf16Length_Basic) {
   EXPECT_EQ(txt_utf16_length("abc"), 3);
@@ -464,4 +495,29 @@ TEST_F(TextRegistryFixture, OptInSpool_SkippedWithoutEnv) {
   std::string text;
   ASSERT_TRUE(txt_read_offline_text(offlineId, &text, &err)) << err;
   EXPECT_FALSE(text.empty());
+}
+
+TEST_F(TextRegistryFixture, SegEngineHooks_FireOnWriteFinalizeRelease) {
+  ResetSegHooks();
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_live(1024, 100, false, 0, "off", "", true, &id, &err)) << err;
+  auto live = txt_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  ASSERT_TRUE(txt_live_write_partial(live, "hello", &err)) << err;
+  EXPECT_EQ(g_seg_text_write_n.load(), 1);
+  {
+    std::lock_guard<std::mutex> lock(g_seg_hook_mu);
+    EXPECT_EQ(g_seg_last_text_id, id);
+  }
+
+  ASSERT_TRUE(txt_live_append_text(live, "!", &err)) << err;
+  EXPECT_EQ(g_seg_text_write_n.load(), 2);
+
+  ASSERT_TRUE(txt_finalize_live(id, &err)) << err;
+  EXPECT_EQ(g_seg_finalized_n.load(), 1);
+
+  EXPECT_TRUE(txt_release_buffer(id));
+  EXPECT_EQ(g_seg_released_n.load(), 1);
 }

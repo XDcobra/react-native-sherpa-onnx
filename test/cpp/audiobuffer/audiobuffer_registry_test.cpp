@@ -11,9 +11,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -21,6 +23,26 @@
 namespace fs = std::filesystem;
 
 namespace {
+
+std::mutex g_seg_hook_mu;
+std::atomic<int> g_seg_audio_append_n{0};
+std::atomic<int> g_seg_finalized_n{0};
+std::atomic<int> g_seg_released_n{0};
+std::string g_seg_last_audio_id;
+size_t g_seg_last_count = 0;
+int g_seg_last_sr = 0;
+int64_t g_seg_last_total = 0;
+
+void ResetSegHooks() {
+  std::lock_guard<std::mutex> lock(g_seg_hook_mu);
+  g_seg_audio_append_n = 0;
+  g_seg_finalized_n = 0;
+  g_seg_released_n = 0;
+  g_seg_last_audio_id.clear();
+  g_seg_last_count = 0;
+  g_seg_last_sr = 0;
+  g_seg_last_total = 0;
+}
 
 class AudioRegistryFixture : public ::testing::Test {
  protected:
@@ -40,6 +62,25 @@ class AudioRegistryFixture : public ::testing::Test {
 };
 
 }  // namespace
+
+// Strong overrides of weak AudioRegistry stubs — assert C append/finalize/release notify.
+void seg_engine_on_audio_append(const std::string &liveBufferId, const float * /*samples*/,
+                                size_t count, int sampleRate, int64_t totalSamplesWritten) {
+  std::lock_guard<std::mutex> lock(g_seg_hook_mu);
+  g_seg_audio_append_n.fetch_add(1);
+  g_seg_last_audio_id = liveBufferId;
+  g_seg_last_count = count;
+  g_seg_last_sr = sampleRate;
+  g_seg_last_total = totalSamplesWritten;
+}
+
+void seg_engine_on_buffer_finalized(const std::string & /*bufferId*/) {
+  g_seg_finalized_n.fetch_add(1);
+}
+
+void seg_engine_on_buffer_released(const std::string & /*bufferId*/) {
+  g_seg_released_n.fetch_add(1);
+}
 
 TEST_F(AudioRegistryFixture, CreateEmptyOffline_AndRelease) {
   std::string id;
@@ -399,4 +440,30 @@ TEST_F(AudioRegistryFixture, OptInLargeMmap_SkippedWithoutEnv) {
   ASSERT_TRUE(pa_create_offline_from_samples(samples.data(), samples.size(), 48000, 1, &json,
                                              &errCode, &errMsg))
       << errMsg;
+}
+
+TEST_F(AudioRegistryFixture, SegEngineHooks_FireOnAppendFinalizeRelease) {
+  ResetSegHooks();
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &id, &errCode, &errMsg)) << errMsg;
+
+  std::vector<float> chunk(160, 0.25f);
+  ASSERT_TRUE(pa_append_samples_to_live(id, chunk.data(), chunk.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+  EXPECT_EQ(g_seg_audio_append_n.load(), 1);
+  {
+    std::lock_guard<std::mutex> lock(g_seg_hook_mu);
+    EXPECT_EQ(g_seg_last_audio_id, id);
+    EXPECT_EQ(g_seg_last_count, chunk.size());
+    EXPECT_EQ(g_seg_last_sr, 16000);
+    EXPECT_EQ(g_seg_last_total, static_cast<int64_t>(chunk.size()));
+  }
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg)) << errMsg;
+  EXPECT_EQ(g_seg_finalized_n.load(), 1);
+
+  EXPECT_TRUE(pa_release_buffer(id));
+  EXPECT_EQ(g_seg_released_n.load(), 1);
 }

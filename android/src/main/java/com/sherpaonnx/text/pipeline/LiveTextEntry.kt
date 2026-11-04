@@ -2,7 +2,6 @@ package com.sherpaonnx.text.pipeline
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.WritableMap
-import com.sherpaonnx.segment.engine.SegmentationEngineRegistry
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import org.json.JSONArray
@@ -71,7 +70,7 @@ class LiveTextEntry(
     if (!TextBufferNative.nativeWritePartial(bufferId, text)) {
       throw TextPipelineException(TextErrorCodes.INVALID_STATE, "writePartial failed for $bufferId")
     }
-    SegmentationEngineRegistry.onLiveTextWrite(bufferId)
+    // Engine notify: C txt_live_* → seg_engine_on_text_write → JNI → SegmentationEngineRegistry
     TextPipelineRegistry.notifyLivePartialWritten(this, "set")
     notifyAppendListeners()
   }
@@ -81,7 +80,7 @@ class LiveTextEntry(
     if (!TextBufferNative.nativeAppendText(bufferId, text)) {
       throw TextPipelineException(TextErrorCodes.INVALID_STATE, "appendText failed for $bufferId")
     }
-    SegmentationEngineRegistry.onLiveTextWrite(bufferId)
+    // Engine notify: C txt_live_* → seg_engine_on_text_write → JNI → SegmentationEngineRegistry
     TextPipelineRegistry.notifyLivePartialWritten(this, "append")
     notifyAppendListeners()
   }
@@ -120,7 +119,7 @@ class LiveTextEntry(
       throw TextPipelineException(TextErrorCodes.ALREADY_FINALIZED, "finalize failed for $bufferId")
     }
     notifyAppendListeners()
-    SegmentationEngineRegistry.onBufferFinalized(bufferId)
+    // Engine flush/detach: C finalize → seg_engine_on_buffer_finalized → JNI
   }
 
   fun snapshotText(): String = currentText
@@ -198,7 +197,7 @@ class LiveTextEntry(
     } catch (_: Exception) {
     }
     TextBufferNative.nativeRelease(bufferId)
-    SegmentationEngineRegistry.onBufferReleased(bufferId)
+    // Engine release: C release → seg_engine_on_buffer_released → JNI
     appendListeners.clear()
     commitListeners.clear()
   }

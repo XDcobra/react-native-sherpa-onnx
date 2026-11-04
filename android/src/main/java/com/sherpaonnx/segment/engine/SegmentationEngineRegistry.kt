@@ -1100,6 +1100,8 @@ object SegmentationEngineRegistry {
     return engine.info()
   }
 
+  /** Called from C `seg_engine_on_text_write` (JNI) and Kotlin facades. */
+  @JvmStatic
   fun onLiveTextWrite(bufferId: String) {
     val engineId = engineIdByBufferId[bufferId] ?: return
     val engine = engineById[engineId] ?: return
@@ -1114,6 +1116,8 @@ object SegmentationEngineRegistry {
     }
   }
 
+  /** Called from C `seg_engine_on_audio_append` (JNI). */
+  @JvmStatic
   fun onLiveAudioWrite(
     bufferId: String,
     chunk: FloatArray,
@@ -1133,6 +1137,8 @@ object SegmentationEngineRegistry {
     }
   }
 
+  /** Called from C `seg_engine_on_buffer_finalized` (JNI). */
+  @JvmStatic
   fun onBufferFinalized(bufferId: String) {
     val engineId = engineIdByBufferId[bufferId] ?: return
     val engine = engineById[engineId] ?: return
@@ -1148,6 +1154,8 @@ object SegmentationEngineRegistry {
     }
   }
 
+  /** Called from C `seg_engine_on_buffer_released` (JNI). */
+  @JvmStatic
   fun onBufferReleased(bufferId: String) {
     val engineId = engineIdByBufferId.remove(bufferId) ?: return
     val engine = engineById.remove(engineId) ?: return

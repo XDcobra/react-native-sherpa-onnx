@@ -10,13 +10,13 @@
 #include <sstream>
 #include <sys/stat.h>
 
-#if defined(__APPLE__)
+// Always weak so Android SegEngineAndroidHooks (and iOS .mm) can provide strong overrides.
+#if defined(__GNUC__) || defined(__clang__)
 #define PA_WEAK_STUB __attribute__((weak))
 #else
 #define PA_WEAK_STUB
 #endif
 
-// Match PaLiveEntry.h linkage. iOS SegmentBuffer provides strong defs when linked.
 PA_WEAK_STUB void seg_engine_on_audio_append(const std::string & /*liveBufferId*/,
                                              const float * /*samples*/, size_t /*count*/,
                                              int /*sampleRate*/,
