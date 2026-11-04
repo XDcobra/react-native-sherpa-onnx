@@ -13,16 +13,7 @@ import { Ionicons } from '@react-native-vector-icons/ionicons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Clipboard from '@react-native-clipboard/clipboard';
-import {
-  createStreamingDiarization,
-  detectDiarizationModel,
-  type DiarizationPipelineHandle,
-  type StreamingDiarizationEngine,
-} from 'react-native-sherpa-onnx/diarization';
-import {
-  ModelCategory,
-  onModelsListUpdated,
-} from 'react-native-sherpa-onnx/download';
+import type { DiarizationPipelineHandle } from 'react-native-sherpa-onnx/diarization';
 import {
   createEmptyLiveAudioBuffer,
   appendOfflineToLiveAudioBuffer,
@@ -42,22 +33,9 @@ import {
 } from 'react-native-sherpa-onnx/segmentbuffer';
 import type { StreamingPipelineStatus } from 'react-native-sherpa-onnx/audiobuffer';
 import type { RootStackParamList } from '../../types/navigation';
+import { DiarizationStreamingModelInitPanel } from '../../components/DiarizationStreamingModelInitPanel';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
-import {
-  InitModeSelector,
-  ModelFolderGrid,
-  type ModelInitMode,
-} from '../../components/modelInit';
-import {
-  DiarizationStreamingCustomInitForm,
-  type DiarizationStreamingCustomInitFormState,
-} from '../../components/modelInit/DiarizationStreamingCustomInitForm';
-import {
-  loadDiarizationStreamingModelCatalog,
-  getDiarizationStreamingModelPathConfig,
-  type DiarizationStreamingCatalogSnapshot,
-} from '../../utils/diarizationStreamingModelCatalog';
-import { fillDiarizationStreamingCustomConfigFromModelFolder } from '../../utils/diarizationCustomInitFill';
+import { useDiarizationStreamingModelInit } from '../../hooks/useDiarizationStreamingModelInit';
 import { DIARIZATION_AUDIO_FILES } from '../../audioConfig';
 import {
   OfflineAudioBufferWidget,
@@ -69,8 +47,6 @@ import {
   SPEAKER_COLORS,
   styles,
 } from './DiarizationStreamingScreen.styles';
-
-const CHUNK_SIZE_OPTIONS = [1024, 2048, 4096, 8192] as const;
 
 export type SpeakerTurn = {
   id: string;
@@ -87,8 +63,6 @@ export type EventLogItem = {
   time: string;
   message: string;
 };
-
-export type LatencyProfile = 'low' | 'ultra_low' | 'default' | 'custom';
 
 function formatTime(sec: number): string {
   if (isNaN(sec) || sec < 0) return '00:00.00';
@@ -108,44 +82,11 @@ export default function DiarizationStreamingScreen() {
   const navigation =
     useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  // Model catalog & selection
-  const [catalog, setCatalog] =
-    useState<DiarizationStreamingCatalogSnapshot | null>(null);
-  const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(
-    null
-  );
-  const [initMode, setInitMode] = useState<ModelInitMode>('auto');
-  const [customFormState, setCustomFormState] =
-    useState<DiarizationStreamingCustomInitFormState>({ fileSources: {} });
-  const [customFillLoading, setCustomFillLoading] = useState(false);
-  const [customFillHint, setCustomFillHint] = useState<string | null>(null);
-
-  // Latency profile & window controls (default: 'low' for real-time live mic feedback)
-  const [latencyProfile, setLatencyProfile] = useState<LatencyProfile>('low');
-  const [customChunkLen, setCustomChunkLen] = useState(6);
-  const [customRightContext, setCustomRightContext] = useState(7);
-  const [customFifoLen, setCustomFifoLen] = useState(188);
-
-  // Parameter tuning controls
-  const [tuningExpanded, setTuningExpanded] = useState(false);
-  const [onset, setOnset] = useState(0.5);
-  const [offset, setOffset] = useState(0.5);
-  const [minDurationOff, setMinDurationOff] = useState(0.5);
-  const [minDurationOn, setMinDurationOn] = useState(0.0);
-  const [chunkSize, setChunkSize] = useState<number>(4096);
-
-  // Engine lifecycle
-  const engineRef = useRef<StreamingDiarizationEngine | null>(null);
-  const [engineInfo, setEngineInfo] = useState<{
-    instanceId: string;
-    sampleRate: number;
-    maxSpeakers: number;
-    feedSamples: number;
-    strideSamples: number;
-    latencySeconds: number;
-  } | null>(null);
-  const [engineInitBusy, setEngineInitBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const stopStreamingRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  const streaming = useDiarizationStreamingModelInit({
+    onBeforeInit: () => stopStreamingRef.current?.(),
+  });
+  const { engineRef, engineInfo, chunkSize, minDurationOff } = streaming;
 
   // Audio ingress selection
   const [sourceMode, setSourceMode] = useState<'file' | 'mic'>('file');
@@ -182,6 +123,7 @@ export default function DiarizationStreamingScreen() {
   const [pipelineStatus, setPipelineStatus] =
     useState<StreamingPipelineStatus | null>(null);
   const [events, setEvents] = useState<EventLogItem[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const appendEvent = useCallback((message: string) => {
     const time = new Date().toLocaleTimeString();
@@ -191,37 +133,7 @@ export default function DiarizationStreamingScreen() {
     ]);
   }, []);
 
-  // Load model catalog
-  const reloadCatalog = useCallback(async () => {
-    try {
-      const snap = await loadDiarizationStreamingModelCatalog();
-      setCatalog(snap);
-      setSelectedCatalogId((curr) => {
-        if (curr && snap.entries.some((e) => e.id === curr)) {
-          return curr;
-        }
-        return snap.entries[0]?.id ?? null;
-      });
-    } catch (e) {
-      appendEvent(
-        `Catalog load error: ${e instanceof Error ? e.message : String(e)}`
-      );
-    }
-  }, [appendEvent]);
-
-  useEffect(() => {
-    reloadCatalog().catch(() => {});
-  }, [reloadCatalog]);
-
-  useEffect(() => {
-    const unsubscribe = onModelsListUpdated((category) => {
-      if (category !== ModelCategory.Diarization) return;
-      reloadCatalog().catch(() => {});
-    });
-    return unsubscribe;
-  }, [reloadCatalog]);
-
-  // Clean up on unmount
+  // Clean up pipeline on unmount (engine persists in module cache)
   useEffect(() => {
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
@@ -230,184 +142,8 @@ export default function DiarizationStreamingScreen() {
       const pipe = pipelineRef.current;
       pipelineRef.current = null;
       pipe?.stop().catch(() => {});
-      const eng = engineRef.current;
-      engineRef.current = null;
-      eng?.release().catch(() => {});
     };
   }, []);
-
-  // Fill custom config from selected catalog folder
-  const handleFillCustomConfig = useCallback(async () => {
-    if (!catalog || !selectedCatalogId) return;
-    setCustomFillLoading(true);
-    setCustomFillHint(null);
-    try {
-      const source = getDiarizationStreamingModelPathConfig(selectedCatalogId, {
-        padModelIds: catalog.padModelIds,
-        padModelsPath: catalog.padModelsPath,
-        bundledFolders: catalog.bundledFolders,
-        downloadedIds: new Set(catalog.downloadedIds),
-        downloadedPaths: catalog.downloadedPaths,
-      });
-      const res = await fillDiarizationStreamingCustomConfigFromModelFolder(
-        source
-      );
-      setCustomFormState({ fileSources: res.customConfig });
-      setCustomFillHint(`Filled paths from ${selectedCatalogId}`);
-      appendEvent(`Filled custom paths from ${selectedCatalogId}`);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setCustomFillHint(`Fill failed: ${msg}`);
-      appendEvent(`Custom fill failed: ${msg}`);
-    } finally {
-      setCustomFillLoading(false);
-    }
-  }, [appendEvent, catalog, selectedCatalogId]);
-
-  // Initialize or reload engine
-  const initEngine = useCallback(async () => {
-    setError(null);
-    setEngineInitBusy(true);
-    try {
-      if (engineRef.current) {
-        await engineRef.current.release().catch(() => {});
-        engineRef.current = null;
-        setEngineInfo(null);
-      }
-
-      let engine: StreamingDiarizationEngine;
-      if (initMode === 'auto') {
-        if (!catalog || !selectedCatalogId) {
-          throw new Error(
-            'No streaming diarization model selected. Download a model from Download Showcase or configure custom paths.'
-          );
-        }
-        const source = getDiarizationStreamingModelPathConfig(
-          selectedCatalogId,
-          {
-            padModelIds: catalog.padModelIds,
-            padModelsPath: catalog.padModelsPath,
-            bundledFolders: catalog.bundledFolders,
-            downloadedIds: new Set(catalog.downloadedIds),
-            downloadedPaths: catalog.downloadedPaths,
-          }
-        );
-
-        // Verify detection
-        const det = await detectDiarizationModel(source);
-        if (!det.success || !det.isStreaming) {
-          throw new Error(
-            `Model ${selectedCatalogId} is not a valid streaming diarization model: ${
-              det.error ?? 'Unknown'
-            }`
-          );
-        }
-
-        const latencyConfig =
-          latencyProfile === 'low'
-            ? { chunkLen: 6, rightContext: 7, fifoLen: 188 }
-            : latencyProfile === 'ultra_low'
-            ? { chunkLen: 3, rightContext: 1, fifoLen: 188 }
-            : latencyProfile === 'default'
-            ? { chunkLen: 124, rightContext: 1, fifoLen: 124 }
-            : {
-                chunkLen: customChunkLen,
-                rightContext: customRightContext,
-                fifoLen: customFifoLen,
-              };
-
-        engine = await createStreamingDiarization({
-          modelSource: source,
-          modelType: 'sortformer',
-          onset,
-          offset,
-          minDurationOff,
-          minDurationOn,
-          ...latencyConfig,
-        });
-      } else {
-        if (!customFormState.fileSources.model) {
-          throw new Error('Custom config requires a valid model file (.onnx)');
-        }
-        const latencyConfig =
-          latencyProfile === 'low'
-            ? { chunkLen: 6, rightContext: 7, fifoLen: 188 }
-            : latencyProfile === 'ultra_low'
-            ? { chunkLen: 3, rightContext: 1, fifoLen: 188 }
-            : latencyProfile === 'default'
-            ? { chunkLen: 124, rightContext: 1, fifoLen: 124 }
-            : {
-                chunkLen: customChunkLen,
-                rightContext: customRightContext,
-                fifoLen: customFifoLen,
-              };
-
-        engine = await createStreamingDiarization({
-          initMode: 'custom',
-          modelType: 'sortformer',
-          customConfig: {
-            model: customFormState.fileSources.model,
-            metadata: customFormState.fileSources.metadata,
-          },
-          onset,
-          offset,
-          minDurationOff,
-          minDurationOn,
-          ...latencyConfig,
-        });
-      }
-
-      engineRef.current = engine;
-      setEngineInfo({
-        instanceId: engine.instanceId,
-        sampleRate: engine.sampleRate,
-        maxSpeakers: engine.maxSpeakers,
-        feedSamples: engine.feedSamples,
-        strideSamples: engine.strideSamples,
-        latencySeconds: engine.latencySeconds,
-      });
-      appendEvent(
-        `Engine initialized (SR=${engine.sampleRate}, Speakers=${engine.maxSpeakers})`
-      );
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
-      appendEvent(`Engine init error: ${msg}`);
-    } finally {
-      setEngineInitBusy(false);
-    }
-  }, [
-    catalog,
-    customChunkLen,
-    customFifoLen,
-    customFormState,
-    customRightContext,
-    initMode,
-    latencyProfile,
-    minDurationOff,
-    minDurationOn,
-    offset,
-    onset,
-    selectedCatalogId,
-    appendEvent,
-  ]);
-
-  // Unload engine
-  const unloadEngine = useCallback(async () => {
-    if (streamState !== 'idle') {
-      Alert.alert(
-        'Cannot Unload',
-        'Please stop streaming before unloading the engine.'
-      );
-      return;
-    }
-    if (engineRef.current) {
-      await engineRef.current.release().catch(() => {});
-      engineRef.current = null;
-      setEngineInfo(null);
-      appendEvent('Engine unloaded');
-    }
-  }, [appendEvent, streamState]);
 
   // Start streaming pipeline
   const startStreaming = useCallback(async () => {
@@ -642,6 +378,7 @@ export default function DiarizationStreamingScreen() {
     appendEvent,
     chunkSize,
     engineInfo,
+    engineRef,
     minDurationOff,
     offlineInputBuffer,
     sourceMode,
@@ -711,6 +448,12 @@ export default function DiarizationStreamingScreen() {
     }
   }, [appendEvent, sourceMode, streamState]);
 
+  stopStreamingRef.current = async () => {
+    if (streamState !== 'idle') {
+      await stopStreaming();
+    }
+  };
+
   // Analytics computation
   const {
     totalSpeechTime,
@@ -779,506 +522,11 @@ export default function DiarizationStreamingScreen() {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Module 1: Model Selection & Parameter Tuning */}
-        <View style={styles.card}>
-          <View style={styles.cardHeader}>
-            <Text style={styles.cardTitle}>1. Model & Engine Setup</Text>
-            {engineInfo ? (
-              <TouchableOpacity
-                onPress={unloadEngine}
-                disabled={streamState !== 'idle'}
-              >
-                <Ionicons name="trash-outline" size={20} color="#DC2626" />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-          <Text style={styles.cardSubtitle}>
-            Configure NeMo Sortformer streaming diarization model and inference
-            parameters.
-          </Text>
-
-          <InitModeSelector value={initMode} onChange={setInitMode} />
-
-          {initMode === 'auto' ? (
-            <View style={styles.marginTop10}>
-              <ModelFolderGrid
-                entries={catalog?.entries ?? []}
-                selectedId={selectedCatalogId}
-                initializedId={engineInfo ? selectedCatalogId : null}
-                onSelect={setSelectedCatalogId}
-                emptyMessage="No streaming diarization models found."
-              />
-              {catalog && catalog.entries.length === 0 ? (
-                <View style={styles.noModelsBanner}>
-                  <Text style={styles.noModelsText}>
-                    No streaming diarization models found on device. Download
-                    Sortformer from the Download Showcase or configure custom
-                    paths.
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.downloadLinkButton}
-                    onPress={() => navigation.navigate('DownloadShowcase')}
-                  >
-                    <Ionicons
-                      name="cloud-download-outline"
-                      size={16}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.downloadLinkText}>
-                      Open Download Screen
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-            </View>
-          ) : (
-            <DiarizationStreamingCustomInitForm
-              value={customFormState}
-              onChange={setCustomFormState}
-              selectedCatalogModelId={selectedCatalogId}
-              onFillFromSelectedModel={handleFillCustomConfig}
-              fillLoading={customFillLoading}
-              fillHint={customFillHint}
-              disabled={engineInitBusy || streamState !== 'idle'}
-            />
-          )}
-
-          {/* Streaming Latency Profile */}
-          <Text style={[styles.paramLabel, styles.marginTop10]}>
-            Streaming Latency Profile
-          </Text>
-          <View style={styles.latencyRow}>
-            <TouchableOpacity
-              style={[
-                styles.latencyChip,
-                latencyProfile === 'low' && styles.latencyChipActive,
-              ]}
-              onPress={() => setLatencyProfile('low')}
-              disabled={streamState !== 'idle'}
-            >
-              <Text
-                style={[
-                  styles.latencyChipText,
-                  latencyProfile === 'low' && styles.latencyChipTextActive,
-                ]}
-              >
-                Low Latency (~1.0s) [Default]
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.latencyChip,
-                latencyProfile === 'ultra_low' && styles.latencyChipActive,
-              ]}
-              onPress={() => setLatencyProfile('ultra_low')}
-              disabled={streamState !== 'idle'}
-            >
-              <Text
-                style={[
-                  styles.latencyChipText,
-                  latencyProfile === 'ultra_low' &&
-                    styles.latencyChipTextActive,
-                ]}
-              >
-                Ultra-Low (~0.3s)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.latencyChip,
-                latencyProfile === 'default' && styles.latencyChipActive,
-              ]}
-              onPress={() => setLatencyProfile('default')}
-              disabled={streamState !== 'idle'}
-            >
-              <Text
-                style={[
-                  styles.latencyChipText,
-                  latencyProfile === 'default' && styles.latencyChipTextActive,
-                ]}
-              >
-                Standard (~10.0s)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.latencyChip,
-                latencyProfile === 'custom' && styles.latencyChipActive,
-              ]}
-              onPress={() => setLatencyProfile('custom')}
-              disabled={streamState !== 'idle'}
-            >
-              <Text
-                style={[
-                  styles.latencyChipText,
-                  latencyProfile === 'custom' && styles.latencyChipTextActive,
-                ]}
-              >
-                Custom
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.latencyHint}>
-            {latencyProfile === 'low'
-              ? '⚡ Real-time live mic feedback: updates every ~0.48s with a 1.04s lookahead window (chunkLen=6, rightContext=7).'
-              : latencyProfile === 'ultra_low'
-              ? '⚡⚡ Ultra-fast: updates every ~0.24s with a 0.32s lookahead window (chunkLen=3, rightContext=1).'
-              : latencyProfile === 'default'
-              ? '📁 High accuracy for audio files: updates every 9.92s with a 10.0s window (chunkLen=124, rightContext=1).'
-              : `Custom window: chunkLen=${customChunkLen}, rightContext=${customRightContext}, fifoLen=${customFifoLen}.`}
-          </Text>
-
-          {latencyProfile === 'custom' ? (
-            <View style={styles.tuningSectionContent}>
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Chunk Len (80ms frames)</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() => setCustomChunkLen((v) => Math.max(1, v - 1))}
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>{customChunkLen}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setCustomChunkLen((v) => Math.min(250, v + 1))
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Right Context (frames)</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setCustomRightContext((v) => Math.max(0, v - 1))
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {customRightContext}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setCustomRightContext((v) => Math.min(50, v + 1))
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>FIFO Size (frames)</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setCustomFifoLen((v) => Math.max(10, v - 10))
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>{customFifoLen}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setCustomFifoLen((v) => Math.min(300, v + 10))
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          ) : null}
-
-          {/* Parameter Tuning Collapsible */}
-          <TouchableOpacity
-            style={[styles.paramRow, styles.marginTop10]}
-            onPress={() => setTuningExpanded((p) => !p)}
-          >
-            <Text style={[styles.paramLabel, styles.tuningToggleLabel]}>
-              {tuningExpanded
-                ? '▼ Hide Tuning Parameters'
-                : '▶ Advanced Tuning Parameters'}
-            </Text>
-          </TouchableOpacity>
-
-          {tuningExpanded ? (
-            <View style={styles.tuningSectionContent}>
-              {/* Onset */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Speech Onset Threshold</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setOnset((v) =>
-                        Math.max(0.1, Math.round((v - 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {onset.toFixed(2)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setOnset((v) =>
-                        Math.min(0.9, Math.round((v + 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Offset */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Speech Offset Threshold</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setOffset((v) =>
-                        Math.max(0.1, Math.round((v - 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {offset.toFixed(2)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setOffset((v) =>
-                        Math.min(0.9, Math.round((v + 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Min Duration Off */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Max Gap to Merge Turns</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setMinDurationOff((v) =>
-                        Math.max(0.0, Math.round((v - 0.1) * 10) / 10)
-                      )
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {minDurationOff.toFixed(1)}s
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setMinDurationOff((v) =>
-                        Math.min(2.0, Math.round((v + 0.1) * 10) / 10)
-                      )
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Min Duration On */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Min Turn Duration</Text>
-                <View style={styles.paramControls}>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setMinDurationOn((v) =>
-                        Math.max(0.0, Math.round((v - 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>-</Text>
-                  </TouchableOpacity>
-                  <View style={styles.paramValueBadge}>
-                    <Text style={styles.paramValueText}>
-                      {minDurationOn.toFixed(2)}s
-                    </Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.paramStepButton}
-                    onPress={() =>
-                      setMinDurationOn((v) =>
-                        Math.min(1.0, Math.round((v + 0.05) * 100) / 100)
-                      )
-                    }
-                    disabled={streamState !== 'idle'}
-                  >
-                    <Text style={styles.paramStepButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* Chunk Size */}
-              <View style={styles.paramRow}>
-                <Text style={styles.paramLabel}>Drain Chunk Size</Text>
-                <View style={styles.paramControls}>
-                  {CHUNK_SIZE_OPTIONS.map((sz) => (
-                    <TouchableOpacity
-                      key={sz}
-                      style={[
-                        styles.toggleChip,
-                        chunkSize === sz && styles.toggleChipActive,
-                        styles.chunkChip,
-                      ]}
-                      onPress={() => setChunkSize(sz)}
-                      disabled={streamState !== 'idle'}
-                    >
-                      <Text
-                        style={[
-                          styles.toggleChipText,
-                          chunkSize === sz && styles.toggleChipTextActive,
-                          styles.chunkChipText,
-                        ]}
-                      >
-                        {sz}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            </View>
-          ) : null}
-
-          {/* Engine Action Button */}
-          {(() => {
-            const hasAutoModels = (catalog?.entries.length ?? 0) > 0;
-            const isInitDisabled =
-              engineInitBusy ||
-              streamState !== 'idle' ||
-              (initMode === 'auto' && (!selectedCatalogId || !hasAutoModels)) ||
-              (initMode === 'custom' && !customFormState.fileSources.model);
-
-            return (
-              <View style={styles.marginTop12}>
-                <TouchableOpacity
-                  style={[
-                    styles.primaryButton,
-                    isInitDisabled && styles.buttonDisabled,
-                  ]}
-                  onPress={initEngine}
-                  disabled={isInitDisabled}
-                >
-                  {engineInitBusy ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
-                  ) : (
-                    <>
-                      <Ionicons
-                        name="hardware-chip-outline"
-                        size={18}
-                        color="#FFFFFF"
-                      />
-                      <Text style={styles.buttonText}>
-                        {initMode === 'auto' && !hasAutoModels
-                          ? 'No Model Available'
-                          : engineInfo
-                          ? 'Re-Initialize Engine'
-                          : 'Initialize Diarization Engine'}
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
-            );
-          })()}
-
-          {/* Engine Properties Card */}
-          {engineInfo ? (
-            <View style={styles.metaGrid}>
-              <View style={styles.metaBadge}>
-                <Text style={styles.metaBadgeLabel}>Sample Rate</Text>
-                <Text style={styles.metaBadgeValue}>
-                  {engineInfo.sampleRate} Hz
-                </Text>
-              </View>
-              <View style={styles.metaBadge}>
-                <Text style={styles.metaBadgeLabel}>Max Speakers</Text>
-                <Text style={styles.metaBadgeValue}>
-                  {engineInfo.maxSpeakers}
-                </Text>
-              </View>
-              <View style={styles.metaBadge}>
-                <Text style={styles.metaBadgeLabel}>Feed Window</Text>
-                <Text style={styles.metaBadgeValue}>
-                  {(engineInfo.feedSamples / engineInfo.sampleRate).toFixed(2)}s
-                </Text>
-              </View>
-              <View style={styles.metaBadge}>
-                <Text style={styles.metaBadgeLabel}>Step Stride</Text>
-                <Text style={styles.metaBadgeValue}>
-                  {(engineInfo.strideSamples / engineInfo.sampleRate).toFixed(
-                    2
-                  )}
-                  s
-                </Text>
-              </View>
-              <View style={styles.metaBadge}>
-                <Text style={styles.metaBadgeLabel}>Latency</Text>
-                <Text style={styles.metaBadgeValue}>
-                  {engineInfo.latencySeconds.toFixed(2)}s
-                </Text>
-              </View>
-            </View>
-          ) : null}
-        </View>
+        <DiarizationStreamingModelInitPanel
+          streaming={streaming}
+          disabled={streamState !== 'idle'}
+          onOpenDownloads={() => navigation.navigate('DownloadShowcase')}
+        />
 
         {/* Module 2: Audio Ingress & Pipeline Lifecycle */}
         <View style={styles.card}>

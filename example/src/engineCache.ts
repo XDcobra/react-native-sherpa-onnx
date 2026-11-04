@@ -41,7 +41,10 @@ import type {
   SpeakerIdentificationEngine,
   SpeakerEmbeddingModelType,
 } from 'react-native-sherpa-onnx/speaker-identification';
-import type { DiarizationEngine } from 'react-native-sherpa-onnx/diarization';
+import type {
+  DiarizationEngine,
+  StreamingDiarizationEngine,
+} from 'react-native-sherpa-onnx/diarization';
 import type { STTModelType } from 'react-native-sherpa-onnx/stt';
 import type { TTSModelType } from 'react-native-sherpa-onnx/tts';
 
@@ -672,4 +675,56 @@ export function clearDiarizationCache(): void {
   diarizationEmbModelId = null;
   diarizationInitMessage = null;
   diarizationEngineInfo = null;
+}
+
+// --- Streaming diarization cache ---
+
+export type DiarizationStreamingCachedEngineInfo = {
+  instanceId: string;
+  sampleRate: number;
+  maxSpeakers: number;
+  feedSamples: number;
+  strideSamples: number;
+  latencySeconds: number;
+};
+
+let diarizationStreamingEngine: StreamingDiarizationEngine | null = null;
+let diarizationStreamingModelFolder: string | null = null;
+let diarizationStreamingInitMessage: string | null = null;
+let diarizationStreamingEngineInfo: DiarizationStreamingCachedEngineInfo | null =
+  null;
+
+export function getDiarizationStreamingCache(): {
+  engine: StreamingDiarizationEngine | null;
+  modelFolder: string | null;
+  initMessage: string | null;
+  engineInfo: DiarizationStreamingCachedEngineInfo | null;
+} {
+  return {
+    engine: diarizationStreamingEngine,
+    modelFolder: diarizationStreamingModelFolder,
+    initMessage: diarizationStreamingInitMessage,
+    engineInfo: diarizationStreamingEngineInfo
+      ? { ...diarizationStreamingEngineInfo }
+      : null,
+  };
+}
+
+export function setDiarizationStreamingCache(
+  engine: StreamingDiarizationEngine,
+  modelFolder: string,
+  initMessage: string | null,
+  engineInfo: DiarizationStreamingCachedEngineInfo
+): void {
+  diarizationStreamingEngine = engine;
+  diarizationStreamingModelFolder = modelFolder;
+  diarizationStreamingInitMessage = initMessage;
+  diarizationStreamingEngineInfo = { ...engineInfo };
+}
+
+export function clearDiarizationStreamingCache(): void {
+  diarizationStreamingEngine = null;
+  diarizationStreamingModelFolder = null;
+  diarizationStreamingInitMessage = null;
+  diarizationStreamingEngineInfo = null;
 }
