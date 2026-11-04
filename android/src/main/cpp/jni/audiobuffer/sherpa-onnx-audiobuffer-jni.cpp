@@ -103,12 +103,13 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendInt16SamplesToL
   const jsize n = env->GetArrayLength(samples);
   if (n <= 0) return JNI_FALSE;
 
+  // Resolve id before critical — no other JNI calls while array is pinned.
+  const std::string id = jstringToUtf8(env, bufferId);
   jshort *elems = static_cast<jshort *>(env->GetPrimitiveArrayCritical(samples, nullptr));
   if (!elems) return JNI_FALSE;
   std::string errCode, errMsg;
   const bool ok =
-      pa_append_int16_samples_to_live(jstringToUtf8(env, bufferId),
-                                      reinterpret_cast<const int16_t *>(elems), (size_t)n,
+      pa_append_int16_samples_to_live(id, reinterpret_cast<const int16_t *>(elems), (size_t)n,
                                       sampleRate, &errCode, &errMsg);
   env->ReleasePrimitiveArrayCritical(samples, elems, JNI_ABORT);
   return ok ? JNI_TRUE : JNI_FALSE;
@@ -160,14 +161,14 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeReadOfflineInto(
   const int toCopy = maxSamples < capacity ? maxSamples : capacity;
   if (toCopy <= 0) return 0;
 
-  // Pin caller array and copy once from C float* (no intermediate jfloatArray).
+  // Resolve id before critical — no other JNI calls while array is pinned.
+  const std::string id = jstringToUtf8(env, bufferId);
   jfloat *elems = static_cast<jfloat *>(env->GetPrimitiveArrayCritical(out, nullptr));
   if (!elems) return 0;
   int copied = 0;
   std::string errCode, errMsg;
   const bool ok =
-      pa_copy_offline_samples(jstringToUtf8(env, bufferId), start, elems + outOffset, toCopy,
-                              &copied, &errCode, &errMsg);
+      pa_copy_offline_samples(id, start, elems + outOffset, toCopy, &copied, &errCode, &errMsg);
   env->ReleasePrimitiveArrayCritical(out, elems, ok ? 0 : JNI_ABORT);
   return ok ? copied : 0;
 }
@@ -311,13 +312,14 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeDrainCursorInto(
   const int toCopy = maxSamples < capacity ? maxSamples : capacity;
   if (toCopy <= 0) return 0;
 
+  // Resolve id before critical — no other JNI calls while array is pinned.
+  const std::string id = jstringToUtf8(env, liveBufferId);
   jfloat *elems = static_cast<jfloat *>(env->GetPrimitiveArrayCritical(out, nullptr));
   if (!elems) return 0;
   int copied = 0;
   std::string errCode, errMsg;
   const bool ok =
-      pa_drain_cursor_into(jstringToUtf8(env, liveBufferId), cursorId, elems + outOffset, toCopy,
-                           &copied, &errCode, &errMsg);
+      pa_drain_cursor_into(id, cursorId, elems + outOffset, toCopy, &copied, &errCode, &errMsg);
   env->ReleasePrimitiveArrayCritical(out, elems, ok ? 0 : JNI_ABORT);
   return ok ? copied : 0;
 }
