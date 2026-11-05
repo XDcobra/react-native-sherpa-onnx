@@ -60,6 +60,8 @@ static std::vector<int16_t> pa_mic_resample_int16(
   return result;
 }
 
+// Prefer 16 kHz first so capture often matches live SR (skip resample).
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
 static const int kPaMicCaptureRates[] = {16000, 44100, 48000};
 static const size_t kPaMicCaptureRatesCount = 3;
 static const UInt32 kPaMicAQNumberBuffers = 3;

@@ -130,6 +130,7 @@ void pa_configure_cache_dir(const std::string &cacheDir) {
   if (!cacheDir.empty()) g_pa_cache_dir = cacheDir;
 }
 
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — mmap threshold).
 void pa_configure_threshold(uint64_t totalRamBytes) {
   std::lock_guard<std::mutex> lock(g_pa_config_mutex);
   PaDeviceRamClass ramClass = classifyRam(totalRamBytes);
@@ -161,6 +162,7 @@ std::string pa_generate_id(const char *prefix) {
   return std::string(buf);
 }
 
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — mmap threshold).
 std::shared_ptr<PaOfflineEntry> pa_create_entry_with_threshold(const std::string &bufferId,
                                                                int sampleRate, int channelCount,
                                                                std::vector<float> &samples) {
@@ -293,9 +295,8 @@ bool pa_create_offline_from_f32_file(const std::string &f32Path, int sampleRate,
 
 /**
  * Live spool → offline via mmap @ WAV offset 44 (no WAV→.f32 double copy).
- * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #9).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #9 / B — transfer mmap).
  */
-
 std::shared_ptr<PaOfflineEntry> pa_create_offline_from_transferred_wav_spool(
     const std::string &bufferId, const std::string &spoolPath, int sampleRate, int channelCount) {
   struct stat st {};
@@ -339,6 +340,8 @@ void pa_cleanupOrphanedOrchestrationFiles(int maxAgeSec) {
   pa_sweepOrphanedOrchestrationFiles(maxAgeSec);
 }
 
+// Short g_pa_mutex hold: return shared_ptr so append/drain run outside the registry lock.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #11).
 std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId) {
   std::lock_guard<std::mutex> lock(g_pa_mutex);
   auto it = g_pa_live.find(bufferId);
@@ -577,6 +580,10 @@ bool pa_copy_live_samples_slice(const std::string &bufferId, int startFrame, int
   return true;
 }
 
+/**
+ * Resolve live under g_pa_mutex, append under entry ringMutex (no registry lock across PCM).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #11).
+ */
 bool pa_append_samples_to_live(const std::string &bufferId, const float *samples, size_t count,
                                int sampleRate, std::string *errorCode, std::string *errorMessage) {
   if (!samples || count == 0 || sampleRate <= 0) {

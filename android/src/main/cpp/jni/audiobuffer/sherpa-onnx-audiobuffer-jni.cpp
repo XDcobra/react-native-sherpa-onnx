@@ -105,6 +105,8 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendSamplesToLive(
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendInt16SamplesToLive(
     JNIEnv *env, jclass, jstring bufferId, jshortArray samples, jint sampleRate) {
+  // Pin short[] via Critical (no GetShortArrayRegion + heap vector).
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — Int16 Critical JNI).
   if (!samples) return JNI_FALSE;
   const jsize n = env->GetArrayLength(samples);
   if (n <= 0) return JNI_FALSE;

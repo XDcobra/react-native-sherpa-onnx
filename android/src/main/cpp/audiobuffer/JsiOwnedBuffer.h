@@ -14,8 +14,8 @@
 namespace sherpa {
 
 /**
- * jsi::MutableBuffer backed by ByteBufferPool (A9).
- * Returns capacity to the pool in the destructor when JS drops the ArrayBuffer.
+ * jsi::MutableBuffer backed by ByteBufferPool; release returns capacity to freelist.
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #17).
  */
 class OwnedBuffer : public facebook::jsi::MutableBuffer {
  public:

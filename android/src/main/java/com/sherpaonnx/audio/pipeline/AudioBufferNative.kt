@@ -27,13 +27,20 @@ internal object AudioBufferNative {
   ): String?
 
   @JvmStatic
+  /**
+   * Float append via JNI Critical (no Region + heap vector).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #3 / D-A1).
+   */
   external fun nativeAppendSamplesToLive(
     bufferId: String,
     samples: FloatArray,
     sampleRate: Int,
   ): Boolean
 
-  /** Append Int16 PCM; C converts ÷32768 (no Kotlin FloatArray). */
+  /**
+   * Int16 append via JNI Critical; C converts ÷32768 (no Kotlin FloatArray).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — Int16 Critical JNI).
+   */
   @JvmStatic
   external fun nativeAppendInt16SamplesToLive(
     bufferId: String,

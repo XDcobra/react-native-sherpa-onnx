@@ -8,9 +8,8 @@
 namespace sherpaonnx {
 
 /**
- * Thread-safe freelist of byte vectors for JSI OwnedBuffer reuse (A9).
- * Size classes are power-of-two from kMinClassBytes..kMaxClassBytes.
- * Larger allocations are not pooled. Depth per class is capped.
+ * Thread-safe freelist of byte vectors for JSI OwnedBuffer reuse (size-class hit rate).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #17).
  */
 class ByteBufferPool {
  public:

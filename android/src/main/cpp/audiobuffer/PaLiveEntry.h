@@ -147,6 +147,8 @@ void seg_engine_on_buffer_released(const std::string &bufferId);
 
 // ==================== Inline utility functions ====================
 
+// Prefer matched SR (C #6); this scalar path is the fallback when rates differ (C #5 skipped).
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
 inline std::vector<float> pa_resampleLinear(const float *input, size_t inputSize, int inputRate, int outputRate) {
   if (inputSize == 0 || inputRate <= 0 || outputRate <= 0 || inputRate == outputRate) {
     return std::vector<float>(input, input + inputSize);
@@ -197,6 +199,8 @@ struct PaLiveEntry {
 
   // Ring buffer
   int windowCapacity;
+  // Fixed-size live ring (RSS ≈ 4 × sr × windowSec).
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — live ring).
   std::vector<float> ring;
   int writePos = 0;
   int64_t totalSamplesWritten = 0;
@@ -240,7 +244,8 @@ struct PaLiveEntry {
   std::mutex backpressureMutex;
   std::condition_variable backpressureCV;
 
-  // Spool
+  // F32 WAV spool = lossless authority behind the fixed ring.
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — live spool).
   bool hasActiveSpool = false;
   std::string spoolPath;
   std::ofstream spoolFile;
@@ -261,7 +266,8 @@ struct PaLiveEntry {
   std::unordered_map<int, CursorHandle> cursors;
   std::mutex cursorMutex;
 
-  // Append events (JS callback)
+  // Append events (JS callback); minInterval coalesces bridge rate.
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — append-event coalesce).
   bool appendEventsEnabled = false;
   int appendEventMinIntervalMs = 0;
   std::function<void(const PaLiveFramesAppendedPayload &)> onFramesAppended;
@@ -468,6 +474,8 @@ struct PaLiveEntry {
     std::vector<float> resampled;
     const float *toAppend = data;
     size_t appendCount = count;
+    // Skip resample when ingress SR already matches live (C #6 policy).
+    // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
     if (inputRate != sampleRate) {
       resampled = pa_resampleLinear(data, count, inputRate, sampleRate);
       toAppend = resampled.data();

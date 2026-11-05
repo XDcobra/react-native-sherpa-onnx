@@ -10,11 +10,8 @@ import com.sherpaonnx.audio.session.PaAudioSessionCoordinator
 import kotlin.concurrent.thread
 
 /**
- * Native microphone capture that writes directly into a LiveEntry's ring buffer.
- *
- * This avoids the JS roundtrip: Mic → Int16 → resample → Float32 → LiveEntry.appendSamples().
- * Mic samples are written directly into the native LiveEntry ring buffer.
- * JS event emission is handled centrally by LiveEntry append callbacks, independent of producer.
+ * Native mic → live ring (no JS roundtrip). Prod AudioRecord = VOICE_RECOGNITION classic.
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (D-A4).
  */
 class MicToLiveBufferSink(
   private val context: Context,
@@ -23,6 +20,8 @@ class MicToLiveBufferSink(
   private val logTag: String = "MicToLiveBufferSink"
 ) {
   companion object {
+    // Prefer 16 kHz first so capture often matches live SR (skip resample).
+    // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
     private val CAPTURE_RATES = intArrayOf(16000, 44100, 48000)
   }
 
@@ -51,6 +50,7 @@ class MicToLiveBufferSink(
     val bufSize = minBuf.coerceAtLeast(bufferSizeBytes)
 
     val record = try {
+      // Prod source (D-A4): VOICE_RECOGNITION; PERF_MODE_LOW_LATENCY skipped (no win).
       AudioRecord(
         MediaRecorder.AudioSource.VOICE_RECOGNITION,
         captureRate,

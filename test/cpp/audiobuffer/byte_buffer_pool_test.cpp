@@ -1,5 +1,6 @@
 /**
- * Host tests for ByteBufferPool (A9) — no JSI / no device.
+ * Host tests for ByteBufferPool — no JSI / no device.
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #17).
  */
 #include "ByteBufferPool.h"
 
