@@ -80,7 +80,7 @@ Android cold `B_offline_mmap` ~+180 KiB; iOS sim ~+160 KiB. Host +48 MiB create 
 | C #7/#8 spool I/O | **defer** — A142P spool 9.5 vs ring ~3.4–4.1 ms / 30 s; behind 1.2 ms (no lag pain) |
 | C #9 kill WAV→`.f32` double copy | **keep** (product SoT landed) — helper removed; iOS fullIfSpooled → `pa_transfer_offline_from_live` |
 | C #11 shorten `g_pa_mutex` | **keep (hygiene)** — A142P `C_int16` ~flat; microbench convert-bound, not mutex-bound |
-| C #13 unlock-before listeners | **keep (hygiene)** — A142P `B_ring` 3.41 vs 4.09; iOS sim 2.22 vs 1.37 (noise); suite has no listeners |
+| C #13 unlock-before listeners | **keep (hygiene)** (product SoT landed) — snapshot then invoke after unlock |
 | C #14 coalesce seg hook | **defer** — needs attached-engine pipeline telemetry |
 | C #16 kill `readAllSamples` hot paths | **keep** (product SoT landed) — `pa_clone_offline` / `pa_append_offline_to_live` + Android/iOS wire |
 | C #17 JSI ByteBufferPool hit rate | **keep** — A142P/iOS sim **hitPct=100** (4500/4500); capacity-tolerant release |

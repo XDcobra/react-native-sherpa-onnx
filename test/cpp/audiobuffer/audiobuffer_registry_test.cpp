@@ -827,3 +827,35 @@ TEST_F(AudioRegistryFixture, CloneOffline_AndAppendOfflineToLive) {
   EXPECT_TRUE(pa_release_buffer(clonedId));
   EXPECT_TRUE(pa_release_buffer(srcId));
 }
+
+// Bucket C #13: listener may remove itself during notify without deadlocking on listener mutex.
+TEST_F(AudioRegistryFixture, AppendListener_SelfRemoveDuringNotify) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &id, &errCode, &errMsg)) << errMsg;
+
+  auto live = pa_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  std::atomic<int> fires{0};
+  int token = -1;
+  token = live->addAppendListener([&]() {
+    fires.fetch_add(1);
+    live->removeAppendListener(token);
+  });
+  EXPECT_EQ(live->appendListenerCount(), 1u);
+
+  std::vector<float> chunk(80, 0.1f);
+  ASSERT_TRUE(pa_append_samples_to_live(id, chunk.data(), chunk.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+  EXPECT_EQ(fires.load(), 1);
+  EXPECT_EQ(live->appendListenerCount(), 0u);
+
+  ASSERT_TRUE(pa_append_samples_to_live(id, chunk.data(), chunk.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+  EXPECT_EQ(fires.load(), 1);
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(id));
+}

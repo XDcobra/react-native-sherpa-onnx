@@ -306,10 +306,18 @@ struct PaLiveEntry {
     return nativeAppendListeners.size();
   }
 
+  /** Bucket C #13 — snapshot under lock, invoke after unlock (TxtLiveEntry parity; avoids nested deadlock). */
   void notifyAppendListeners() {
-    std::lock_guard<std::mutex> lock(nativeAppendListenerMutex);
-    for (auto &entry : nativeAppendListeners) {
-      entry.callback();
+    std::vector<std::function<void()>> callbacks;
+    {
+      std::lock_guard<std::mutex> lock(nativeAppendListenerMutex);
+      callbacks.reserve(nativeAppendListeners.size());
+      for (auto &entry : nativeAppendListeners) {
+        callbacks.push_back(entry.callback);
+      }
+    }
+    for (auto &cb : callbacks) {
+      if (cb) cb();
     }
   }
 

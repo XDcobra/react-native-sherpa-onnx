@@ -211,7 +211,7 @@ Hypothesis × is **not** a ship number. Dual gate applies. **Host / Android / iO
 | 10 | mmap ingest prefault | **Strict RSS gate** — may raise peak | yes | yes | yes | device mmap RSS ≪ host | device OK | **skip** |
 | 11 | Shorten `g_pa_mutex` across append | Contention | yes | yes | yes | A142P `C_int16` 5.05 (~flat); JNI int16 13.6 | +128 KiB / noise | **keep (hygiene)** — convert-bound in microbench |
 | 12 | Lock-free / SPSC ring | Only if #1+#11 still contend | later | yes | yes | — | — | — |
-| 13 | Unlock-before listener callbacks | Nested work | yes | yes | yes | A142P 3.41 / iOS sim 2.22 (~flat vs 4.09 / 1.37) | ~0 | **keep (hygiene)** |
+| 13 | Unlock-before listener callbacks | Nested work | yes | yes | yes | A142P 3.41 / iOS sim 2.22 (~flat vs 4.09 / 1.37) | ~0 | **keep (hygiene)** (product SoT landed) |
 | 14 | Coalesce `seg_engine_on_audio_append` | Hook cost | yes | pipeline | pipeline | no attached-engine bench bound | — | **defer** (needs pipeline telemetry) |
 | 15 | Retention trim | RSS/disk product | later | yes | yes | — | — | — |
 | 16 | Audit remaining `readAllSamples` | Copy avoidance | yes | yes | yes | A142P append 0.35 / clone 4.80; iOS sim 0.39 / 3.31 | clone ~+1.9 MiB (=PCM) | **keep** (product SoT: clone + append APIs) |
@@ -258,7 +258,7 @@ See §M.4. Buffer writes; chunked mmap reads only after **device** B. **#9 statu
 
 ### 3.6 Locking / callbacks — **#11–#14**
 
-Shorten registry critical sections; unlock-before-notify; profile seg hook. Lock-free last.
+Shorten registry critical sections; unlock-before-notify; profile seg hook. Lock-free last. **#13 status:** `PaLiveEntry::notifyAppendListeners` snapshots callbacks under lock then invokes after unlock (TxtLiveEntry parity).
 
 ### 3.7 Product RSS — **#15–#18**
 
@@ -380,7 +380,7 @@ Filled: [`audiobuffer-android-ios-ranking.md`](./audiobuffer-android-ios-ranking
 4. ~~C #3 / D-A1~~ **keep Critical** (product SoT landed); ~~C #4~~ **keep** (product SoT landed).  
 5. ~~C #9/#10 / D-A3~~ #9 **keep** (product SoT landed); #10 / D-A3 **skip**. ~~C #16~~ **keep** (product SoT landed).  
 6. ~~C #7/#8~~ **defer** (no lag pain).  
-7. ~~C #11/#13~~ **keep (hygiene)**; #12 only if contention appears.  
+7. ~~C #11/#13~~ **keep (hygiene)** (#13 product SoT landed); #12 only if contention appears.  
 8. ~~Bucket D Android~~ filled (§M.7); D-I\* pending iPhone.  
 9. ~~C #5 external lib~~ **skip for now**.
 
