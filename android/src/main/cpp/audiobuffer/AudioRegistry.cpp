@@ -291,8 +291,10 @@ bool pa_create_offline_from_f32_file(const std::string &f32Path, int sampleRate,
   return true;
 }
 
-// Bucket C #9: WAV→`.f32` double-copy helper removed. Use
-// pa_create_offline_from_transferred_wav_spool / pa_transfer_offline_from_live (mmap @ offset 44).
+/**
+ * Live spool → offline via mmap @ WAV offset 44 (no WAV→.f32 double copy).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #9).
+ */
 
 std::shared_ptr<PaOfflineEntry> pa_create_offline_from_transferred_wav_spool(
     const std::string &bufferId, const std::string &spoolPath, int sampleRate, int channelCount) {
@@ -604,10 +606,13 @@ bool pa_append_samples_to_live(const std::string &bufferId, const float *samples
   }
 }
 
+/**
+ * Int16→f32 in stack chunks; resolve live once (no full-length float temp).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #4).
+ */
 bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t *samples,
                                      size_t count, int sampleRate, std::string *errorCode,
                                      std::string *errorMessage) {
-  // Bucket C #4: chunked convert; resolve live once (no full-length float vector).
   if (!samples || count == 0 || sampleRate <= 0) {
     if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
     if (errorMessage) *errorMessage = "Invalid samples or sample rate";
@@ -648,10 +653,13 @@ bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t 
 #if defined(__APPLE__)
 #include <Accelerate/Accelerate.h>
 
+/**
+ * vDSP_vflt16 + scale vs portable scalar convert.
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (D-I1).
+ */
 bool pa_append_int16_samples_to_live_vdsp(const std::string &bufferId, const int16_t *samples,
                                           size_t count, int sampleRate, std::string *errorCode,
                                           std::string *errorMessage) {
-  // Bucket D-I1: vDSP_vflt16 + scale vs portable scalar convert.
   if (!samples || count == 0 || sampleRate <= 0) {
     if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
     if (errorMessage) *errorMessage = "Invalid samples or sample rate";

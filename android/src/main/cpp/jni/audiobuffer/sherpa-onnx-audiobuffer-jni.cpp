@@ -85,7 +85,8 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeCreateLive(
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendSamplesToLive(
     JNIEnv *env, jclass, jstring bufferId, jfloatArray samples, jint sampleRate) {
-  // Bucket C #3 / D-A1: pin float[] like Int16 — no GetFloatArrayRegion + heap vector.
+  // Pin float[] like Int16 — no GetFloatArrayRegion + heap vector.
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #3 / D-A1).
   if (!samples) return JNI_FALSE;
   const jsize n = env->GetArrayLength(samples);
   if (n <= 0) return JNI_FALSE;

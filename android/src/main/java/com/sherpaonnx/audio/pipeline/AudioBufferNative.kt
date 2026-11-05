@@ -86,10 +86,16 @@ internal object AudioBufferNative {
   @JvmStatic external fun nativeUpgradeToMmap(bufferId: String)
   @JvmStatic external fun nativeTransferFromLive(liveBufferId: String, fullIfSpooled: Boolean): String?
 
-  /** C #16 — one PCM copy clone (same SR/channels). */
+  /**
+   * One PCM copy clone (same SR/channels).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
+   */
   @JvmStatic external fun nativeCloneOffline(sourceBufferId: String): String?
 
-  /** C #16 — chunked offline→live append from floatPtr (no full FloatArray materialize). */
+  /**
+   * Chunked offline→live append from floatPtr (no full FloatArray materialize).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
+   */
   @JvmStatic
   external fun nativeAppendOfflineToLive(liveBufferId: String, offlineBufferId: String): Boolean
 

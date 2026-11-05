@@ -177,7 +177,8 @@ object PipelineAudioRegistry {
         ?: throw IllegalArgumentException("Offline buffer not found: $sourceBufferId")
     val effectiveTarget = resolveEffectiveTargetSampleRateHz(targetSampleRateHz, source.sampleRate)
     if (effectiveTarget == source.sampleRate) {
-      // C #16: one C-side copy via floatPtr (not readAllSamples + recreate).
+      // One C-side copy via floatPtr (not readAllSamples + recreate).
+      // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
       val clonedId =
         AudioBufferNative.nativeCloneOffline(source.bufferId)
           ?: throw IllegalStateException("Failed to clone offline buffer")
@@ -290,7 +291,8 @@ object PipelineAudioRegistry {
     }
     getOffline(offlineBufferId)
       ?: throw IllegalArgumentException("Offline buffer not found: $offlineBufferId")
-    // C #16: one JNI call; C chunks from floatPtr (no per-chunk FloatArray / Critical).
+    // One JNI call; C chunks from floatPtr (no per-chunk FloatArray / Critical).
+    // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
     if (!AudioBufferNative.nativeAppendOfflineToLive(liveBufferId, offlineBufferId)) {
       throw IllegalStateException("Failed to append offline to live")
     }

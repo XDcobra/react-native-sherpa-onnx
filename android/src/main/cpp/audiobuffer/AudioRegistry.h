@@ -86,19 +86,25 @@ bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t 
                                      std::string *errorMessage);
 
 #if defined(__APPLE__)
-/** Bucket D-I1 — Accelerate vDSP int16→f32 then append (iOS/macOS only). */
+/**
+ * Accelerate vDSP int16→f32 then append (iOS/macOS only; portable path is pa_append_int16_samples_to_live).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (D-I1).
+ */
 bool pa_append_int16_samples_to_live_vdsp(const std::string &bufferId, const int16_t *samples,
                                           size_t count, int sampleRate, std::string *errorCode,
                                           std::string *errorMessage);
 #endif
 
-/** Bucket C #16 — append offline→live from floatPtr in chunks (no full readAllSamples materialize). */
+/**
+ * Append offline→live from floatPtr in chunks (no full readAllSamples materialize).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
+ */
 bool pa_append_offline_to_live(const std::string &liveBufferId, const std::string &offlineBufferId,
                                std::string *errorCode, std::string *errorMessage);
 
 /**
- * Bucket C #16 — new offline id with one PCM copy from source floatPtr (same SR/channels).
- * Avoids readAllSamples + create (two copies for RAM/mmap).
+ * New offline id with one PCM copy from source floatPtr (same SR/channels; avoids double copy).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
  */
 bool pa_clone_offline(const std::string &sourceBufferId, std::string *offlineBufferIdOut,
                       std::string *errorCode, std::string *errorMessage);

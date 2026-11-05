@@ -204,9 +204,8 @@ struct PaLiveEntry {
   std::mutex ringMutex;
 
   /**
-   * Bucket C #1 — caller must hold ringMutex.
-   * Write n samples from a linear buffer into the ring at writePos using contiguous
-   * memcpy spans (≤2 for a single wrap; loops if n exceeds capacity).
+   * Write n samples into the ring at writePos via contiguous memcpy (caller holds ringMutex).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #1).
    */
   void writeRingContiguous(const float *src, int n) {
     if (!src || n <= 0 || windowCapacity <= 0) return;
@@ -221,8 +220,8 @@ struct PaLiveEntry {
   }
 
   /**
-   * Bucket C #2 — caller must hold ringMutex.
-   * Read n samples from ring starting at ringOffset into a linear dest using ≤2 memcpy spans.
+   * Read n samples from ringOffset into a linear dest via ≤2 memcpy spans (caller holds ringMutex).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #2).
    */
   void readRingContiguous(int ringOffset, float *dest, int n) const {
     if (!dest || n <= 0 || windowCapacity <= 0) return;
@@ -306,7 +305,10 @@ struct PaLiveEntry {
     return nativeAppendListeners.size();
   }
 
-  /** Bucket C #13 — snapshot under lock, invoke after unlock (TxtLiveEntry parity; avoids nested deadlock). */
+  /**
+   * Snapshot append listeners under lock, invoke after unlock (avoids nested deadlock).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #13).
+   */
   void notifyAppendListeners() {
     std::vector<std::function<void()>> callbacks;
     {

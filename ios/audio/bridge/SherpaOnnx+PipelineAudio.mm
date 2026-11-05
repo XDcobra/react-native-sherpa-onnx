@@ -1250,8 +1250,8 @@ static std::string pa_tempDir() {
 
     int effectiveTarget = pa_resolveEffectiveTargetSampleRateHz(options, live->sampleRate);
 
-    // Bucket C #9: fullIfSpooled at same SR uses transfer/mmap-adopt (no WAV→.f32 double copy),
-    // matching Android createOfflineFromLive. Invalidates the live buffer.
+    // Same-SR fullIfSpooled: transfer/mmap-adopt (no WAV→.f32 double copy); invalidates live.
+    // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #9).
     if (modeStr == "fullIfSpooled" && effectiveTarget == live->sampleRate) {
       std::string offlineId, errCode, errMsg;
       if (!pa_transfer_offline_from_live(liveId, /*fullIfSpooled=*/true, &offlineId, &errCode,
@@ -1340,7 +1340,8 @@ static std::string pa_tempDir() {
       return;
     }
 
-    // Bucket C #16: same-SR clone = one PCM copy via floatPtr (not readAllSamples + recreate).
+    // Same-SR clone = one PCM copy via floatPtr (not readAllSamples + recreate).
+    // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
     if (effectiveTarget == source->sampleRate) {
       std::string offlineId, errCode, errMsg;
       if (!pa_clone_offline(sourceId, &offlineId, &errCode, &errMsg)) {
@@ -1663,7 +1664,8 @@ static std::string pa_tempDir() {
       reject(kPAErrAlreadyFinalized, @"Live buffer is finalized", nil);
       return;
     }
-    // Bucket C #16: chunked floatPtr append (Android OfflineReader parity; no full materialize).
+    // Chunked floatPtr append (no full materialize).
+    // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
     std::string errCode, errMsg;
     if (!pa_append_offline_to_live(liveId, offId, &errCode, &errMsg)) {
       NSString *nsCode = errCode.empty() ? kPAErrInternalError

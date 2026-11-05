@@ -291,7 +291,8 @@ TEST_F(AudioRegistryFixture, AppendInt16_ParityWithFloat) {
 }
 
 TEST_F(AudioRegistryFixture, AppendInt16_MultiChunkParityWithFloat) {
-  // Forces C #4 kChunk=4096 boundary (one full chunk + remainder).
+  // Forces portable int16 kChunk=4096 boundary (one full chunk + remainder).
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #4).
   constexpr size_t kN = 4096 + 257;
   std::string idFloat;
   std::string idInt16;
@@ -344,7 +345,8 @@ TEST_F(AudioRegistryFixture, AppendInt16_MultiChunkParityWithFloat) {
 
 #if defined(__APPLE__)
 TEST_F(AudioRegistryFixture, AppendInt16_VdspParityWithPortable) {
-  // Bucket D-I1: portable vs Accelerate path, including kChunk boundary.
+  // Portable vs Accelerate int16 path, including kChunk boundary.
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (D-I1).
   constexpr size_t kN = 4096 + 257;
   std::string idPortable;
   std::string idVdsp;
@@ -843,7 +845,8 @@ TEST_F(AudioRegistryFixture, LiveRingWrap_Int16ParityAndSegHook) {
   EXPECT_TRUE(pa_release_buffer(idInt16));
 }
 
-// Bucket C #16: clone is one-copy; append offline→live uses floatPtr chunks.
+// Clone is one-copy; append offline→live uses floatPtr chunks.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
 TEST_F(AudioRegistryFixture, CloneOffline_AndAppendOfflineToLive) {
   std::string errCode, errMsg, json;
   std::vector<float> pcm(1000);
@@ -878,7 +881,8 @@ TEST_F(AudioRegistryFixture, CloneOffline_AndAppendOfflineToLive) {
   EXPECT_TRUE(pa_release_buffer(srcId));
 }
 
-// Bucket C #13: listener may remove itself during notify without deadlocking on listener mutex.
+// Listener may remove itself during notify without deadlocking on listener mutex.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #13).
 TEST_F(AudioRegistryFixture, AppendListener_SelfRemoveDuringNotify) {
   std::string id;
   std::string errCode;

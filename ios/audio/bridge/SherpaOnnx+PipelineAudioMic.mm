@@ -125,7 +125,8 @@ static void paMicAQInputCallback(
     count16 = resampledBuf.size();
   }
 
-  // Bucket D-I1: chunked Accelerate convert (keep Mic ingress origin).
+  // Chunked Accelerate int16→f32 convert (keep Mic ingress origin).
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (D-I1).
   constexpr size_t kChunk = 4096;
   std::array<float, kChunk> converted{};
   const float scale = 1.0f / 32768.0f;
