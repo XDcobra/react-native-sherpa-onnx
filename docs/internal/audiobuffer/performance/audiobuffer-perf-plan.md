@@ -207,14 +207,14 @@ Hypothesis × is **not** a ship number. Dual gate applies. **Host / Android / iO
 | 6 | Avoid resample (match SR) | Policy | n/a | e2e | e2e | — | — | **keep policy** |
 | 7 | Spool write buffering | Long ingest | yes | yes | yes | A142P spool 9.5 vs ring 3.4–4.1 ms / 30 s | small | **defer** (absolute cheap; lossless path OK) |
 | 8 | mmap chunked live spool reads | Only if B lag I/O hurts on device | yes | yes | yes | `B_spool_behind` 1.2 ms | ~0 | **defer** (no lag drain pain) |
-| 9 | Kill WAV→`.f32` double copy | Transfer path only | yes | yes | yes | transfer still mmap; A142P 0.29 / iOS sim 0.24 ms | ~0 | **keep** (dead path + iOS createOffline align) |
+| 9 | Kill WAV→`.f32` double copy | Transfer path only | yes | yes | yes | transfer still mmap; A142P 0.29 / iOS sim 0.24 ms | ~0 | **keep** (product SoT: helper removed + iOS transfer) |
 | 10 | mmap ingest prefault | **Strict RSS gate** — may raise peak | yes | yes | yes | device mmap RSS ≪ host | device OK | **skip** |
 | 11 | Shorten `g_pa_mutex` across append | Contention | yes | yes | yes | A142P `C_int16` 5.05 (~flat); JNI int16 13.6 | +128 KiB / noise | **keep (hygiene)** — convert-bound in microbench |
 | 12 | Lock-free / SPSC ring | Only if #1+#11 still contend | later | yes | yes | — | — | — |
 | 13 | Unlock-before listener callbacks | Nested work | yes | yes | yes | A142P 3.41 / iOS sim 2.22 (~flat vs 4.09 / 1.37) | ~0 | **keep (hygiene)** |
 | 14 | Coalesce `seg_engine_on_audio_append` | Hook cost | yes | pipeline | pipeline | no attached-engine bench bound | — | **defer** (needs pipeline telemetry) |
 | 15 | Retention trim | RSS/disk product | later | yes | yes | — | — | — |
-| 16 | Audit remaining `readAllSamples` | Copy avoidance | yes | yes | yes | A142P append 0.35 / clone 4.80; iOS sim 0.39 / 3.31 | clone ~+1.9 MiB (=PCM) | **keep** |
+| 16 | Audit remaining `readAllSamples` | Copy avoidance | yes | yes | yes | A142P append 0.35 / clone 4.80; iOS sim 0.39 / 3.31 | clone ~+1.9 MiB (=PCM) | **keep** (product SoT: clone + append APIs) |
 | 17 | JSI pool hit rate | Churn | yes | yes | yes | A142P/iOS sim **hitPct=100** (4500/4500) | A142P +1.7 MiB / iOS noise | **keep** |
 | 18 | 64 B aligned slabs | Only with a real F32 SIMD kernel | yes | later | later | — | — | — |
 
@@ -250,7 +250,7 @@ Bucket **D** scoreboard: §M.7 tables (same Wall × / RSS Δ / Ship? columns).
 
 ### 3.4 Spool I/O — **#7 / #8 / #9**
 
-See §M.4. Buffer writes; chunked mmap reads only after **device** B; dead-code double-copy create path after transfer is proven universal.
+See §M.4. Buffer writes; chunked mmap reads only after **device** B. **#9 status:** `pa_create_offline_from_f32_wav_spool` removed; iOS same-SR `fullIfSpooled` uses `pa_transfer_offline_from_live`.
 
 ### 3.5 Offline mmap prefault — **#10**
 
@@ -262,7 +262,7 @@ Shorten registry critical sections; unlock-before-notify; profile seg hook. Lock
 
 ### 3.7 Product RSS — **#15–#18**
 
-Retention trim, copy audits, pool hit rate; no align-without-SIMD.
+Retention trim, copy audits, pool hit rate; no align-without-SIMD. **#16 status:** `pa_clone_offline` / `pa_append_offline_to_live` landed; Android + iOS same-SR hot paths wired off `readAllSamples`.
 
 ---
 
@@ -378,7 +378,7 @@ Filled: [`audiobuffer-android-ios-ranking.md`](./audiobuffer-android-ios-ranking
 2. iOS **device** B/D — **pending** (sim done as ratio/smoke).  
 3. ~~Portable C #1/#2~~ **keep** (landed in product SoT).  
 4. ~~C #3 / D-A1~~ **keep Critical** (product SoT landed); ~~C #4~~ **keep** (product SoT landed).  
-5. ~~C #9/#10 / D-A3~~ #9 **keep**; #10 / D-A3 **skip**.  
+5. ~~C #9/#10 / D-A3~~ #9 **keep** (product SoT landed); #10 / D-A3 **skip**. ~~C #16~~ **keep** (product SoT landed).  
 6. ~~C #7/#8~~ **defer** (no lag pain).  
 7. ~~C #11/#13~~ **keep (hygiene)**; #12 only if contention appears.  
 8. ~~Bucket D Android~~ filled (§M.7); D-I\* pending iPhone.  

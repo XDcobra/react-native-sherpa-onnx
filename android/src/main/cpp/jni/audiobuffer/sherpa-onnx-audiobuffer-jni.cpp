@@ -283,6 +283,26 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeTransferFromLive(
   return utf8ToJstring(env, offlineId);
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeCloneOffline(JNIEnv *env, jclass,
+                                                                        jstring sourceBufferId) {
+  std::string offlineId, errCode, errMsg;
+  if (!pa_clone_offline(jstringToUtf8(env, sourceBufferId), &offlineId, &errCode, &errMsg)) {
+    return nullptr;
+  }
+  return utf8ToJstring(env, offlineId);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendOfflineToLive(
+    JNIEnv *env, jclass, jstring liveBufferId, jstring offlineBufferId) {
+  std::string errCode, errMsg;
+  return pa_append_offline_to_live(jstringToUtf8(env, liveBufferId),
+                                   jstringToUtf8(env, offlineBufferId), &errCode, &errMsg)
+             ? JNI_TRUE
+             : JNI_FALSE;
+}
+
 JNIEXPORT jint JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeCreateCursor(JNIEnv *env, jclass,
                                                                         jstring liveBufferId) {

@@ -291,72 +291,8 @@ bool pa_create_offline_from_f32_file(const std::string &f32Path, int sampleRate,
   return true;
 }
 
-std::shared_ptr<PaOfflineEntry> pa_create_offline_from_f32_wav_spool(const std::string &bufferId,
-                                                                    const std::string &spoolPath,
-                                                                    int sampleRate,
-                                                                    int channelCount) {
-  std::string tempDir = pa_temp_dir();
-  std::string f32Path = tempDir + "/pa_off_" + bufferId + ".f32";
-  try {
-    std::ifstream wavFile(spoolPath, std::ios::binary);
-    if (!wavFile) return nullptr;
-    wavFile.seekg(44);
-    if (!wavFile) return nullptr;
-    std::ofstream f32File(f32Path, std::ios::binary);
-    if (!f32File) return nullptr;
-    int64_t copiedBytes = 0;
-    char buf[32768];
-    while (wavFile.read(buf, sizeof(buf)) || wavFile.gcount() > 0) {
-      std::streamsize count = wavFile.gcount();
-      if (count <= 0) break;
-      f32File.write(buf, count);
-      copiedBytes += (int64_t)count;
-    }
-    f32File.close();
-    wavFile.close();
-    if (copiedBytes <= 0) {
-      unlink(f32Path.c_str());
-      return nullptr;
-    }
-    long threshold = computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
-    if (copiedBytes < threshold) {
-      if ((copiedBytes % (int64_t)sizeof(float)) != 0) {
-        unlink(f32Path.c_str());
-        return nullptr;
-      }
-      int sampleCount = (int)(copiedBytes / (int64_t)sizeof(float));
-      std::ifstream in(f32Path, std::ios::binary);
-      if (!in) {
-        unlink(f32Path.c_str());
-        return nullptr;
-      }
-      std::vector<float> samples((size_t)sampleCount);
-      in.read(reinterpret_cast<char *>(samples.data()), (std::streamsize)(sampleCount * sizeof(float)));
-      unlink(f32Path.c_str());
-      if (!in && !in.eof()) return nullptr;
-      auto entry = std::make_shared<PaOfflineEntry>();
-      entry->bufferId = bufferId;
-      entry->sampleRate = sampleRate;
-      entry->channelCount = channelCount;
-      entry->samples = std::move(samples);
-      return entry;
-    }
-    auto region = PaMmapRegion::mapFile(f32Path);
-    if (!region) {
-      unlink(f32Path.c_str());
-      return nullptr;
-    }
-    auto entry = std::make_shared<PaOfflineEntry>();
-    entry->bufferId = bufferId;
-    entry->sampleRate = sampleRate;
-    entry->channelCount = channelCount;
-    entry->mmapRegion = std::move(region);
-    return entry;
-  } catch (...) {
-    unlink(f32Path.c_str());
-    return nullptr;
-  }
-}
+// Bucket C #9: WAV→`.f32` double-copy helper removed. Use
+// pa_create_offline_from_transferred_wav_spool / pa_transfer_offline_from_live (mmap @ offset 44).
 
 std::shared_ptr<PaOfflineEntry> pa_create_offline_from_transferred_wav_spool(
     const std::string &bufferId, const std::string &spoolPath, int sampleRate, int channelCount) {
@@ -707,6 +643,88 @@ bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t 
     if (errorMessage) *errorMessage = e.what();
     return false;
   }
+}
+
+bool pa_append_offline_to_live(const std::string &liveBufferId, const std::string &offlineBufferId,
+                               std::string *errorCode, std::string *errorMessage) {
+  auto live = pa_get_live_entry(liveBufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(liveBufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
+  }
+  auto offline = pa_get_offline_entry(offlineBufferId);
+  if (!offline) {
+    if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+  const float *ptr = offline->floatPtr();
+  const int n = offline->numSamples();
+  if (n < 0) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Invalid offline sample count";
+    return false;
+  }
+  if (n == 0) return true;
+  if (!ptr) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Offline floatPtr unavailable";
+    return false;
+  }
+  constexpr int kChunk = 8192;
+  try {
+    for (int offset = 0; offset < n; offset += kChunk) {
+      const int count = std::min(kChunk, n - offset);
+      live->appendSamples(ptr + offset, static_cast<size_t>(count), offline->sampleRate,
+                          PaLiveAppendOrigin::ingress(PaLiveIngressSource::AppendOffline), false);
+    }
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
+}
+
+bool pa_clone_offline(const std::string &sourceBufferId, std::string *offlineBufferIdOut,
+                      std::string *errorCode, std::string *errorMessage) {
+  auto source = pa_get_offline_entry(sourceBufferId);
+  if (!source) {
+    if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+  const float *ptr = source->floatPtr();
+  const int n = source->numSamples();
+  if (n < 0 || (n > 0 && !ptr)) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Offline floatPtr unavailable";
+    return false;
+  }
+  std::string bufferId = pa_generate_id("off");
+  std::vector<float> owned;
+  if (n > 0) {
+    owned.assign(ptr, ptr + n);
+  }
+  auto entry =
+      pa_create_entry_with_threshold(bufferId, source->sampleRate, source->channelCount, owned);
+  if (!entry) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Failed to clone offline buffer";
+    return false;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    g_pa_offline[bufferId] = entry;
+  }
+  if (offlineBufferIdOut) *offlineBufferIdOut = bufferId;
+  return true;
 }
 
 bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,

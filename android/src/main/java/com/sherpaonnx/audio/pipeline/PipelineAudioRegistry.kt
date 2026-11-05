@@ -177,11 +177,15 @@ object PipelineAudioRegistry {
         ?: throw IllegalArgumentException("Offline buffer not found: $sourceBufferId")
     val effectiveTarget = resolveEffectiveTargetSampleRateHz(targetSampleRateHz, source.sampleRate)
     if (effectiveTarget == source.sampleRate) {
-      return createOfflineFromFloatArray(
-        source.readAllSamples(),
-        source.sampleRate,
-        source.channelCount,
-      )
+      // C #16: one C-side copy via floatPtr (not readAllSamples + recreate).
+      val clonedId =
+        AudioBufferNative.nativeCloneOffline(source.bufferId)
+          ?: throw IllegalStateException("Failed to clone offline buffer")
+      val wrapped =
+        OfflineEntry.wrap(clonedId)
+          ?: throw IllegalStateException("Cloned offline handle missing: $clonedId")
+      offlineEntries[clonedId] = wrapped
+      return wrapped
     }
     if (source.channelCount != 1) {
       throw IllegalArgumentException(
@@ -284,21 +288,11 @@ object PipelineAudioRegistry {
     if (live.state != LiveEntry.State.RECORDING) {
       throw IllegalStateException("Live buffer is finalized, cannot append")
     }
-    val offline =
-      getOffline(offlineBufferId)
-        ?: throw IllegalArgumentException("Offline buffer not found: $offlineBufferId")
-    offline.createReader().use { reader ->
-      val chunk = FloatArray(8192)
-      while (true) {
-        val read = reader.readSamples(chunk, 0, chunk.size)
-        if (read <= 0) break
-        val toAppend = if (read == chunk.size) chunk else chunk.copyOf(read)
-        live.appendSamples(
-          toAppend,
-          offline.sampleRate,
-          LiveAppendOrigin.Ingress(LiveAudioIngressSource.APPEND_OFFLINE),
-        )
-      }
+    getOffline(offlineBufferId)
+      ?: throw IllegalArgumentException("Offline buffer not found: $offlineBufferId")
+    // C #16: one JNI call; C chunks from floatPtr (no per-chunk FloatArray / Critical).
+    if (!AudioBufferNative.nativeAppendOfflineToLive(liveBufferId, offlineBufferId)) {
+      throw IllegalStateException("Failed to append offline to live")
     }
   }
 

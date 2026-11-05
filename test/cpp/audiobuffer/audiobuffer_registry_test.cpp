@@ -792,3 +792,38 @@ TEST_F(AudioRegistryFixture, LiveRingWrap_Int16ParityAndSegHook) {
   EXPECT_TRUE(pa_release_buffer(idFloat));
   EXPECT_TRUE(pa_release_buffer(idInt16));
 }
+
+// Bucket C #16: clone is one-copy; append offline→live uses floatPtr chunks.
+TEST_F(AudioRegistryFixture, CloneOffline_AndAppendOfflineToLive) {
+  std::string errCode, errMsg, json;
+  std::vector<float> pcm(1000);
+  for (size_t i = 0; i < pcm.size(); ++i) pcm[i] = static_cast<float>(i) * 0.001f;
+  ASSERT_TRUE(pa_create_offline_from_samples(pcm.data(), pcm.size(), 16000, 1, &json, &errCode,
+                                             &errMsg))
+      << errMsg;
+  const std::string srcId = bufferIdFromCreateJson(json);
+  ASSERT_FALSE(srcId.empty());
+
+  std::string clonedId;
+  ASSERT_TRUE(pa_clone_offline(srcId, &clonedId, &errCode, &errMsg)) << errMsg;
+  auto src = pa_get_offline_entry(srcId);
+  auto cloned = pa_get_offline_entry(clonedId);
+  ASSERT_NE(src, nullptr);
+  ASSERT_NE(cloned, nullptr);
+  EXPECT_EQ(cloned->numSamples(), src->numSamples());
+  EXPECT_EQ(cloned->sampleRate, src->sampleRate);
+  ASSERT_NE(cloned->floatPtr(), nullptr);
+  EXPECT_FLOAT_EQ(cloned->floatPtr()[10], pcm[10]);
+
+  std::string liveId;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &liveId, &errCode, &errMsg)) << errMsg;
+  ASSERT_TRUE(pa_append_offline_to_live(liveId, clonedId, &errCode, &errMsg)) << errMsg;
+  auto live = pa_get_live_entry(liveId);
+  ASSERT_NE(live, nullptr);
+  EXPECT_EQ(live->totalSamplesWritten, static_cast<int64_t>(pcm.size()));
+
+  ASSERT_TRUE(pa_finalize_live(liveId, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(liveId));
+  EXPECT_TRUE(pa_release_buffer(clonedId));
+  EXPECT_TRUE(pa_release_buffer(srcId));
+}

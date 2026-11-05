@@ -86,6 +86,13 @@ internal object AudioBufferNative {
   @JvmStatic external fun nativeUpgradeToMmap(bufferId: String)
   @JvmStatic external fun nativeTransferFromLive(liveBufferId: String, fullIfSpooled: Boolean): String?
 
+  /** C #16 — one PCM copy clone (same SR/channels). */
+  @JvmStatic external fun nativeCloneOffline(sourceBufferId: String): String?
+
+  /** C #16 — chunked offline→live append from floatPtr (no full FloatArray materialize). */
+  @JvmStatic
+  external fun nativeAppendOfflineToLive(liveBufferId: String, offlineBufferId: String): Boolean
+
   @JvmStatic external fun nativeCreateCursor(liveBufferId: String): Int
 
   @JvmStatic

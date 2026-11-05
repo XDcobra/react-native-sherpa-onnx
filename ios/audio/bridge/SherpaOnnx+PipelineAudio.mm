@@ -1249,27 +1249,44 @@ static std::string pa_tempDir() {
     }
 
     int effectiveTarget = pa_resolveEffectiveTargetSampleRateHz(options, live->sampleRate);
+
+    // Bucket C #9: fullIfSpooled at same SR uses transfer/mmap-adopt (no WAV→.f32 double copy),
+    // matching Android createOfflineFromLive. Invalidates the live buffer.
+    if (modeStr == "fullIfSpooled" && effectiveTarget == live->sampleRate) {
+      std::string offlineId, errCode, errMsg;
+      if (!pa_transfer_offline_from_live(liveId, /*fullIfSpooled=*/true, &offlineId, &errCode,
+                                         &errMsg)) {
+        NSString *nsCode = errCode.empty() ? kPAErrInternalError
+                                           : [NSString stringWithUTF8String:errCode.c_str()];
+        NSString *nsMsg = errMsg.empty() ? @"Failed to create offline buffer from live"
+                                         : [NSString stringWithUTF8String:errMsg.c_str()];
+        reject(nsCode, nsMsg, nil);
+        return;
+      }
+      auto transferred = pa_get_offline_entry(offlineId);
+      if (!transferred) {
+        reject(kPAErrInternalError, @"Offline missing after transfer", nil);
+        return;
+      }
+      resolve(transferred->toDict());
+      return;
+    }
+
     std::string bufferId = pa_generate_id("off");
     std::shared_ptr<PaOfflineEntry> entry;
 
     if (effectiveTarget == live->sampleRate) {
-      if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED && !live->spoolPath.empty()) {
-        entry = pa_create_offline_from_f32_wav_spool(bufferId, live->spoolPath, live->sampleRate, live->channelCount);
-        if (!entry) {
-          auto snapshot = live->snapshotRing();
-          entry = pa_create_entry_with_threshold(bufferId, live->sampleRate, live->channelCount, snapshot);
-        }
-      } else {
-        auto snapshot = live->snapshotRing();
-        entry = pa_create_entry_with_threshold(bufferId, live->sampleRate, live->channelCount, snapshot);
-      }
+      // windowSnapshot — keep live registered.
+      auto snapshot = live->snapshotRing();
+      entry = pa_create_entry_with_threshold(bufferId, live->sampleRate, live->channelCount, snapshot);
     } else {
       if (live->channelCount != 1) {
         reject(kPAErrInvalidArgument, @"Resampling live→offline requires mono (channelCount=1)", nil);
         return;
       }
       std::vector<float> pcm;
-      if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED && !live->spoolPath.empty()) {
+      if (modeStr == "fullIfSpooled" && live->hasActiveSpool && live->state == PaLiveEntry::FINISHED &&
+          !live->spoolPath.empty()) {
         pcm = pa_read_f32_wav_spool_samples(live->spoolPath);
       }
       if (pcm.empty()) {
@@ -1323,13 +1340,33 @@ static std::string pa_tempDir() {
       return;
     }
 
-    auto pcm = source->readAllSamples();
-    std::vector<float> output;
+    // Bucket C #16: same-SR clone = one PCM copy via floatPtr (not readAllSamples + recreate).
     if (effectiveTarget == source->sampleRate) {
-      output = pcm;
-    } else {
-      output = pa_resampleLinear(pcm.data(), pcm.size(), source->sampleRate, effectiveTarget);
+      std::string offlineId, errCode, errMsg;
+      if (!pa_clone_offline(sourceId, &offlineId, &errCode, &errMsg)) {
+        NSString *nsCode = errCode.empty() ? kPAErrInternalError
+                                           : [NSString stringWithUTF8String:errCode.c_str()];
+        NSString *nsMsg = errMsg.empty() ? @"Failed to create offline buffer from offline"
+                                         : [NSString stringWithUTF8String:errMsg.c_str()];
+        reject(nsCode, nsMsg, nil);
+        return;
+      }
+      auto cloned = pa_get_offline_entry(offlineId);
+      if (!cloned) {
+        reject(kPAErrInternalError, @"Offline missing after clone", nil);
+        return;
+      }
+      resolve(cloned->toDict());
+      return;
     }
+
+    const float *ptr = source->floatPtr();
+    const int n = source->numSamples();
+    if (n < 0 || (n > 0 && !ptr)) {
+      reject(kPAErrInternalError, @"Offline floatPtr unavailable", nil);
+      return;
+    }
+    auto output = pa_resampleLinear(ptr, static_cast<size_t>(n), source->sampleRate, effectiveTarget);
 
     std::string bufferId = pa_generate_id("off");
     auto entry = pa_create_entry_with_threshold(
@@ -1626,13 +1663,16 @@ static std::string pa_tempDir() {
       reject(kPAErrAlreadyFinalized, @"Live buffer is finalized", nil);
       return;
     }
-    auto allSamples = offline->readAllSamples();
-    live->appendSamples(
-      allSamples.data(),
-      allSamples.size(),
-      offline->sampleRate,
-      PaLiveAppendOrigin::ingress(PaLiveIngressSource::AppendOffline)
-    );
+    // Bucket C #16: chunked floatPtr append (Android OfflineReader parity; no full materialize).
+    std::string errCode, errMsg;
+    if (!pa_append_offline_to_live(liveId, offId, &errCode, &errMsg)) {
+      NSString *nsCode = errCode.empty() ? kPAErrInternalError
+                                         : [NSString stringWithUTF8String:errCode.c_str()];
+      NSString *nsMsg = errMsg.empty() ? @"Failed to append offline to live"
+                                       : [NSString stringWithUTF8String:errMsg.c_str()];
+      reject(nsCode, nsMsg, nil);
+      return;
+    }
     resolve(nil);
   } @catch (NSException *e) {
     reject(kPAErrInternalError, e.reason, nil);

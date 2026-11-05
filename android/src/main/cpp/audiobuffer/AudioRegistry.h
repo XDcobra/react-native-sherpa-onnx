@@ -85,6 +85,17 @@ bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t 
                                      size_t count, int sampleRate, std::string *errorCode,
                                      std::string *errorMessage);
 
+/** Bucket C #16 — append offline→live from floatPtr in chunks (no full readAllSamples materialize). */
+bool pa_append_offline_to_live(const std::string &liveBufferId, const std::string &offlineBufferId,
+                               std::string *errorCode, std::string *errorMessage);
+
+/**
+ * Bucket C #16 — new offline id with one PCM copy from source floatPtr (same SR/channels).
+ * Avoids readAllSamples + create (two copies for RAM/mmap).
+ */
+bool pa_clone_offline(const std::string &sourceBufferId, std::string *offlineBufferIdOut,
+                      std::string *errorCode, std::string *errorMessage);
+
 /** Drain live cursor into caller-owned dest; advances cursor like drainCursor. */
 bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,
                           int maxSamples, int *outCopied, std::string *errorCode,
@@ -113,11 +124,6 @@ bool pa_create_offline_from_f32_file(const std::string &f32Path, int sampleRate,
 std::shared_ptr<PaOfflineEntry> pa_create_entry_with_threshold(const std::string &bufferId,
                                                                int sampleRate, int channelCount,
                                                                std::vector<float> &samples);
-
-std::shared_ptr<PaOfflineEntry> pa_create_offline_from_f32_wav_spool(const std::string &bufferId,
-                                                                    const std::string &spoolPath,
-                                                                    int sampleRate,
-                                                                    int channelCount);
 
 std::shared_ptr<PaOfflineEntry> pa_create_offline_from_transferred_wav_spool(
     const std::string &bufferId, const std::string &spoolPath, int sampleRate, int channelCount);
