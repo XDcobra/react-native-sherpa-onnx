@@ -1,5 +1,6 @@
 #include "PunctuationOfflineLivePipelineWorker.h"
 
+#include "TxtMetaBridge.h"
 #include <stdexcept>
 
 extern "C" bool sherpaonnx_punct_offline_add_punctuation_if_exists(
@@ -60,7 +61,7 @@ void PunctuationOfflineLivePipelineWorker::onSegmentCommitted(
         {},
         {},
         "segmentation_engine",
-        meta,
+        txtMetaJsonFromDict(meta),
         &err
       )) {
     throw std::runtime_error(

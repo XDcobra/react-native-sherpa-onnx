@@ -147,6 +147,8 @@ void seg_engine_on_buffer_released(const std::string &bufferId);
 
 // ==================== Inline utility functions ====================
 
+// Prefer matched SR (C #6); this scalar path is the fallback when rates differ (C #5 skipped).
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
 inline std::vector<float> pa_resampleLinear(const float *input, size_t inputSize, int inputRate, int outputRate) {
   if (inputSize == 0 || inputRate <= 0 || outputRate <= 0 || inputRate == outputRate) {
     return std::vector<float>(input, input + inputSize);
@@ -197,17 +199,53 @@ struct PaLiveEntry {
 
   // Ring buffer
   int windowCapacity;
+  // Fixed-size live ring (RSS ≈ 4 × sr × windowSec).
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — live ring).
   std::vector<float> ring;
   int writePos = 0;
   int64_t totalSamplesWritten = 0;
   int64_t totalSamplesDropped = 0;
   std::mutex ringMutex;
 
+  /**
+   * Write n samples into the ring at writePos via contiguous memcpy (caller holds ringMutex).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #1).
+   */
+  void writeRingContiguous(const float *src, int n) {
+    if (!src || n <= 0 || windowCapacity <= 0) return;
+    const int cap = windowCapacity;
+    while (n > 0) {
+      const int first = std::min(n, cap - writePos);
+      std::memcpy(ring.data() + writePos, src, (size_t)first * sizeof(float));
+      writePos = (writePos + first) % cap;
+      src += first;
+      n -= first;
+    }
+  }
+
+  /**
+   * Read n samples from ringOffset into a linear dest via ≤2 memcpy spans (caller holds ringMutex).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #2).
+   */
+  void readRingContiguous(int ringOffset, float *dest, int n) const {
+    if (!dest || n <= 0 || windowCapacity <= 0) return;
+    const int cap = windowCapacity;
+    int off = ringOffset % cap;
+    if (off < 0) off += cap;
+    const int first = std::min(n, cap - off);
+    std::memcpy(dest, ring.data() + off, (size_t)first * sizeof(float));
+    const int second = n - first;
+    if (second > 0) {
+      std::memcpy(dest + first, ring.data(), (size_t)second * sizeof(float));
+    }
+  }
+
   // Backpressure
   std::mutex backpressureMutex;
   std::condition_variable backpressureCV;
 
-  // Spool
+  // F32 WAV spool = lossless authority behind the fixed ring.
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — live spool).
   bool hasActiveSpool = false;
   std::string spoolPath;
   std::ofstream spoolFile;
@@ -228,7 +266,8 @@ struct PaLiveEntry {
   std::unordered_map<int, CursorHandle> cursors;
   std::mutex cursorMutex;
 
-  // Append events (JS callback)
+  // Append events (JS callback); minInterval coalesces bridge rate.
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — append-event coalesce).
   bool appendEventsEnabled = false;
   int appendEventMinIntervalMs = 0;
   std::function<void(const PaLiveFramesAppendedPayload &)> onFramesAppended;
@@ -272,10 +311,21 @@ struct PaLiveEntry {
     return nativeAppendListeners.size();
   }
 
+  /**
+   * Snapshot append listeners under lock, invoke after unlock (avoids nested deadlock).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #13).
+   */
   void notifyAppendListeners() {
-    std::lock_guard<std::mutex> lock(nativeAppendListenerMutex);
-    for (auto &entry : nativeAppendListeners) {
-      entry.callback();
+    std::vector<std::function<void()>> callbacks;
+    {
+      std::lock_guard<std::mutex> lock(nativeAppendListenerMutex);
+      callbacks.reserve(nativeAppendListeners.size());
+      for (auto &entry : nativeAppendListeners) {
+        callbacks.push_back(entry.callback);
+      }
+    }
+    for (auto &cb : callbacks) {
+      if (cb) cb();
     }
   }
 
@@ -424,6 +474,8 @@ struct PaLiveEntry {
     std::vector<float> resampled;
     const float *toAppend = data;
     size_t appendCount = count;
+    // Skip resample when ingress SR already matches live (C #6 policy).
+    // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
     if (inputRate != sampleRate) {
       resampled = pa_resampleLinear(data, count, inputRate, sampleRate);
       toAppend = resampled.data();
@@ -453,10 +505,7 @@ struct PaLiveEntry {
 
     {
       std::lock_guard<std::mutex> lock(ringMutex);
-      for (size_t i = 0; i < appendCount; i++) {
-        ring[writePos] = toAppend[i];
-        writePos = (writePos + 1) % windowCapacity;
-      }
+      writeRingContiguous(toAppend, (int)appendCount);
       int64_t prevTotal = totalSamplesWritten;
       totalSamplesWritten = prevTotal + (int64_t)appendCount;
       if (prevTotal >= windowCapacity) {
@@ -628,11 +677,10 @@ struct PaLiveEntry {
     if (used == 0) return {};
     std::vector<float> out(used);
     if (totalSamplesWritten <= windowCapacity) {
-      std::copy(ring.begin(), ring.begin() + used, out.begin());
+      readRingContiguous(0, out.data(), used);
     } else {
-      int firstPart = windowCapacity - writePos;
-      std::copy(ring.begin() + writePos, ring.begin() + writePos + firstPart, out.begin());
-      std::copy(ring.begin(), ring.begin() + writePos, out.begin() + firstPart);
+      // Oldest sample is at writePos after wrap.
+      readRingContiguous(writePos, out.data(), used);
     }
     return out;
   }
@@ -647,9 +695,7 @@ struct PaLiveEntry {
     if (actualCount <= 0) return 0;
     int ringStart =
         (totalSamplesWritten <= windowCapacity) ? startFrame : (writePos + startFrame) % windowCapacity;
-    for (int i = 0; i < actualCount; i++) {
-      dest[i] = ring[(ringStart + i) % windowCapacity];
-    }
+    readRingContiguous(ringStart, dest, actualCount);
     return actualCount;
   }
 
@@ -708,9 +754,7 @@ struct PaLiveEntry {
         if (available == 0) return 0;
         int count = std::min(maxSamples, available);
         int ringOffset = (int)(rp % windowCapacity);
-        for (int i = 0; i < count; i++) {
-          dest[i] = ring[(ringOffset + i) % windowCapacity];
-        }
+        readRingContiguous(ringOffset, dest, count);
         it->second.absoluteReadPos = rp + count;
         copied = count;
       } else if (hasActiveSpool) {
@@ -746,9 +790,7 @@ struct PaLiveEntry {
         if (available == 0) return 0;
         int count = std::min(maxSamples, available);
         int ringOffset = (int)(oldestInRingLocked % windowCapacity);
-        for (int i = 0; i < count; i++) {
-          dest[i] = ring[(ringOffset + i) % windowCapacity];
-        }
+        readRingContiguous(ringOffset, dest, count);
         it->second.absoluteReadPos = oldestInRingLocked + count;
         copied = count;
       }
@@ -786,9 +828,7 @@ struct PaLiveEntry {
       int count = std::min(maxSamples, available);
       std::vector<float> out(count);
       int ringOffset = (int)(rp % windowCapacity);
-      for (int i = 0; i < count; i++) {
-        out[i] = ring[(ringOffset + i) % windowCapacity];
-      }
+      readRingContiguous(ringOffset, out.data(), count);
       // No advance for peek
       return out;
     }
@@ -817,9 +857,7 @@ struct PaLiveEntry {
       int count = std::min(maxSamples, available);
       std::vector<float> out(count);
       int ringOffset = (int)(oldestInRingLocked % windowCapacity);
-      for (int i = 0; i < count; i++) {
-        out[i] = ring[(ringOffset + i) % windowCapacity];
-      }
+      readRingContiguous(ringOffset, out.data(), count);
       return out;
     }
   }

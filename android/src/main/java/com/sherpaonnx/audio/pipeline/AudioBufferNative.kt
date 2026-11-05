@@ -27,13 +27,20 @@ internal object AudioBufferNative {
   ): String?
 
   @JvmStatic
+  /**
+   * Float append via JNI Critical (no Region + heap vector).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #3 / D-A1).
+   */
   external fun nativeAppendSamplesToLive(
     bufferId: String,
     samples: FloatArray,
     sampleRate: Int,
   ): Boolean
 
-  /** Append Int16 PCM; C converts ÷32768 (no Kotlin FloatArray). */
+  /**
+   * Int16 append via JNI Critical; C converts ÷32768 (no Kotlin FloatArray).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — Int16 Critical JNI).
+   */
   @JvmStatic
   external fun nativeAppendInt16SamplesToLive(
     bufferId: String,
@@ -85,6 +92,19 @@ internal object AudioBufferNative {
 
   @JvmStatic external fun nativeUpgradeToMmap(bufferId: String)
   @JvmStatic external fun nativeTransferFromLive(liveBufferId: String, fullIfSpooled: Boolean): String?
+
+  /**
+   * One PCM copy clone (same SR/channels).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
+   */
+  @JvmStatic external fun nativeCloneOffline(sourceBufferId: String): String?
+
+  /**
+   * Chunked offline→live append from floatPtr (no full FloatArray materialize).
+   * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
+   */
+  @JvmStatic
+  external fun nativeAppendOfflineToLive(liveBufferId: String, offlineBufferId: String): Boolean
 
   @JvmStatic external fun nativeCreateCursor(liveBufferId: String): Int
 

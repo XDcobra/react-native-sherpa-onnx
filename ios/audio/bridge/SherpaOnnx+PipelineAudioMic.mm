@@ -8,12 +8,14 @@
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <Accelerate/Accelerate.h>
 
 #include "PaLiveEntry.h"
 #include "AudioRegistry.h"
 #import "../session/PaAudioSessionCoordinator.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -58,6 +60,8 @@ static std::vector<int16_t> pa_mic_resample_int16(
   return result;
 }
 
+// Prefer 16 kHz first so capture often matches live SR (skip resample).
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
 static const int kPaMicCaptureRates[] = {16000, 44100, 48000};
 static const size_t kPaMicCaptureRatesCount = 3;
 static const UInt32 kPaMicAQNumberBuffers = 3;
@@ -123,19 +127,27 @@ static void paMicAQInputCallback(
     count16 = resampledBuf.size();
   }
 
-  std::vector<float> floatSamples(count16);
-  for (size_t i = 0; i < count16; i++) {
-    floatSamples[i] = (float)samples16[i] / 32768.0f;
-  }
-  auto appendResult = liveEntry->tryAppendSamples(
-    floatSamples.data(),
-    floatSamples.size(),
-    targetRate,
-    PaLiveAppendOrigin::ingress(PaLiveIngressSource::Mic)
-  );
-  if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
-    g_pa_mic_aq_running = false;
-    return;
+  // Chunked Accelerate int16→f32 convert (keep Mic ingress origin).
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (D-I1).
+  constexpr size_t kChunk = 4096;
+  std::array<float, kChunk> converted{};
+  const float scale = 1.0f / 32768.0f;
+  size_t offset = 0;
+  while (offset < count16) {
+    const size_t n = std::min(kChunk, count16 - offset);
+    vDSP_vflt16(samples16 + offset, 1, converted.data(), 1, n);
+    vDSP_vsmul(converted.data(), 1, &scale, converted.data(), 1, n);
+    auto appendResult = liveEntry->tryAppendSamples(
+      converted.data(),
+      n,
+      targetRate,
+      PaLiveAppendOrigin::ingress(PaLiveIngressSource::Mic)
+    );
+    if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
+      g_pa_mic_aq_running = false;
+      return;
+    }
+    offset += n;
   }
 
   AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);

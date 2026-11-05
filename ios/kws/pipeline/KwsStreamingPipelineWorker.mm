@@ -2,6 +2,7 @@
 
 #import <Foundation/Foundation.h>
 
+#include "TxtMetaBridge.h"
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -159,7 +160,7 @@ void KwsStreamingPipelineWorker::maybeCommitHit(
           result.tokens,
           result.timestamps,
           "kws_stream",
-          segmentMeta,
+          txtMetaJsonFromDict(segmentMeta),
           &err)) {
     throw std::runtime_error("Failed to commit keyword segment: " + err);
   }

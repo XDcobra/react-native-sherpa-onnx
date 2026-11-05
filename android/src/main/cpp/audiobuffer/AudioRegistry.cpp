@@ -1,6 +1,7 @@
 #include "AudioRegistry.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -129,6 +130,7 @@ void pa_configure_cache_dir(const std::string &cacheDir) {
   if (!cacheDir.empty()) g_pa_cache_dir = cacheDir;
 }
 
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — mmap threshold).
 void pa_configure_threshold(uint64_t totalRamBytes) {
   std::lock_guard<std::mutex> lock(g_pa_config_mutex);
   PaDeviceRamClass ramClass = classifyRam(totalRamBytes);
@@ -160,6 +162,7 @@ std::string pa_generate_id(const char *prefix) {
   return std::string(buf);
 }
 
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — mmap threshold).
 std::shared_ptr<PaOfflineEntry> pa_create_entry_with_threshold(const std::string &bufferId,
                                                                int sampleRate, int channelCount,
                                                                std::vector<float> &samples) {
@@ -290,73 +293,10 @@ bool pa_create_offline_from_f32_file(const std::string &f32Path, int sampleRate,
   return true;
 }
 
-std::shared_ptr<PaOfflineEntry> pa_create_offline_from_f32_wav_spool(const std::string &bufferId,
-                                                                    const std::string &spoolPath,
-                                                                    int sampleRate,
-                                                                    int channelCount) {
-  std::string tempDir = pa_temp_dir();
-  std::string f32Path = tempDir + "/pa_off_" + bufferId + ".f32";
-  try {
-    std::ifstream wavFile(spoolPath, std::ios::binary);
-    if (!wavFile) return nullptr;
-    wavFile.seekg(44);
-    if (!wavFile) return nullptr;
-    std::ofstream f32File(f32Path, std::ios::binary);
-    if (!f32File) return nullptr;
-    int64_t copiedBytes = 0;
-    char buf[32768];
-    while (wavFile.read(buf, sizeof(buf)) || wavFile.gcount() > 0) {
-      std::streamsize count = wavFile.gcount();
-      if (count <= 0) break;
-      f32File.write(buf, count);
-      copiedBytes += (int64_t)count;
-    }
-    f32File.close();
-    wavFile.close();
-    if (copiedBytes <= 0) {
-      unlink(f32Path.c_str());
-      return nullptr;
-    }
-    long threshold = computeThresholdBytes(PaThresholdPathType::FILE_ORIGIN);
-    if (copiedBytes < threshold) {
-      if ((copiedBytes % (int64_t)sizeof(float)) != 0) {
-        unlink(f32Path.c_str());
-        return nullptr;
-      }
-      int sampleCount = (int)(copiedBytes / (int64_t)sizeof(float));
-      std::ifstream in(f32Path, std::ios::binary);
-      if (!in) {
-        unlink(f32Path.c_str());
-        return nullptr;
-      }
-      std::vector<float> samples((size_t)sampleCount);
-      in.read(reinterpret_cast<char *>(samples.data()), (std::streamsize)(sampleCount * sizeof(float)));
-      unlink(f32Path.c_str());
-      if (!in && !in.eof()) return nullptr;
-      auto entry = std::make_shared<PaOfflineEntry>();
-      entry->bufferId = bufferId;
-      entry->sampleRate = sampleRate;
-      entry->channelCount = channelCount;
-      entry->samples = std::move(samples);
-      return entry;
-    }
-    auto region = PaMmapRegion::mapFile(f32Path);
-    if (!region) {
-      unlink(f32Path.c_str());
-      return nullptr;
-    }
-    auto entry = std::make_shared<PaOfflineEntry>();
-    entry->bufferId = bufferId;
-    entry->sampleRate = sampleRate;
-    entry->channelCount = channelCount;
-    entry->mmapRegion = std::move(region);
-    return entry;
-  } catch (...) {
-    unlink(f32Path.c_str());
-    return nullptr;
-  }
-}
-
+/**
+ * Live spool → offline via mmap @ WAV offset 44 (no WAV→.f32 double copy).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #9 / B — transfer mmap).
+ */
 std::shared_ptr<PaOfflineEntry> pa_create_offline_from_transferred_wav_spool(
     const std::string &bufferId, const std::string &spoolPath, int sampleRate, int channelCount) {
   struct stat st {};
@@ -400,6 +340,8 @@ void pa_cleanupOrphanedOrchestrationFiles(int maxAgeSec) {
   pa_sweepOrphanedOrchestrationFiles(maxAgeSec);
 }
 
+// Short g_pa_mutex hold: return shared_ptr so append/drain run outside the registry lock.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #11).
 std::shared_ptr<PaLiveEntry> pa_get_live_entry(const std::string &bufferId) {
   std::lock_guard<std::mutex> lock(g_pa_mutex);
   auto it = g_pa_live.find(bufferId);
@@ -638,6 +580,10 @@ bool pa_copy_live_samples_slice(const std::string &bufferId, int startFrame, int
   return true;
 }
 
+/**
+ * Resolve live under g_pa_mutex, append under entry ringMutex (no registry lock across PCM).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #11).
+ */
 bool pa_append_samples_to_live(const std::string &bufferId, const float *samples, size_t count,
                                int sampleRate, std::string *errorCode, std::string *errorMessage) {
   if (!samples || count == 0 || sampleRate <= 0) {
@@ -667,6 +613,10 @@ bool pa_append_samples_to_live(const std::string &bufferId, const float *samples
   }
 }
 
+/**
+ * Int16→f32 in stack chunks; resolve live once (no full-length float temp).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #4).
+ */
 bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t *samples,
                                      size_t count, int sampleRate, std::string *errorCode,
                                      std::string *errorMessage) {
@@ -675,12 +625,166 @@ bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t 
     if (errorMessage) *errorMessage = "Invalid samples or sample rate";
     return false;
   }
-  std::vector<float> converted(count);
-  for (size_t i = 0; i < count; ++i) {
-    converted[i] = static_cast<float>(samples[i]) / 32768.0f;
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(bufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
   }
-  return pa_append_samples_to_live(bufferId, converted.data(), converted.size(), sampleRate,
-                                   errorCode, errorMessage);
+  constexpr size_t kChunk = 4096;
+  std::array<float, kChunk> converted{};
+  size_t offset = 0;
+  try {
+    while (offset < count) {
+      const size_t n = std::min(kChunk, count - offset);
+      for (size_t i = 0; i < n; ++i) {
+        converted[i] = static_cast<float>(samples[offset + i]) / 32768.0f;
+      }
+      live->appendSamples(converted.data(), n, sampleRate,
+                          PaLiveAppendOrigin::ingress(PaLiveIngressSource::Append), false);
+      offset += n;
+    }
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
+}
+
+#if defined(__APPLE__)
+#include <Accelerate/Accelerate.h>
+
+/**
+ * vDSP_vflt16 + scale vs portable scalar convert.
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (D-I1).
+ */
+bool pa_append_int16_samples_to_live_vdsp(const std::string &bufferId, const int16_t *samples,
+                                          size_t count, int sampleRate, std::string *errorCode,
+                                          std::string *errorMessage) {
+  if (!samples || count == 0 || sampleRate <= 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "Invalid samples or sample rate";
+    return false;
+  }
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(bufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
+  }
+  constexpr size_t kChunk = 4096;
+  std::array<float, kChunk> converted{};
+  const float scale = 1.0f / 32768.0f;
+  size_t offset = 0;
+  try {
+    while (offset < count) {
+      const size_t n = std::min(kChunk, count - offset);
+      vDSP_vflt16(samples + offset, 1, converted.data(), 1, n);
+      vDSP_vsmul(converted.data(), 1, &scale, converted.data(), 1, n);
+      live->appendSamples(converted.data(), n, sampleRate,
+                          PaLiveAppendOrigin::ingress(PaLiveIngressSource::Append), false);
+      offset += n;
+    }
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
+}
+#endif
+
+bool pa_append_offline_to_live(const std::string &liveBufferId, const std::string &offlineBufferId,
+                               std::string *errorCode, std::string *errorMessage) {
+  auto live = pa_get_live_entry(liveBufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(liveBufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
+  }
+  auto offline = pa_get_offline_entry(offlineBufferId);
+  if (!offline) {
+    if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+  const float *ptr = offline->floatPtr();
+  const int n = offline->numSamples();
+  if (n < 0) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Invalid offline sample count";
+    return false;
+  }
+  if (n == 0) return true;
+  if (!ptr) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Offline floatPtr unavailable";
+    return false;
+  }
+  constexpr int kChunk = 8192;
+  try {
+    for (int offset = 0; offset < n; offset += kChunk) {
+      const int count = std::min(kChunk, n - offset);
+      live->appendSamples(ptr + offset, static_cast<size_t>(count), offline->sampleRate,
+                          PaLiveAppendOrigin::ingress(PaLiveIngressSource::AppendOffline), false);
+    }
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
+}
+
+bool pa_clone_offline(const std::string &sourceBufferId, std::string *offlineBufferIdOut,
+                      std::string *errorCode, std::string *errorMessage) {
+  auto source = pa_get_offline_entry(sourceBufferId);
+  if (!source) {
+    if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+    if (errorMessage) *errorMessage = "Offline buffer not found";
+    return false;
+  }
+  const float *ptr = source->floatPtr();
+  const int n = source->numSamples();
+  if (n < 0 || (n > 0 && !ptr)) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Offline floatPtr unavailable";
+    return false;
+  }
+  std::string bufferId = pa_generate_id("off");
+  std::vector<float> owned;
+  if (n > 0) {
+    owned.assign(ptr, ptr + n);
+  }
+  auto entry =
+      pa_create_entry_with_threshold(bufferId, source->sampleRate, source->channelCount, owned);
+  if (!entry) {
+    if (errorCode) *errorCode = "AUDIO_INTERNAL_ERROR";
+    if (errorMessage) *errorMessage = "Failed to clone offline buffer";
+    return false;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    g_pa_offline[bufferId] = entry;
+  }
+  if (offlineBufferIdOut) *offlineBufferIdOut = bufferId;
+  return true;
 }
 
 bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,

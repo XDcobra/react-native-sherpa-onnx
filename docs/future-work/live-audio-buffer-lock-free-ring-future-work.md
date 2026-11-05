@@ -1,6 +1,6 @@
 # Live audio buffer: lock-free native ring buffer (future work)
 
-**Status:** Future optimization note — not implemented.
+**Status:** Future optimization note — not implemented. Measurement SOT / scoreboard row **#12**: [`docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md`](../internal/audiobuffer/performance/audiobuffer-perf-plan.md). Prefer measuring block-`memcpy` ring (#1/#2) and shorter registry locks (#11) before this.
 **Scope:** Native live audio ring implementation on Android and iOS.
 
 ---

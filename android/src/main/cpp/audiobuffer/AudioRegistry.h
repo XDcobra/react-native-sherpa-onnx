@@ -20,12 +20,19 @@
 extern std::unordered_map<std::string, std::shared_ptr<PaOfflineEntry>> g_pa_offline;
 extern std::unordered_map<std::string, std::shared_ptr<PaLiveEntry>> g_pa_live;
 extern std::unordered_set<std::string> g_pa_invalidated_live_ids;
+/**
+ * Registry map lock only — resolve shared_ptr then release; hot append/drain use entry locks.
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #11).
+ */
 extern std::mutex g_pa_mutex;
 
 /** Configure temp/cache directory for mmap .f32 and live spool paths. */
 void pa_configure_cache_dir(const std::string &cacheDir);
 
-/** Configure mmap thresholds from device total RAM (bytes). Call once at init. */
+/**
+ * RAM-class mmap thresholds for offline .f32 (heap vs file origin).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — mmap threshold).
+ */
 void pa_configure_threshold(uint64_t totalRamBytes);
 
 std::string pa_generate_id(const char *prefix);
@@ -63,7 +70,10 @@ bool pa_get_offline_samples_slice(const std::string &bufferId, int startFrame, i
                                   std::vector<float> *out, std::string *errorCode,
                                   std::string *errorMessage);
 
-/** Copy up to maxSamples from offline buffer into caller-owned dest (mmap or RAM). */
+/**
+ * Copy up to maxSamples from offline into caller-owned dest (mmap or RAM).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — drain-into-dest).
+ */
 bool pa_copy_offline_samples(const std::string &bufferId, int startSample, float *dest,
                              int maxSamples, int *outCopied, std::string *errorCode,
                              std::string *errorMessage);
@@ -72,7 +82,10 @@ bool pa_get_live_samples_slice(const std::string &bufferId, int startFrame, int 
                                std::vector<float> *out, std::string *errorCode,
                                std::string *errorMessage);
 
-/** Copy live ring slice into caller-owned dest (non-advancing; mmap/RAM offline twin is pa_copy_offline). */
+/**
+ * Copy live ring slice into caller-owned dest (non-advancing peek).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — drain-into-dest).
+ */
 bool pa_copy_live_samples_slice(const std::string &bufferId, int startFrame, int frameCount,
                                 float *dest, int maxSamples, int *outCopied,
                                 std::string *errorCode, std::string *errorMessage);
@@ -80,12 +93,42 @@ bool pa_copy_live_samples_slice(const std::string &bufferId, int startFrame, int
 bool pa_append_samples_to_live(const std::string &bufferId, const float *samples, size_t count,
                                int sampleRate, std::string *errorCode, std::string *errorMessage);
 
-/** Convert Int16 PCM (÷32768) then append to live ring — same semantics as float append. */
+/**
+ * Convert Int16 PCM (÷32768) then append to live ring — same semantics as float append.
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #4).
+ */
 bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t *samples,
                                      size_t count, int sampleRate, std::string *errorCode,
                                      std::string *errorMessage);
 
-/** Drain live cursor into caller-owned dest; advances cursor like drainCursor. */
+#if defined(__APPLE__)
+/**
+ * Accelerate vDSP int16→f32 then append (iOS/macOS only; portable path is pa_append_int16_samples_to_live).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (D-I1).
+ */
+bool pa_append_int16_samples_to_live_vdsp(const std::string &bufferId, const int16_t *samples,
+                                          size_t count, int sampleRate, std::string *errorCode,
+                                          std::string *errorMessage);
+#endif
+
+/**
+ * Append offline→live from floatPtr in chunks (no full readAllSamples materialize).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
+ */
+bool pa_append_offline_to_live(const std::string &liveBufferId, const std::string &offlineBufferId,
+                               std::string *errorCode, std::string *errorMessage);
+
+/**
+ * New offline id with one PCM copy from source floatPtr (same SR/channels; avoids double copy).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #16).
+ */
+bool pa_clone_offline(const std::string &sourceBufferId, std::string *offlineBufferIdOut,
+                      std::string *errorCode, std::string *errorMessage);
+
+/**
+ * Drain live cursor into caller-owned dest (no allocating drainCursor vector).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — drain-into-dest).
+ */
 bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,
                           int maxSamples, int *outCopied, std::string *errorCode,
                           std::string *errorMessage);
@@ -110,15 +153,18 @@ bool pa_create_offline_from_f32_file(const std::string &f32Path, int sampleRate,
                                      std::string *bufferIdOut, std::string *errorCode,
                                      std::string *errorMessage);
 
+/**
+ * Offline entry: RAM under threshold, else one mmap .f32.
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — mmap threshold).
+ */
 std::shared_ptr<PaOfflineEntry> pa_create_entry_with_threshold(const std::string &bufferId,
                                                                int sampleRate, int channelCount,
                                                                std::vector<float> &samples);
 
-std::shared_ptr<PaOfflineEntry> pa_create_offline_from_f32_wav_spool(const std::string &bufferId,
-                                                                    const std::string &spoolPath,
-                                                                    int sampleRate,
-                                                                    int channelCount);
-
+/**
+ * Live spool → offline via mmap @ WAV offset 44 (no WAV→.f32 double copy).
+ * Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #9 / B — transfer mmap).
+ */
 std::shared_ptr<PaOfflineEntry> pa_create_offline_from_transferred_wav_spool(
     const std::string &bufferId, const std::string &spoolPath, int sampleRate, int channelCount);
 

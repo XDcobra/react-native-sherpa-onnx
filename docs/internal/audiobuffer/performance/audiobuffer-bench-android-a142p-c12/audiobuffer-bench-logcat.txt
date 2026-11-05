@@ -1,0 +1,9 @@
+--------- beginning of main
+11-05 10:00:20.069 17101 17296 I AudioBufferBench: suite=B_ring_append_drain cache=/data/user/0/com.xdcobra.voicelab/cache/audiobuffer-bench durationSec=30.0
+11-05 10:00:20.180 17101 17296 I AudioBufferBench: RESULTS_FILE ndjson=/data/user/0/com.xdcobra.voicelab/files/audiobuffer-bench.ndjson all=/data/user/0/com.xdcobra.voicelab/files/audiobuffer-bench-all.json
+11-05 10:00:20.180 17101 17296 I AudioBufferBench: SUITE B_ring_append_drain error=none bytes=403
+11-05 10:00:20.180 17101 17296 I AudioBufferBench: JSON {"suite":"B_ring_append_drain","rows":[{"name":"B_ring_append_drain","ok":true,"wallMs":4.0925,"samplesPerSec":1.17286603744E8,"rssBeforeBytes":462565376,"rssAfterBytes":462712832,"rssDeltaBytes":147456,"diskBytes":0,"notes":"windowSec=60.0000 dur=30.0000s drained=480000 no_spool"}],"loggedAt":"2026-11-05T10:00:20.112+07:00","device":{"manufacturer":"Nothing","model":"A142P","sdk":36,"pssKb":404468}}
+11-05 10:00:50.926 17418 17498 I AudioBufferBench: suite=B_offline_mmap cache=/data/user/0/com.xdcobra.voicelab/cache/audiobuffer-bench durationSec=30.0
+11-05 10:00:51.298 17418 17498 I AudioBufferBench: RESULTS_FILE ndjson=/data/user/0/com.xdcobra.voicelab/files/audiobuffer-bench.ndjson all=/data/user/0/com.xdcobra.voicelab/files/audiobuffer-bench-all.json
+11-05 10:00:51.298 17418 17498 I AudioBufferBench: SUITE B_offline_mmap error=none bytes=400
+11-05 10:00:51.298 17418 17498 I AudioBufferBench: JSON {"suite":"B_offline_mmap","rows":[{"name":"B_offline_mmap","ok":true,"wallMs":180.6942,"samplesPerSec":3.48182451648E7,"rssBeforeBytes":487362560,"rssAfterBytes":487546880,"rssDeltaBytes":184320,"diskBytes":0,"notes":"n=6291456 kind=mmap cold_xor_ms=45.6135 warm_xor_ms=44.1325"}],"loggedAt":"2026-11-05T10:00:51.250+07:00","device":{"manufacturer":"Nothing","model":"A142P","sdk":36,"pssKb":407701}}

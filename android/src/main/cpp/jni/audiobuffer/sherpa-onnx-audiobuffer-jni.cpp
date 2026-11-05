@@ -85,20 +85,28 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeCreateLive(
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendSamplesToLive(
     JNIEnv *env, jclass, jstring bufferId, jfloatArray samples, jint sampleRate) {
+  // Pin float[] like Int16 — no GetFloatArrayRegion + heap vector.
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #3 / D-A1).
   if (!samples) return JNI_FALSE;
-  jsize n = env->GetArrayLength(samples);
-  std::vector<float> buf((size_t)n);
-  if (n > 0) env->GetFloatArrayRegion(samples, 0, n, buf.data());
+  const jsize n = env->GetArrayLength(samples);
+  if (n <= 0) return JNI_FALSE;
+
+  // Resolve id before critical — no other JNI calls while array is pinned.
+  const std::string id = jstringToUtf8(env, bufferId);
+  jfloat *elems = static_cast<jfloat *>(env->GetPrimitiveArrayCritical(samples, nullptr));
+  if (!elems) return JNI_FALSE;
   std::string errCode, errMsg;
-  return pa_append_samples_to_live(jstringToUtf8(env, bufferId), buf.data(), buf.size(), sampleRate,
-                                   &errCode, &errMsg)
-             ? JNI_TRUE
-             : JNI_FALSE;
+  const bool ok =
+      pa_append_samples_to_live(id, elems, (size_t)n, sampleRate, &errCode, &errMsg);
+  env->ReleasePrimitiveArrayCritical(samples, elems, JNI_ABORT);
+  return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendInt16SamplesToLive(
     JNIEnv *env, jclass, jstring bufferId, jshortArray samples, jint sampleRate) {
+  // Pin short[] via Critical (no GetShortArrayRegion + heap vector).
+  // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — Int16 Critical JNI).
   if (!samples) return JNI_FALSE;
   const jsize n = env->GetArrayLength(samples);
   if (n <= 0) return JNI_FALSE;
@@ -276,6 +284,26 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeTransferFromLive(
     return nullptr;
   }
   return utf8ToJstring(env, offlineId);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeCloneOffline(JNIEnv *env, jclass,
+                                                                        jstring sourceBufferId) {
+  std::string offlineId, errCode, errMsg;
+  if (!pa_clone_offline(jstringToUtf8(env, sourceBufferId), &offlineId, &errCode, &errMsg)) {
+    return nullptr;
+  }
+  return utf8ToJstring(env, offlineId);
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendOfflineToLive(
+    JNIEnv *env, jclass, jstring liveBufferId, jstring offlineBufferId) {
+  std::string errCode, errMsg;
+  return pa_append_offline_to_live(jstringToUtf8(env, liveBufferId),
+                                   jstringToUtf8(env, offlineBufferId), &errCode, &errMsg)
+             ? JNI_TRUE
+             : JNI_FALSE;
 }
 
 JNIEXPORT jint JNICALL

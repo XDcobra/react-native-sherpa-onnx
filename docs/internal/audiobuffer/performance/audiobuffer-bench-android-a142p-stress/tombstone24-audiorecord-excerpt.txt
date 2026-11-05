@@ -1,0 +1,131 @@
+      #11 pc 00000000004e1a68  /apex/com.android.art/lib64/libart.so (art::Thread::CreateCallback(void*)+1384) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #12 pc 00000000004e14ec  /apex/com.android.art/lib64/libart.so (art::Thread::CreateCallbackWithUffdGc(void*)+12) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #13 pc 0000000000083c4c  /apex/com.android.runtime/lib64/bionic/libc.so (__pthread_start(void*)+236) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #14 pc 0000000000076150  /apex/com.android.runtime/lib64/bionic/libc.so (__start_thread+64) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
+Cmdline: com.xdcobra.voicelab
+pid: 10902, tid: 10979, name: sherpa-audiobuf  >>> com.xdcobra.voicelab <<<
+uid: 10862
+tagged_addr_ctrl: 0000000000000001 (PR_TAGGED_ADDR_ENABLE)
+pac_enabled_keys: 000000000000000f (PR_PAC_APIAKEY, PR_PAC_APIBKEY, PR_PAC_APDAKEY, PR_PAC_APDBKEY)
+    x0  b400007092a0aa70  x1  0000000000000080  x2  0000000000000000  x3  0000006f255f84b8
+    x4  0000000000000000  x5  0000000000000000  x6  0000000000000000  x7  12004c01016d6577
+    x8  0000000000000062  x9  0000000000000009  x10 000000003b9aca00  x11 0000000000000000
+    x12 b400006fb274fd20  x13 0000000000000001  x14 00000000126ffe7a  x15 00000e7c4ecf6f6c
+    x16 0000006f2f931bd8  x17 00000071d0974cc0  x18 0000006f2525c000  x19 b400007092a0aa60
+    x20 b400007052879fd0  x21 0000000000000000  x22 0000000000000001  x23 0000000000000002
+    x24 b4000070b297a290  x25 00000071fb6a8a70  x26 0000000000000045  x27 0000006f255fa840
+    x28 0000000000000001  x29 0000006f255f8510
+    lr  0000006f2ef03f2c  sp  0000006f255f84b0  pc  00000071d0974cdc  pst 0000000000001000
+
+44 total frames
+backtrace:
+      #00 pc 0000000000099cdc  /apex/com.android.runtime/lib64/bionic/libc.so (syscall+28) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #01 pc 0000000000201f28  /apex/com.android.art/lib64/libart.so (art::ConditionVariable::TimedWait(art::Thread*, long, int)+268) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #02 pc 00000000005dcf34  /apex/com.android.art/lib64/libart.so (art::Monitor::Wait(art::Thread*, art::ObjPtr<art::mirror::Object>, long, int, bool, art::ThreadState)+976) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #03 pc 00000000025d0a64  /memfd:jit-cache (deleted) (offset 0x2000000) (art_jni_trampoline+132)
+      #04 pc 00000000025c83d0  /memfd:jit-cache (deleted) (offset 0x2000000) (java.lang.Thread.sleep0+272)
+      #05 pc 00000000025c7f8c  /memfd:jit-cache (deleted) (offset 0x2000000) (java.lang.Thread.sleep+444)
+      #06 pc 00000000025c7d24  /memfd:jit-cache (deleted) (offset 0x2000000) (java.lang.Thread.sleep+116)
+      #07 pc 00000000002ab260  /apex/com.android.art/lib64/libart.so (art_quick_invoke_static_stub+640) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #08 pc 000000000087a970  /apex/com.android.art/lib64/libart.so (bool art::interpreter::DoCall<false>(art::ArtMethod*, art::Thread*, art::ShadowFrame&, art::Instruction const*, unsigned short, bool, art::JValue*)+1884) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #09 pc 00000000006fce54  /apex/com.android.art/lib64/libart.so (void art::interpreter::ExecuteSwitchImplCpp<false>(art::interpreter::SwitchImplContext*)+284) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #10 pc 00000000002fde48  /apex/com.android.art/lib64/libart.so (ExecuteSwitchImplAsm+8) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #11 pc 000000000000743c  [anon:dalvik-classes6.dex extract...dcobra.voicelab-IkVvdlIPyHShfeREoifM3g==/base.apk] (com.sherpaonnx.audiobuffer.AudioBenchLog.captureOnce+0)
+      #12 pc 000000000087ab14  /apex/com.android.art/lib64/libart.so (bool art::interpreter::DoCall<false>(art::ArtMethod*, art::Thread*, art::ShadowFrame&, art::Instruction const*, unsigned short, bool, art::JValue*)+2304) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #13 pc 00000000006fce54  /apex/com.android.art/lib64/libart.so (void art::interpreter::ExecuteSwitchImplCpp<false>(art::interpreter::SwitchImplContext*)+284) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #14 pc 00000000002fde48  /apex/com.android.art/lib64/libart.so (ExecuteSwitchImplAsm+8) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #15 pc 0000000000006a24  [anon:dalvik-classes6.dex extract...dcobra.voicelab-IkVvdlIPyHShfeREoifM3g==/base.apk] (com.sherpaonnx.audiobuffer.AudioBenchLog.runDa4AudioRecord+0)
+      #16 pc 000000000087ab14  /apex/com.android.art/lib64/libart.so (bool art::interpreter::DoCall<false>(art::ArtMethod*, art::Thread*, art::ShadowFrame&, art::Instruction const*, unsigned short, bool, art::JValue*)+2304) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #17 pc 00000000006fcf7c  /apex/com.android.art/lib64/libart.so (void art::interpreter::ExecuteSwitchImplCpp<false>(art::interpreter::SwitchImplContext*)+580) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #18 pc 00000000002fde48  /apex/com.android.art/lib64/libart.so (ExecuteSwitchImplAsm+8) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #19 pc 0000000000014ec4  [anon:dalvik-classes7.dex extract...dcobra.voicelab-IkVvdlIPyHShfeREoifM3g==/base.apk] (com.sherpaonnx.SherpaOnnxModule.runAudioBufferBenchOnWorker+0)
+      #20 pc 000000000087ab14  /apex/com.android.art/lib64/libart.so (bool art::interpreter::DoCall<false>(art::ArtMethod*, art::Thread*, art::ShadowFrame&, art::Instruction const*, unsigned short, bool, art::JValue*)+2304) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #21 pc 00000000006fce54  /apex/com.android.art/lib64/libart.so (void art::interpreter::ExecuteSwitchImplCpp<false>(art::interpreter::SwitchImplContext*)+284) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #22 pc 00000000002fde48  /apex/com.android.art/lib64/libart.so (ExecuteSwitchImplAsm+8) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #23 pc 0000000000027524  [anon:dalvik-classes7.dex extract...dcobra.voicelab-IkVvdlIPyHShfeREoifM3g==/base.apk] (com.sherpaonnx.SherpaOnnxModule.runAudioBufferBench$lambda$20+0)
+      #24 pc 000000000087ab14  /apex/com.android.art/lib64/libart.so (bool art::interpreter::DoCall<false>(art::ArtMethod*, art::Thread*, art::ShadowFrame&, art::Instruction const*, unsigned short, bool, art::JValue*)+2304) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #25 pc 00000000006fce54  /apex/com.android.art/lib64/libart.so (void art::interpreter::ExecuteSwitchImplCpp<false>(art::interpreter::SwitchImplContext*)+284) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #26 pc 00000000002fde48  /apex/com.android.art/lib64/libart.so (ExecuteSwitchImplAsm+8) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #27 pc 0000000000016868  [anon:dalvik-classes7.dex extract...dcobra.voicelab-IkVvdlIPyHShfeREoifM3g==/base.apk] (com.sherpaonnx.SherpaOnnxModule.$r8$lambda$3uQMZtnXnI-uODzBm0afzklHr-U+0)
+      #28 pc 000000000087ab14  /apex/com.android.art/lib64/libart.so (bool art::interpreter::DoCall<false>(art::ArtMethod*, art::Thread*, art::ShadowFrame&, art::Instruction const*, unsigned short, bool, art::JValue*)+2304) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #29 pc 00000000006fce54  /apex/com.android.art/lib64/libart.so (void art::interpreter::ExecuteSwitchImplCpp<false>(art::interpreter::SwitchImplContext*)+284) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #30 pc 00000000002fde48  /apex/com.android.art/lib64/libart.so (ExecuteSwitchImplAsm+8) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #31 pc 000000000000ed50  [anon:dalvik-classes7.dex extract...dcobra.voicelab-IkVvdlIPyHShfeREoifM3g==/base.apk] (com.sherpaonnx.SherpaOnnxModule$$ExternalSyntheticLambda15.run+0)
+      #32 pc 00000000002fda80  /apex/com.android.art/lib64/libart.so (art::interpreter::Execute(art::Thread*, art::CodeItemDataAccessor const&, art::ShadowFrame&, art::JValue, bool, bool) (.__uniq.112435418011751916792819755956732575238.llvm.8613519112829971472)+360) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #33 pc 00000000002fd404  /apex/com.android.art/lib64/libart.so (artQuickToInterpreterBridge+916) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #34 pc 00000000002c24d8  /apex/com.android.art/lib64/libart.so (art_quick_to_interpreter_bridge+88) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #35 pc 000000000214a4a0  /memfd:jit-cache (deleted) (offset 0x2000000) (java.util.concurrent.ThreadPoolExecutor.runWorker+448)
+      #36 pc 000000000214a234  /memfd:jit-cache (deleted) (offset 0x2000000) (java.util.concurrent.ThreadPoolExecutor$Worker.run+132)
+      #37 pc 000000000200499c  /memfd:jit-cache (deleted) (offset 0x2000000) (java.lang.Thread.run+140)
+      #38 pc 00000000002aaf94  /apex/com.android.art/lib64/libart.so (art_quick_invoke_stub+612) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #39 pc 00000000002a9268  /apex/com.android.art/lib64/libart.so (art::ArtMethod::Invoke(art::Thread*, unsigned int*, unsigned int, art::JValue*, char const*)+148) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #40 pc 00000000004e1a68  /apex/com.android.art/lib64/libart.so (art::Thread::CreateCallback(void*)+1384) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #41 pc 00000000004e14ec  /apex/com.android.art/lib64/libart.so (art::Thread::CreateCallbackWithUffdGc(void*)+12) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #42 pc 0000000000083c4c  /apex/com.android.runtime/lib64/bionic/libc.so (__pthread_start(void*)+236) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #43 pc 0000000000076150  /apex/com.android.runtime/lib64/bionic/libc.so (__start_thread+64) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
+Cmdline: com.xdcobra.voicelab
+pid: 10902, tid: 10983, name: ScrollPolicy  >>> com.xdcobra.voicelab <<<
+uid: 10862
+tagged_addr_ctrl: 0000000000000001 (PR_TAGGED_ADDR_ENABLE)
+pac_enabled_keys: 000000000000000f (PR_PAC_APIAKEY, PR_PAC_APIBKEY, PR_PAC_APDAKEY, PR_PAC_APDBKEY)
+    x0  fffffffffffffffc  x1  0000006f244e9dc0  x2  0000000000000010  x3  00000000ffffffff
+    x4  0000000000000000  x5  0000000000000008  x6  0000006f2f918ab8  x7  0000006f244e8c20
+    x8  0000000000000016  x9  0000000000000001  x10 0000000000000001  x11 0000000000000000
+    x12 0000000000000000  x13 b40000707295c7f0  x14 00000000126edf68  x15 00000e7bdceb7ad4
+    x16 00000071c28a5c40  x17 00000071d0968500  x18 0000006f1d9cc000  x19 0000000000000000
+    x20 0000000000000000  x21 0000000000000000  x22 00000000ffffffff  x23 b40000707295ca30
+    x24 0000006f244ea840  x25 0000006f244e9dc0  x26 00000000ffffffff  x27 7fffffffffffffff
+    x28 0000000000000000  x29 0000006f244e9ee0
+    lr  00000071c2897984  sp  0000006f244e9d60  pc  00000071d09bac48  pst 0000000060001000
+
+15 total frames
+backtrace:
+      #00 pc 00000000000dfc48  /apex/com.android.runtime/lib64/bionic/libc.so (__epoll_pwait+8) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #01 pc 0000000000016980  /system/lib64/libutils.so (android::Looper::pollOnce(int, int*, int*, void**)+288) (BuildId: 7aa2d71e030a290c8dd28236ba0a838f)
+      #02 pc 00000000001daf7c  /system/lib64/libandroid_runtime.so (android::android_os_MessageQueue_nativePollOnce(_JNIEnv*, _jobject*, long, int)+44) (BuildId: 8cdbfc689c7be4af82dcbaf1533d005a)
+      #03 pc 00000000021e5cf8  /memfd:jit-cache (deleted) (offset 0x2000000) (art_jni_trampoline+136)
+      #04 pc 000000000208398c  /memfd:jit-cache (deleted) (offset 0x2000000) (android.os.MessageQueue.nextLegacy+316)
+      #05 pc 00000000020836fc  /memfd:jit-cache (deleted) (offset 0x2000000) (android.os.MessageQueue.next+124)
+      #06 pc 0000000002082998  /memfd:jit-cache (deleted) (offset 0x2000000) (android.os.Looper.loopOnce+168)
+      #07 pc 000000000207e798  /memfd:jit-cache (deleted) (offset 0x2000000) (android.os.Looper.loop+552)
+      #08 pc 0000000002181f9c  /memfd:jit-cache (deleted) (offset 0x2000000) (android.os.HandlerThread.run+348)
+      #09 pc 00000000002aaf94  /apex/com.android.art/lib64/libart.so (art_quick_invoke_stub+612) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #10 pc 00000000002a9268  /apex/com.android.art/lib64/libart.so (art::ArtMethod::Invoke(art::Thread*, unsigned int*, unsigned int, art::JValue*, char const*)+148) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #11 pc 00000000004e1a68  /apex/com.android.art/lib64/libart.so (art::Thread::CreateCallback(void*)+1384) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #12 pc 00000000004e14ec  /apex/com.android.art/lib64/libart.so (art::Thread::CreateCallbackWithUffdGc(void*)+12) (BuildId: cecb684d19b4f44ee3cbd66142c315f4)
+      #13 pc 0000000000083c4c  /apex/com.android.runtime/lib64/bionic/libc.so (__pthread_start(void*)+236) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #14 pc 0000000000076150  /apex/com.android.runtime/lib64/bionic/libc.so (__start_thread+64) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+--- --- --- --- --- --- --- --- --- --- --- --- --- --- --- ---
+Cmdline: com.xdcobra.voicelab
+pid: 10902, tid: 10984, name: AudioRecord  >>> com.xdcobra.voicelab <<<
+uid: 10862
+tagged_addr_ctrl: 0000000000000001 (PR_TAGGED_ADDR_ENABLE)
+pac_enabled_keys: 000000000000000f (PR_PAC_APIAKEY, PR_PAC_APIBKEY, PR_PAC_APDAKEY, PR_PAC_APDBKEY)
+    x0  b400007072979828  x1  0000000000000089  x2  0000000000000006  x3  0000006f27d2b318
+    x4  0000000000000000  x5  00000000ffffffff  x6  00000000ffffffff  x7  0000006f2fb02008
+    x8  0000000000000062  x9  0000000000000089  x10 0000000000000009  x11 000000003b9ac9ff
+    x12 00000071fce84030  x13 000000007fffffff  x14 00000000126ee18a  x15 00000e7bddc4aa84
+    x16 00000071d09d2108  x17 00000071d0974cc0  x18 0000006f1b70c000  x19 0000000000000006
+    x20 0000006f27d2b318  x21 b400007072979828  x22 0000000000000089  x23 0000006f27d2b7c0
+    x24 0000006f27d2b840  x25 0000000000000000  x26 0000006f27d2b828  x27 b400006f7289ce30
+    x28 0000000000104000  x29 0000006f27d2b280
+    lr  00000071d094ff14  sp  0000006f27d2b260  pc  00000071d0974cdc  pst 0000000040001000
+
+9 total frames
+backtrace:
+      #00 pc 0000000000099cdc  /apex/com.android.runtime/lib64/bionic/libc.so (syscall+28) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #01 pc 0000000000074f10  /apex/com.android.runtime/lib64/bionic/libc.so (__futex_wait_ex(void volatile*, bool, int, bool, timespec const*)+144) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #02 pc 0000000000082ec4  /apex/com.android.runtime/lib64/bionic/libc.so (pthread_cond_timedwait+132) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #03 pc 0000000000073b70  /system/lib64/libaudioclient.so (android::AudioRecord::AudioRecordThread::threadLoop()+592) (BuildId: bae4d38affd09046d3d1cf41311ea7d8)
+      #04 pc 0000000000019268  /system/lib64/libutils.so (android::Thread::_threadLoop(void*)+248) (BuildId: 7aa2d71e030a290c8dd28236ba0a838f)
+      #05 pc 000000000012f0cc  /system/lib64/libandroid_runtime.so (android::AndroidRuntime::javaThreadShell(void*)+140) (BuildId: 8cdbfc689c7be4af82dcbaf1533d005a)
+      #06 pc 000000000001b994  /system/lib64/libutils.so (libutil_thread_trampoline(void*) (.__uniq.226528677032898775202282855395389835431)+20) (BuildId: 7aa2d71e030a290c8dd28236ba0a838f)
+      #07 pc 0000000000083c4c  /apex/com.android.runtime/lib64/bionic/libc.so (__pthread_start(void*)+236) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+      #08 pc 0000000000076150  /apex/com.android.runtime/lib64/bionic/libc.so (__start_thread+64) (BuildId: 9eace478b8cf6dcaddbfd39bbaa7f956)
+
+open files:
+    fd 0: /dev/null (unowned)
+    fd 1: /dev/null (unowned)
+    fd 2: /dev/null (unowned)

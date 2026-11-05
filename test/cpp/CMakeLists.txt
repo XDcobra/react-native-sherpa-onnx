@@ -771,6 +771,9 @@ target_include_directories(audiobuffer_host_test PRIVATE
 )
 find_package(Threads REQUIRED)
 target_link_libraries(audiobuffer_host_test PRIVATE ${AUDIOBUFFER_GTEST_LIBS} Threads::Threads)
+if(APPLE)
+  target_link_libraries(audiobuffer_host_test PRIVATE "-framework Accelerate")
+endif()
 add_test(NAME audiobuffer_host_test COMMAND $<TARGET_FILE:audiobuffer_host_test>)
 set_tests_properties(audiobuffer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
