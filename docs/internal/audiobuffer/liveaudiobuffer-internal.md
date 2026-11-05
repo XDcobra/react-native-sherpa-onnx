@@ -2,7 +2,7 @@
 
 **Scope:** Internal implementation details of `livePcmBuffer` (the streaming/live audio buffer).  
 **Audience:** SDK developers planning engine integrations, buffer pipeline flows, and Fake-Live engine strategies.  
-**Native entry types:** `LiveEntry` (Android/Kotlin), `PaLiveEntry` (iOS/C++ header-only).
+**Native entry types:** C++ `PaLiveEntry` / `AudioRegistry` (shared Android + iOS SoT).
 
 ---
 
