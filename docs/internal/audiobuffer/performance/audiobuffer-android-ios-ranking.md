@@ -22,7 +22,7 @@
 | Android cold | 7.96 ms | 4.09 ms | ~1.94× |
 | iOS sim | 6.21 ms | **1.37 ms** | ~4.5× (direction confirm) |
 
-**Ship?** **keep**
+**Ship?** **keep** — product SoT on `perf/improve-audiobuffer-from-benchmarks` now matches (`writeRingContiguous` / `readRingContiguous` in `PaLiveEntry.h` + host wrap/parity tests).
 
 ---
 
@@ -67,7 +67,7 @@ Android cold `B_offline_mmap` ~+180 KiB; iOS sim ~+160 KiB. Host +48 MiB create 
 | Spool speed | **skip** |
 | Spool lossless | **keep** |
 | Live→offline mmap adopt | **keep** |
-| C #1/#2 block memcpy | **keep** |
+| C #1/#2 block memcpy | **keep** (product SoT landed) |
 | C #3 JNI float Critical | **keep (Android)** |
 | C #4 chunked int16 convert | **keep** |
 | C #5 faster resample lib | **skip for now** — baseline cheap (A142P 26 ms / iOS sim 18 ms for 30 s @44.1k) |

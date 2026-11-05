@@ -199,8 +199,8 @@ Hypothesis × is **not** a ship number. Dual gate applies. **Host / Android / iO
 
 | # | Candidate | Hypothesis | Host | Android | iOS | Wall × | RSS Δ | Ship? |
 |---|-----------|------------|------|---------|-----|--------|-------|-------|
-| 1 | Block ring write (≤2 `memcpy`) | Cut lock hold on 10–40 ms chunks | yes | yes | deferred | Host ~14.5× / A142P ~1.94× vs pre | neutral | **keep** |
-| 2 | Block ring drain / peek | Same on cursor path | yes | yes | deferred | (same suite; paired with #1) | neutral | **keep** |
+| 1 | Block ring write (≤2 `memcpy`) | Cut lock hold on 10–40 ms chunks | yes | yes | deferred | Host ~14.5× / A142P ~1.94× vs pre | neutral | **keep** (product SoT: `writeRingContiguous`) |
+| 2 | Block ring drain / peek | Same on cursor path | yes | yes | deferred | (same suite; paired with #1) | neutral | **keep** (product SoT: `readRingContiguous`) |
 | 3 | JNI float Critical / DirectByteBuffer | Drop intermediate vector | approx | **yes** | n/a | A142P `C_jni_float` 8.06 ms | +1.34 MiB PSS (ring likely) | **keep (Android)** |
 | 4 | Int16→F32 chunked convert (portable) | Mic S16 without full float temp | yes | yes | sim* | A142P 5.39 / iOS sim 4.84 ms | ~0 / +80 KiB | **keep** |
 | 5 | Faster resample lib | Only if rates mismatch | yes | yes | sim | A142P 26 ms / iOS sim 18 ms (30 s @44.1k) | +268 / +416 KiB | **skip lib for now** |
@@ -228,9 +228,11 @@ Bucket **D** scoreboard: §M.7 tables (same Wall × / RSS Δ / Ship? columns).
 
 ### 3.1 Live ring copy shape — **#1 / #2**
 
-**Current:** per-sample `% windowCapacity` in `tryAppendSamples` / `drainCursorInto` / `copySamplesSliceIntoLocked` ([`PaLiveEntry.h`](../../../../android/src/main/cpp/audiobuffer/PaLiveEntry.h)).
+**Status:** implemented on product SoT (`perf/improve-audiobuffer-from-benchmarks`) — `writeRingContiguous` / `readRingContiguous` in [`PaLiveEntry.h`](../../../../android/src/main/cpp/audiobuffer/PaLiveEntry.h); host wrap/parity coverage in `audiobuffer_registry_test.cpp`.
 
-**Change:** ≤2 contiguous `memcpy` spans per transfer.
+**Was:** per-sample `% windowCapacity` in `tryAppendSamples` / `drainCursorInto` / `copySamplesSliceIntoLocked`.
+
+**Change:** contiguous `memcpy` spans per transfer (≤2 for a single wrap).
 
 **Validate:** Host chunk sizes 256 / 1600 / 4800 / 16000; Android + iOS device mic / dual cursor. Dual gate: wall and RSS (expect RSS-neutral).
 
@@ -372,7 +374,7 @@ Filled: [`audiobuffer-android-ios-ranking.md`](./audiobuffer-android-ios-ranking
 
 1. ~~Android device B-smoke~~ **done**.  
 2. iOS **device** B/D — **pending** (sim done as ratio/smoke).  
-3. ~~Portable C #1/#2~~ **keep**.  
+3. ~~Portable C #1/#2~~ **keep** (landed in product SoT).  
 4. ~~C #3/#4 / D-A1~~ **keep Critical**.  
 5. ~~C #9/#10 / D-A3~~ #9 **keep**; #10 / D-A3 **skip**.  
 6. ~~C #7/#8~~ **defer** (no lag pain).  

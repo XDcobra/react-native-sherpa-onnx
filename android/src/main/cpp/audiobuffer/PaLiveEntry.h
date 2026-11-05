@@ -203,6 +203,40 @@ struct PaLiveEntry {
   int64_t totalSamplesDropped = 0;
   std::mutex ringMutex;
 
+  /**
+   * Bucket C #1 — caller must hold ringMutex.
+   * Write n samples from a linear buffer into the ring at writePos using contiguous
+   * memcpy spans (≤2 for a single wrap; loops if n exceeds capacity).
+   */
+  void writeRingContiguous(const float *src, int n) {
+    if (!src || n <= 0 || windowCapacity <= 0) return;
+    const int cap = windowCapacity;
+    while (n > 0) {
+      const int first = std::min(n, cap - writePos);
+      std::memcpy(ring.data() + writePos, src, (size_t)first * sizeof(float));
+      writePos = (writePos + first) % cap;
+      src += first;
+      n -= first;
+    }
+  }
+
+  /**
+   * Bucket C #2 — caller must hold ringMutex.
+   * Read n samples from ring starting at ringOffset into a linear dest using ≤2 memcpy spans.
+   */
+  void readRingContiguous(int ringOffset, float *dest, int n) const {
+    if (!dest || n <= 0 || windowCapacity <= 0) return;
+    const int cap = windowCapacity;
+    int off = ringOffset % cap;
+    if (off < 0) off += cap;
+    const int first = std::min(n, cap - off);
+    std::memcpy(dest, ring.data() + off, (size_t)first * sizeof(float));
+    const int second = n - first;
+    if (second > 0) {
+      std::memcpy(dest + first, ring.data(), (size_t)second * sizeof(float));
+    }
+  }
+
   // Backpressure
   std::mutex backpressureMutex;
   std::condition_variable backpressureCV;
@@ -453,10 +487,7 @@ struct PaLiveEntry {
 
     {
       std::lock_guard<std::mutex> lock(ringMutex);
-      for (size_t i = 0; i < appendCount; i++) {
-        ring[writePos] = toAppend[i];
-        writePos = (writePos + 1) % windowCapacity;
-      }
+      writeRingContiguous(toAppend, (int)appendCount);
       int64_t prevTotal = totalSamplesWritten;
       totalSamplesWritten = prevTotal + (int64_t)appendCount;
       if (prevTotal >= windowCapacity) {
@@ -628,11 +659,10 @@ struct PaLiveEntry {
     if (used == 0) return {};
     std::vector<float> out(used);
     if (totalSamplesWritten <= windowCapacity) {
-      std::copy(ring.begin(), ring.begin() + used, out.begin());
+      readRingContiguous(0, out.data(), used);
     } else {
-      int firstPart = windowCapacity - writePos;
-      std::copy(ring.begin() + writePos, ring.begin() + writePos + firstPart, out.begin());
-      std::copy(ring.begin(), ring.begin() + writePos, out.begin() + firstPart);
+      // Oldest sample is at writePos after wrap.
+      readRingContiguous(writePos, out.data(), used);
     }
     return out;
   }
@@ -647,9 +677,7 @@ struct PaLiveEntry {
     if (actualCount <= 0) return 0;
     int ringStart =
         (totalSamplesWritten <= windowCapacity) ? startFrame : (writePos + startFrame) % windowCapacity;
-    for (int i = 0; i < actualCount; i++) {
-      dest[i] = ring[(ringStart + i) % windowCapacity];
-    }
+    readRingContiguous(ringStart, dest, actualCount);
     return actualCount;
   }
 
@@ -708,9 +736,7 @@ struct PaLiveEntry {
         if (available == 0) return 0;
         int count = std::min(maxSamples, available);
         int ringOffset = (int)(rp % windowCapacity);
-        for (int i = 0; i < count; i++) {
-          dest[i] = ring[(ringOffset + i) % windowCapacity];
-        }
+        readRingContiguous(ringOffset, dest, count);
         it->second.absoluteReadPos = rp + count;
         copied = count;
       } else if (hasActiveSpool) {
@@ -746,9 +772,7 @@ struct PaLiveEntry {
         if (available == 0) return 0;
         int count = std::min(maxSamples, available);
         int ringOffset = (int)(oldestInRingLocked % windowCapacity);
-        for (int i = 0; i < count; i++) {
-          dest[i] = ring[(ringOffset + i) % windowCapacity];
-        }
+        readRingContiguous(ringOffset, dest, count);
         it->second.absoluteReadPos = oldestInRingLocked + count;
         copied = count;
       }
@@ -786,9 +810,7 @@ struct PaLiveEntry {
       int count = std::min(maxSamples, available);
       std::vector<float> out(count);
       int ringOffset = (int)(rp % windowCapacity);
-      for (int i = 0; i < count; i++) {
-        out[i] = ring[(ringOffset + i) % windowCapacity];
-      }
+      readRingContiguous(ringOffset, out.data(), count);
       // No advance for peek
       return out;
     }
@@ -817,9 +839,7 @@ struct PaLiveEntry {
       int count = std::min(maxSamples, available);
       std::vector<float> out(count);
       int ringOffset = (int)(oldestInRingLocked % windowCapacity);
-      for (int i = 0; i < count; i++) {
-        out[i] = ring[(ringOffset + i) % windowCapacity];
-      }
+      readRingContiguous(ringOffset, out.data(), count);
       return out;
     }
   }
