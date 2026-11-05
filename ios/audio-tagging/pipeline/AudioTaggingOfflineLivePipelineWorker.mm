@@ -4,6 +4,7 @@
 
 #include "SegmentRegistry.h"
 #include "TextRegistry.h"
+#include "TxtMetaBridge.h"
 
 #include <algorithm>
 #include <cmath>
@@ -159,7 +160,7 @@ void AudioTaggingOfflineLivePipelineWorker::onSegmentCommitted(
         tokens,
         timestamps,
         "audio_tagging",
-        meta,
+        txtMetaJsonFromDict(meta),
         &err
       )) {
     throw std::runtime_error(

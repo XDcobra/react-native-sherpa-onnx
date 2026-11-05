@@ -2,6 +2,7 @@
 
 #include "SegmentRegistry.h"
 #include "TextRegistry.h"
+#include "TxtMetaBridge.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -96,7 +97,7 @@ void SlidOfflineLivePipelineWorker::onSegmentCommitted(
         tokens,
         timestamps,
         "language_id",
-        meta,
+        txtMetaJsonFromDict(meta),
         &err
       )) {
     throw std::runtime_error(

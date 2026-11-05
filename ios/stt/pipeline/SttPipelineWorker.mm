@@ -1,5 +1,6 @@
 #include "SttPipelineWorker.h"
 #import <Foundation/Foundation.h>
+#include "TxtMetaBridge.h"
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -126,7 +127,7 @@ void SttPipelineWorker::runLoop() {
                 result.tokens,
                 result.timestamps,
                 "stt_stream",
-                segmentMeta,
+                txtMetaJsonFromDict(segmentMeta),
                 &err
               )) {
             throw std::runtime_error("Failed to commit text segment: " + err);
@@ -236,7 +237,7 @@ void SttPipelineWorker::autoFlushAndCommit(bool endOfAudio) {
           result.tokens,
           result.timestamps,
           "stt_stream",
-          segmentMeta,
+          txtMetaJsonFromDict(segmentMeta),
           &err
         )) {
       throw std::runtime_error("Failed to commit flushed text segment: " + err);

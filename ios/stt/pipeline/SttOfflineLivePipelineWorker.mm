@@ -1,5 +1,6 @@
 #include "SttOfflineLivePipelineWorker.h"
 
+#include "TxtMetaBridge.h"
 #include <algorithm>
 #include <stdexcept>
 
@@ -50,7 +51,7 @@ void SttOfflineLivePipelineWorker::onSegmentCommitted(
         result.tokens,
         result.timestamps,
         "segmentation_engine",
-        nil,
+        std::string{},
         &err
       )) {
     throw std::runtime_error(
