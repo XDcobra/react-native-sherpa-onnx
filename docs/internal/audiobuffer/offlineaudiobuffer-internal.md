@@ -2,7 +2,7 @@
 
 **Scope:** Internal implementation details of `offlinePcmBuffer` (the offline/immutable audio buffer).  
 **Audience:** SDK developers planning engine integrations, buffer pipeline flows, and memory management strategies.  
-**Native entry types:** `OfflineEntry` sealed class (Android/Kotlin), `PaOfflineEntry` struct (iOS/C++).
+**Native entry types:** C++ `PaOfflineEntry` / `AudioRegistry` (shared Android + iOS SoT).
 
 ---
 
