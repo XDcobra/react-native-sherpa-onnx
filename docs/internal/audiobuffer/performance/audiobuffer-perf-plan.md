@@ -122,7 +122,7 @@ Smoke suite IDs: `D_i1_vdsp_int16`, `D_i2_madvise_willneed`, `D_i3_jetsam_thresh
 
 | ID | Suite-ID | Candidate | Version note | Fallback | Host? | Device? | Wall × | RSS Δ | Ship? |
 |----|----------|-----------|--------------|----------|-------|---------|--------|-------|-------|
-| D-I1 | `D_i1_vdsp_int16` | Accelerate **vDSP** Int16→F32 | 15.1+ | Scalar / portable convert (`C_int16_append`) | no | **yes** | sim: vdsp **2.20** vs portable 5.21 (~2.4×) | +112 KiB | **pending iPhone** (sim promising) |
+| D-I1 | `D_i1_vdsp_int16` | Accelerate **vDSP** Int16→F32 | 15.1+ | Scalar / portable convert (`C_int16_append`) | no | **yes** | sim: vdsp **2.20** vs portable 5.21 (~2.4×) | +112 KiB | **keep** (product SoT landed; optional iPhone re-check) |
 | D-I2 | `D_i2_madvise_willneed` | `madvise(MADV_WILLNEED)` after mmap | POSIX; **≠** Linux `MAP_POPULATE` | No hint / fault-on-touch (`B_offline_mmap`) | weak | **yes** | sim: 98.4; cold≈warm (~28 ms) | +112 KiB | **pending iPhone** (sim: no cold win → lean skip) |
 | D-I3 | `D_i3_jetsam_threshold` | `os_proc_available_memory` / Jetsam-aware threshold | iOS 13+ | Current RAM-class multipliers from total RAM | no | **yes** | sim: 22.5 ms; `availableBytes=0` on sim | +8.9 MiB | **pending iPhone** (sim inconclusive) |
 | D-I4 | `D_i4_avaudio_capture` | AudioQueue capture → live append | 15.1+ | Current product mic path; permission skip | no | **yes** (capture) | sim smoke 5.8 s; stress **900027** ms; ~14.4M; errors=0 | reclaim noise | **pending iPhone** (sim capture OK; keep current product path) |
@@ -240,7 +240,9 @@ Bucket **D** scoreboard: §M.7 tables (same Wall × / RSS Δ / Ship? columns).
 
 **#3 / D-A1 status:** product SoT float live append uses `GetPrimitiveArrayCritical` in [`sherpa-onnx-audiobuffer-jni.cpp`](../../../../android/src/main/cpp/jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp) (no Region + heap vector; DirectByteBuffer not preferred).
 
-**#4 status:** product SoT `pa_append_int16_samples_to_live` in [`AudioRegistry.cpp`](../../../../android/src/main/cpp/audiobuffer/AudioRegistry.cpp) uses 4096 stack-chunk convert + single live resolve (no full-length float vector). D-I1 vDSP still deferred.
+**#4 status:** product SoT `pa_append_int16_samples_to_live` in [`AudioRegistry.cpp`](../../../../android/src/main/cpp/audiobuffer/AudioRegistry.cpp) uses 4096 stack-chunk convert + single live resolve (no full-length float vector).
+
+**D-I1 status:** Apple-only `pa_append_int16_samples_to_live_vdsp` (`vDSP_vflt16` + `vDSP_vsmul`); iOS mic path uses the same chunked convert with `Mic` origin. Keep on sim evidence (~2.4×); portable C #4 remains Android/host fallback.
 
 **Validate:** Android device RSS peak during 60 s ingest. Overlaps **D-A1** for the JNI float pin; keep portable convert logic in C for iOS/host.
 

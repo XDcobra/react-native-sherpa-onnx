@@ -645,6 +645,51 @@ bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t 
   }
 }
 
+#if defined(__APPLE__)
+#include <Accelerate/Accelerate.h>
+
+bool pa_append_int16_samples_to_live_vdsp(const std::string &bufferId, const int16_t *samples,
+                                          size_t count, int sampleRate, std::string *errorCode,
+                                          std::string *errorMessage) {
+  // Bucket D-I1: vDSP_vflt16 + scale vs portable scalar convert.
+  if (!samples || count == 0 || sampleRate <= 0) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
+    if (errorMessage) *errorMessage = "Invalid samples or sample rate";
+    return false;
+  }
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(bufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
+  }
+  constexpr size_t kChunk = 4096;
+  std::array<float, kChunk> converted{};
+  const float scale = 1.0f / 32768.0f;
+  size_t offset = 0;
+  try {
+    while (offset < count) {
+      const size_t n = std::min(kChunk, count - offset);
+      vDSP_vflt16(samples + offset, 1, converted.data(), 1, n);
+      vDSP_vsmul(converted.data(), 1, &scale, converted.data(), 1, n);
+      live->appendSamples(converted.data(), n, sampleRate,
+                          PaLiveAppendOrigin::ingress(PaLiveIngressSource::Append), false);
+      offset += n;
+    }
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
+}
+#endif
+
 bool pa_append_offline_to_live(const std::string &liveBufferId, const std::string &offlineBufferId,
                                std::string *errorCode, std::string *errorMessage) {
   auto live = pa_get_live_entry(liveBufferId);

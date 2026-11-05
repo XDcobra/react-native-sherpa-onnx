@@ -138,18 +138,18 @@ Full Wall/RSS columns: plan §M.7. Raw: [`audiobuffer-bench-android-a142p-d/`](.
 | D-A2 | `D_a2_ashmem_view` | **skip** | walk 607 vs readAll 103 ms; +48 MiB |
 | D-A3 | `D_a3_mmap_populate` | **skip** | cold_xor ≈ `B_offline_mmap` |
 | D-A4 | `D_a4_audiorecord_prod`, `D_a4_audiorecord_perf` | **keep prod; skip PERF** | 15 min stress parity (~15995/s, errors=0); PERF no win |
-| D-I1 | `D_i1_vdsp_int16` | **pending iPhone** | sim ~2.4× vdsp vs portable |
+| D-I1 | `D_i1_vdsp_int16` | **keep** (product SoT landed; sim-backed) | sim ~2.4×; API + iOS mic vDSP; optional iPhone re-check |
 | D-I2 | `D_i2_madvise_willneed` | **pending iPhone** | sim no cold win → lean skip |
 | D-I3 | `D_i3_jetsam_threshold` | **pending iPhone** | sim `availableBytes=0` inconclusive |
 | D-I4 | `D_i4_avaudio_capture` | **pending iPhone** | sim 15 min OK; keep current product mic path |
 
-**Ship? for D-I\***: physical iPhone only — iOS Simulator is ratio/smoke, not a Ship? verdict.
+**Ship? for D-I\***: D-I1 landed on sim evidence; physical iPhone remains optional re-check for D-I1 and still required for D-I2/I3/I4 verdicts.
 
 ---
 
 ## Next steps
 
-1. Physical iPhone for D-I\* Ship? (optional; Android keep set is enough to close most of the epic).  
+1. Optional physical iPhone re-check for D-I1; D-I2/I3/I4 still open if pursued.  
 2. Optional **#12** lock-free only if contention remains; **#15/#18** later.  
 3. Retire throwaway AudioBuffer Bench when the epic closes.  
 4. Do **not** vendor SpeexDSP/soxr/Oboe/AAudio unless new product pain appears.

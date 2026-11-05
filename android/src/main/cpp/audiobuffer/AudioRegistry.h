@@ -85,6 +85,13 @@ bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t 
                                      size_t count, int sampleRate, std::string *errorCode,
                                      std::string *errorMessage);
 
+#if defined(__APPLE__)
+/** Bucket D-I1 — Accelerate vDSP int16→f32 then append (iOS/macOS only). */
+bool pa_append_int16_samples_to_live_vdsp(const std::string &bufferId, const int16_t *samples,
+                                          size_t count, int sampleRate, std::string *errorCode,
+                                          std::string *errorMessage);
+#endif
+
 /** Bucket C #16 — append offline→live from floatPtr in chunks (no full readAllSamples materialize). */
 bool pa_append_offline_to_live(const std::string &liveBufferId, const std::string &offlineBufferId,
                                std::string *errorCode, std::string *errorMessage);

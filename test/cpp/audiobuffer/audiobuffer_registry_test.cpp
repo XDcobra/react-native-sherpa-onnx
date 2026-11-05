@@ -342,6 +342,56 @@ TEST_F(AudioRegistryFixture, AppendInt16_MultiChunkParityWithFloat) {
   EXPECT_TRUE(pa_release_buffer(idInt16));
 }
 
+#if defined(__APPLE__)
+TEST_F(AudioRegistryFixture, AppendInt16_VdspParityWithPortable) {
+  // Bucket D-I1: portable vs Accelerate path, including kChunk boundary.
+  constexpr size_t kN = 4096 + 257;
+  std::string idPortable;
+  std::string idVdsp;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &idPortable, &errCode, &errMsg))
+      << errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &idVdsp, &errCode, &errMsg)) << errMsg;
+
+  std::vector<int16_t> i16(kN);
+  for (size_t i = 0; i < kN; ++i) {
+    i16[i] = static_cast<int16_t>((i % 60001) - 30000);
+  }
+
+  ASSERT_TRUE(
+      pa_append_int16_samples_to_live(idPortable, i16.data(), i16.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+  ASSERT_TRUE(pa_append_int16_samples_to_live_vdsp(idVdsp, i16.data(), i16.size(), 16000, &errCode,
+                                                   &errMsg))
+      << errMsg;
+
+  auto liveP = pa_get_live_entry(idPortable);
+  auto liveV = pa_get_live_entry(idVdsp);
+  ASSERT_NE(liveP, nullptr);
+  ASSERT_NE(liveV, nullptr);
+  EXPECT_EQ(liveP->totalSamplesWritten, liveV->totalSamplesWritten);
+  EXPECT_EQ(liveP->totalSamplesWritten, static_cast<int64_t>(kN));
+
+  int cP = liveP->createCursorHandle();
+  int cV = liveV->createCursorHandle();
+  auto dP = liveP->drainCursor(cP, static_cast<int>(kN));
+  auto dV = liveV->drainCursor(cV, static_cast<int>(kN));
+  liveP->releaseCursor(cP);
+  liveV->releaseCursor(cV);
+  ASSERT_EQ(dP.size(), kN);
+  ASSERT_EQ(dV.size(), kN);
+  for (size_t i = 0; i < kN; ++i) {
+    EXPECT_FLOAT_EQ(dP[i], dV[i]) << "i=" << i;
+  }
+
+  ASSERT_TRUE(pa_finalize_live(idPortable, &errCode, &errMsg));
+  ASSERT_TRUE(pa_finalize_live(idVdsp, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(idPortable));
+  EXPECT_TRUE(pa_release_buffer(idVdsp));
+}
+#endif
+
 TEST_F(AudioRegistryFixture, DrainCursorInto_ParityWithAllocatingDrain) {
   std::string id;
   std::string errCode;

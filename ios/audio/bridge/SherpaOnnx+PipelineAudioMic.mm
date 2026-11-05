@@ -8,12 +8,14 @@
 #import <React/RCTLog.h>
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import <Accelerate/Accelerate.h>
 
 #include "PaLiveEntry.h"
 #include "AudioRegistry.h"
 #import "../session/PaAudioSessionCoordinator.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <memory>
@@ -123,19 +125,26 @@ static void paMicAQInputCallback(
     count16 = resampledBuf.size();
   }
 
-  std::vector<float> floatSamples(count16);
-  for (size_t i = 0; i < count16; i++) {
-    floatSamples[i] = (float)samples16[i] / 32768.0f;
-  }
-  auto appendResult = liveEntry->tryAppendSamples(
-    floatSamples.data(),
-    floatSamples.size(),
-    targetRate,
-    PaLiveAppendOrigin::ingress(PaLiveIngressSource::Mic)
-  );
-  if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
-    g_pa_mic_aq_running = false;
-    return;
+  // Bucket D-I1: chunked Accelerate convert (keep Mic ingress origin).
+  constexpr size_t kChunk = 4096;
+  std::array<float, kChunk> converted{};
+  const float scale = 1.0f / 32768.0f;
+  size_t offset = 0;
+  while (offset < count16) {
+    const size_t n = std::min(kChunk, count16 - offset);
+    vDSP_vflt16(samples16 + offset, 1, converted.data(), 1, n);
+    vDSP_vsmul(converted.data(), 1, &scale, converted.data(), 1, n);
+    auto appendResult = liveEntry->tryAppendSamples(
+      converted.data(),
+      n,
+      targetRate,
+      PaLiveAppendOrigin::ingress(PaLiveIngressSource::Mic)
+    );
+    if (appendResult == PaLiveEntry::AppendResult::BUFFER_FINALIZED) {
+      g_pa_mic_aq_running = false;
+      return;
+    }
+    offset += n;
   }
 
   AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
