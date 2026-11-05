@@ -84,3 +84,25 @@ TEST_F(ByteBufferPoolFixture, FreelistDepth_Capped) {
   }
   EXPECT_EQ(pool.freelistDepthFor(n), ByteBufferPool::kMaxPerClass);
 }
+
+// After warm freelist, steady acquire/release should be 100% hits.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #17).
+TEST_F(ByteBufferPoolFixture, HitRate_SteadyReuse) {
+  auto &pool = ByteBufferPool::instance();
+  const size_t n = 320 * sizeof(float);  // typical JSI float chunk
+  std::vector<uint8_t> warm = pool.acquire(n);
+  pool.release(std::move(warm));
+  pool.resetStats();
+
+  constexpr int kIters = 200;
+  for (int i = 0; i < kIters; ++i) {
+    auto v = pool.acquire(n);
+    ASSERT_EQ(v.size(), n);
+    pool.release(std::move(v));
+  }
+  auto st = pool.stats();
+  EXPECT_EQ(st.acquires, static_cast<uint64_t>(kIters));
+  EXPECT_EQ(st.hits, static_cast<uint64_t>(kIters));
+  EXPECT_EQ(st.misses, 0u);
+  EXPECT_GT(st.releases_pooled, 0u);
+}

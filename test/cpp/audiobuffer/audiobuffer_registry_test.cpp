@@ -19,6 +19,7 @@
 #include <mutex>
 #include <regex>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -161,6 +162,7 @@ TEST_F(AudioRegistryFixture, LiveAppendDrainCursor) {
   EXPECT_TRUE(pa_release_buffer(id));
 }
 
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — drain-into-dest).
 TEST_F(AudioRegistryFixture, CopyLiveSamplesSlice_ParityWithSlice) {
   std::string id;
   std::string errCode;
@@ -394,6 +396,7 @@ TEST_F(AudioRegistryFixture, AppendInt16_VdspParityWithPortable) {
 }
 #endif
 
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — drain-into-dest).
 TEST_F(AudioRegistryFixture, DrainCursorInto_ParityWithAllocatingDrain) {
   std::string id;
   std::string errCode;
@@ -476,6 +479,7 @@ std::string bufferIdFromCreateJson(const std::string &json) {
 
 }  // namespace
 
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — drain-into-dest).
 TEST_F(AudioRegistryFixture, CopyOfflineSamples_ParityWithSlice) {
   std::vector<float> samples(200);
   for (int i = 0; i < 200; ++i) {
@@ -909,6 +913,302 @@ TEST_F(AudioRegistryFixture, AppendListener_SelfRemoveDuringNotify) {
   ASSERT_TRUE(pa_append_samples_to_live(id, chunk.data(), chunk.size(), 16000, &errCode, &errMsg))
       << errMsg;
   EXPECT_EQ(fires.load(), 1);
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
+// Heap mmap when payload exceeds RAM-class threshold; small stays RAM.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — mmap threshold).
+TEST_F(AudioRegistryFixture, CreateOffline_ForcesMmapWhenOverLowThreshold) {
+  pa_configure_threshold(1ULL * 1024ULL * 1024ULL * 1024ULL);  // LOW → heap ~9 MiB
+
+  {
+    std::vector<float> small(1024);
+    for (size_t i = 0; i < small.size(); ++i) {
+      small[i] = static_cast<float>(i % 17) * 0.01f;
+    }
+    std::string json;
+    std::string errCode;
+    std::string errMsg;
+    ASSERT_TRUE(pa_create_offline_from_samples(small.data(), small.size(), 16000, 1, &json,
+                                               &errCode, &errMsg))
+        << errMsg;
+    const std::string id = bufferIdFromCreateJson(json);
+    ASSERT_FALSE(id.empty());
+    auto entry = pa_get_offline_entry(id);
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ(entry->storageKind(), "ram");
+    EXPECT_EQ(entry->numSamples(), static_cast<int>(small.size()));
+    EXPECT_TRUE(pa_release_buffer(id));
+  }
+
+  // LOW heap threshold ≈ 9 MiB → need > 9 MiB / 4 bytes samples.
+  const size_t n = (9ULL * 1024ULL * 1024ULL / sizeof(float)) + 2048;
+  std::vector<float> samples(n);
+  for (size_t i = 0; i < n; ++i) {
+    samples[i] = static_cast<float>(i % 97) * 0.001f;
+  }
+  std::string json;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_offline_from_samples(samples.data(), samples.size(), 16000, 1, &json,
+                                             &errCode, &errMsg))
+      << errMsg;
+  const std::string id = bufferIdFromCreateJson(json);
+  ASSERT_FALSE(id.empty());
+  auto entry = pa_get_offline_entry(id);
+  ASSERT_NE(entry, nullptr);
+  EXPECT_EQ(entry->storageKind(), "mmap");
+  EXPECT_TRUE(entry->isMmapBacked());
+  EXPECT_EQ(entry->numSamples(), static_cast<int>(n));
+  const float *ptr = entry->floatPtr();
+  ASSERT_NE(ptr, nullptr);
+  EXPECT_FLOAT_EQ(ptr[0], samples[0]);
+  EXPECT_FLOAT_EQ(ptr[n / 2], samples[n / 2]);
+  EXPECT_FLOAT_EQ(ptr[n - 1], samples[n - 1]);
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
+// Spool keeps full history behind a tiny ring window.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — live spool).
+TEST_F(AudioRegistryFixture, LiveSpool_BehindRingDrainMatchesFullHistory) {
+  const std::string spoolPath = (cacheDir_ / "live_spool_lossless.wav").string();
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  // windowCapacity = max(sr, windowSec*sr) → at least 1 s @ 16 kHz = 16000
+  ASSERT_TRUE(pa_create_live(16000, 1, 0.05, spoolPath, false, 0, &id, &errCode, &errMsg))
+      << errMsg;
+  auto live = pa_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+  ASSERT_TRUE(live->hasActiveSpool);
+  const int cap = live->windowCapacity;
+  ASSERT_GE(cap, 16000);
+
+  std::vector<float> golden;
+  golden.reserve(static_cast<size_t>(cap) * 2 + 1024);
+  // Uneven chunks totaling > 2× ring so drain must read spool behind the ring.
+  while (static_cast<int>(golden.size()) < cap * 2 + 513) {
+    const int c = 257 + static_cast<int>(golden.size() % 64);
+    std::vector<float> chunk(static_cast<size_t>(c));
+    for (int i = 0; i < c; ++i) {
+      chunk[static_cast<size_t>(i)] =
+          static_cast<float>(golden.size() + static_cast<size_t>(i)) * 0.001f;
+    }
+    ASSERT_TRUE(pa_append_samples_to_live(id, chunk.data(), chunk.size(), 16000, &errCode, &errMsg))
+        << errMsg;
+    golden.insert(golden.end(), chunk.begin(), chunk.end());
+  }
+  ASSERT_GT(static_cast<int>(golden.size()), cap);
+
+  int cursor = live->createCursorHandle();
+  std::vector<float> drained;
+  drained.reserve(golden.size());
+  std::vector<float> buf(512);
+  for (;;) {
+    int copied = 0;
+    ASSERT_TRUE(pa_drain_cursor_into(id, cursor, buf.data(), static_cast<int>(buf.size()), &copied,
+                                     &errCode, &errMsg))
+        << errMsg;
+    if (copied <= 0) break;
+    drained.insert(drained.end(), buf.begin(), buf.begin() + copied);
+  }
+  live->releaseCursor(cursor);
+
+  ASSERT_EQ(drained.size(), golden.size());
+  for (size_t i = 0; i < golden.size(); ++i) {
+    EXPECT_FLOAT_EQ(drained[i], golden[i]) << "i=" << i;
+  }
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
+// fullIfSpooled transfer adopts spool via mmap when over file-origin threshold.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #9 / B — transfer mmap).
+TEST_F(AudioRegistryFixture, TransferOfflineFromLive_FullIfSpooledIsMmap) {
+  pa_configure_threshold(1ULL * 1024ULL * 1024ULL * 1024ULL);  // LOW → file ~6 MiB
+  const std::string spoolPath = (cacheDir_ / "live_spool_transfer.wav").string();
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 0.1, spoolPath, false, 0, &id, &errCode, &errMsg)) << errMsg;
+
+  // File-origin threshold ≈ 6 MiB → payload must exceed that (WAV header + floats).
+  const size_t n = (6ULL * 1024ULL * 1024ULL / sizeof(float)) + 4096;
+  std::vector<float> golden(n);
+  for (size_t i = 0; i < n; ++i) {
+    golden[i] = static_cast<float>(i % 53) * 0.002f;
+  }
+  const size_t chunk = 16000;
+  for (size_t off = 0; off < n; off += chunk) {
+    const size_t m = std::min(chunk, n - off);
+    ASSERT_TRUE(pa_append_samples_to_live(id, golden.data() + off, m, 16000, &errCode, &errMsg))
+        << errMsg;
+  }
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg)) << errMsg;
+  std::string offlineId;
+  ASSERT_TRUE(pa_transfer_offline_from_live(id, true, &offlineId, &errCode, &errMsg)) << errMsg;
+  ASSERT_FALSE(offlineId.empty());
+
+  auto offline = pa_get_offline_entry(offlineId);
+  ASSERT_NE(offline, nullptr);
+  EXPECT_EQ(offline->storageKind(), "mmap");
+  EXPECT_TRUE(offline->isMmapBacked());
+  EXPECT_EQ(offline->numSamples(), static_cast<int>(n));
+  const float *ptr = offline->floatPtr();
+  ASSERT_NE(ptr, nullptr);
+  EXPECT_FLOAT_EQ(ptr[0], golden[0]);
+  EXPECT_FLOAT_EQ(ptr[n / 2], golden[n / 2]);
+  EXPECT_FLOAT_EQ(ptr[n - 1], golden[n - 1]);
+
+  // Live id invalidated after transfer.
+  errCode.clear();
+  std::vector<float> one(1, 0.f);
+  EXPECT_FALSE(pa_append_samples_to_live(id, one.data(), one.size(), 16000, &errCode, &errMsg));
+  EXPECT_EQ(errCode, "BUFFER_INVALIDATED");
+
+  EXPECT_TRUE(pa_release_buffer(offlineId));
+}
+
+// Min-interval coalesces JS append callbacks; flush emits the rest.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — append-event coalesce).
+TEST_F(AudioRegistryFixture, AppendEvents_MinIntervalCoalescesCallbacks) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", true, 50, &id, &errCode, &errMsg)) << errMsg;
+  auto live = pa_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  std::atomic<int> calls{0};
+  std::atomic<int> frames{0};
+  live->onFramesAppended = [&](const PaLiveFramesAppendedPayload &p) {
+    calls.fetch_add(1);
+    frames.fetch_add(p.frameCount);
+  };
+
+  std::vector<float> chunk(100, 0.25f);
+  constexpr int kBurst = 10;
+  for (int i = 0; i < kBurst; ++i) {
+    ASSERT_TRUE(pa_append_samples_to_live(id, chunk.data(), chunk.size(), 16000, &errCode, &errMsg))
+        << errMsg;
+  }
+  // First append emits immediately (lastAppendEventAtMs==0); rest stay pending inside interval.
+  EXPECT_EQ(calls.load(), 1);
+  EXPECT_EQ(frames.load(), 100);
+
+  live->flushPendingFramesAppended();
+  EXPECT_EQ(calls.load(), 2);
+  EXPECT_EQ(frames.load(), kBurst * 100);
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
+// Matched SR must not drift; mismatched SR resamples length ≈ n * out/in.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
+TEST_F(AudioRegistryFixture, Append_MatchedSampleRate_NoResampleDrift) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &id, &errCode, &errMsg)) << errMsg;
+
+  std::vector<float> pcm(500);
+  for (int i = 0; i < 500; ++i) {
+    pcm[static_cast<size_t>(i)] = static_cast<float>(i) * 0.01f;
+  }
+  ASSERT_TRUE(pa_append_samples_to_live(id, pcm.data(), pcm.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+
+  auto live = pa_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+  int cursor = live->createCursorHandle();
+  auto drained = live->drainCursor(cursor, static_cast<int>(pcm.size()));
+  live->releaseCursor(cursor);
+  ASSERT_EQ(drained.size(), pcm.size());
+  for (size_t i = 0; i < pcm.size(); ++i) {
+    EXPECT_FLOAT_EQ(drained[i], pcm[i]) << "i=" << i;
+  }
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #6).
+TEST_F(AudioRegistryFixture, Append_MismatchedSampleRate_ResamplesLength) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &id, &errCode, &errMsg)) << errMsg;
+
+  const size_t nIn = 4800;  // 100 ms @ 48 kHz
+  std::vector<float> pcm(nIn, 0.5f);
+  ASSERT_TRUE(pa_append_samples_to_live(id, pcm.data(), pcm.size(), 48000, &errCode, &errMsg))
+      << errMsg;
+
+  auto live = pa_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+  const int64_t expected = static_cast<int64_t>(nIn) * 16000 / 48000;
+  EXPECT_NEAR(static_cast<double>(live->totalSamplesWritten), static_cast<double>(expected), 1.0);
+
+  int cursor = live->createCursorHandle();
+  auto drained = live->drainCursor(cursor, static_cast<int>(expected) + 8);
+  live->releaseCursor(cursor);
+  EXPECT_NEAR(static_cast<double>(drained.size()), static_cast<double>(expected), 1.0);
+
+  ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(id));
+}
+
+// Resolve under g_pa_mutex then append/drain outside — concurrent lookup must not hang.
+// Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (C #11).
+TEST_F(AudioRegistryFixture, Append_ConcurrentWithLookup_NoDeadlock) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &id, &errCode, &errMsg)) << errMsg;
+
+  constexpr int kIters = 400;
+  std::vector<float> chunk(64, 0.1f);
+  std::atomic<bool> appendDone{false};
+  std::atomic<int> lookups{0};
+
+  std::thread appender([&]() {
+    std::string ec, em;
+    for (int i = 0; i < kIters; ++i) {
+      if (!pa_append_samples_to_live(id, chunk.data(), chunk.size(), 16000, &ec, &em)) {
+        ADD_FAILURE() << em;
+        break;
+      }
+    }
+    appendDone.store(true);
+  });
+
+  std::thread lookup([&]() {
+    while (!appendDone.load()) {
+      auto live = pa_get_live_entry(id);
+      if (live) {
+        (void)live->totalSamplesWritten;
+        lookups.fetch_add(1);
+      }
+      std::this_thread::yield();
+    }
+    for (int i = 0; i < 20; ++i) {
+      EXPECT_NE(pa_get_live_entry(id), nullptr);
+      lookups.fetch_add(1);
+    }
+  });
+
+  appender.join();
+  lookup.join();
+
+  auto live = pa_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+  EXPECT_EQ(live->totalSamplesWritten, static_cast<int64_t>(kIters) * 64);
+  EXPECT_GT(lookups.load(), 0);
 
   ASSERT_TRUE(pa_finalize_live(id, &errCode, &errMsg));
   EXPECT_TRUE(pa_release_buffer(id));
