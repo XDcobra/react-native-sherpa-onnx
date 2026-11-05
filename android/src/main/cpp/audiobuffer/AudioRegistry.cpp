@@ -1,6 +1,7 @@
 #include "AudioRegistry.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -670,17 +671,42 @@ bool pa_append_samples_to_live(const std::string &bufferId, const float *samples
 bool pa_append_int16_samples_to_live(const std::string &bufferId, const int16_t *samples,
                                      size_t count, int sampleRate, std::string *errorCode,
                                      std::string *errorMessage) {
+  // Bucket C #4: chunked convert; resolve live once (no full-length float vector).
   if (!samples || count == 0 || sampleRate <= 0) {
     if (errorCode) *errorCode = "AUDIO_INVALID_ARGUMENT";
     if (errorMessage) *errorMessage = "Invalid samples or sample rate";
     return false;
   }
-  std::vector<float> converted(count);
-  for (size_t i = 0; i < count; ++i) {
-    converted[i] = static_cast<float>(samples[i]) / 32768.0f;
+  auto live = pa_get_live_entry(bufferId);
+  if (!live) {
+    if (pa_is_live_invalidated(bufferId)) {
+      if (errorCode) *errorCode = "BUFFER_INVALIDATED";
+      if (errorMessage) *errorMessage = "Live buffer is invalidated after transfer";
+    } else {
+      if (errorCode) *errorCode = "AUDIO_BUFFER_NOT_FOUND";
+      if (errorMessage) *errorMessage = "Live buffer not found";
+    }
+    return false;
   }
-  return pa_append_samples_to_live(bufferId, converted.data(), converted.size(), sampleRate,
-                                   errorCode, errorMessage);
+  constexpr size_t kChunk = 4096;
+  std::array<float, kChunk> converted{};
+  size_t offset = 0;
+  try {
+    while (offset < count) {
+      const size_t n = std::min(kChunk, count - offset);
+      for (size_t i = 0; i < n; ++i) {
+        converted[i] = static_cast<float>(samples[offset + i]) / 32768.0f;
+      }
+      live->appendSamples(converted.data(), n, sampleRate,
+                          PaLiveAppendOrigin::ingress(PaLiveIngressSource::Append), false);
+      offset += n;
+    }
+    return true;
+  } catch (const std::runtime_error &e) {
+    if (errorCode) *errorCode = "AUDIO_INVALID_STATE";
+    if (errorMessage) *errorMessage = e.what();
+    return false;
+  }
 }
 
 bool pa_drain_cursor_into(const std::string &liveBufferId, int cursorId, float *dest,

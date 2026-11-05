@@ -202,7 +202,7 @@ Hypothesis × is **not** a ship number. Dual gate applies. **Host / Android / iO
 | 1 | Block ring write (≤2 `memcpy`) | Cut lock hold on 10–40 ms chunks | yes | yes | deferred | Host ~14.5× / A142P ~1.94× vs pre | neutral | **keep** (product SoT: `writeRingContiguous`) |
 | 2 | Block ring drain / peek | Same on cursor path | yes | yes | deferred | (same suite; paired with #1) | neutral | **keep** (product SoT: `readRingContiguous`) |
 | 3 | JNI float Critical / DirectByteBuffer | Drop intermediate vector | approx | **yes** | n/a | A142P `C_jni_float` 8.06 ms | +1.34 MiB PSS (ring likely) | **keep (Android)** (product SoT: Critical; DB not added) |
-| 4 | Int16→F32 chunked convert (portable) | Mic S16 without full float temp | yes | yes | sim* | A142P 5.39 / iOS sim 4.84 ms | ~0 / +80 KiB | **keep** |
+| 4 | Int16→F32 chunked convert (portable) | Mic S16 without full float temp | yes | yes | sim* | A142P 5.39 / iOS sim 4.84 ms | ~0 / +80 KiB | **keep** (product SoT: chunked) |
 | 5 | Faster resample lib | Only if rates mismatch | yes | yes | sim | A142P 26 ms / iOS sim 18 ms (30 s @44.1k) | +268 / +416 KiB | **skip lib for now** |
 | 6 | Avoid resample (match SR) | Policy | n/a | e2e | e2e | — | — | **keep policy** |
 | 7 | Spool write buffering | Long ingest | yes | yes | yes | A142P spool 9.5 vs ring 3.4–4.1 ms / 30 s | small | **defer** (absolute cheap; lossless path OK) |
@@ -240,7 +240,7 @@ Bucket **D** scoreboard: §M.7 tables (same Wall × / RSS Δ / Ship? columns).
 
 **#3 / D-A1 status:** product SoT float live append uses `GetPrimitiveArrayCritical` in [`sherpa-onnx-audiobuffer-jni.cpp`](../../../../android/src/main/cpp/jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp) (no Region + heap vector; DirectByteBuffer not preferred).
 
-**#4 still open:** int16 Critical then full float convert vector in [`AudioRegistry.cpp`](../../../../android/src/main/cpp/audiobuffer/AudioRegistry.cpp).
+**#4 status:** product SoT `pa_append_int16_samples_to_live` in [`AudioRegistry.cpp`](../../../../android/src/main/cpp/audiobuffer/AudioRegistry.cpp) uses 4096 stack-chunk convert + single live resolve (no full-length float vector). D-I1 vDSP still deferred.
 
 **Validate:** Android device RSS peak during 60 s ingest. Overlaps **D-A1** for the JNI float pin; keep portable convert logic in C for iOS/host.
 
@@ -377,7 +377,7 @@ Filled: [`audiobuffer-android-ios-ranking.md`](./audiobuffer-android-ios-ranking
 1. ~~Android device B-smoke~~ **done**.  
 2. iOS **device** B/D — **pending** (sim done as ratio/smoke).  
 3. ~~Portable C #1/#2~~ **keep** (landed in product SoT).  
-4. ~~C #3 / D-A1~~ **keep Critical** (product SoT landed); C #4 still open.  
+4. ~~C #3 / D-A1~~ **keep Critical** (product SoT landed); ~~C #4~~ **keep** (product SoT landed).  
 5. ~~C #9/#10 / D-A3~~ #9 **keep**; #10 / D-A3 **skip**.  
 6. ~~C #7/#8~~ **defer** (no lag pain).  
 7. ~~C #11/#13~~ **keep (hygiene)**; #12 only if contention appears.  

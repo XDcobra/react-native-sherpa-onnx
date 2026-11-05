@@ -53,6 +53,8 @@ Product SoT on `perf/improve-audiobuffer-from-benchmarks`: `nativeAppendSamplesT
 
 **Ship?** **keep** (portable). JNI int16 wrapper stays Critical + #4.
 
+Product SoT on `perf/improve-audiobuffer-from-benchmarks`: `pa_append_int16_samples_to_live` uses 4096-sample stack-chunk convert + single live resolve (no full-length float vector).
+
 ---
 
 ## Isolated mmap RSS
@@ -71,7 +73,7 @@ Android cold `B_offline_mmap` ~+180 KiB; iOS sim ~+160 KiB. Host +48 MiB create 
 | Live→offline mmap adopt | **keep** |
 | C #1/#2 block memcpy | **keep** (product SoT landed) |
 | C #3 JNI float Critical | **keep (Android)** (product SoT landed; DB not preferred) |
-| C #4 chunked int16 convert | **keep** |
+| C #4 chunked int16 convert | **keep** (product SoT landed) |
 | C #5 faster resample lib | **skip for now** — baseline cheap (A142P 26 ms / iOS sim 18 ms for 30 s @44.1k) |
 | C #6 prefer matched SR | **keep as policy** |
 | C #10 prefault | **skip** |

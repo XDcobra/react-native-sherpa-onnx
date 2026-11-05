@@ -290,6 +290,58 @@ TEST_F(AudioRegistryFixture, AppendInt16_ParityWithFloat) {
   EXPECT_TRUE(pa_release_buffer(idInt16));
 }
 
+TEST_F(AudioRegistryFixture, AppendInt16_MultiChunkParityWithFloat) {
+  // Forces C #4 kChunk=4096 boundary (one full chunk + remainder).
+  constexpr size_t kN = 4096 + 257;
+  std::string idFloat;
+  std::string idInt16;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &idFloat, &errCode, &errMsg)) << errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 2.0, "", false, 0, &idInt16, &errCode, &errMsg)) << errMsg;
+
+  std::vector<int16_t> i16(kN);
+  std::vector<float> asFloat(kN);
+  for (size_t i = 0; i < kN; ++i) {
+    const int16_t v = static_cast<int16_t>((i % 60001) - 30000);
+    i16[i] = v;
+    asFloat[i] = static_cast<float>(v) / 32768.0f;
+  }
+
+  ASSERT_TRUE(
+      pa_append_samples_to_live(idFloat, asFloat.data(), asFloat.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+  ASSERT_TRUE(
+      pa_append_int16_samples_to_live(idInt16, i16.data(), i16.size(), 16000, &errCode, &errMsg))
+      << errMsg;
+
+  auto liveF = pa_get_live_entry(idFloat);
+  auto liveI = pa_get_live_entry(idInt16);
+  ASSERT_NE(liveF, nullptr);
+  ASSERT_NE(liveI, nullptr);
+  EXPECT_EQ(liveF->totalSamplesWritten, liveI->totalSamplesWritten);
+  EXPECT_EQ(liveF->totalSamplesWritten, static_cast<int64_t>(kN));
+
+  int cF = liveF->createCursorHandle();
+  int cI = liveI->createCursorHandle();
+  auto dF = liveF->drainCursor(cF, static_cast<int>(kN));
+  auto dI = liveI->drainCursor(cI, static_cast<int>(kN));
+  liveF->releaseCursor(cF);
+  liveI->releaseCursor(cI);
+  ASSERT_EQ(dF.size(), kN);
+  ASSERT_EQ(dI.size(), kN);
+  for (size_t i = 0; i < kN; ++i) {
+    EXPECT_FLOAT_EQ(dF[i], asFloat[i]) << "float path i=" << i;
+    EXPECT_FLOAT_EQ(dI[i], asFloat[i]) << "int16 path i=" << i;
+    EXPECT_FLOAT_EQ(dF[i], dI[i]) << "parity i=" << i;
+  }
+
+  ASSERT_TRUE(pa_finalize_live(idFloat, &errCode, &errMsg));
+  ASSERT_TRUE(pa_finalize_live(idInt16, &errCode, &errMsg));
+  EXPECT_TRUE(pa_release_buffer(idFloat));
+  EXPECT_TRUE(pa_release_buffer(idInt16));
+}
+
 TEST_F(AudioRegistryFixture, DrainCursorInto_ParityWithAllocatingDrain) {
   std::string id;
   std::string errCode;
