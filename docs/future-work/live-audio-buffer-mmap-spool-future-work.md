@@ -1,6 +1,6 @@
 # Live audio buffer: mmap-backed spool for cursor reads (future work)
 
-**Status:** Future optimization note — not implemented.
+**Status:** Future optimization note — not implemented. Measurement SOT / scoreboard row **#8** (plus related #7/#9): [`docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md`](../internal/audiobuffer/performance/audiobuffer-perf-plan.md).
 **Scope:** Native live audio spool reads and `createOfflineAudioBufferFromLive('fullIfSpooled')` / similar fast-path readers.
 
 ---
