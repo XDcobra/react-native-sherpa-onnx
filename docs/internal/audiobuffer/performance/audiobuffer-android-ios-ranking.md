@@ -36,6 +36,8 @@ No pre-Critical JNI baseline on device. Wall for 30 s @20 ms chunks is small; PS
 
 **Ship?** **keep on Android** (parity with Int16 Critical). Re-check PSS on a real mic session if Jetsam appears.
 
+Product SoT on `perf/improve-audiobuffer-from-benchmarks`: `nativeAppendSamplesToLive` uses `GetPrimitiveArrayCritical` (no Region + heap vector); DirectByteBuffer not preferred / not added.
+
 ---
 
 ## C #4 — portable int16→f32 chunked convert
@@ -68,7 +70,7 @@ Android cold `B_offline_mmap` ~+180 KiB; iOS sim ~+160 KiB. Host +48 MiB create 
 | Spool lossless | **keep** |
 | Live→offline mmap adopt | **keep** |
 | C #1/#2 block memcpy | **keep** (product SoT landed) |
-| C #3 JNI float Critical | **keep (Android)** |
+| C #3 JNI float Critical | **keep (Android)** (product SoT landed; DB not preferred) |
 | C #4 chunked int16 convert | **keep** |
 | C #5 faster resample lib | **skip for now** — baseline cheap (A142P 26 ms / iOS sim 18 ms for 30 s @44.1k) |
 | C #6 prefer matched SR | **keep as policy** |

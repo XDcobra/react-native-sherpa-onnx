@@ -85,15 +85,20 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeCreateLive(
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeAppendSamplesToLive(
     JNIEnv *env, jclass, jstring bufferId, jfloatArray samples, jint sampleRate) {
+  // Bucket C #3 / D-A1: pin float[] like Int16 — no GetFloatArrayRegion + heap vector.
   if (!samples) return JNI_FALSE;
-  jsize n = env->GetArrayLength(samples);
-  std::vector<float> buf((size_t)n);
-  if (n > 0) env->GetFloatArrayRegion(samples, 0, n, buf.data());
+  const jsize n = env->GetArrayLength(samples);
+  if (n <= 0) return JNI_FALSE;
+
+  // Resolve id before critical — no other JNI calls while array is pinned.
+  const std::string id = jstringToUtf8(env, bufferId);
+  jfloat *elems = static_cast<jfloat *>(env->GetPrimitiveArrayCritical(samples, nullptr));
+  if (!elems) return JNI_FALSE;
   std::string errCode, errMsg;
-  return pa_append_samples_to_live(jstringToUtf8(env, bufferId), buf.data(), buf.size(), sampleRate,
-                                   &errCode, &errMsg)
-             ? JNI_TRUE
-             : JNI_FALSE;
+  const bool ok =
+      pa_append_samples_to_live(id, elems, (size_t)n, sampleRate, &errCode, &errMsg);
+  env->ReleasePrimitiveArrayCritical(samples, elems, JNI_ABORT);
+  return ok ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL

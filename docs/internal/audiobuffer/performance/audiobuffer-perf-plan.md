@@ -111,7 +111,7 @@ Smoke suite IDs (AudioBuffer Bench screen): `D_a1_jni_float`, `D_a1_direct_bb`, 
 
 | ID | Suite-ID(s) | Candidate | Version note | Fallback | Host? | Device? | Wall × | RSS Δ | Ship? |
 |----|-------------|-----------|--------------|----------|-------|---------|--------|-------|-------|
-| D-A1 | `D_a1_jni_float`, `D_a1_direct_bb` (+ alias `C_jni_float_append`) | Float append via `GetPrimitiveArrayCritical` / direct `ByteBuffer` | JNI, API ≥24 | Keep `GetFloatArrayRegion` path | approx only | **yes** | Critical 8.91 / DB 13.89 ms (~1.6× Critical faster) | +1.33 / +0.91 MiB | **keep Critical** (skip preferring DB) |
+| D-A1 | `D_a1_jni_float`, `D_a1_direct_bb` (+ alias `C_jni_float_append`) | Float append via `GetPrimitiveArrayCritical` / direct `ByteBuffer` | JNI, API ≥24 | Keep `GetFloatArrayRegion` path | approx only | **yes** | Critical 8.91 / DB 13.89 ms (~1.6× Critical faster) | +1.33 / +0.91 MiB | **keep Critical** (product SoT landed; skip preferring DB) |
 | D-A2 | `D_a2_ashmem_view` | `android.os.SharedMemory` for large offline views into Java | API **27+** | mmap-file / RAM copy on API 24–26 (`api27_required` skip) | no | **yes** | ashmem walk **607** vs readAll **103** ms | +48.3 MiB | **skip** (slower + RSS blowup vs readAll fixture) |
 | D-A3 | `D_a3_mmap_populate` | `posix_fallocate` before `.f32` write; `MAP_POPULATE` where available | NDK/Linux; page-cache ≠ macOS Host | Current write+mmap without populate (`B_offline_mmap`) | weak | **yes** | 184.5 ms; cold_xor≈49 ≈ `B_offline_mmap` | +0.56 MiB | **skip** (no cold-walk win; same lesson as C #10) |
 | D-A4 | `D_a4_audiorecord_prod`, `D_a4_audiorecord_perf` | Mic→live: **prod** = `VOICE_RECOGNITION` classic (`MicToLiveBufferSink`); **perf** = +`PERFORMANCE_MODE_LOW_LATENCY`. Separate full-`durationSec` suites. | API 24+; OEM variance on PERF | Keep prod path (`RECORD_AUDIO` skip) | no | **yes** (capture) | Stress 15 min: both ~900094 ms; ~14.4M samples; ~15995/s; errors=0 | prod −13.5 / perf −15.3 MiB (reclaim) | **keep prod**; **skip PERF** (parity, no win; one transient SIGSEGV on first try) |
@@ -201,7 +201,7 @@ Hypothesis × is **not** a ship number. Dual gate applies. **Host / Android / iO
 |---|-----------|------------|------|---------|-----|--------|-------|-------|
 | 1 | Block ring write (≤2 `memcpy`) | Cut lock hold on 10–40 ms chunks | yes | yes | deferred | Host ~14.5× / A142P ~1.94× vs pre | neutral | **keep** (product SoT: `writeRingContiguous`) |
 | 2 | Block ring drain / peek | Same on cursor path | yes | yes | deferred | (same suite; paired with #1) | neutral | **keep** (product SoT: `readRingContiguous`) |
-| 3 | JNI float Critical / DirectByteBuffer | Drop intermediate vector | approx | **yes** | n/a | A142P `C_jni_float` 8.06 ms | +1.34 MiB PSS (ring likely) | **keep (Android)** |
+| 3 | JNI float Critical / DirectByteBuffer | Drop intermediate vector | approx | **yes** | n/a | A142P `C_jni_float` 8.06 ms | +1.34 MiB PSS (ring likely) | **keep (Android)** (product SoT: Critical; DB not added) |
 | 4 | Int16→F32 chunked convert (portable) | Mic S16 without full float temp | yes | yes | sim* | A142P 5.39 / iOS sim 4.84 ms | ~0 / +80 KiB | **keep** |
 | 5 | Faster resample lib | Only if rates mismatch | yes | yes | sim | A142P 26 ms / iOS sim 18 ms (30 s @44.1k) | +268 / +416 KiB | **skip lib for now** |
 | 6 | Avoid resample (match SR) | Policy | n/a | e2e | e2e | — | — | **keep policy** |
@@ -238,7 +238,9 @@ Bucket **D** scoreboard: §M.7 tables (same Wall × / RSS Δ / Ship? columns).
 
 ### 3.2 JNI / bridge — **#3 / #4**
 
-Float append still `GetFloatArrayRegion` + vector; int16 Critical then full float convert vector ([`sherpa-onnx-audiobuffer-jni.cpp`](../../../../android/src/main/cpp/jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp), [`AudioRegistry.cpp`](../../../../android/src/main/cpp/audiobuffer/AudioRegistry.cpp)).
+**#3 / D-A1 status:** product SoT float live append uses `GetPrimitiveArrayCritical` in [`sherpa-onnx-audiobuffer-jni.cpp`](../../../../android/src/main/cpp/jni/audiobuffer/sherpa-onnx-audiobuffer-jni.cpp) (no Region + heap vector; DirectByteBuffer not preferred).
+
+**#4 still open:** int16 Critical then full float convert vector in [`AudioRegistry.cpp`](../../../../android/src/main/cpp/audiobuffer/AudioRegistry.cpp).
 
 **Validate:** Android device RSS peak during 60 s ingest. Overlaps **D-A1** for the JNI float pin; keep portable convert logic in C for iOS/host.
 
@@ -375,7 +377,7 @@ Filled: [`audiobuffer-android-ios-ranking.md`](./audiobuffer-android-ios-ranking
 1. ~~Android device B-smoke~~ **done**.  
 2. iOS **device** B/D — **pending** (sim done as ratio/smoke).  
 3. ~~Portable C #1/#2~~ **keep** (landed in product SoT).  
-4. ~~C #3/#4 / D-A1~~ **keep Critical**.  
+4. ~~C #3 / D-A1~~ **keep Critical** (product SoT landed); C #4 still open.  
 5. ~~C #9/#10 / D-A3~~ #9 **keep**; #10 / D-A3 **skip**.  
 6. ~~C #7/#8~~ **defer** (no lag pain).  
 7. ~~C #11/#13~~ **keep (hygiene)**; #12 only if contention appears.  
