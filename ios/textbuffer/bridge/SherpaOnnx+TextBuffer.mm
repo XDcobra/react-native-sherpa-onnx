@@ -11,6 +11,7 @@
 
 #import "../../SherpaOnnx.h"
 #include "TextRegistry.h"
+#include "TxtJetsamCaps.h"
 #include "TxtMetaBridge.h"
 #import <React/RCTLog.h>
 #include <mutex>
@@ -434,6 +435,8 @@ static void txt_emit_live_text_segment_event(
         if (auto maxSegmentsOpt = options.maxSegments()) {
             maxSegments = static_cast<int>(maxSegmentsOpt.value());
         }
+        // Perf keep: D-I3 Adaptive Jetsam clamp (TextBuffer only; ForceTight = harness).
+        (void)txt_ios_apply_jetsam_caps(&windowMaxChars, &maxSegments);
         if (auto emitPartialEventsOpt = options.emitPartialEvents()) {
             emitPartialEvents = emitPartialEventsOpt.value();
         }
