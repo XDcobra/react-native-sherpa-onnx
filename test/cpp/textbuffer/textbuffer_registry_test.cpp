@@ -19,6 +19,7 @@
 #include <mutex>
 #include <regex>
 #include <string>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -544,6 +545,42 @@ TEST_F(TextRegistryFixture, OptInSpool_DeltaParityGrowRewriteCommit) {
   ASSERT_TRUE(txt_live_append_text(live, "gamma", &err)) << err;
 
   const std::string expected = "alpha betagamma";
+
+  ASSERT_TRUE(txt_finalize_live(id, &err)) << err;
+  std::string offlineId;
+  ASSERT_TRUE(txt_create_offline_from_live(id, "fullIfSpooled", &offlineId, &err)) << err;
+  std::string text;
+  ASSERT_TRUE(txt_read_offline_text(offlineId, &text, &err)) << err;
+  EXPECT_EQ(text, expected);
+}
+
+TEST_F(TextRegistryFixture, OptInSpool_CheckpointRotateParity) {
+  const char *flag = std::getenv("SHERPA_HOST_TEXT_SPOOL");
+  if (flag == nullptr || std::string(flag) != "1") {
+    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
+  }
+  std::string id;
+  std::string err;
+  std::string spool = (cacheDir_ / "spool_ckpt.bin").string();
+  ASSERT_TRUE(txt_create_live(1 << 20, 100, false, 0, "on", spool, true, &id, &err)) << err;
+  auto live = txt_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  std::string expected;
+  constexpr int kOps = 400;  // > 128 × 3 rotates
+  expected.reserve(static_cast<size_t>(kOps) * 2);
+  for (int i = 0; i < kOps; ++i) {
+    const std::string chunk = "x" + std::to_string(i % 10);
+    expected += chunk;
+    ASSERT_TRUE(txt_live_append_text(live, chunk, &err)) << err;
+  }
+
+  struct stat stJ {};
+  struct stat stC {};
+  ASSERT_EQ(stat((spool + ".txtj").c_str(), &stJ), 0);
+  ASSERT_EQ(stat((spool + ".txtc").c_str(), &stC), 0);
+  EXPECT_LT(stJ.st_size, 8 * 1024);
+  EXPECT_GT(stC.st_size, 0);
 
   ASSERT_TRUE(txt_finalize_live(id, &err)) << err;
   std::string offlineId;

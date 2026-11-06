@@ -80,6 +80,10 @@ struct TxtLiveEntry {
 	static constexpr uint16_t kTextSpoolRecordCheckpoint = 4;
 	static constexpr uint16_t kTextSpoolRecordFinalize = 5;
 	static constexpr int kTextSpoolHeaderBytes = 16;
+	/** Perf keep: C2 — checkpoint + journal rotate after this many journal events. */
+	static constexpr int kSpoolCheckpointEvents = 128;
+	/** Perf keep: C2 — checkpoint + journal rotate after this much journal growth. */
+	static constexpr int64_t kSpoolCheckpointBytes = 1024 * 1024;
 
 	std::string bufferId;
 	State state = RECORDING;
@@ -111,6 +115,9 @@ struct TxtLiveEntry {
 	/** Last full UTF-8 snapshot written to journal/checkpoint (under spoolMutex).
 	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1). */
 	std::string lastJournaledFull_;
+	/** Perf keep: C2 — journal growth since last checkpoint rotate (under spoolMutex). */
+	int64_t journalEventsSinceCheckpoint_ = 0;
+	int64_t journalBytesSinceCheckpoint_ = 0;
 
 	~TxtLiveEntry() {
 		try {
@@ -364,6 +371,25 @@ struct TxtLiveEntry {
 		spoolFile = nullptr;
 	}
 
+	/** Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2). */
+	void checkpointAndRotateJournalLocked() {
+		if (spoolFile != nullptr) {
+			if (fflush(spoolFile) != 0) {
+				throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to flush text journal for " + bufferId);
+			}
+		}
+		writeCheckpointSnapshotLocked(lastJournaledFull_);
+		closeSpoolFileLocked(false);
+		spoolFile = fopen(journalPath().c_str(), "wb");
+		if (spoolFile == nullptr) {
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to rotate text journal for " + bufferId);
+		}
+		spoolBytes = 0;
+		journalEventsSinceCheckpoint_ = 0;
+		journalBytesSinceCheckpoint_ = 0;
+		spoolReady = true;
+	}
+
 	void appendSnapshotRecordLocked(uint16_t recordType, const std::string &snapshot) {
 		if (spoolFile == nullptr) {
 			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Spool file is not open for " + bufferId);
@@ -402,8 +428,19 @@ struct TxtLiveEntry {
 		if (fflush(spoolFile) != 0) {
 			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to flush text journal for " + bufferId);
 		}
+		const int64_t wrote = (int64_t)kTextSpoolHeaderBytes + (int64_t)len;
+		if (recordType != kTextSpoolRecordCheckpoint && recordType != kTextSpoolRecordFinalize) {
+			journalEventsSinceCheckpoint_ += 1;
+			journalBytesSinceCheckpoint_ += wrote;
+		}
 		spoolBytes = ftell(spoolFile);
 		spoolReady = true;
+
+		if (recordType != kTextSpoolRecordCheckpoint && recordType != kTextSpoolRecordFinalize &&
+			(journalEventsSinceCheckpoint_ >= kSpoolCheckpointEvents ||
+			 journalBytesSinceCheckpoint_ >= kSpoolCheckpointBytes)) {
+			checkpointAndRotateJournalLocked();
+		}
 	}
 
 	void writeCheckpointSnapshotLocked(const std::string &snapshot) {
@@ -466,9 +503,13 @@ struct TxtLiveEntry {
 			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to create text journal file for " + bufferId);
 		}
 		spoolBytes = 0;
+		journalEventsSinceCheckpoint_ = 0;
+		journalBytesSinceCheckpoint_ = 0;
 		writeCheckpointSnapshotLocked(bootstrapSnapshot);
 		appendSnapshotRecordLocked(kTextSpoolRecordCheckpoint, "{}");
 		lastJournaledFull_ = bootstrapSnapshot;
+		journalEventsSinceCheckpoint_ = 0;
+		journalBytesSinceCheckpoint_ = 0;
 	}
 
 	/** Perf keep: C1 — PARTIAL_APPEND suffix when newFull extends lastJournaledFull_; else PARTIAL_SET. Equal → skip. */
@@ -538,6 +579,8 @@ struct TxtLiveEntry {
 			std::lock_guard<std::mutex> lock(spoolMutex);
 			closeSpoolFileLocked(false);
 			lastJournaledFull_.clear();
+			journalEventsSinceCheckpoint_ = 0;
+			journalBytesSinceCheckpoint_ = 0;
 		}
 
 		if (spoolingMode == SPOOL_ON) {
