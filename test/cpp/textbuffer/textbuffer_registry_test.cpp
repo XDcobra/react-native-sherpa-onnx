@@ -1,8 +1,16 @@
 /**
  * Host tests for shared TextRegistry / Txt* (no device required).
  *
- * Always-on: create/release, offline populate, live partial/commit/finalize, UTF-16 length.
+ * Always-on: create/release, offline populate, live partial/commit/finalize, UTF-16 length,
+ *            and behavior coverage for measured perf keeps (parity / invariants — not wall time).
  * Opt-in spool: SHERPA_HOST_TEXT_SPOOL=1 ./textbuffer_host_test
+ *
+ * Perf keeps covered (see textbuffer-perf-plan.md / ship-overview):
+ *   B — utf16 slice, notify-only partial, spool lossless, offline text view
+ *   C1 delta APPEND, C2 checkpoint rotate, C3 deferred fflush, C4 unlock-before spool,
+ *   C5 short registry lock, C6 unlock-before notify (hooks/emit), C8 utf16 len cache,
+ *   C12 spool-off commit, D-A2 utf16 units, D-I3 Jetsam (Apple only).
+ *   D-A4 Batched emit is Android Kotlin — device-only; host covers emit contract (B).
  *
  * Build: cmake -S test/cpp -B test/cpp/build && cmake --build test/cpp/build --target textbuffer_host_test
  */
@@ -11,15 +19,23 @@
 #include "TxtUtf16.h"
 #include "TxtUtf16Codec.h"
 
+#if defined(__APPLE__)
+#include "TxtJetsamCaps.h"
+#endif
+
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <regex>
 #include <string>
 #include <sys/stat.h>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -39,6 +55,59 @@ void ResetSegHooks() {
   g_seg_finalized_n = 0;
   g_seg_released_n = 0;
   g_seg_last_text_id.clear();
+}
+
+bool SpoolOptInEnabled() {
+  const char *flag = std::getenv("SHERPA_HOST_TEXT_SPOOL");
+  return flag != nullptr && std::string(flag) == "1";
+}
+
+/** TXT2 journal record type counts (PartialSet=1, PartialAppend=2, …). */
+struct Txt2TypeCounts {
+  int partialSet = 0;
+  int partialAppend = 0;
+  int other = 0;
+  int records = 0;
+};
+
+bool CountTxt2JournalTypes(const std::string &journalPath, Txt2TypeCounts *out) {
+  if (!out) return false;
+  *out = Txt2TypeCounts{};
+  FILE *f = std::fopen(journalPath.c_str(), "rb");
+  if (f == nullptr) return false;
+  while (true) {
+    unsigned char hdr[16];
+    const size_t n = std::fread(hdr, 1, 16, f);
+    if (n == 0) break;
+    if (n != 16) {
+      std::fclose(f);
+      return false;
+    }
+    const uint32_t magic = (uint32_t)hdr[0] | ((uint32_t)hdr[1] << 8) | ((uint32_t)hdr[2] << 16) |
+                           ((uint32_t)hdr[3] << 24);
+    const uint16_t version = (uint16_t)hdr[4] | ((uint16_t)hdr[5] << 8);
+    const uint16_t type = (uint16_t)hdr[6] | ((uint16_t)hdr[7] << 8);
+    const uint32_t len = (uint32_t)hdr[8] | ((uint32_t)hdr[9] << 8) | ((uint32_t)hdr[10] << 16) |
+                         ((uint32_t)hdr[11] << 24);
+    if (magic != 0x32545854u || version != 2) {
+      std::fclose(f);
+      return false;
+    }
+    if (len > 0 && std::fseek(f, static_cast<long>(len), SEEK_CUR) != 0) {
+      std::fclose(f);
+      return false;
+    }
+    out->records += 1;
+    if (type == 1) {
+      out->partialSet += 1;
+    } else if (type == 2) {
+      out->partialAppend += 1;
+    } else {
+      out->other += 1;
+    }
+  }
+  std::fclose(f);
+  return true;
 }
 
 class TextRegistryFixture : public ::testing::Test {
@@ -151,6 +220,7 @@ TEST_F(TextRegistryFixture, Utf16Codec_LengthMatchesTxtUtf16Length) {
   EXPECT_EQ(txt_utf8_from_utf16(units.data(), units.size()), mixed);
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — utf16 slice axiom).
 TEST_F(TextRegistryFixture, Utf16Slice_AsciiMidAndPastEnd) {
   EXPECT_EQ(txt_utf16_slice("abcdef", 2, 3), "cde");
   EXPECT_EQ(txt_utf16_slice("abcdef", 6, 1), "");
@@ -158,6 +228,7 @@ TEST_F(TextRegistryFixture, Utf16Slice_AsciiMidAndPastEnd) {
   EXPECT_EQ(txt_utf16_slice("", 0, 4), "");
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — utf16 slice axiom).
 TEST_F(TextRegistryFixture, Utf16Slice_MultibyteAndEmoji) {
   // "ä" is one UTF-16 unit
   EXPECT_EQ(txt_utf16_slice("xäy", 1, 1), "ä");
@@ -172,6 +243,7 @@ TEST_F(TextRegistryFixture, Utf16Slice_MultibyteAndEmoji) {
   EXPECT_EQ(txt_utf16_slice(mixed, 3, 1), "b");
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — utf16 slice axiom).
 TEST_F(TextRegistryFixture, OfflineUtf16Slice_MatchesFullOverlap) {
   std::string id;
   std::string err;
@@ -188,6 +260,7 @@ TEST_F(TextRegistryFixture, OfflineUtf16Slice_MatchesFullOverlap) {
   EXPECT_EQ(slice, "");
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — utf16 slice axiom).
 TEST_F(TextRegistryFixture, LiveSnapshotUtf16Slice_AfterAppend) {
   std::string id;
   std::string err;
@@ -455,6 +528,8 @@ TEST_F(TextRegistryFixture, InvalidId_FailsCleanly) {
   EXPECT_FALSE(txt_read_offline_text("txt_off_missing", &text, &err));
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — notify-only partial).
+// D-A4 Batched mainHandler coalesce is Android Kotlin (device); host covers emit contract only.
 TEST_F(TextRegistryFixture, PartialEmit_PassesUtf16LengthNotFullString) {
   struct Capture {
     std::string bufferId;
@@ -496,9 +571,9 @@ TEST_F(TextRegistryFixture, PartialEmit_PassesUtf16LengthNotFullString) {
   txt_set_partial_emit_fn(nullptr);
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — spool lossless).
 TEST_F(TextRegistryFixture, OptInSpool_SkippedWithoutEnv) {
-  const char *flag = std::getenv("SHERPA_HOST_TEXT_SPOOL");
-  if (flag == nullptr || std::string(flag) != "1") {
+  if (!SpoolOptInEnabled()) {
     GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
   }
   std::string id;
@@ -516,10 +591,10 @@ TEST_F(TextRegistryFixture, OptInSpool_SkippedWithoutEnv) {
   EXPECT_FALSE(text.empty());
 }
 
-/** C1 delta journal: APPEND grow, SET rewrite, commit equal-skip — fullIfSpooled == RAM. */
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1).
+// Also B — spool lossless (fullIfSpooled == RAM after APPEND/SET/commit).
 TEST_F(TextRegistryFixture, OptInSpool_DeltaParityGrowRewriteCommit) {
-  const char *flag = std::getenv("SHERPA_HOST_TEXT_SPOOL");
-  if (flag == nullptr || std::string(flag) != "1") {
+  if (!SpoolOptInEnabled()) {
     GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
   }
   std::string id;
@@ -547,6 +622,12 @@ TEST_F(TextRegistryFixture, OptInSpool_DeltaParityGrowRewriteCommit) {
   const std::string expected = "alpha betagamma";
 
   ASSERT_TRUE(txt_finalize_live(id, &err)) << err;
+
+  Txt2TypeCounts counts;
+  ASSERT_TRUE(CountTxt2JournalTypes(spool + ".txtj", &counts));
+  EXPECT_GE(counts.partialAppend, 1);
+  EXPECT_GE(counts.partialSet, 1);
+
   std::string offlineId;
   ASSERT_TRUE(txt_create_offline_from_live(id, "fullIfSpooled", &offlineId, &err)) << err;
   std::string text;
@@ -554,9 +635,9 @@ TEST_F(TextRegistryFixture, OptInSpool_DeltaParityGrowRewriteCommit) {
   EXPECT_EQ(text, expected);
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2).
 TEST_F(TextRegistryFixture, OptInSpool_CheckpointRotateParity) {
-  const char *flag = std::getenv("SHERPA_HOST_TEXT_SPOOL");
-  if (flag == nullptr || std::string(flag) != "1") {
+  if (!SpoolOptInEnabled()) {
     GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
   }
   std::string id;
@@ -590,6 +671,7 @@ TEST_F(TextRegistryFixture, OptInSpool_CheckpointRotateParity) {
   EXPECT_EQ(text, expected);
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — offline text view).
 TEST_F(TextRegistryFixture, OfflineTextView_ParityWithRead) {
   std::string id;
   std::string err;
@@ -650,6 +732,8 @@ TEST_F(TextRegistryFixture, CreateLiveFromOffline_SeedsPartial) {
   EXPECT_EQ(snap, "seed me");
 }
 
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C6).
+// Unlock-before listeners/hooks: write/finalize/release notify outside stateMutex (SoT).
 TEST_F(TextRegistryFixture, SegEngineHooks_FireOnWriteFinalizeRelease) {
   ResetSegHooks();
   std::string id;
@@ -674,3 +758,270 @@ TEST_F(TextRegistryFixture, SegEngineHooks_FireOnWriteFinalizeRelease) {
   EXPECT_TRUE(txt_release_buffer(id));
   EXPECT_EQ(g_seg_released_n.load(), 1);
 }
+
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3).
+// Mid-session fullIfSpooled forces flushSpoolJournalLocked; finalize remains durable.
+TEST_F(TextRegistryFixture, OptInSpool_DeferredFlushParityMidSession) {
+  if (!SpoolOptInEnabled()) {
+    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
+  }
+  std::string id;
+  std::string err;
+  std::string spool = (cacheDir_ / "spool_flush.bin").string();
+  ASSERT_TRUE(txt_create_live(65536, 100, false, 0, "on", spool, true, &id, &err)) << err;
+  auto live = txt_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  std::string expected;
+  constexpr int kOps = 48;  // > kSpoolFlushRecords (32)
+  for (int i = 0; i < kOps; ++i) {
+    const std::string chunk = "a";
+    expected += chunk;
+    ASSERT_TRUE(txt_live_append_text(live, chunk, &err)) << err;
+  }
+
+  // Snapshot while live — must flush deferred journal and reconstruct.
+  std::string midOffline;
+  ASSERT_TRUE(txt_create_offline_from_live(id, "fullIfSpooled", &midOffline, &err)) << err;
+  std::string midText;
+  ASSERT_TRUE(txt_read_offline_text(midOffline, &midText, &err)) << err;
+  EXPECT_EQ(midText, expected);
+
+  ASSERT_TRUE(txt_live_append_text(live, "Z", &err)) << err;
+  expected += "Z";
+
+  ASSERT_TRUE(txt_finalize_live(id, &err)) << err;
+  std::string offlineId;
+  ASSERT_TRUE(txt_create_offline_from_live(id, "fullIfSpooled", &offlineId, &err)) << err;
+  std::string text;
+  ASSERT_TRUE(txt_read_offline_text(offlineId, &text, &err)) << err;
+  EXPECT_EQ(text, expected);
+}
+
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C8).
+TEST_F(TextRegistryFixture, LivePartialUtf16Length_MatchesWindow) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_live(1024, 100, false, 0, "off", "", true, &id, &err)) << err;
+  auto live = txt_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  const std::string emoji = "\xF0\x9F\x98\x80";  // 😀 = 2 UTF-16 units
+  ASSERT_TRUE(txt_live_write_partial(live, std::string("hi") + emoji, &err)) << err;
+  EXPECT_EQ(txt_live_partial_utf16_length(live), 4);
+  EXPECT_EQ(txt_live_partial_utf16_length(live), txt_utf16_length(live->snapshotText()));
+
+  ASSERT_TRUE(txt_live_append_text(live, "!", &err)) << err;
+  EXPECT_EQ(txt_live_partial_utf16_length(live), 5);
+  EXPECT_EQ(txt_live_partial_utf16_length(live), txt_utf16_length(live->snapshotText()));
+
+  ASSERT_TRUE(txt_live_commit_segment(live, "hi", {}, {}, "test", "", &err)) << err;
+  // Window stripped "hi" → emoji + "!"
+  EXPECT_EQ(live->snapshotText(), emoji + "!");
+  EXPECT_EQ(txt_live_partial_utf16_length(live), 3);
+  EXPECT_EQ(txt_live_partial_utf16_length(live), txt_utf16_length(live->snapshotText()));
+}
+
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C12).
+TEST_F(TextRegistryFixture, CommitWithSpoolOff_NoJournalFiles) {
+  std::string id;
+  std::string err;
+  const std::string spool = (cacheDir_ / "should_not_appear.bin").string();
+  ASSERT_TRUE(txt_create_live(1024, 100, false, 0, "off", spool, true, &id, &err)) << err;
+  auto live = txt_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  for (int i = 0; i < 40; ++i) {
+    const std::string piece = "w" + std::to_string(i);
+    ASSERT_TRUE(txt_live_write_partial(live, piece + " rest", &err)) << err;
+    ASSERT_TRUE(txt_live_commit_segment(live, piece, {}, {}, "t", "", &err)) << err;
+  }
+  EXPECT_EQ(live->segmentCount(), 40);
+  EXPECT_EQ(live->snapshotText(), " rest");
+  EXPECT_FALSE(fs::exists(spool + ".txtj"));
+  EXPECT_FALSE(fs::exists(spool + ".txtc"));
+  EXPECT_FALSE(fs::exists(spool));
+
+  int cursor = live->createSegmentCursor();
+  auto drained = live->drainSegments(cursor, 100);
+  EXPECT_EQ(drained.size(), 40u);
+  live->releaseSegmentCursor(cursor);
+}
+
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C4).
+// Spool I/O after stateMutex unlock — concurrent lookup must not hang.
+TEST_F(TextRegistryFixture, OptInSpool_ConcurrentAppendWithLookup_NoDeadlock) {
+  if (!SpoolOptInEnabled()) {
+    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
+  }
+  std::string id;
+  std::string err;
+  std::string spool = (cacheDir_ / "spool_conc.bin").string();
+  ASSERT_TRUE(txt_create_live(1 << 20, 100, false, 0, "on", spool, true, &id, &err)) << err;
+
+  constexpr int kIters = 300;
+  std::atomic<bool> appendDone{false};
+  std::atomic<int> lookups{0};
+
+  std::thread appender([&]() {
+    auto live = txt_get_live_entry(id);
+    if (!live) {
+      ADD_FAILURE() << "missing live";
+      appendDone.store(true);
+      return;
+    }
+    std::string ec;
+    for (int i = 0; i < kIters; ++i) {
+      if (!txt_live_append_text(live, "x", &ec)) {
+        ADD_FAILURE() << ec;
+        break;
+      }
+    }
+    appendDone.store(true);
+  });
+
+  std::thread lookup([&]() {
+    while (!appendDone.load()) {
+      auto live = txt_get_live_entry(id);
+      if (live) {
+        (void)live->snapshotText();
+        (void)txt_live_partial_utf16_length(live);
+        lookups.fetch_add(1);
+      }
+      std::this_thread::yield();
+    }
+    for (int i = 0; i < 20; ++i) {
+      EXPECT_NE(txt_get_live_entry(id), nullptr);
+      lookups.fetch_add(1);
+    }
+  });
+
+  appender.join();
+  lookup.join();
+
+  EXPECT_GT(lookups.load(), 0);
+  ASSERT_TRUE(txt_finalize_live(id, &err)) << err;
+  std::string offlineId;
+  ASSERT_TRUE(txt_create_offline_from_live(id, "fullIfSpooled", &offlineId, &err)) << err;
+  std::string text;
+  ASSERT_TRUE(txt_read_offline_text(offlineId, &text, &err)) << err;
+  EXPECT_EQ(text.size(), static_cast<size_t>(kIters));
+}
+
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C5).
+TEST_F(TextRegistryFixture, OfflinePopulate_ConcurrentSecondFails_NoDeadlock) {
+  std::string id;
+  std::string err;
+  ASSERT_TRUE(txt_create_empty_offline(&id, &err)) << err;
+
+  const std::string big(256 * 1024, 'A');
+  std::atomic<bool> firstDone{false};
+  std::atomic<int> lookups{0};
+  std::atomic<bool> secondFailed{false};
+
+  std::thread populator([&]() {
+    std::string ec;
+    EXPECT_TRUE(txt_populate_offline_if_empty(id, big, {}, {}, {}, "en", "", "", &ec)) << ec;
+    firstDone.store(true);
+  });
+
+  std::thread second([&]() {
+    while (!firstDone.load()) {
+      auto off = txt_get_offline_entry(id);
+      if (off) lookups.fetch_add(1);
+      std::this_thread::yield();
+    }
+    std::string ec;
+    if (!txt_populate_offline_if_empty(id, "other", {}, {}, {}, "", "", "", &ec)) {
+      secondFailed.store(true);
+      EXPECT_NE(ec.find("already populated"), std::string::npos) << ec;
+    }
+  });
+
+  populator.join();
+  second.join();
+
+  EXPECT_TRUE(secondFailed.load());
+  EXPECT_GT(lookups.load(), 0);
+  std::string text;
+  ASSERT_TRUE(txt_read_offline_text(id, &text, &err)) << err;
+  EXPECT_EQ(text, big);
+}
+
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-A2).
+TEST_F(TextRegistryFixture, Utf16SliceUnits_ParityWithSliceReencode) {
+  const std::string emoji = "\xF0\x9F\x98\x80";
+  const std::string mixed = std::string("ab") + "ä" + emoji + "cd";
+
+  auto expectParity = [](const std::string &utf8, int start, int max) {
+    const std::string slice = txt_utf16_slice(utf8, start, max);
+    const auto viaSlice = txt_utf16_from_utf8(slice);
+    const auto viaUnits = txt_utf16_slice_units(utf8, start, max);
+    EXPECT_EQ(viaUnits, viaSlice) << "start=" << start << " max=" << max;
+  };
+
+  expectParity(mixed, 0, 2);
+  expectParity(mixed, 2, 1);   // ä
+  expectParity(mixed, 3, 2);   // emoji
+  expectParity(mixed, 5, 2);   // cd
+  expectParity(mixed, 1, 4);
+  expectParity("abcdef", 2, 3);
+
+  std::string offId;
+  std::string err;
+  ASSERT_TRUE(txt_create_empty_offline(&offId, &err)) << err;
+  ASSERT_TRUE(txt_populate_offline_if_empty(offId, mixed, {}, {}, {}, "", "", "", &err)) << err;
+  std::vector<uint16_t> units;
+  ASSERT_TRUE(txt_copy_offline_text_utf16_units(offId, 3, 2, &units, &err)) << err;
+  EXPECT_EQ(units, txt_utf16_from_utf8(emoji));
+
+  std::string liveId;
+  ASSERT_TRUE(txt_create_live(1024, 100, false, 0, "off", "", true, &liveId, &err)) << err;
+  auto live = txt_get_live_entry(liveId);
+  ASSERT_NE(live, nullptr);
+  ASSERT_TRUE(txt_live_write_partial(live, mixed, &err)) << err;
+  units.clear();
+  ASSERT_TRUE(txt_copy_live_snapshot_utf16_units(liveId, 5, 2, &units, &err)) << err;
+  EXPECT_EQ(units, txt_utf16_from_utf8("cd"));
+}
+
+#if defined(__APPLE__)
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-I3).
+TEST_F(TextRegistryFixture, JetsamCaps_OffForceTightAdaptiveOverride) {
+  const TxtJetsamCapsMode prevMode = txt_ios_get_jetsam_caps_mode();
+  const int64_t prevOverride = -1;  // reset to OS at end
+  txt_ios_set_jetsam_avail_override_bytes(-1);
+
+  txt_ios_set_jetsam_caps_mode(TxtJetsamCapsModeOff);
+  int w = 100000;
+  int s = 9000;
+  EXPECT_FALSE(txt_ios_apply_jetsam_caps(&w, &s));
+  EXPECT_EQ(w, 100000);
+  EXPECT_EQ(s, 9000);
+
+  txt_ios_set_jetsam_caps_mode(TxtJetsamCapsModeForceTight);
+  w = 100000;
+  s = 9000;
+  EXPECT_TRUE(txt_ios_apply_jetsam_caps(&w, &s));
+  EXPECT_EQ(w, 16384);
+  EXPECT_EQ(s, 512);
+
+  txt_ios_set_jetsam_caps_mode(TxtJetsamCapsModeAdaptive);
+  txt_ios_set_jetsam_avail_override_bytes(0);  // unknown → no clamp
+  w = 100000;
+  s = 9000;
+  EXPECT_FALSE(txt_ios_apply_jetsam_caps(&w, &s));
+  EXPECT_EQ(w, 100000);
+  EXPECT_EQ(s, 9000);
+
+  txt_ios_set_jetsam_avail_override_bytes(32LL * 1024 * 1024);  // < 64 MiB
+  w = 100000;
+  s = 9000;
+  EXPECT_TRUE(txt_ios_apply_jetsam_caps(&w, &s));
+  EXPECT_EQ(w, 16384);
+  EXPECT_EQ(s, 512);
+
+  txt_ios_set_jetsam_caps_mode(prevMode);
+  txt_ios_set_jetsam_avail_override_bytes(prevOverride);
+}
+#endif

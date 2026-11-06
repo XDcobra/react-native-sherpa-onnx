@@ -1,7 +1,10 @@
 #import "TxtJetsamCaps.h"
 
+#if TARGET_OS_IPHONE
 #import <os/proc.h>
+#endif
 
+#include <TargetConditionals.h>
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
@@ -30,9 +33,12 @@ extern "C" void txt_ios_set_jetsam_avail_override_bytes(int64_t bytesOrNegative)
 extern "C" int64_t txt_ios_jetsam_avail_bytes(void) {
   const int64_t ov = g_avail_override.load(std::memory_order_relaxed);
   if (ov >= 0) return ov;
+#if TARGET_OS_IPHONE
   if (@available(iOS 13.0, *)) {
     return static_cast<int64_t>(os_proc_available_memory());
   }
+#endif
+  // macOS host / Catalyst without Jetsam API: treat as unknown-high (no Adaptive clamp).
   return INT64_MAX;
 }
 

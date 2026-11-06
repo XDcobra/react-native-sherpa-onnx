@@ -788,13 +788,25 @@ else()
   set(TEXTBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
 endif()
 find_package(ZLIB REQUIRED)
-add_executable(textbuffer_host_test
+set(TEXTBUFFER_IOS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../ios/textbuffer")
+set(TEXTBUFFER_HOST_SOURCES
   "${TEXTBUFFER_TEST_DIR}/textbuffer_registry_test.cpp"
   "${TEXTBUFFER_CPP_ROOT}/TextRegistry.cpp"
 )
+if(APPLE)
+  list(APPEND TEXTBUFFER_HOST_SOURCES "${TEXTBUFFER_IOS_ROOT}/TxtJetsamCaps.mm")
+endif()
+add_executable(textbuffer_host_test ${TEXTBUFFER_HOST_SOURCES})
 target_include_directories(textbuffer_host_test PRIVATE
   "${TEXTBUFFER_CPP_ROOT}"
 )
+if(APPLE)
+  target_include_directories(textbuffer_host_test PRIVATE "${TEXTBUFFER_IOS_ROOT}")
+  set_source_files_properties(
+    "${TEXTBUFFER_IOS_ROOT}/TxtJetsamCaps.mm"
+    PROPERTIES COMPILE_FLAGS "-fobjc-arc"
+  )
+endif()
 target_link_libraries(textbuffer_host_test PRIVATE ${TEXTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
 add_test(NAME textbuffer_host_test COMMAND $<TARGET_FILE:textbuffer_host_test>)
 set_tests_properties(textbuffer_host_test PROPERTIES

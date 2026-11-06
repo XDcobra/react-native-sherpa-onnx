@@ -81,14 +81,40 @@ Example TextBuffer Bench UI, auto-suite, ForceTight/Sync harness benches, device
 
 ---
 
-## 7. Remaining
+## 7. Host coverage (`textbuffer_host_test`)
+
+Behavior / parity only (no wall gates). Tags: `Perf keep: …/textbuffer-perf-plan.md (<ID>)`.
+
+| Keep | GTest |
+|------|-------|
+| B — utf16 slice | `Utf16Slice_*`, `OfflineUtf16Slice_*`, `LiveSnapshotUtf16Slice_*` |
+| B — notify-only partial | `PartialEmit_PassesUtf16LengthNotFullString` (D-A4 Batched = device) |
+| B — spool lossless | `OptInSpool_SkippedWithoutEnv` (+ C1/C2/C3) |
+| B — offline text view | `OfflineTextView_ParityWithRead` |
+| C1 | `OptInSpool_DeltaParityGrowRewriteCommit` |
+| C2 | `OptInSpool_CheckpointRotateParity` |
+| C3 | `OptInSpool_DeferredFlushParityMidSession` |
+| C4 | `OptInSpool_ConcurrentAppendWithLookup_NoDeadlock` |
+| C5 | `OfflinePopulate_ConcurrentSecondFails_NoDeadlock` |
+| C6 | `SegEngineHooks_FireOnWriteFinalizeRelease` |
+| C8 | `LivePartialUtf16Length_MatchesWindow` |
+| C12 | `CommitWithSpoolOff_NoJournalFiles` |
+| D-A2 | `Utf16SliceUnits_ParityWithSliceReencode` |
+| D-I3 | `JetsamCaps_OffForceTightAdaptiveOverride` (Apple host only) |
+| D-A4 | device-only (Kotlin); emit contract under B notify-only |
+
+Opt-in spool cases need `SHERPA_HOST_TEXT_SPOOL=1`.
+
+---
+
+## 8. Remaining
 
 1. Merge umbrella PR into `refactor/refactor-before-release-1-0`.
 2. Optional: physical iPhone Adaptive smoke (D-I3); C9 only if bridge wall returns.
 
 ---
 
-## 8. One-line scoreboard
+## 9. One-line scoreboard
 
 | Bucket | Closed? | Keeps on umbrella | Skips |
 |--------|---------|-------------------|-------|
