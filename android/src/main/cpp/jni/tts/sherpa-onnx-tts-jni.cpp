@@ -199,6 +199,27 @@ std::vector<std::vector<std::string>> ParseTokens(JNIEnv* env,
   return out;
 }
 
+std::string ResolveTtsText(JNIEnv* env, jstring text, jstring textBufferId,
+                           std::string* error) {
+  const std::string textId = CopyJstring(env, textBufferId);
+  if (!textId.empty()) {
+    TxtOfflineTextView view;
+    std::string errCode;
+    std::string errMsg;
+    // Allow empty for phoneme-only generation.
+    if (!txt_acquire_offline_text_view(textId, /*allowEmpty=*/true, &view,
+                                       &errCode, &errMsg)) {
+      if (error) *error = errMsg.empty() ? "Text buffer not found" : errMsg;
+      return {};
+    }
+    if (view.bytes == 0 || view.data == nullptr) {
+      return {};
+    }
+    return std::string(view.data, view.bytes);
+  }
+  return CopyJstring(env, text);
+}
+
 }  // namespace
 
 extern "C" {
@@ -242,29 +263,6 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeInitializeCustom(
   sherpaonnx::PutString(env, map, mapPut, "error", result.error);
   return map;
 }
-
-namespace {
-
-std::string ResolveTtsText(JNIEnv* env, jstring text, jstring textBufferId, std::string* error) {
-  const std::string textId = CopyJstring(env, textBufferId);
-  if (!textId.empty()) {
-    TxtOfflineTextView view;
-    std::string errCode;
-    std::string errMsg;
-    // Allow empty for phoneme-only generation.
-    if (!txt_acquire_offline_text_view(textId, /*allowEmpty=*/true, &view, &errCode, &errMsg)) {
-      if (error) *error = errMsg.empty() ? "Text buffer not found" : errMsg;
-      return {};
-    }
-    if (view.bytes == 0 || view.data == nullptr) {
-      return {};
-    }
-    return std::string(view.data, view.bytes);
-  }
-  return CopyJstring(env, text);
-}
-
-}  // namespace
 
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerate(

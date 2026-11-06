@@ -28,7 +28,6 @@ std::atomic<uint64_t> g_seq{0};
 std::atomic<uint32_t> g_head{0};
 
 DiagnosticEntry g_ring[kRingCapacity];
-std::atomic<bool> g_crashDumping{false};
 std::atomic_flag g_ringLock = ATOMIC_FLAG_INIT;
 
 bool TryAcquireRingLock() { return !g_ringLock.test_and_set(std::memory_order_acquire); }

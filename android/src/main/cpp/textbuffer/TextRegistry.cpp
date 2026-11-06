@@ -385,6 +385,7 @@ bool txt_populate_offline_if_empty(const std::string &bufferId, const std::strin
 }
 
 bool txt_create_empty_offline(std::string *bufferIdOut, std::string *error) {
+  (void)error;
   auto entry = std::make_shared<TxtOfflineEntry>();
   entry->bufferId = txt_generate_id("txt_off_");
   {
@@ -398,6 +399,7 @@ bool txt_create_empty_offline(std::string *bufferIdOut, std::string *error) {
 bool txt_create_offline_from_text(const std::string &text, const std::string &lang,
                                   const std::string &emotion, const std::string &event,
                                   std::string *bufferIdOut, std::string *error) {
+  (void)error;
   auto entry = std::make_shared<TxtOfflineEntry>();
   entry->bufferId = txt_generate_id("txt_off_");
   entry->populate(text, {}, {}, {}, lang, emotion, event, {});
@@ -413,26 +415,31 @@ bool txt_create_live(int windowMaxChars, int maxSegments, bool emitPartialEvents
                      int64_t partialEventMinIntervalMs, const std::string &spoolMode,
                      const std::string &spoolPathOrEmpty, bool spoolTemporary,
                      std::string *bufferIdOut, std::string *error) {
-  auto entry = std::make_shared<TxtLiveEntry>();
-  entry->bufferId = txt_generate_id("txt_live_");
-  entry->windowMaxChars = windowMaxChars > 0 ? windowMaxChars : 65536;
-  entry->maxSegments = maxSegments > 0 ? maxSegments : 1000;
-  entry->emitPartialEvents = emitPartialEvents;
-  entry->partialEventMinIntervalMs = partialEventMinIntervalMs;
-  entry->spoolingMode = parseSpoolMode(spoolMode);
-  entry->spoolTemporary = spoolTemporary;
-  if (entry->spoolEnabled()) {
-    entry->spoolPath =
-        spoolPathOrEmpty.empty()
-            ? (txt_temp_dir() + "/txt_spool_" + makeUuidLike() + ".bin")
-            : spoolPathOrEmpty;
+  try {
+    auto entry = std::make_shared<TxtLiveEntry>();
+    entry->bufferId = txt_generate_id("txt_live_");
+    entry->windowMaxChars = windowMaxChars > 0 ? windowMaxChars : 65536;
+    entry->maxSegments = maxSegments > 0 ? maxSegments : 1000;
+    entry->emitPartialEvents = emitPartialEvents;
+    entry->partialEventMinIntervalMs = partialEventMinIntervalMs;
+    entry->spoolingMode = parseSpoolMode(spoolMode);
+    entry->spoolTemporary = spoolTemporary;
+    if (entry->spoolEnabled()) {
+      entry->spoolPath =
+          spoolPathOrEmpty.empty()
+              ? (txt_temp_dir() + "/txt_spool_" + makeUuidLike() + ".bin")
+              : spoolPathOrEmpty;
+    }
+    {
+      std::lock_guard<std::mutex> lock(g_txt_mutex);
+      g_txt_live[entry->bufferId] = entry;
+    }
+    if (bufferIdOut) *bufferIdOut = entry->bufferId;
+    return true;
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return false;
   }
-  {
-    std::lock_guard<std::mutex> lock(g_txt_mutex);
-    g_txt_live[entry->bufferId] = entry;
-  }
-  if (bufferIdOut) *bufferIdOut = entry->bufferId;
-  return true;
 }
 
 bool txt_finalize_live(const std::string &liveBufferId, std::string *error) {

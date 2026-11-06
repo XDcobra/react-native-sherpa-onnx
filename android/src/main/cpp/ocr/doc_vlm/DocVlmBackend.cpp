@@ -58,12 +58,6 @@ constexpr int kDoctagEndId = 100328;
 constexpr int kDefaultMaxNewTokens = 8192;
 constexpr int kMaxPositions = 8192;
 
-std::string JoinPath(const std::string& dir, const std::string& file) {
-  fs::path path(dir);
-  path /= file;
-  return path.string();
-}
-
 void RequireNonEmptyFile(const std::string& path) {
   std::error_code ec;
   if (!fs::is_regular_file(path, ec) || ec) {

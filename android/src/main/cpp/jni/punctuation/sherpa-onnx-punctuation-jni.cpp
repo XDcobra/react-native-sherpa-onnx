@@ -69,6 +69,50 @@ std::shared_ptr<sherpaonnx::OnlinePunctuationWrapper> LookupOnline(
   return it->second;
 }
 
+std::string JavaToLowercaseUtf8(JNIEnv* env, const std::string& utf8) {
+  if (utf8.empty() || env == nullptr) return utf8;
+  jbyteArray bytes = env->NewByteArray(static_cast<jsize>(utf8.size()));
+  if (!bytes) return utf8;
+  env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(utf8.size()),
+                          reinterpret_cast<const jbyte*>(utf8.data()));
+  jclass charsetClass = env->FindClass("java/nio/charset/StandardCharsets");
+  jclass stringClass = env->FindClass("java/lang/String");
+  if (!charsetClass || !stringClass) {
+    env->DeleteLocalRef(bytes);
+    return utf8;
+  }
+  jfieldID utf8Field =
+      env->GetStaticFieldID(charsetClass, "UTF_8", "Ljava/nio/charset/Charset;");
+  jmethodID ctor =
+      env->GetMethodID(stringClass, "<init>", "([BLjava/nio/charset/Charset;)V");
+  jmethodID toLower =
+      env->GetMethodID(stringClass, "toLowerCase", "()Ljava/lang/String;");
+  jmethodID getBytes =
+      env->GetMethodID(stringClass, "getBytes", "(Ljava/nio/charset/Charset;)[B");
+  if (!utf8Field || !ctor || !toLower || !getBytes) {
+    env->DeleteLocalRef(bytes);
+    return utf8;
+  }
+  jobject charset = env->GetStaticObjectField(charsetClass, utf8Field);
+  jobject jstr = env->NewObject(stringClass, ctor, bytes, charset);
+  env->DeleteLocalRef(bytes);
+  if (!jstr) return utf8;
+  jobject lower = env->CallObjectMethod(jstr, toLower);
+  env->DeleteLocalRef(jstr);
+  if (!lower) return utf8;
+  auto lowerBytes =
+      static_cast<jbyteArray>(env->CallObjectMethod(lower, getBytes, charset));
+  env->DeleteLocalRef(lower);
+  if (!lowerBytes) return utf8;
+  const jsize n = env->GetArrayLength(lowerBytes);
+  std::string out(static_cast<size_t>(n), '\0');
+  if (n > 0) {
+    env->GetByteArrayRegion(lowerBytes, 0, n, reinterpret_cast<jbyte*>(&out[0]));
+  }
+  env->DeleteLocalRef(lowerBytes);
+  return out;
+}
+
 }  // namespace
 
 extern "C" {
@@ -162,54 +206,6 @@ Java_com_sherpaonnx_punctuation_facade_SherpaOnnxPunctuationHelper_nativeAddPunc
   sherpaonnx::PutString(env, map, mapPut, "text", result.text);
   return map;
 }
-
-namespace {
-
-std::string JavaToLowercaseUtf8(JNIEnv* env, const std::string& utf8) {
-  if (utf8.empty() || env == nullptr) return utf8;
-  jbyteArray bytes = env->NewByteArray(static_cast<jsize>(utf8.size()));
-  if (!bytes) return utf8;
-  env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(utf8.size()),
-                          reinterpret_cast<const jbyte*>(utf8.data()));
-  jclass charsetClass = env->FindClass("java/nio/charset/StandardCharsets");
-  jclass stringClass = env->FindClass("java/lang/String");
-  if (!charsetClass || !stringClass) {
-    env->DeleteLocalRef(bytes);
-    return utf8;
-  }
-  jfieldID utf8Field =
-      env->GetStaticFieldID(charsetClass, "UTF_8", "Ljava/nio/charset/Charset;");
-  jmethodID ctor =
-      env->GetMethodID(stringClass, "<init>", "([BLjava/nio/charset/Charset;)V");
-  jmethodID toLower =
-      env->GetMethodID(stringClass, "toLowerCase", "()Ljava/lang/String;");
-  jmethodID getBytes =
-      env->GetMethodID(stringClass, "getBytes", "(Ljava/nio/charset/Charset;)[B");
-  if (!utf8Field || !ctor || !toLower || !getBytes) {
-    env->DeleteLocalRef(bytes);
-    return utf8;
-  }
-  jobject charset = env->GetStaticObjectField(charsetClass, utf8Field);
-  jobject jstr = env->NewObject(stringClass, ctor, bytes, charset);
-  env->DeleteLocalRef(bytes);
-  if (!jstr) return utf8;
-  jobject lower = env->CallObjectMethod(jstr, toLower);
-  env->DeleteLocalRef(jstr);
-  if (!lower) return utf8;
-  auto lowerBytes =
-      static_cast<jbyteArray>(env->CallObjectMethod(lower, getBytes, charset));
-  env->DeleteLocalRef(lower);
-  if (!lowerBytes) return utf8;
-  const jsize n = env->GetArrayLength(lowerBytes);
-  std::string out(static_cast<size_t>(n), '\0');
-  if (n > 0) {
-    env->GetByteArrayRegion(lowerBytes, 0, n, reinterpret_cast<jbyte*>(&out[0]));
-  }
-  env->DeleteLocalRef(lowerBytes);
-  return out;
-}
-
-}  // namespace
 
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_punctuation_facade_SherpaOnnxPunctuationHelper_nativeAddPunctuationOfflineFromBuffer(
