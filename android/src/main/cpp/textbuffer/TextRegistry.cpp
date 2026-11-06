@@ -325,17 +325,21 @@ bool txt_populate_offline_if_empty(const std::string &bufferId, const std::strin
                                    const std::string &emotion, const std::string &event,
                                    const std::vector<TxtSpatialSpan> &spatialSpans,
                                    std::string *error) {
-  std::lock_guard<std::mutex> lock(g_txt_mutex);
-  auto it = g_txt_offline.find(bufferId);
-  if (it == g_txt_offline.end() || !it->second) {
-    if (error) *error = "Offline text buffer not found";
-    return false;
+  // Perf keep: C5 — hold g_txt_mutex only for map lookup; copy under entry populateMutex.
+  std::shared_ptr<TxtOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_offline.find(bufferId);
+    if (it == g_txt_offline.end() || !it->second) {
+      if (error) *error = "Offline text buffer not found";
+      return false;
+    }
+    entry = it->second;
   }
-  if (it->second->populated) {
+  if (!entry->tryPopulate(text, tokens, timestamps, durations, lang, emotion, event, spatialSpans)) {
     if (error) *error = "Text buffer already populated";
     return false;
   }
-  it->second->populate(text, tokens, timestamps, durations, lang, emotion, event, spatialSpans);
   return true;
 }
 
