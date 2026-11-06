@@ -400,6 +400,13 @@ Status FfmpegDemuxer::ScanContainerPackets(std::vector<SampleEntry>* video,
   AVStream* ast = impl_->audioStream >= 0
                       ? impl_->fmt->streams[impl_->audioStream]
                       : nullptr;
+  // Open() sets audio to AVDISCARD_ALL on the video demux context so video
+  // packet reads stay pure. Temporarily accept audio while scanning indexes.
+  AVDiscard prevAudioDiscard = AVDISCARD_NONE;
+  if (audio && ast) {
+    prevAudioDiscard = ast->discard;
+    ast->discard = AVDISCARD_DEFAULT;
+  }
   // After find_stream_info the demuxer is often at EOF. Seek by timestamp
   // (not byte 0 — that rewinds past the EBML header).
   const int seekErr =
@@ -408,6 +415,9 @@ Status FfmpegDemuxer::ScanContainerPackets(std::vector<SampleEntry>* video,
              impl_->videoStream);
   AVPacket* pkt = av_packet_alloc();
   if (pkt == nullptr) {
+    if (audio && ast) {
+      ast->discard = prevAudioDiscard;
+    }
     return Status::Fail(kErrFileCorrupt, "scan: packet alloc");
   }
   while (true) {
@@ -417,6 +427,9 @@ Status FfmpegDemuxer::ScanContainerPackets(std::vector<SampleEntry>* video,
     }
     if (err < 0) {
       av_packet_free(&pkt);
+      if (audio && ast) {
+        ast->discard = prevAudioDiscard;
+      }
       return Status::Fail(kErrFileCorrupt, "scan: av_read_frame");
     }
     if (video && pkt->stream_index == impl_->videoStream) {
@@ -443,6 +456,9 @@ Status FfmpegDemuxer::ScanContainerPackets(std::vector<SampleEntry>* video,
     av_packet_unref(pkt);
   }
   av_packet_free(&pkt);
+  if (audio && ast) {
+    ast->discard = prevAudioDiscard;
+  }
   (void)av_seek_frame(impl_->fmt, impl_->videoStream, INT64_MIN,
                       AVSEEK_FLAG_BACKWARD);
   return Status::Ok();
@@ -659,6 +675,20 @@ Status FfmpegDemuxer::BuildAudioIndex() {
   info.decodable = info.codec != AudioCodec::Unsupported &&
                    avcodec_find_decoder(par->codec_id) != nullptr;
   audio_ = info;
+
+  // MOV/MP4 sample tables list every audio chunk. Matroska/WebM stream indexes
+  // from libavformat are cue-sparse (often a handful of seek points). Seeding
+  // audioTimeline_ with those cues made ReadAudioPacket stop after cue count
+  // (e.g. 2) instead of the real packet count (~100). Leave empty for non-MOV
+  // so EnsurePacketIndex can scan every packet.
+  if (!impl_->isMov) {
+    VIDEO_LOGI(
+        "video.audio open codec=%s decodable=%d rate=%d ch=%d packets=0 "
+        "(defer matroska scan)",
+        info.codecName.c_str(), info.decodable ? 1 : 0, info.sampleRate,
+        info.channels);
+    return Status::Ok();
+  }
 
   std::vector<AudioPacketEntry> entries;
   const int n = avformat_index_get_entries_count(st);
