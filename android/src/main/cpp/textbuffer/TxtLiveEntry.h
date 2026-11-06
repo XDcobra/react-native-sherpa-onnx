@@ -947,11 +947,9 @@ struct TxtLiveEntry {
 					}
 
 					if (recordType == kTextSpoolRecordPartialSet) {
-						// Journal payloads are full snapshots from currentFullSnapshotLocked().
-						// Never shrink below the checkpoint baseline (stale partial windows).
-						if (payload.size() >= latest.size()) {
-							latest = payload;
-						}
+						// Perf keep: C1 — full snapshots replace (incl. shrink). Legacy
+						// no-shrink rule was for partial-window-only SET helpers.
+						latest = payload;
 					} else if (recordType == kTextSpoolRecordPartialAppend) {
 						latest += payload;
 					} else if (recordType == kTextSpoolRecordSegmentCommit) {
