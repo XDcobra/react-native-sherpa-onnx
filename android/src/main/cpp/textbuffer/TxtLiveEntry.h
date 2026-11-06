@@ -630,6 +630,8 @@ struct TxtLiveEntry {
 		std::string bid;
 		int utf16LenSnap = 0;
 		int64_t revSnap = 0;
+		std::string spoolSnap;
+		bool doSpool = false;
 		{
 			std::lock_guard<std::mutex> lock(stateMutex);
 			if (state == FINISHED) {
@@ -645,12 +647,19 @@ struct TxtLiveEntry {
 			}
 			totalCharsWritten += len;
 			revision.fetch_add(1);
-			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+			// Perf keep: C4 — snapshot under stateMutex; spool I/O after unlock.
+			if (spoolEnabled()) {
+				spoolSnap = currentFullSnapshotLocked();
+				doSpool = true;
+			}
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
 			utf16LenSnap = currentUtf16Len_;
 			revSnap = (int64_t)revision.load();
+		}
+		if (doSpool) {
+			maybeWriteSnapshotToSpool(spoolSnap, true);
 		}
 		// Outside stateMutex: the engine reads and commits the partial.
 		seg_engine_on_text_write(bid);
@@ -665,6 +674,8 @@ struct TxtLiveEntry {
 		std::string bid;
 		int utf16LenSnap = 0;
 		int64_t revSnap = 0;
+		std::string spoolSnap;
+		bool doSpool = false;
 		{
 			std::lock_guard<std::mutex> lock(stateMutex);
 			if (state == FINISHED) {
@@ -682,12 +693,18 @@ struct TxtLiveEntry {
 			}
 			totalCharsWritten += appendLen;
 			revision.fetch_add(1);
-			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+			if (spoolEnabled()) {
+				spoolSnap = currentFullSnapshotLocked();
+				doSpool = true;
+			}
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
 			utf16LenSnap = currentUtf16Len_;
 			revSnap = (int64_t)revision.load();
+		}
+		if (doSpool) {
+			maybeWriteSnapshotToSpool(spoolSnap, true);
 		}
 		seg_engine_on_text_write(bid);
 		if (shouldEmitPartial) {
@@ -703,6 +720,8 @@ struct TxtLiveEntry {
 		int committedSegmentIndex = -1;
 		TextSegment committedSegment;
 		bool hasCommittedSegment = false;
+		std::string spoolSnap;
+		bool doSpool = false;
 		{
 			std::lock_guard<std::mutex> stateLock(stateMutex);
 			if (state == FINISHED) {
@@ -717,10 +736,11 @@ struct TxtLiveEntry {
 				seg.source = source;
 				seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
 				seg.metaJson = metaJsonArg;
-				committedSegment = seg;
-				hasCommittedSegment = true;
 				committedSegmentIndex = seg.segmentIndex;
+				// Perf keep: C12 — push first, then one copy for notify.
 				segments.push_back(std::move(seg));
+				committedSegment = segments.back();
+				hasCommittedSegment = true;
 				if ((int)segments.size() > maxSegments) {
 					segments.pop_front();
 					evictedCount++;
@@ -741,11 +761,17 @@ struct TxtLiveEntry {
 					currentText = currentText.substr(text.size());
 					currentUtf16Len_ = std::max(0, currentUtf16Len_ - charLen);
 				}
-				// Already hold segmentMutex — do not call currentFullSnapshotLocked().
-				maybeWriteSnapshotToSpool(
-					committedTextFromSegmentsLocked() + partialRemainderFromCurrentTextLocked(),
-					true);
+				// Perf keep: C12 — never eagerly build full snapshot when spool is off.
+				// Perf keep: C4 — build snap here; spool I/O after releasing mutexes.
+				if (spoolEnabled()) {
+					spoolSnap =
+						committedTextFromSegmentsLocked() + partialRemainderFromCurrentTextLocked();
+					doSpool = true;
+				}
 			}
+		}
+		if (doSpool) {
+			maybeWriteSnapshotToSpool(spoolSnap, true);
 		}
 		notifyAppendListeners();
 		if (hasCommittedSegment) {
