@@ -89,12 +89,12 @@ Behavior / parity only (no wall gates). Tags: `Perf keep: …/textbuffer-perf-pl
 |------|-------|
 | B — utf16 slice | `Utf16Slice_*`, `OfflineUtf16Slice_*`, `LiveSnapshotUtf16Slice_*` |
 | B — notify-only partial | `PartialEmit_PassesUtf16LengthNotFullString` (D-A4 Batched = device) |
-| B — spool lossless | `OptInSpool_SkippedWithoutEnv` (+ C1/C2/C3) |
+| B — spool lossless | `Spool_WriteFinalizeFullIfSpooled` (+ C1/C2/C3) |
 | B — offline text view | `OfflineTextView_ParityWithRead` |
-| C1 | `OptInSpool_DeltaParityGrowRewriteCommit` |
-| C2 | `OptInSpool_CheckpointRotateParity` |
-| C3 | `OptInSpool_DeferredFlushParityMidSession` |
-| C4 | `OptInSpool_ConcurrentAppendWithLookup_NoDeadlock` |
+| C1 | `Spool_DeltaParityGrowRewriteCommit` |
+| C2 | `Spool_CheckpointRotateParity` |
+| C3 | `Spool_DeferredFlushParityMidSession` |
+| C4 | `Spool_ConcurrentAppendWithLookup_NoDeadlock` |
 | C5 | `OfflinePopulate_ConcurrentSecondFails_NoDeadlock` |
 | C6 | `SegEngineHooks_FireOnWriteFinalizeRelease` |
 | C8 | `LivePartialUtf16Length_MatchesWindow` |
@@ -103,7 +103,7 @@ Behavior / parity only (no wall gates). Tags: `Perf keep: …/textbuffer-perf-pl
 | D-I3 | `JetsamCaps_OffForceTightAdaptiveOverride` (Apple host only) |
 | D-A4 | device-only (Kotlin); emit contract under B notify-only |
 
-Opt-in spool cases need `SHERPA_HOST_TEXT_SPOOL=1`.
+Spool cases run always-on in `textbuffer_host_test` (temp files under the fixture cache dir).
 
 ---
 

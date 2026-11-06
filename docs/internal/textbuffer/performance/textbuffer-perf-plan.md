@@ -13,7 +13,7 @@
 **Host results:** [`textbuffer-host-bench-results.md`](./textbuffer-host-bench-results.md) (Host B filled).  
 **Device / ranking / ship:** [`textbuffer-device-bench-results.md`](./textbuffer-device-bench-results.md), [`textbuffer-android-ios-ranking.md`](./textbuffer-android-ios-ranking.md), [`textbuffer-perf-ship-overview.md`](./textbuffer-perf-ship-overview.md) (B + C + D closed).
 
-Correctness today: `test/cpp/textbuffer/textbuffer_registry_test.cpp` (`SHERPA_HOST_TEXT_SPOOL=1` for spool opt-in). Timed host bench: `test/cpp/textbuffer/textbuffer_bench.cpp` (§6.1).
+Correctness today: `test/cpp/textbuffer/textbuffer_registry_test.cpp` (TXT2 spool always-on). Timed host bench: `test/cpp/textbuffer/textbuffer_bench.cpp` (§6.1).
 
 ---
 

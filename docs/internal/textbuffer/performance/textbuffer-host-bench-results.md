@@ -39,4 +39,4 @@ cmake --build test/cpp/textbuffer/build --target textbuffer_bench -j
   --out docs/internal/textbuffer/performance/textbuffer-host-bench-results.md
 ```
 
-Correctness: `textbuffer_host_test` (spool opt-in: `SHERPA_HOST_TEXT_SPOOL=1`).
+Correctness: `textbuffer_host_test` (TXT2 spool always-on).

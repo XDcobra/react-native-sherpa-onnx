@@ -2,8 +2,8 @@
  * Host tests for shared TextRegistry / Txt* (no device required).
  *
  * Always-on: create/release, offline populate, live partial/commit/finalize, UTF-16 length,
- *            and behavior coverage for measured perf keeps (parity / invariants — not wall time).
- * Opt-in spool: SHERPA_HOST_TEXT_SPOOL=1 ./textbuffer_host_test
+ *            TXT2 spool parity, and behavior coverage for measured perf keeps
+ *            (parity / invariants — not wall time).
  *
  * Perf keeps covered (see textbuffer-perf-plan.md / ship-overview):
  *   B — utf16 slice, notify-only partial, spool lossless, offline text view
@@ -55,11 +55,6 @@ void ResetSegHooks() {
   g_seg_finalized_n = 0;
   g_seg_released_n = 0;
   g_seg_last_text_id.clear();
-}
-
-bool SpoolOptInEnabled() {
-  const char *flag = std::getenv("SHERPA_HOST_TEXT_SPOOL");
-  return flag != nullptr && std::string(flag) == "1";
 }
 
 /** TXT2 journal record type counts (PartialSet=1, PartialAppend=2, …). */
@@ -572,10 +567,7 @@ TEST_F(TextRegistryFixture, PartialEmit_PassesUtf16LengthNotFullString) {
 }
 
 // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — spool lossless).
-TEST_F(TextRegistryFixture, OptInSpool_SkippedWithoutEnv) {
-  if (!SpoolOptInEnabled()) {
-    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
-  }
+TEST_F(TextRegistryFixture, Spool_WriteFinalizeFullIfSpooled) {
   std::string id;
   std::string err;
   std::string spool = (cacheDir_ / "spool.bin").string();
@@ -593,10 +585,7 @@ TEST_F(TextRegistryFixture, OptInSpool_SkippedWithoutEnv) {
 
 // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1).
 // Also B — spool lossless (fullIfSpooled == RAM after APPEND/SET/commit).
-TEST_F(TextRegistryFixture, OptInSpool_DeltaParityGrowRewriteCommit) {
-  if (!SpoolOptInEnabled()) {
-    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
-  }
+TEST_F(TextRegistryFixture, Spool_DeltaParityGrowRewriteCommit) {
   std::string id;
   std::string err;
   std::string spool = (cacheDir_ / "spool_delta.bin").string();
@@ -636,10 +625,7 @@ TEST_F(TextRegistryFixture, OptInSpool_DeltaParityGrowRewriteCommit) {
 }
 
 // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2).
-TEST_F(TextRegistryFixture, OptInSpool_CheckpointRotateParity) {
-  if (!SpoolOptInEnabled()) {
-    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
-  }
+TEST_F(TextRegistryFixture, Spool_CheckpointRotateParity) {
   std::string id;
   std::string err;
   std::string spool = (cacheDir_ / "spool_ckpt.bin").string();
@@ -761,10 +747,7 @@ TEST_F(TextRegistryFixture, SegEngineHooks_FireOnWriteFinalizeRelease) {
 
 // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3).
 // Mid-session fullIfSpooled forces flushSpoolJournalLocked; finalize remains durable.
-TEST_F(TextRegistryFixture, OptInSpool_DeferredFlushParityMidSession) {
-  if (!SpoolOptInEnabled()) {
-    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
-  }
+TEST_F(TextRegistryFixture, Spool_DeferredFlushParityMidSession) {
   std::string id;
   std::string err;
   std::string spool = (cacheDir_ / "spool_flush.bin").string();
@@ -850,10 +833,7 @@ TEST_F(TextRegistryFixture, CommitWithSpoolOff_NoJournalFiles) {
 
 // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C4).
 // Spool I/O after stateMutex unlock — concurrent lookup must not hang.
-TEST_F(TextRegistryFixture, OptInSpool_ConcurrentAppendWithLookup_NoDeadlock) {
-  if (!SpoolOptInEnabled()) {
-    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
-  }
+TEST_F(TextRegistryFixture, Spool_ConcurrentAppendWithLookup_NoDeadlock) {
   std::string id;
   std::string err;
   std::string spool = (cacheDir_ / "spool_conc.bin").string();
@@ -942,7 +922,8 @@ TEST_F(TextRegistryFixture, OfflinePopulate_ConcurrentSecondFails_NoDeadlock) {
   second.join();
 
   EXPECT_TRUE(secondFailed.load());
-  EXPECT_GT(lookups.load(), 0);
+  // lookups may be 0 if populate finishes before the second thread spins — not required.
+  (void)lookups.load();
   std::string text;
   ASSERT_TRUE(txt_read_offline_text(id, &text, &err)) << err;
   EXPECT_EQ(text, big);

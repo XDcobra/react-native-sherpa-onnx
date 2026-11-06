@@ -779,7 +779,7 @@ set_tests_properties(audiobuffer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
-# TextBuffer shared registry host tests (always-on + opt-in spool via SHERPA_HOST_TEXT_SPOOL=1)
+# TextBuffer shared registry host tests (always-on, including TXT2 spool)
 set(TEXTBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/textbuffer")
 set(TEXTBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/textbuffer")
 if(TARGET gtest AND TARGET gtest_main)
@@ -815,7 +815,7 @@ set_tests_properties(textbuffer_host_test PROPERTIES
 
 
 
-# SegmentBuffer shared registry host tests (always-on + opt-in spool via SHERPA_HOST_SEGMENT_SPOOL=1)
+# SegmentBuffer shared registry host tests (always-on, including SEG2 spool smoke)
 set(SEGMENTBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/segmentbuffer")
 set(SEGMENTBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/segmentbuffer")
 if(TARGET gtest AND TARGET gtest_main)
