@@ -108,6 +108,9 @@ struct TxtLiveEntry {
 	std::mutex stateMutex;
 	std::mutex spoolMutex;
 	FILE *spoolFile = nullptr;
+	/** Last full UTF-8 snapshot written to journal/checkpoint (under spoolMutex).
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1). */
+	std::string lastJournaledFull_;
 
 	~TxtLiveEntry() {
 		try {
@@ -465,6 +468,23 @@ struct TxtLiveEntry {
 		spoolBytes = 0;
 		writeCheckpointSnapshotLocked(bootstrapSnapshot);
 		appendSnapshotRecordLocked(kTextSpoolRecordCheckpoint, "{}");
+		lastJournaledFull_ = bootstrapSnapshot;
+	}
+
+	/** Perf keep: C1 — PARTIAL_APPEND suffix when newFull extends lastJournaledFull_; else PARTIAL_SET. Equal → skip. */
+	void appendDeltaOrSetLocked(const std::string &newFull) {
+		if (newFull == lastJournaledFull_) {
+			return;
+		}
+		if (newFull.size() >= lastJournaledFull_.size() &&
+			newFull.compare(0, lastJournaledFull_.size(), lastJournaledFull_) == 0) {
+			const std::string suffix = newFull.substr(lastJournaledFull_.size());
+			lastJournaledFull_ = newFull;
+			appendSnapshotRecordLocked(kTextSpoolRecordPartialAppend, suffix);
+		} else {
+			lastJournaledFull_ = newFull;
+			appendSnapshotRecordLocked(kTextSpoolRecordPartialSet, newFull);
+		}
 	}
 
 	void maybeWriteSnapshotToSpool(const std::string &snapshot, bool mayActivateAuto) {
@@ -497,7 +517,7 @@ struct TxtLiveEntry {
 			}
 		}
 
-		appendSnapshotRecordLocked(kTextSpoolRecordPartialSet, snapshot);
+		appendDeltaOrSetLocked(snapshot);
 	}
 
 	void configureSpooling(SpoolingMode mode,
@@ -517,6 +537,7 @@ struct TxtLiveEntry {
 		{
 			std::lock_guard<std::mutex> lock(spoolMutex);
 			closeSpoolFileLocked(false);
+			lastJournaledFull_.clear();
 		}
 
 		if (spoolingMode == SPOOL_ON) {

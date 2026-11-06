@@ -515,6 +515,44 @@ TEST_F(TextRegistryFixture, OptInSpool_SkippedWithoutEnv) {
   EXPECT_FALSE(text.empty());
 }
 
+/** C1 delta journal: APPEND grow, SET rewrite, commit equal-skip — fullIfSpooled == RAM. */
+TEST_F(TextRegistryFixture, OptInSpool_DeltaParityGrowRewriteCommit) {
+  const char *flag = std::getenv("SHERPA_HOST_TEXT_SPOOL");
+  if (flag == nullptr || std::string(flag) != "1") {
+    GTEST_SKIP() << "Set SHERPA_HOST_TEXT_SPOOL=1 for TXT2 spool opt-in test";
+  }
+  std::string id;
+  std::string err;
+  std::string spool = (cacheDir_ / "spool_delta.bin").string();
+  ASSERT_TRUE(txt_create_live(65536, 100, false, 0, "on", spool, true, &id, &err)) << err;
+  auto live = txt_get_live_entry(id);
+  ASSERT_NE(live, nullptr);
+
+  // Prefix-growing appends → PARTIAL_APPEND path.
+  ASSERT_TRUE(txt_live_append_text(live, "hello", &err)) << err;
+  ASSERT_TRUE(txt_live_append_text(live, " world", &err)) << err;
+  ASSERT_TRUE(txt_live_append_text(live, "!", &err)) << err;
+
+  // Non-prefix rewrite → PARTIAL_SET.
+  ASSERT_TRUE(txt_live_write_partial(live, "RESET", &err)) << err;
+  ASSERT_TRUE(txt_live_append_text(live, " more", &err)) << err;
+
+  // Commit strips matching prefix from window; journal must not double-append.
+  ASSERT_TRUE(txt_live_write_partial(live, "alpha beta", &err)) << err;
+  ASSERT_TRUE(txt_live_commit_segment(live, "alpha ", {}, {}, "test", "", &err)) << err;
+  // After commit, window is "beta"; append without leading space → "betagamma".
+  ASSERT_TRUE(txt_live_append_text(live, "gamma", &err)) << err;
+
+  const std::string expected = "alpha betagamma";
+
+  ASSERT_TRUE(txt_finalize_live(id, &err)) << err;
+  std::string offlineId;
+  ASSERT_TRUE(txt_create_offline_from_live(id, "fullIfSpooled", &offlineId, &err)) << err;
+  std::string text;
+  ASSERT_TRUE(txt_read_offline_text(offlineId, &text, &err)) << err;
+  EXPECT_EQ(text, expected);
+}
+
 TEST_F(TextRegistryFixture, OfflineTextView_ParityWithRead) {
   std::string id;
   std::string err;
