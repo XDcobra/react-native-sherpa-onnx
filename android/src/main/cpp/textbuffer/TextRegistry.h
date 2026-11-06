@@ -74,6 +74,12 @@ bool txt_copy_offline_text_utf16_slice(const std::string &bufferId, int startUtf
 bool txt_copy_live_snapshot_utf16_slice(const std::string &liveBufferId, int startUtf16,
                                         int maxUtf16, std::string *out,
                                         std::string *error = nullptr);
+/** Perf keep: D-A2 — UTF-16 units for mid-slice (JNI NewString without UTF-8 re-encode). */
+bool txt_copy_offline_text_utf16_units(const std::string &bufferId, int startUtf16, int maxUtf16,
+                                       std::vector<uint16_t> *out, std::string *error = nullptr);
+bool txt_copy_live_snapshot_utf16_units(const std::string &liveBufferId, int startUtf16,
+                                        int maxUtf16, std::vector<uint16_t> *out,
+                                        std::string *error = nullptr);
 
 bool txt_populate_offline_if_empty(const std::string &bufferId, const std::string &text,
                                    const std::vector<std::string> &tokens,

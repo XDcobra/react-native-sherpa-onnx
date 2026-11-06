@@ -1,4 +1,5 @@
 #include "TextRegistry.h"
+#include "TxtUtf16Codec.h"
 
 #include <chrono>
 #include <cstdio>
@@ -304,6 +305,45 @@ bool txt_copy_live_snapshot_utf16_slice(const std::string &liveBufferId, int sta
     return false;
   } catch (...) {
     if (error) *error = "Unknown live text snapshot slice error";
+    return false;
+  }
+}
+
+bool txt_copy_offline_text_utf16_units(const std::string &bufferId, int startUtf16, int maxUtf16,
+                                       std::vector<uint16_t> *out, std::string *error) {
+  if (!out) {
+    if (error) *error = "Output vector is null";
+    return false;
+  }
+  auto entry = txt_get_offline_entry(bufferId);
+  if (!entry) {
+    if (error) *error = "Offline text buffer not found";
+    return false;
+  }
+  *out = txt_utf16_slice_units(entry->text, startUtf16, maxUtf16);
+  return true;
+}
+
+bool txt_copy_live_snapshot_utf16_units(const std::string &liveBufferId, int startUtf16,
+                                        int maxUtf16, std::vector<uint16_t> *out,
+                                        std::string *error) {
+  if (!out) {
+    if (error) *error = "Output vector is null";
+    return false;
+  }
+  auto live = txt_get_live_entry(liveBufferId);
+  if (!live) {
+    if (error) *error = "Live text buffer not found";
+    return false;
+  }
+  try {
+    *out = txt_utf16_slice_units(live->snapshotText(), startUtf16, maxUtf16);
+    return true;
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return false;
+  } catch (...) {
+    if (error) *error = "Unknown live text snapshot utf16 units error";
     return false;
   }
 }
