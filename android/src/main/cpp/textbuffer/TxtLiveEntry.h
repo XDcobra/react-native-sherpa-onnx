@@ -92,6 +92,9 @@ struct TxtLiveEntry {
 	std::string bufferId;
 	State state = RECORDING;
 	std::string currentText;
+	/** Cached UTF-16 length of currentText (under stateMutex).
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C8). */
+	int currentUtf16Len_ = 0;
 	int64_t totalCharsWritten = 0;
 	std::atomic<int> revision{0};
 	int windowMaxChars = 65536;
@@ -632,11 +635,13 @@ struct TxtLiveEntry {
 			if (state == FINISHED) {
 				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
 			}
-			int len = txt_utf16_length(text);
+			const int len = txt_utf16_length(text);
 			if (len > windowMaxChars) {
 				currentText = txt_utf16_suffix(text, windowMaxChars);
+				currentUtf16Len_ = windowMaxChars;
 			} else {
 				currentText = text;
+				currentUtf16Len_ = len;
 			}
 			totalCharsWritten += len;
 			revision.fetch_add(1);
@@ -644,7 +649,7 @@ struct TxtLiveEntry {
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
-			utf16LenSnap = txt_utf16_length(currentText);
+			utf16LenSnap = currentUtf16Len_;
 			revSnap = (int64_t)revision.load();
 		}
 		// Outside stateMutex: the engine reads and commits the partial.
@@ -665,13 +670,15 @@ struct TxtLiveEntry {
 			if (state == FINISHED) {
 				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
 			}
+			const int appendLen = txt_utf16_length(text);
+			const int combinedLen = currentUtf16Len_ + appendLen;
 			std::string combined = currentText + text;
-			int len = txt_utf16_length(combined);
-			int appendLen = txt_utf16_length(text);
-			if (len > windowMaxChars) {
+			if (combinedLen > windowMaxChars) {
 				currentText = txt_utf16_suffix(combined, windowMaxChars);
+				currentUtf16Len_ = windowMaxChars;
 			} else {
-				currentText = combined;
+				currentText = std::move(combined);
+				currentUtf16Len_ = combinedLen;
 			}
 			totalCharsWritten += appendLen;
 			revision.fetch_add(1);
@@ -679,7 +686,7 @@ struct TxtLiveEntry {
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
-			utf16LenSnap = txt_utf16_length(currentText);
+			utf16LenSnap = currentUtf16Len_;
 			revSnap = (int64_t)revision.load();
 		}
 		seg_engine_on_text_write(bid);
@@ -732,6 +739,7 @@ struct TxtLiveEntry {
 				if (currentText.size() >= text.size() &&
 					currentText.compare(0, text.size(), text) == 0) {
 					currentText = currentText.substr(text.size());
+					currentUtf16Len_ = std::max(0, currentUtf16Len_ - charLen);
 				}
 				// Already hold segmentMutex — do not call currentFullSnapshotLocked().
 				maybeWriteSnapshotToSpool(
@@ -759,9 +767,7 @@ struct TxtLiveEntry {
 			std::lock_guard<std::mutex> lock(spoolMutex);
 			if (spoolFile != nullptr) {
 				appendSnapshotRecordLocked(kTextSpoolRecordFinalize, "{}");
-				if (fflush(spoolFile) != 0) {
-					throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to finalize text spool for " + bufferId);
-				}
+				flushSpoolJournalLocked();
 				closeSpoolFileLocked(false);
 			}
 		}
@@ -777,7 +783,7 @@ struct TxtLiveEntry {
 
 	int partialUtf16Length() {
 		std::lock_guard<std::mutex> lock(stateMutex);
-		return txt_utf16_length(currentText);
+		return currentUtf16Len_;
 	}
 
 	std::string snapshotFullTextIfSpooled() {
@@ -807,7 +813,7 @@ struct TxtLiveEntry {
 				throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spool path is missing for " + bufferId);
 			}
 			if (spoolFile != nullptr) {
-				fflush(spoolFile);
+				flushSpoolJournalLocked();
 			}
 		}
 
