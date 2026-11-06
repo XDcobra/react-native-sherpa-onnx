@@ -120,8 +120,9 @@ inline std::vector<uint16_t> txt_utf16_from_utf8(const std::string &utf8) {
 }
 
 /**
- * Perf keep: D-A2 — one-pass UTF-16-indexed slice → UTF-16 units (no UTF-8 substring + re-encode).
+ * One-pass UTF-16-indexed slice → UTF-16 units (no UTF-8 substring + re-encode).
  * Same window rules as txt_utf16_slice (no splitting surrogate pairs).
+ * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-A2).
  */
 inline std::vector<uint16_t> txt_utf16_slice_units(const std::string &utf8, int startUnits,
                                                    int maxUnits) {

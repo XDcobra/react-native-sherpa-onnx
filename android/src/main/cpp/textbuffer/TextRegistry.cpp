@@ -365,7 +365,8 @@ bool txt_populate_offline_if_empty(const std::string &bufferId, const std::strin
                                    const std::string &emotion, const std::string &event,
                                    const std::vector<TxtSpatialSpan> &spatialSpans,
                                    std::string *error) {
-  // Perf keep: C5 — hold g_txt_mutex only for map lookup; copy under entry populateMutex.
+  // Hold g_txt_mutex only for map lookup; copy under entry populateMutex.
+  // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C5).
   std::shared_ptr<TxtOfflineEntry> entry;
   {
     std::lock_guard<std::mutex> lock(g_txt_mutex);

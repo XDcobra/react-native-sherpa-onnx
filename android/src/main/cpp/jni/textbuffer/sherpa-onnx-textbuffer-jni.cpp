@@ -42,7 +42,8 @@ jstring contentUtf8ToJstring(JNIEnv *env, const std::string &s) {
   return env->NewString(reinterpret_cast<const jchar *>(units.data()), (jsize)units.size());
 }
 
-/** Perf keep: D-A2 — NewString from UTF-16 units (no UTF-8 intermediate). */
+/** NewString from UTF-16 units (no UTF-8 intermediate).
+ * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-A2). */
 jstring utf16UnitsToJstring(JNIEnv *env, const std::vector<uint16_t> &units) {
   if (units.empty()) {
     return env->NewString(nullptr, 0);

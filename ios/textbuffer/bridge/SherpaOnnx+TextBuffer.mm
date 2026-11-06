@@ -435,7 +435,8 @@ static void txt_emit_live_text_segment_event(
         if (auto maxSegmentsOpt = options.maxSegments()) {
             maxSegments = static_cast<int>(maxSegmentsOpt.value());
         }
-        // Perf keep: D-I3 Adaptive Jetsam clamp (TextBuffer only; ForceTight = harness).
+        // Adaptive Jetsam clamp (TextBuffer only; ForceTight = harness).
+        // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-I3).
         (void)txt_ios_apply_jetsam_caps(&windowMaxChars, &maxSegments);
         if (auto emitPartialEventsOpt = options.emitPartialEvents()) {
             emitPartialEvents = emitPartialEventsOpt.value();

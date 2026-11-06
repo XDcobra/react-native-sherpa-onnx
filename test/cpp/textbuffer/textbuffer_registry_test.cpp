@@ -528,8 +528,8 @@ TEST_F(TextRegistryFixture, InvalidId_FailsCleanly) {
   EXPECT_FALSE(txt_read_offline_text("txt_off_missing", &text, &err));
 }
 
+// Host covers emit contract only; Batched mainHandler coalesce is Android Kotlin (device).
 // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (B — notify-only partial).
-// D-A4 Batched mainHandler coalesce is Android Kotlin (device); host covers emit contract only.
 TEST_F(TextRegistryFixture, PartialEmit_PassesUtf16LengthNotFullString) {
   struct Capture {
     std::string bufferId;

@@ -1,4 +1,5 @@
-// D-A4: sync vs latest-wins Handler batch for pipelineLiveTextPartial.
+// Sync vs latest-wins Handler batch for pipelineLiveTextPartial.
+// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-A4).
 package com.sherpaonnx.textbuffer
 
 import android.os.Handler
@@ -17,11 +18,12 @@ object LiveTextPartialEmitPolicy {
   enum class Mode {
     /** Baseline: emit on calling thread immediately (after interval gate). */
     Sync,
-    /** D-A4 opt: coalesce to latest payload; one main-looper Binder emit per schedule. */
+    /** Coalesce to latest payload; one main-looper Binder emit per schedule. */
     Batched,
   }
 
-  /** Perf keep: D-A4 Batched (~6.6× vs Sync on A142P). Sync retained for harness A/B. */
+  /** Default Batched; Sync retained for harness A/B.
+   * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-A4). */
   @Volatile
   var mode: Mode = Mode.Batched
 
@@ -80,7 +82,7 @@ object LiveTextPartialEmitPolicy {
     }
   }
 
-  /** Drain batched emits (no-op for Sync). Used by D-A4 bench for fair e2e wall. */
+  /** Drain batched emits (no-op for Sync). Harness helper for fair e2e wall. */
   fun flushAndEmit(context: ReactApplicationContext, timeoutMs: Long = 2000L): Boolean {
     if (mode != Mode.Batched) return true
     val latch = CountDownLatch(1)

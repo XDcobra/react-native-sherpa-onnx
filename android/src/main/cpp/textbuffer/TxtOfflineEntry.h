@@ -22,7 +22,8 @@ struct TxtOfflineEntry {
   std::string emotion;
   std::string event;
   bool populated = false;
-  /** Perf keep: C5 — serialize tryPopulate so work can run outside g_txt_mutex. */
+  /** Serialize tryPopulate so work can run outside g_txt_mutex.
+   * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C5). */
   std::mutex populateMutex;
 
   int utf16Length() const { return txt_utf16_length(text); }

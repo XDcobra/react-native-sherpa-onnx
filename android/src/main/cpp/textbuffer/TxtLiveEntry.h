@@ -80,13 +80,17 @@ struct TxtLiveEntry {
 	static constexpr uint16_t kTextSpoolRecordCheckpoint = 4;
 	static constexpr uint16_t kTextSpoolRecordFinalize = 5;
 	static constexpr int kTextSpoolHeaderBytes = 16;
-	/** Perf keep: C3 — defer fflush until this many unflushed journal bytes. */
+	/** Defer fflush until this many unflushed journal bytes.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3). */
 	static constexpr int64_t kSpoolFlushBytes = 64 * 1024;
-	/** Perf keep: C3 — defer fflush until this many unflushed journal records. */
+	/** Defer fflush until this many unflushed journal records.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3). */
 	static constexpr int kSpoolFlushRecords = 32;
-	/** Perf keep: C2 — checkpoint + journal rotate after this many journal events. */
+	/** Checkpoint + journal rotate after this many journal events.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2). */
 	static constexpr int kSpoolCheckpointEvents = 128;
-	/** Perf keep: C2 — checkpoint + journal rotate after this much journal growth. */
+	/** Checkpoint + journal rotate after this much journal growth.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2). */
 	static constexpr int64_t kSpoolCheckpointBytes = 1024 * 1024;
 
 	std::string bufferId;
@@ -122,10 +126,12 @@ struct TxtLiveEntry {
 	/** Last full UTF-8 snapshot written to journal/checkpoint (under spoolMutex).
 	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1). */
 	std::string lastJournaledFull_;
-	/** Perf keep: C3 — bytes/records written since last fflush (under spoolMutex). */
+	/** Bytes/records written since last fflush (under spoolMutex).
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3). */
 	int64_t spoolUnflushedBytes_ = 0;
 	int spoolUnflushedRecords_ = 0;
-	/** Perf keep: C2 — journal growth since last checkpoint rotate (under spoolMutex). */
+	/** Journal growth since last checkpoint rotate (under spoolMutex).
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2). */
 	int64_t journalEventsSinceCheckpoint_ = 0;
 	int64_t journalBytesSinceCheckpoint_ = 0;
 
@@ -541,7 +547,8 @@ struct TxtLiveEntry {
 		journalBytesSinceCheckpoint_ = 0;
 	}
 
-	/** Perf keep: C1 — PARTIAL_APPEND suffix when newFull extends lastJournaledFull_; else PARTIAL_SET. Equal → skip. */
+	/** PARTIAL_APPEND suffix when newFull extends lastJournaledFull_; else PARTIAL_SET. Equal → skip.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1). */
 	void appendDeltaOrSetLocked(const std::string &newFull) {
 		if (newFull == lastJournaledFull_) {
 			return;
@@ -647,7 +654,8 @@ struct TxtLiveEntry {
 			}
 			totalCharsWritten += len;
 			revision.fetch_add(1);
-			// Perf keep: C4 — snapshot under stateMutex; spool I/O after unlock.
+			// Snapshot under stateMutex; spool I/O after unlock.
+			// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C4).
 			if (spoolEnabled()) {
 				spoolSnap = currentFullSnapshotLocked();
 				doSpool = true;
@@ -737,7 +745,8 @@ struct TxtLiveEntry {
 				seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
 				seg.metaJson = metaJsonArg;
 				committedSegmentIndex = seg.segmentIndex;
-				// Perf keep: C12 — push first, then one copy for notify.
+				// Push first, then one copy for notify.
+				// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C12).
 				segments.push_back(std::move(seg));
 				committedSegment = segments.back();
 				hasCommittedSegment = true;
@@ -761,8 +770,9 @@ struct TxtLiveEntry {
 					currentText = currentText.substr(text.size());
 					currentUtf16Len_ = std::max(0, currentUtf16Len_ - charLen);
 				}
-				// Perf keep: C12 — never eagerly build full snapshot when spool is off.
-				// Perf keep: C4 — build snap here; spool I/O after releasing mutexes.
+				// Never eagerly build full snapshot when spool is off; spool I/O after unlock.
+				// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C12).
+				// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C4).
 				if (spoolEnabled()) {
 					spoolSnap =
 						committedTextFromSegmentsLocked() + partialRemainderFromCurrentTextLocked();
@@ -947,8 +957,9 @@ struct TxtLiveEntry {
 					}
 
 					if (recordType == kTextSpoolRecordPartialSet) {
-						// Perf keep: C1 — full snapshots replace (incl. shrink). Legacy
-						// no-shrink rule was for partial-window-only SET helpers.
+						// Full snapshots replace (incl. shrink). Legacy no-shrink was
+						// for partial-window-only SET helpers.
+						// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1).
 						latest = payload;
 					} else if (recordType == kTextSpoolRecordPartialAppend) {
 						latest += payload;

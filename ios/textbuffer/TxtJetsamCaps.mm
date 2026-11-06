@@ -11,8 +11,9 @@
 
 namespace {
 /**
- * Perf keep: D-I3 Adaptive — clamp only when os_proc_available_memory() is known and low.
- * ForceTight is harness-only (proved ~28× less RSS Δ on sim flood). avail<=0 → no clamp.
+ * Adaptive: clamp only when os_proc_available_memory() is known and low.
+ * ForceTight is harness-only. avail<=0 → no clamp.
+ * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-I3).
  */
 std::atomic<TxtJetsamCapsMode> g_mode{TxtJetsamCapsModeAdaptive};
 std::atomic<int64_t> g_avail_override{-1};

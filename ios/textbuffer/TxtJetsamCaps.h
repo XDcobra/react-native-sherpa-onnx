@@ -1,8 +1,9 @@
 #pragma once
 
 /**
- * D-I3: Jetsam-aware clamps for live text windowMaxChars / maxSegments (iOS 13+).
+ * Jetsam-aware clamps for live text windowMaxChars / maxSegments (iOS 13+).
  * Fallback = fixed caller defaults when mode is Off.
+ * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-I3).
  */
 
 #include <stdbool.h>
