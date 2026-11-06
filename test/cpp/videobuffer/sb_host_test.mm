@@ -65,6 +65,17 @@ TEST(SampleBufferHost, AudioRendererAcceptsFloat32) {
 TEST(SampleBufferHost, DisplayLayerFlushDoesNotFail) {
   AVSampleBufferDisplayLayer *layer = [[AVSampleBufferDisplayLayer alloc] init];
   ASSERT_NE(layer, nil);
-  [layer flush];
-  EXPECT_NE(layer.status, AVQueuedSampleBufferRenderingStatusFailed);
+  // macOS 15 / iOS 17+: layer.flush/status are deprecated; match production
+  // SampleBufferVideoRenderer and use sampleBufferRenderer.
+  if (@available(iOS 17.0, macOS 14.0, *)) {
+    [layer.sampleBufferRenderer flush];
+    EXPECT_NE(layer.sampleBufferRenderer.status,
+              AVQueuedSampleBufferRenderingStatusFailed);
+  } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    [layer flush];
+    EXPECT_NE(layer.status, AVQueuedSampleBufferRenderingStatusFailed);
+#pragma clang diagnostic pop
+  }
 }
