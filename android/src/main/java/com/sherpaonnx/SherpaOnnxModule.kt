@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
-import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import com.facebook.react.bridge.ReadableArray
