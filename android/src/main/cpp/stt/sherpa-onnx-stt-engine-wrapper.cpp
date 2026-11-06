@@ -838,13 +838,11 @@ SttRecognitionResult SttWrapper::transcribeFile(const std::string& filePath) {
             throw std::runtime_error("Audio too large to process");
         }
 
-        int32_t sample_rate = 0;
-        if (wave.sample_rate > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
-            LOGE("Sample rate too large: %u", wave.sample_rate);
+        if (wave.sample_rate <= 0) {
+            LOGE("Sample rate invalid: %d", wave.sample_rate);
             throw std::runtime_error("Unsupported sample rate");
-        } else {
-            sample_rate = static_cast<int32_t>(wave.sample_rate);
         }
+        const int32_t sample_rate = wave.sample_rate;
 
         int32_t n_samples = static_cast<int32_t>(wave.samples.size());
 

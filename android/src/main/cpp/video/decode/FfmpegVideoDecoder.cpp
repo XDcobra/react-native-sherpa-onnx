@@ -84,16 +84,19 @@ Status FfmpegVideoDecoder::Submit(const EncodedPacket& packet) {
   if (!configured_ || impl_->ctx == nullptr) {
     return Status::Fail(kErrDecoderUnavailable, "ffmpeg not configured");
   }
-  AVPacket pkt;
-  av_init_packet(&pkt);
-  pkt.data = const_cast<uint8_t*>(packet.payload.data());
-  pkt.size = static_cast<int>(packet.payload.size());
-  pkt.pts = packet.ptsUs;
-  pkt.dts = packet.dtsUs;
-  if (packet.flags & kSampleKey) {
-    pkt.flags |= AV_PKT_FLAG_KEY;
+  AVPacket* pkt = av_packet_alloc();
+  if (pkt == nullptr) {
+    return Status::Fail(kErrDecodeFailed, "av_packet_alloc");
   }
-  const int sent = avcodec_send_packet(impl_->ctx, &pkt);
+  pkt->data = const_cast<uint8_t*>(packet.payload.data());
+  pkt->size = static_cast<int>(packet.payload.size());
+  pkt->pts = packet.ptsUs;
+  pkt->dts = packet.dtsUs;
+  if (packet.flags & kSampleKey) {
+    pkt->flags |= AV_PKT_FLAG_KEY;
+  }
+  const int sent = avcodec_send_packet(impl_->ctx, pkt);
+  av_packet_free(&pkt);
   if (sent < 0) {
     VIDEO_LOGW("video.decode ffmpeg send fail ptsUs=%lld rc=%d",
                static_cast<long long>(packet.ptsUs), sent);

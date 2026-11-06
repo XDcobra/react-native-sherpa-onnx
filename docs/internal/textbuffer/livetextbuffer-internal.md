@@ -118,6 +118,10 @@ The spool provides **full-history retention** beyond the in-memory window using 
 | `'auto'` | Activate spool once a threshold is exceeded (e.g., `thresholdBytes`). |
 | `'off'` | No spool file. Only in-memory window/segment log. `fullIfSpooled` will fail. |
 
+**Journal write path (perf keeps C1–C3):**
+- Suffix-growing full text → `TEXT_PARTIAL_APPEND` (delta); non-prefix rewrite → `TEXT_PARTIAL_SET`.
+- Deferred `fflush` (64 KiB / 32 records); always flush on finalize.
+
 **Checkpoint policy:**
 - Checkpoint written every **128 events** or **1 MiB** journal growth, whichever comes first.
 - After checkpoint, the journal is rotated/truncated and a `CHECKPOINT_MARK` is emitted.

@@ -41,12 +41,6 @@ namespace ocr {
 namespace doctr {
 namespace {
 
-std::string JoinPath(const std::string& dir, const std::string& file) {
-  fs::path p(dir);
-  p /= file;
-  return p.string();
-}
-
 std::string FirstInputName(Ort::Session& session) {
   Ort::AllocatorWithDefaultOptions alloc;
   return session.GetInputNameAllocated(0, alloc).get();

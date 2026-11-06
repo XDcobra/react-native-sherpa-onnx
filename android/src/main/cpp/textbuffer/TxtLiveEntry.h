@@ -80,10 +80,25 @@ struct TxtLiveEntry {
 	static constexpr uint16_t kTextSpoolRecordCheckpoint = 4;
 	static constexpr uint16_t kTextSpoolRecordFinalize = 5;
 	static constexpr int kTextSpoolHeaderBytes = 16;
+	/** Defer fflush until this many unflushed journal bytes.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3). */
+	static constexpr int64_t kSpoolFlushBytes = 64 * 1024;
+	/** Defer fflush until this many unflushed journal records.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3). */
+	static constexpr int kSpoolFlushRecords = 32;
+	/** Checkpoint + journal rotate after this many journal events.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2). */
+	static constexpr int kSpoolCheckpointEvents = 128;
+	/** Checkpoint + journal rotate after this much journal growth.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2). */
+	static constexpr int64_t kSpoolCheckpointBytes = 1024 * 1024;
 
 	std::string bufferId;
 	State state = RECORDING;
 	std::string currentText;
+	/** Cached UTF-16 length of currentText (under stateMutex).
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C8). */
+	int currentUtf16Len_ = 0;
 	int64_t totalCharsWritten = 0;
 	std::atomic<int> revision{0};
 	int windowMaxChars = 65536;
@@ -108,6 +123,17 @@ struct TxtLiveEntry {
 	std::mutex stateMutex;
 	std::mutex spoolMutex;
 	FILE *spoolFile = nullptr;
+	/** Last full UTF-8 snapshot written to journal/checkpoint (under spoolMutex).
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1). */
+	std::string lastJournaledFull_;
+	/** Bytes/records written since last fflush (under spoolMutex).
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3). */
+	int64_t spoolUnflushedBytes_ = 0;
+	int spoolUnflushedRecords_ = 0;
+	/** Journal growth since last checkpoint rotate (under spoolMutex).
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2). */
+	int64_t journalEventsSinceCheckpoint_ = 0;
+	int64_t journalBytesSinceCheckpoint_ = 0;
 
 	~TxtLiveEntry() {
 		try {
@@ -350,15 +376,46 @@ struct TxtLiveEntry {
 		*checksum = crc;
 	}
 
+	/** Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C3). */
+	void flushSpoolJournalLocked() {
+		if (spoolFile == nullptr) {
+			return;
+		}
+		if (fflush(spoolFile) != 0) {
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to flush text journal for " + bufferId);
+		}
+		spoolUnflushedBytes_ = 0;
+		spoolUnflushedRecords_ = 0;
+	}
+
 	void closeSpoolFileLocked(bool flushFirst) {
 		if (spoolFile == nullptr) {
 			return;
 		}
 		if (flushFirst) {
-			fflush(spoolFile);
+			flushSpoolJournalLocked();
 		}
 		fclose(spoolFile);
 		spoolFile = nullptr;
+		spoolUnflushedBytes_ = 0;
+		spoolUnflushedRecords_ = 0;
+	}
+
+	/** Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C2). */
+	void checkpointAndRotateJournalLocked() {
+		flushSpoolJournalLocked();
+		writeCheckpointSnapshotLocked(lastJournaledFull_);
+		closeSpoolFileLocked(false);
+		spoolFile = fopen(journalPath().c_str(), "wb");
+		if (spoolFile == nullptr) {
+			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to rotate text journal for " + bufferId);
+		}
+		spoolBytes = 0;
+		journalEventsSinceCheckpoint_ = 0;
+		journalBytesSinceCheckpoint_ = 0;
+		spoolUnflushedBytes_ = 0;
+		spoolUnflushedRecords_ = 0;
+		spoolReady = true;
 	}
 
 	void appendSnapshotRecordLocked(uint16_t recordType, const std::string &snapshot) {
@@ -396,11 +453,27 @@ struct TxtLiveEntry {
 		if (len > 0 && fwrite(snapshot.data(), 1, len, spoolFile) != len) {
 			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to write text journal payload for " + bufferId);
 		}
-		if (fflush(spoolFile) != 0) {
-			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to flush text journal for " + bufferId);
+		const int64_t wrote = (int64_t)kTextSpoolHeaderBytes + (int64_t)len;
+		spoolUnflushedBytes_ += wrote;
+		spoolUnflushedRecords_ += 1;
+		if (recordType != kTextSpoolRecordCheckpoint && recordType != kTextSpoolRecordFinalize) {
+			journalEventsSinceCheckpoint_ += 1;
+			journalBytesSinceCheckpoint_ += wrote;
 		}
 		spoolBytes = ftell(spoolFile);
 		spoolReady = true;
+
+		if (recordType == kTextSpoolRecordFinalize ||
+			spoolUnflushedBytes_ >= kSpoolFlushBytes ||
+			spoolUnflushedRecords_ >= kSpoolFlushRecords) {
+			flushSpoolJournalLocked();
+		}
+
+		if (recordType != kTextSpoolRecordCheckpoint && recordType != kTextSpoolRecordFinalize &&
+			(journalEventsSinceCheckpoint_ >= kSpoolCheckpointEvents ||
+			 journalBytesSinceCheckpoint_ >= kSpoolCheckpointBytes)) {
+			checkpointAndRotateJournalLocked();
+		}
 	}
 
 	void writeCheckpointSnapshotLocked(const std::string &snapshot) {
@@ -463,8 +536,32 @@ struct TxtLiveEntry {
 			throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to create text journal file for " + bufferId);
 		}
 		spoolBytes = 0;
+		spoolUnflushedBytes_ = 0;
+		spoolUnflushedRecords_ = 0;
+		journalEventsSinceCheckpoint_ = 0;
+		journalBytesSinceCheckpoint_ = 0;
 		writeCheckpointSnapshotLocked(bootstrapSnapshot);
 		appendSnapshotRecordLocked(kTextSpoolRecordCheckpoint, "{}");
+		lastJournaledFull_ = bootstrapSnapshot;
+		journalEventsSinceCheckpoint_ = 0;
+		journalBytesSinceCheckpoint_ = 0;
+	}
+
+	/** PARTIAL_APPEND suffix when newFull extends lastJournaledFull_; else PARTIAL_SET. Equal → skip.
+	 * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1). */
+	void appendDeltaOrSetLocked(const std::string &newFull) {
+		if (newFull == lastJournaledFull_) {
+			return;
+		}
+		if (newFull.size() >= lastJournaledFull_.size() &&
+			newFull.compare(0, lastJournaledFull_.size(), lastJournaledFull_) == 0) {
+			const std::string suffix = newFull.substr(lastJournaledFull_.size());
+			lastJournaledFull_ = newFull;
+			appendSnapshotRecordLocked(kTextSpoolRecordPartialAppend, suffix);
+		} else {
+			lastJournaledFull_ = newFull;
+			appendSnapshotRecordLocked(kTextSpoolRecordPartialSet, newFull);
+		}
 	}
 
 	void maybeWriteSnapshotToSpool(const std::string &snapshot, bool mayActivateAuto) {
@@ -497,7 +594,7 @@ struct TxtLiveEntry {
 			}
 		}
 
-		appendSnapshotRecordLocked(kTextSpoolRecordPartialSet, snapshot);
+		appendDeltaOrSetLocked(snapshot);
 	}
 
 	void configureSpooling(SpoolingMode mode,
@@ -517,6 +614,11 @@ struct TxtLiveEntry {
 		{
 			std::lock_guard<std::mutex> lock(spoolMutex);
 			closeSpoolFileLocked(false);
+			lastJournaledFull_.clear();
+			spoolUnflushedBytes_ = 0;
+			spoolUnflushedRecords_ = 0;
+			journalEventsSinceCheckpoint_ = 0;
+			journalBytesSinceCheckpoint_ = 0;
 		}
 
 		if (spoolingMode == SPOOL_ON) {
@@ -535,25 +637,37 @@ struct TxtLiveEntry {
 		std::string bid;
 		int utf16LenSnap = 0;
 		int64_t revSnap = 0;
+		std::string spoolSnap;
+		bool doSpool = false;
 		{
 			std::lock_guard<std::mutex> lock(stateMutex);
 			if (state == FINISHED) {
 				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
 			}
-			int len = txt_utf16_length(text);
+			const int len = txt_utf16_length(text);
 			if (len > windowMaxChars) {
 				currentText = txt_utf16_suffix(text, windowMaxChars);
+				currentUtf16Len_ = windowMaxChars;
 			} else {
 				currentText = text;
+				currentUtf16Len_ = len;
 			}
 			totalCharsWritten += len;
 			revision.fetch_add(1);
-			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+			// Snapshot under stateMutex; spool I/O after unlock.
+			// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C4).
+			if (spoolEnabled()) {
+				spoolSnap = currentFullSnapshotLocked();
+				doSpool = true;
+			}
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
-			utf16LenSnap = txt_utf16_length(currentText);
+			utf16LenSnap = currentUtf16Len_;
 			revSnap = (int64_t)revision.load();
+		}
+		if (doSpool) {
+			maybeWriteSnapshotToSpool(spoolSnap, true);
 		}
 		// Outside stateMutex: the engine reads and commits the partial.
 		seg_engine_on_text_write(bid);
@@ -568,27 +682,37 @@ struct TxtLiveEntry {
 		std::string bid;
 		int utf16LenSnap = 0;
 		int64_t revSnap = 0;
+		std::string spoolSnap;
+		bool doSpool = false;
 		{
 			std::lock_guard<std::mutex> lock(stateMutex);
 			if (state == FINISHED) {
 				throw std::runtime_error("Live text buffer is finalized: " + bufferId);
 			}
+			const int appendLen = txt_utf16_length(text);
+			const int combinedLen = currentUtf16Len_ + appendLen;
 			std::string combined = currentText + text;
-			int len = txt_utf16_length(combined);
-			int appendLen = txt_utf16_length(text);
-			if (len > windowMaxChars) {
+			if (combinedLen > windowMaxChars) {
 				currentText = txt_utf16_suffix(combined, windowMaxChars);
+				currentUtf16Len_ = windowMaxChars;
 			} else {
-				currentText = combined;
+				currentText = std::move(combined);
+				currentUtf16Len_ = combinedLen;
 			}
 			totalCharsWritten += appendLen;
 			revision.fetch_add(1);
-			maybeWriteSnapshotToSpool(currentFullSnapshotLocked(), true);
+			if (spoolEnabled()) {
+				spoolSnap = currentFullSnapshotLocked();
+				doSpool = true;
+			}
 			shouldEmitPartial = emitPartialEvents;
 			minIntervalMs = partialEventMinIntervalMs;
 			bid = bufferId;
-			utf16LenSnap = txt_utf16_length(currentText);
+			utf16LenSnap = currentUtf16Len_;
 			revSnap = (int64_t)revision.load();
+		}
+		if (doSpool) {
+			maybeWriteSnapshotToSpool(spoolSnap, true);
 		}
 		seg_engine_on_text_write(bid);
 		if (shouldEmitPartial) {
@@ -604,6 +728,8 @@ struct TxtLiveEntry {
 		int committedSegmentIndex = -1;
 		TextSegment committedSegment;
 		bool hasCommittedSegment = false;
+		std::string spoolSnap;
+		bool doSpool = false;
 		{
 			std::lock_guard<std::mutex> stateLock(stateMutex);
 			if (state == FINISHED) {
@@ -618,10 +744,12 @@ struct TxtLiveEntry {
 				seg.source = source;
 				seg.segmentIndex = (int)(evictedCount + (int64_t)segments.size());
 				seg.metaJson = metaJsonArg;
-				committedSegment = seg;
-				hasCommittedSegment = true;
 				committedSegmentIndex = seg.segmentIndex;
+				// Push first, then one copy for notify.
+				// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C12).
 				segments.push_back(std::move(seg));
+				committedSegment = segments.back();
+				hasCommittedSegment = true;
 				if ((int)segments.size() > maxSegments) {
 					segments.pop_front();
 					evictedCount++;
@@ -640,12 +768,20 @@ struct TxtLiveEntry {
 				if (currentText.size() >= text.size() &&
 					currentText.compare(0, text.size(), text) == 0) {
 					currentText = currentText.substr(text.size());
+					currentUtf16Len_ = std::max(0, currentUtf16Len_ - charLen);
 				}
-				// Already hold segmentMutex — do not call currentFullSnapshotLocked().
-				maybeWriteSnapshotToSpool(
-					committedTextFromSegmentsLocked() + partialRemainderFromCurrentTextLocked(),
-					true);
+				// Never eagerly build full snapshot when spool is off; spool I/O after unlock.
+				// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C12).
+				// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C4).
+				if (spoolEnabled()) {
+					spoolSnap =
+						committedTextFromSegmentsLocked() + partialRemainderFromCurrentTextLocked();
+					doSpool = true;
+				}
 			}
+		}
+		if (doSpool) {
+			maybeWriteSnapshotToSpool(spoolSnap, true);
 		}
 		notifyAppendListeners();
 		if (hasCommittedSegment) {
@@ -667,9 +803,7 @@ struct TxtLiveEntry {
 			std::lock_guard<std::mutex> lock(spoolMutex);
 			if (spoolFile != nullptr) {
 				appendSnapshotRecordLocked(kTextSpoolRecordFinalize, "{}");
-				if (fflush(spoolFile) != 0) {
-					throwSpoolError("TEXT_SPOOL_WRITE_FAILED", "Failed to finalize text spool for " + bufferId);
-				}
+				flushSpoolJournalLocked();
 				closeSpoolFileLocked(false);
 			}
 		}
@@ -685,7 +819,7 @@ struct TxtLiveEntry {
 
 	int partialUtf16Length() {
 		std::lock_guard<std::mutex> lock(stateMutex);
-		return txt_utf16_length(currentText);
+		return currentUtf16Len_;
 	}
 
 	std::string snapshotFullTextIfSpooled() {
@@ -715,7 +849,7 @@ struct TxtLiveEntry {
 				throw makeCodedError("TEXT_SPOOL_UNAVAILABLE", "Text spool path is missing for " + bufferId);
 			}
 			if (spoolFile != nullptr) {
-				fflush(spoolFile);
+				flushSpoolJournalLocked();
 			}
 		}
 
@@ -823,11 +957,10 @@ struct TxtLiveEntry {
 					}
 
 					if (recordType == kTextSpoolRecordPartialSet) {
-						// Journal payloads are full snapshots from currentFullSnapshotLocked().
-						// Never shrink below the checkpoint baseline (stale partial windows).
-						if (payload.size() >= latest.size()) {
-							latest = payload;
-						}
+						// Full snapshots replace (incl. shrink). Legacy no-shrink was
+						// for partial-window-only SET helpers.
+						// Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C1).
+						latest = payload;
 					} else if (recordType == kTextSpoolRecordPartialAppend) {
 						latest += payload;
 					} else if (recordType == kTextSpoolRecordSegmentCommit) {

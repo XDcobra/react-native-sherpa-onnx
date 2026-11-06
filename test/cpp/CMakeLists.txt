@@ -93,8 +93,10 @@ target_include_directories(model_detect_test PRIVATE
 )
 
 find_package(GTest QUIET)
+# Link only gtest_main: it already depends on gtest. Listing both puts
+# libgtest.a twice on the link line (ld: ignoring duplicate libraries).
 if(GTest_FOUND)
-  target_link_libraries(model_detect_test PRIVATE GTest::gtest GTest::gtest_main)
+  target_link_libraries(model_detect_test PRIVATE GTest::gtest_main)
 else()
   include(FetchContent)
   FetchContent_Declare(
@@ -104,7 +106,7 @@ else()
   )
   set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
-  target_link_libraries(model_detect_test PRIVATE gtest gtest_main)
+  target_link_libraries(model_detect_test PRIVATE gtest_main)
   target_include_directories(model_detect_test PRIVATE ${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
 endif()
 
@@ -117,9 +119,9 @@ endif()
 if(TARGET PkgConfig::LIBAV)
   set(AUDIO_JNI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/jni/audio")
   if(GTest_FOUND)
-    set(AUDIO_GTEST_LIBS GTest::gtest GTest::gtest_main)
+    set(AUDIO_GTEST_LIBS GTest::gtest_main)
   else()
-    set(AUDIO_GTEST_LIBS gtest gtest_main)
+    set(AUDIO_GTEST_LIBS gtest_main)
   endif()
 
   add_executable(audio_f32le_to_format_host_test "${AUDIO_CONVERSION_TEST_DIR}/audio_f32le_host_test.cpp")
@@ -220,9 +222,9 @@ endif()
 set(DIARIZATION_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/diarization")
 set(DIARIZATION_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/diarization")
 if(GTest_FOUND)
-  set(DIARIZATION_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  set(DIARIZATION_GTEST_LIBS GTest::gtest_main)
 else()
-  set(DIARIZATION_GTEST_LIBS gtest gtest_main)
+  set(DIARIZATION_GTEST_LIBS gtest_main)
 endif()
 
 add_executable(diarization_core_test
@@ -269,9 +271,9 @@ set_tests_properties(diarization_core_test PROPERTIES
 set(SPEAKER_EMBEDDING_CORE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/speaker-embedding")
 set(SPEAKER_EMBEDDING_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/speaker-embedding")
 if(GTest_FOUND)
-  set(SPEAKER_EMBEDDING_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  set(SPEAKER_EMBEDDING_GTEST_LIBS GTest::gtest_main)
 else()
-  set(SPEAKER_EMBEDDING_GTEST_LIBS gtest gtest_main)
+  set(SPEAKER_EMBEDDING_GTEST_LIBS gtest_main)
 endif()
 
 add_executable(speaker_embedding_core_test
@@ -353,9 +355,9 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(ctc_alignment_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(ctc_alignment_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(ctc_alignment_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(ctc_alignment_host_test PRIVATE gtest_main)
   endif()
 
   add_test(NAME ctc_alignment_host_test COMMAND $<TARGET_FILE:ctc_alignment_host_test>)
@@ -445,9 +447,9 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(ppocr_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(ppocr_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(ppocr_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(ppocr_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME ppocr_host_test COMMAND $<TARGET_FILE:ppocr_host_test>)
   set_tests_properties(ppocr_host_test PROPERTIES
@@ -506,9 +508,9 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(doctr_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(doctr_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(doctr_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(doctr_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME doctr_host_test COMMAND $<TARGET_FILE:doctr_host_test>)
   set_tests_properties(doctr_host_test PROPERTIES
@@ -558,9 +560,9 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(doc_vlm_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(doc_vlm_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(doc_vlm_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(doc_vlm_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME doc_vlm_host_test COMMAND $<TARGET_FILE:doc_vlm_host_test>)
   set_tests_properties(doc_vlm_host_test PROPERTIES
@@ -603,9 +605,9 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(nemotron_parse_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(nemotron_parse_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(nemotron_parse_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(nemotron_parse_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME nemotron_parse_host_test COMMAND $<TARGET_FILE:nemotron_parse_host_test>)
   set_tests_properties(nemotron_parse_host_test PROPERTIES
@@ -645,9 +647,9 @@ if(_ORT_HOST_INCLUDE AND _ORT_HOST_LIBDIR)
     INSTALL_RPATH "${_ORT_HOST_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(paddleocr_vl_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(paddleocr_vl_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(paddleocr_vl_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(paddleocr_vl_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME paddleocr_vl_host_test COMMAND $<TARGET_FILE:paddleocr_vl_host_test>)
   set_tests_properties(paddleocr_vl_host_test PROPERTIES
@@ -663,9 +665,9 @@ endif()
 set(IMAGE_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image")
 set(IMAGEBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/imagebuffer")
 if(GTest_FOUND)
-  set(IMAGEBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  set(IMAGEBUFFER_GTEST_LIBS GTest::gtest_main)
 else()
-  set(IMAGEBUFFER_GTEST_LIBS gtest gtest_main)
+  set(IMAGEBUFFER_GTEST_LIBS gtest_main)
 endif()
 
 set(PDF_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/pdf")
@@ -756,9 +758,9 @@ set_tests_properties(imagebuffer_host_test PROPERTIES
 set(AUDIOBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/audiobuffer")
 set(AUDIOBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/audiobuffer")
 if(TARGET gtest AND TARGET gtest_main)
-  set(AUDIOBUFFER_GTEST_LIBS gtest gtest_main)
+  set(AUDIOBUFFER_GTEST_LIBS gtest_main)
 else()
-  set(AUDIOBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  set(AUDIOBUFFER_GTEST_LIBS GTest::gtest_main)
 endif()
 add_executable(audiobuffer_host_test
   "${AUDIOBUFFER_TEST_DIR}/audiobuffer_registry_test.cpp"
@@ -779,22 +781,34 @@ set_tests_properties(audiobuffer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
-# TextBuffer shared registry host tests (always-on + opt-in spool via SHERPA_HOST_TEXT_SPOOL=1)
+# TextBuffer shared registry host tests (always-on, including TXT2 spool)
 set(TEXTBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/textbuffer")
 set(TEXTBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/textbuffer")
 if(TARGET gtest AND TARGET gtest_main)
-  set(TEXTBUFFER_GTEST_LIBS gtest gtest_main)
+  set(TEXTBUFFER_GTEST_LIBS gtest_main)
 else()
-  set(TEXTBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  set(TEXTBUFFER_GTEST_LIBS GTest::gtest_main)
 endif()
 find_package(ZLIB REQUIRED)
-add_executable(textbuffer_host_test
+set(TEXTBUFFER_IOS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../ios/textbuffer")
+set(TEXTBUFFER_HOST_SOURCES
   "${TEXTBUFFER_TEST_DIR}/textbuffer_registry_test.cpp"
   "${TEXTBUFFER_CPP_ROOT}/TextRegistry.cpp"
 )
+if(APPLE)
+  list(APPEND TEXTBUFFER_HOST_SOURCES "${TEXTBUFFER_IOS_ROOT}/TxtJetsamCaps.mm")
+endif()
+add_executable(textbuffer_host_test ${TEXTBUFFER_HOST_SOURCES})
 target_include_directories(textbuffer_host_test PRIVATE
   "${TEXTBUFFER_CPP_ROOT}"
 )
+if(APPLE)
+  target_include_directories(textbuffer_host_test PRIVATE "${TEXTBUFFER_IOS_ROOT}")
+  set_source_files_properties(
+    "${TEXTBUFFER_IOS_ROOT}/TxtJetsamCaps.mm"
+    PROPERTIES COMPILE_FLAGS "-fobjc-arc"
+  )
+endif()
 target_link_libraries(textbuffer_host_test PRIVATE ${TEXTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
 add_test(NAME textbuffer_host_test COMMAND $<TARGET_FILE:textbuffer_host_test>)
 set_tests_properties(textbuffer_host_test PROPERTIES
@@ -803,13 +817,13 @@ set_tests_properties(textbuffer_host_test PROPERTIES
 
 
 
-# SegmentBuffer shared registry host tests (always-on + opt-in spool via SHERPA_HOST_SEGMENT_SPOOL=1)
+# SegmentBuffer shared registry host tests (always-on, including SEG2 spool smoke)
 set(SEGMENTBUFFER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/segmentbuffer")
 set(SEGMENTBUFFER_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}/segmentbuffer")
 if(TARGET gtest AND TARGET gtest_main)
-  set(SEGMENTBUFFER_GTEST_LIBS gtest gtest_main)
+  set(SEGMENTBUFFER_GTEST_LIBS gtest_main)
 else()
-  set(SEGMENTBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  set(SEGMENTBUFFER_GTEST_LIBS GTest::gtest_main)
 endif()
 find_package(ZLIB REQUIRED)
 add_executable(segmentbuffer_host_test
@@ -857,13 +871,13 @@ set_tests_properties(segengine_host_test PROPERTIES
 # PDF text-layer host test (disabled path by default; no PDFium required)
 set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 if(TARGET gtest AND TARGET gtest_main)
-  set(PDF_GTEST_LIBS gtest gtest_main)
+  set(PDF_GTEST_LIBS gtest_main)
 else()
   find_package(GTest QUIET)
   if(GTest_FOUND)
-    set(PDF_GTEST_LIBS GTest::gtest GTest::gtest_main)
+    set(PDF_GTEST_LIBS GTest::gtest_main)
   else()
-    set(PDF_GTEST_LIBS gtest gtest_main)
+    set(PDF_GTEST_LIBS gtest_main)
   endif()
 endif()
 
@@ -958,9 +972,9 @@ set(CODEC_SOURCES
   "${CODEC_CPP_ROOT}/codec/CodecRuntime.cpp"
 )
 if(GTest_FOUND)
-  set(CODEC_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  set(CODEC_GTEST_LIBS GTest::gtest_main)
 else()
-  set(CODEC_GTEST_LIBS gtest gtest_main)
+  set(CODEC_GTEST_LIBS gtest_main)
 endif()
 add_executable(codec_host_test
   "${CMAKE_CURRENT_SOURCE_DIR}/codec/codec_plan_test.cpp"
@@ -990,9 +1004,9 @@ set(LIBYUV_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libyuv")
 set(LIBYUV_PREBUILT "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/libyuv_prebuilt")
 if(EXISTS "${LIBYUV_ROOT}/include/libyuv.h")
 if(GTest_FOUND)
-  set(VIDEOBUFFER_GTEST_LIBS GTest::gtest GTest::gtest_main)
+  set(VIDEOBUFFER_GTEST_LIBS GTest::gtest_main)
 else()
-  set(VIDEOBUFFER_GTEST_LIBS gtest gtest_main)
+  set(VIDEOBUFFER_GTEST_LIBS gtest_main)
 endif()
 
 if(NOT TARGET yuv)
@@ -1267,9 +1281,9 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
     INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(slid_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(slid_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(slid_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(slid_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME slid_host_test COMMAND $<TARGET_FILE:slid_host_test>)
   set_tests_properties(slid_host_test PROPERTIES
@@ -1310,9 +1324,9 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
   )
   if(TARGET GTest::gtest)
     target_link_libraries(audio_tagging_host_test PRIVATE
-      GTest::gtest GTest::gtest_main)
+      GTest::gtest_main)
   else()
-    target_link_libraries(audio_tagging_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(audio_tagging_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME audio_tagging_host_test
     COMMAND $<TARGET_FILE:audio_tagging_host_test>)
@@ -1354,9 +1368,9 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
   )
   if(TARGET GTest::gtest)
     target_link_libraries(punctuation_host_test PRIVATE
-      GTest::gtest GTest::gtest_main)
+      GTest::gtest_main)
   else()
-    target_link_libraries(punctuation_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(punctuation_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME punctuation_host_test
     COMMAND $<TARGET_FILE:punctuation_host_test>)
@@ -1397,9 +1411,9 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
     INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(vad_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(vad_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(vad_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(vad_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME vad_host_test COMMAND $<TARGET_FILE:vad_host_test>)
   set_tests_properties(vad_host_test PROPERTIES
@@ -1439,9 +1453,9 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
     INSTALL_RPATH "${_SLID_HOST_LIBDIR};${_SLID_ORT_LIBDIR}"
   )
   if(TARGET GTest::gtest)
-    target_link_libraries(kws_host_test PRIVATE GTest::gtest GTest::gtest_main)
+    target_link_libraries(kws_host_test PRIVATE GTest::gtest_main)
   else()
-    target_link_libraries(kws_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(kws_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME kws_host_test COMMAND $<TARGET_FILE:kws_host_test>)
   set_tests_properties(kws_host_test PROPERTIES
@@ -1489,9 +1503,9 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
   )
   if(TARGET GTest::gtest)
     target_link_libraries(stt_offline_host_test PRIVATE
-      GTest::gtest GTest::gtest_main)
+      GTest::gtest_main)
   else()
-    target_link_libraries(stt_offline_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(stt_offline_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME stt_offline_host_test
     COMMAND $<TARGET_FILE:stt_offline_host_test>)
@@ -1540,9 +1554,9 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
   )
   if(TARGET GTest::gtest)
     target_link_libraries(stt_online_host_test PRIVATE
-      GTest::gtest GTest::gtest_main)
+      GTest::gtest_main)
   else()
-    target_link_libraries(stt_online_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(stt_online_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME stt_online_host_test
     COMMAND $<TARGET_FILE:stt_online_host_test>)
@@ -1592,9 +1606,9 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
   )
   if(TARGET GTest::gtest)
     target_link_libraries(tts_host_test PRIVATE
-      GTest::gtest GTest::gtest_main)
+      GTest::gtest_main)
   else()
-    target_link_libraries(tts_host_test PRIVATE gtest gtest_main)
+    target_link_libraries(tts_host_test PRIVATE gtest_main)
   endif()
   add_test(NAME tts_host_test COMMAND $<TARGET_FILE:tts_host_test>)
   set_tests_properties(tts_host_test PROPERTIES

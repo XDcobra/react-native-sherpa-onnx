@@ -38,6 +38,7 @@ std::unique_ptr<PdfLazySession> PdfLazySession::Open(
 
 #if !(defined(HAVE_PDFIUM) && HAVE_PDFIUM)
   (void)src;
+  (void)max_side;
   (void)password;
   (void)IsPdfiumCompiledIn();
   if (err_code) *err_code = kErrDisabled;

@@ -2,7 +2,7 @@
  * Host tests for shared SegmentRegistry / Seg* (no device required).
  *
  * Always-on: create/release, offline, live append/finalize, link-map CRUD.
- * Opt-in spool: SHERPA_HOST_SEGMENT_SPOOL=1 ./segmentbuffer_host_test
+ * Spool: always-on SEG2 smoke (temp files under fixture cache dir).
  *
  * Build: cmake -S test/cpp -B test/cpp/build && cmake --build test/cpp/build --target segmentbuffer_host_test
  */
@@ -323,11 +323,7 @@ TEST_F(SegmentRegistryFixture, SpeechPayload_AcceptAndReject) {
   EXPECT_TRUE(seg_release_buffer(id));
 }
 
-TEST_F(SegmentRegistryFixture, OptInSpool_SkippedWithoutEnv) {
-  const char *flag = std::getenv("SHERPA_HOST_SEGMENT_SPOOL");
-  if (flag == nullptr || std::string(flag) != "1") {
-    GTEST_SKIP() << "Set SHERPA_HOST_SEGMENT_SPOOL=1 for SEG2 spool opt-in test";
-  }
+TEST_F(SegmentRegistryFixture, Spool_WriteFinalizeFullIfSpooled) {
   std::string id;
   std::string err;
   std::string spool = (cacheDir_ / "spool").string();

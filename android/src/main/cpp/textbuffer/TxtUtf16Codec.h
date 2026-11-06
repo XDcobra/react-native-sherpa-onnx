@@ -118,3 +118,104 @@ inline std::vector<uint16_t> txt_utf16_from_utf8(const std::string &utf8) {
   }
   return out;
 }
+
+/**
+ * One-pass UTF-16-indexed slice → UTF-16 units (no UTF-8 substring + re-encode).
+ * Same window rules as txt_utf16_slice (no splitting surrogate pairs).
+ * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-A2).
+ */
+inline std::vector<uint16_t> txt_utf16_slice_units(const std::string &utf8, int startUnits,
+                                                   int maxUnits) {
+  std::vector<uint16_t> out;
+  if (startUnits < 0 || maxUnits <= 0) return out;
+  out.reserve(static_cast<size_t>(maxUnits));
+
+  const unsigned char *p = reinterpret_cast<const unsigned char *>(utf8.data());
+  const unsigned char *end = p + utf8.size();
+
+  int seen = 0;
+  while (p < end && seen < startUnits) {
+    size_t adv = 1;
+    int units = 1;
+    txt_utf16_advance(p, end, &adv, &units);
+    if (seen + units > startUnits) {
+      p += adv;
+      seen += units;
+      break;
+    }
+    p += adv;
+    seen += units;
+  }
+  if (seen < startUnits) return out;
+
+  int taken = 0;
+  while (p < end && taken < maxUnits) {
+    unsigned char c = *p;
+    uint32_t cp = 0;
+    size_t need = 1;
+    int units = 1;
+    if (c < 0x80) {
+      cp = c;
+      need = 1;
+      units = 1;
+    } else if ((c >> 5) == 0x6) {
+      need = 2;
+      units = 1;
+      if (p + 1 >= end || (p[1] & 0xC0) != 0x80) {
+        if (taken + 1 > maxUnits) break;
+        out.push_back(0xFFFD);
+        ++p;
+        taken += 1;
+        continue;
+      }
+      cp = ((uint32_t)(c & 0x1F) << 6) | (uint32_t)(p[1] & 0x3F);
+    } else if ((c >> 4) == 0xE) {
+      need = 3;
+      units = 1;
+      if (p + 2 >= end || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) {
+        if (taken + 1 > maxUnits) break;
+        out.push_back(0xFFFD);
+        ++p;
+        taken += 1;
+        continue;
+      }
+      cp = ((uint32_t)(c & 0x0F) << 12) | ((uint32_t)(p[1] & 0x3F) << 6) | (uint32_t)(p[2] & 0x3F);
+    } else if ((c >> 3) == 0x1E) {
+      need = 4;
+      units = 2;
+      if (p + 3 >= end || (p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80 || (p[3] & 0xC0) != 0x80) {
+        if (taken + 1 > maxUnits) break;
+        out.push_back(0xFFFD);
+        ++p;
+        taken += 1;
+        continue;
+      }
+      cp = ((uint32_t)(c & 0x07) << 18) | ((uint32_t)(p[1] & 0x3F) << 12) |
+           ((uint32_t)(p[2] & 0x3F) << 6) | (uint32_t)(p[3] & 0x3F);
+    } else {
+      if (taken + 1 > maxUnits) break;
+      out.push_back(0xFFFD);
+      ++p;
+      taken += 1;
+      continue;
+    }
+    if (taken + units > maxUnits) break;
+    p += need;
+    if (cp >= 0xD800 && cp <= 0xDFFF) {
+      out.push_back(0xFFFD);
+      taken += 1;
+    } else if (cp <= 0xFFFF) {
+      out.push_back(static_cast<uint16_t>(cp));
+      taken += 1;
+    } else if (cp <= 0x10FFFF) {
+      cp -= 0x10000;
+      out.push_back(static_cast<uint16_t>(0xD800 + (cp >> 10)));
+      out.push_back(static_cast<uint16_t>(0xDC00 + (cp & 0x3FF)));
+      taken += 2;
+    } else {
+      out.push_back(0xFFFD);
+      taken += 1;
+    }
+  }
+  return out;
+}

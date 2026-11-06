@@ -282,6 +282,7 @@ void seg_live_emit_appended(const std::string &liveBufferId, const std::string &
 
 bool seg_create_empty_offline(const std::string &sourceAudioBufferIdOrEmpty, std::string *bufferIdOut,
                               std::string *error) {
+  (void)error;
   auto entry = std::make_shared<SegOfflineEntry>();
   entry->bufferId = seg_generate_id("seg_off");
   entry->sourceAudioBufferId = sourceAudioBufferIdOrEmpty;

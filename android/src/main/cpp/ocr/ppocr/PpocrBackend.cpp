@@ -49,12 +49,6 @@ static const float kDetNorm[3] = {0.229f, 0.224f, 0.225f};
 static const float kRecMean[3] = {0.5f, 0.5f, 0.5f};
 static const float kRecNorm[3] = {0.5f, 0.5f, 0.5f};
 
-std::string JoinPath(const std::string& dir, const std::string& file) {
-  fs::path p(dir);
-  p /= file;
-  return p.string();
-}
-
 std::string FirstInputName(Ort::Session& session) {
   Ort::AllocatorWithDefaultOptions alloc;
   return session.GetInputNameAllocated(0, alloc).get();

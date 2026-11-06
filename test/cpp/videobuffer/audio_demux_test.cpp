@@ -78,6 +78,8 @@ TEST(AudioDemux, MkvOpusOpens) {
   ASSERT_TRUE(st.ok) << st.errorMessage;
   ASSERT_TRUE(d.hasAudio());
   EXPECT_EQ(d.audioTrack()->codec, AudioCodec::Opus);
+  // Cue-sparse FFmpeg indexes must not seed the timeline; Open scans packets.
+  EXPECT_GT(d.audioTimeline().size(), 50);
 }
 
 TEST(AudioDemux, UnsupportedAc3NotDecodable) {

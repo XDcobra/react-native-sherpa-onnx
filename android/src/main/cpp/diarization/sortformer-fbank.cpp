@@ -131,7 +131,6 @@ void SortformerFbank::BuildMelFilterbank() {
 
   for (int32_t i = 0; i < n_mels; ++i) {
     double p_left = mel_points[static_cast<size_t>(i)];
-    double p_mid = mel_points[static_cast<size_t>(i + 1)];
     double p_right = mel_points[static_cast<size_t>(i + 2)];
     double df_left = fdiff[static_cast<size_t>(i)];
     double df_right = fdiff[static_cast<size_t>(i + 1)];

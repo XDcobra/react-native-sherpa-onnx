@@ -82,22 +82,6 @@ std::string ChooseBestModelFile(
     return chosen;
 }
 
-namespace {
-
-std::string ChooseLargest(
-    const std::vector<FileEntry>& files,
-    const std::vector<std::string>& excludeTokens,
-    bool onlyInt8,
-    bool onlyNonInt8
-) {
-    std::string quant = "";
-    if (onlyInt8) quant = "int8";
-    else if (onlyNonInt8) quant = "fp32";
-    return ChooseBestModelFile(files, excludeTokens, quant);
-}
-
-} // namespace
-
 bool FileExists(const std::string& path) {
 #if __cplusplus >= 201703L && __has_include(<filesystem>)
     return std::filesystem::exists(path);

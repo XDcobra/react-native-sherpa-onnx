@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
-import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import com.facebook.react.bridge.ReadableArray
@@ -286,33 +285,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       NAME,
     )
   private var micToLiveSink: com.sherpaonnx.audio.pipeline.MicToLiveBufferSink? = null
-  private val liveTextPartialLastEmitAtMs = ConcurrentHashMap<String, Long>()
   private fun maybeEmitLiveTextPartial(
     entry: com.sherpaonnx.text.pipeline.LiveTextEntry,
     source: String,
   ) {
-    if (!entry.emitPartialEvents) return
-
-    val now = SystemClock.elapsedRealtime()
-    val minInterval = entry.partialEventMinIntervalMs.coerceAtLeast(0L)
-    val last = liveTextPartialLastEmitAtMs[entry.bufferId] ?: 0L
-    if (minInterval > 0L && last > 0L && (now - last) < minInterval) {
-      return
-    }
-    liveTextPartialLastEmitAtMs[entry.bufferId] = now
-
-    try {
-      val eventEmitter = reactApplicationContext
-        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-      val payload = Arguments.createMap()
-      payload.putString("liveBufferId", entry.bufferId)
-      payload.putString("source", source)
-      payload.putInt("utf16Length", entry.partialUtf16Length)
-      payload.putInt("revision", entry.revision)
-      eventEmitter.emit("pipelineLiveTextPartial", payload)
-    } catch (_: Exception) {
-      // JS bridge may be unavailable during teardown.
-    }
+    com.sherpaonnx.textbuffer.LiveTextPartialEmitPolicy.maybeEmit(
+      reactApplicationContext,
+      entry,
+      source,
+    )
   }
 
   private fun emitLiveTextSegment(
@@ -431,7 +412,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     micToLiveSink?.stop()
     micToLiveSink = null
     com.sherpaonnx.text.pipeline.TextPipelineRegistry.liveTextPartialEmitter = null
-    liveTextPartialLastEmitAtMs.clear()
+    com.sherpaonnx.textbuffer.LiveTextPartialEmitPolicy.clearThrottleState()
     onlineSttHelper.shutdown()
     kwsHelper.shutdown()
     commonTtsHelper.shutdown()

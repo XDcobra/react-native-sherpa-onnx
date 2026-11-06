@@ -1,4 +1,5 @@
 #include "TextRegistry.h"
+#include "TxtUtf16Codec.h"
 
 #include <chrono>
 #include <cstdio>
@@ -308,6 +309,45 @@ bool txt_copy_live_snapshot_utf16_slice(const std::string &liveBufferId, int sta
   }
 }
 
+bool txt_copy_offline_text_utf16_units(const std::string &bufferId, int startUtf16, int maxUtf16,
+                                       std::vector<uint16_t> *out, std::string *error) {
+  if (!out) {
+    if (error) *error = "Output vector is null";
+    return false;
+  }
+  auto entry = txt_get_offline_entry(bufferId);
+  if (!entry) {
+    if (error) *error = "Offline text buffer not found";
+    return false;
+  }
+  *out = txt_utf16_slice_units(entry->text, startUtf16, maxUtf16);
+  return true;
+}
+
+bool txt_copy_live_snapshot_utf16_units(const std::string &liveBufferId, int startUtf16,
+                                        int maxUtf16, std::vector<uint16_t> *out,
+                                        std::string *error) {
+  if (!out) {
+    if (error) *error = "Output vector is null";
+    return false;
+  }
+  auto live = txt_get_live_entry(liveBufferId);
+  if (!live) {
+    if (error) *error = "Live text buffer not found";
+    return false;
+  }
+  try {
+    *out = txt_utf16_slice_units(live->snapshotText(), startUtf16, maxUtf16);
+    return true;
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return false;
+  } catch (...) {
+    if (error) *error = "Unknown live text snapshot utf16 units error";
+    return false;
+  }
+}
+
 bool txt_populate_offline_if_empty(const std::string &bufferId, const std::string &text,
                                    const std::vector<std::string> &tokens,
                                    const std::vector<float> &timestamps,
@@ -325,21 +365,27 @@ bool txt_populate_offline_if_empty(const std::string &bufferId, const std::strin
                                    const std::string &emotion, const std::string &event,
                                    const std::vector<TxtSpatialSpan> &spatialSpans,
                                    std::string *error) {
-  std::lock_guard<std::mutex> lock(g_txt_mutex);
-  auto it = g_txt_offline.find(bufferId);
-  if (it == g_txt_offline.end() || !it->second) {
-    if (error) *error = "Offline text buffer not found";
-    return false;
+  // Hold g_txt_mutex only for map lookup; copy under entry populateMutex.
+  // Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C5).
+  std::shared_ptr<TxtOfflineEntry> entry;
+  {
+    std::lock_guard<std::mutex> lock(g_txt_mutex);
+    auto it = g_txt_offline.find(bufferId);
+    if (it == g_txt_offline.end() || !it->second) {
+      if (error) *error = "Offline text buffer not found";
+      return false;
+    }
+    entry = it->second;
   }
-  if (it->second->populated) {
+  if (!entry->tryPopulate(text, tokens, timestamps, durations, lang, emotion, event, spatialSpans)) {
     if (error) *error = "Text buffer already populated";
     return false;
   }
-  it->second->populate(text, tokens, timestamps, durations, lang, emotion, event, spatialSpans);
   return true;
 }
 
 bool txt_create_empty_offline(std::string *bufferIdOut, std::string *error) {
+  (void)error;
   auto entry = std::make_shared<TxtOfflineEntry>();
   entry->bufferId = txt_generate_id("txt_off_");
   {
@@ -353,6 +399,7 @@ bool txt_create_empty_offline(std::string *bufferIdOut, std::string *error) {
 bool txt_create_offline_from_text(const std::string &text, const std::string &lang,
                                   const std::string &emotion, const std::string &event,
                                   std::string *bufferIdOut, std::string *error) {
+  (void)error;
   auto entry = std::make_shared<TxtOfflineEntry>();
   entry->bufferId = txt_generate_id("txt_off_");
   entry->populate(text, {}, {}, {}, lang, emotion, event, {});
@@ -368,26 +415,31 @@ bool txt_create_live(int windowMaxChars, int maxSegments, bool emitPartialEvents
                      int64_t partialEventMinIntervalMs, const std::string &spoolMode,
                      const std::string &spoolPathOrEmpty, bool spoolTemporary,
                      std::string *bufferIdOut, std::string *error) {
-  auto entry = std::make_shared<TxtLiveEntry>();
-  entry->bufferId = txt_generate_id("txt_live_");
-  entry->windowMaxChars = windowMaxChars > 0 ? windowMaxChars : 65536;
-  entry->maxSegments = maxSegments > 0 ? maxSegments : 1000;
-  entry->emitPartialEvents = emitPartialEvents;
-  entry->partialEventMinIntervalMs = partialEventMinIntervalMs;
-  entry->spoolingMode = parseSpoolMode(spoolMode);
-  entry->spoolTemporary = spoolTemporary;
-  if (entry->spoolEnabled()) {
-    entry->spoolPath =
-        spoolPathOrEmpty.empty()
-            ? (txt_temp_dir() + "/txt_spool_" + makeUuidLike() + ".bin")
-            : spoolPathOrEmpty;
+  try {
+    auto entry = std::make_shared<TxtLiveEntry>();
+    entry->bufferId = txt_generate_id("txt_live_");
+    entry->windowMaxChars = windowMaxChars > 0 ? windowMaxChars : 65536;
+    entry->maxSegments = maxSegments > 0 ? maxSegments : 1000;
+    entry->emitPartialEvents = emitPartialEvents;
+    entry->partialEventMinIntervalMs = partialEventMinIntervalMs;
+    entry->spoolingMode = parseSpoolMode(spoolMode);
+    entry->spoolTemporary = spoolTemporary;
+    if (entry->spoolEnabled()) {
+      entry->spoolPath =
+          spoolPathOrEmpty.empty()
+              ? (txt_temp_dir() + "/txt_spool_" + makeUuidLike() + ".bin")
+              : spoolPathOrEmpty;
+    }
+    {
+      std::lock_guard<std::mutex> lock(g_txt_mutex);
+      g_txt_live[entry->bufferId] = entry;
+    }
+    if (bufferIdOut) *bufferIdOut = entry->bufferId;
+    return true;
+  } catch (const std::exception &e) {
+    if (error) *error = e.what();
+    return false;
   }
-  {
-    std::lock_guard<std::mutex> lock(g_txt_mutex);
-    g_txt_live[entry->bufferId] = entry;
-  }
-  if (bufferIdOut) *bufferIdOut = entry->bufferId;
-  return true;
 }
 
 bool txt_finalize_live(const std::string &liveBufferId, std::string *error) {

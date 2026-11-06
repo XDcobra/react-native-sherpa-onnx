@@ -51,6 +51,7 @@ int ClampQuality(int q) {
   return q;
 }
 
+#if defined(HAVE_LIBWEBP)
 bool WriteBytesToFile(const std::string& path, const uint8_t* data, size_t size) {
   if (!data || size == 0) return false;
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
@@ -59,6 +60,7 @@ bool WriteBytesToFile(const std::string& path, const uint8_t* data, size_t size)
             static_cast<std::streamsize>(size));
   return static_cast<bool>(out);
 }
+#endif
 
 struct StbStreamCtx {
   std::ofstream* out = nullptr;

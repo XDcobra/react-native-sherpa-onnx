@@ -326,11 +326,10 @@ Result<VideoFrameLease> DecodeSession::SeekAndAcquire(const FrameRequest& req) {
 
   const int64_t keyPres = timeline_->KeyframeAtOrBefore(pres);
   const int64_t keyDec = timeline_->DecodeIndexOf(keyPres);
-  const int64_t targetDec = timeline_->DecodeIndexOf(pres);
   // Lookahead can leave lastDecodeIndex_ past this presentation target.
-  // That is still the same GOP — DecodeThrough then only drains. Requiring
-  // lastDecodeIndex_ < targetDec forced a Flush+resubmit every frame and
-  // starved SW MediaCodec input (MOV/MKV "input buffer").
+  // That is still the same GOP — DecodeThrough then only drains. Do not
+  // require lastDecodeIndex_ < DecodeIndexOf(pres): that forced a
+  // Flush+resubmit every frame and starved SW MediaCodec input.
   const bool sameGop =
       lastDecodeIndex_ >= keyDec && lastKeyframePres_ == keyPres;
   if (!sameGop) {

@@ -42,6 +42,15 @@ jstring contentUtf8ToJstring(JNIEnv *env, const std::string &s) {
   return env->NewString(reinterpret_cast<const jchar *>(units.data()), (jsize)units.size());
 }
 
+/** NewString from UTF-16 units (no UTF-8 intermediate).
+ * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (D-A2). */
+jstring utf16UnitsToJstring(JNIEnv *env, const std::vector<uint16_t> &units) {
+  if (units.empty()) {
+    return env->NewString(nullptr, 0);
+  }
+  return env->NewString(reinterpret_cast<const jchar *>(units.data()), (jsize)units.size());
+}
+
 void appendJsonEscaped(std::ostringstream &out, const std::string &s) {
   out << '"';
   for (unsigned char c : s) {
@@ -312,23 +321,25 @@ Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeReadOfflineText(JNIEnv 
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeReadOfflineTextSlice(
     JNIEnv *env, jclass, jstring bufferId, jint startUtf16, jint maxUtf16) {
-  std::string text, err;
-  if (!txt_copy_offline_text_utf16_slice(jstringToUtf8(env, bufferId), startUtf16, maxUtf16, &text,
+  std::vector<uint16_t> units;
+  std::string err;
+  if (!txt_copy_offline_text_utf16_units(jstringToUtf8(env, bufferId), startUtf16, maxUtf16, &units,
                                          &err)) {
     return nullptr;
   }
-  return contentUtf8ToJstring(env, text);
+  return utf16UnitsToJstring(env, units);
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_text_pipeline_TextBufferNative_nativeSnapshotTextSlice(
     JNIEnv *env, jclass, jstring liveId, jint startUtf16, jint maxUtf16) {
-  std::string text, err;
-  if (!txt_copy_live_snapshot_utf16_slice(jstringToUtf8(env, liveId), startUtf16, maxUtf16, &text,
+  std::vector<uint16_t> units;
+  std::string err;
+  if (!txt_copy_live_snapshot_utf16_units(jstringToUtf8(env, liveId), startUtf16, maxUtf16, &units,
                                           &err)) {
     return nullptr;
   }
-  return contentUtf8ToJstring(env, text);
+  return utf16UnitsToJstring(env, units);
 }
 
 JNIEXPORT jboolean JNICALL

@@ -275,7 +275,7 @@ Status WriteVideoPacket(AVFormatContext* fmt, AVStream* vs,
 }
 
 Status MuxAudioFromPcm(AVFormatContext* fmt, AVStream* as, AVCodecContext* enc,
-                       SwrContext* swr, const std::string& pcmPath, int srcRate,
+                       SwrContext* swr, const std::string& pcmPath,
                        std::atomic<bool>* cancel) {
   const int fd = open(pcmPath.c_str(), O_RDONLY);
   if (fd < 0) {
@@ -807,7 +807,7 @@ Status VideoExportSession::Run(const std::string& bufferId,
   entry->DropStickySession();
 
   if (as && aenc && swr && !pcmPath.empty()) {
-    auto ast = MuxAudioFromPcm(av.fmt, as, aenc, swr, pcmPath, pcmRate, cancel);
+    auto ast = MuxAudioFromPcm(av.fmt, as, aenc, swr, pcmPath, cancel);
     if (!ast.ok) {
       return ast;
     }
