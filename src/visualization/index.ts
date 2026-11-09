@@ -11,10 +11,14 @@ import type {
   AudioVisualizationOptions,
   AudioVisualizationProfile,
   AudioVisualizationTimeAggregate,
+  ComputeAudioVisualizationProfileOptions,
+  PersistAudioVisualizationProfile,
+  SavedAudioVisualizationRef,
   VisualizationProgressEvent,
   VisualizationProgressPhase,
 } from './types';
 import { takeVisualizationFrames } from './jsi';
+import { saveAudioVisualizationProfile } from './persist';
 
 const FILE_SOURCE_KINDS = new Set([
   'fs',
@@ -389,6 +393,7 @@ function normalizeOptions(
 
 /**
  * Compute a spectrum-bars visualization profile from a file, offline buffer, or live handle.
+ * When `options.persist` is set, the profile is also written and `saved` is returned.
  * @throws {Error} `AUDIO_VISUALIZATION_INVALID_INPUT` — input is not a FileSource, `off_*` buffer, or `live_*` handle.
  * @throws {Error} `AUDIO_VISUALIZATION_INVALID_OPTIONS` — options are out of range or unsupported.
  * @throws {Error} `AUDIO_VISUALIZATION_PAYLOAD_TOO_LARGE` — `frameCount * barCount` exceeds 131072.
@@ -396,11 +401,31 @@ function normalizeOptions(
  */
 export async function computeAudioVisualizationProfile(
   input: AudioVisualizationInput,
+  options: AudioVisualizationOptions & {
+    persist: PersistAudioVisualizationProfile;
+  }
+): Promise<AudioVisualizationProfile & { saved: SavedAudioVisualizationRef }>;
+export async function computeAudioVisualizationProfile(
+  input: AudioVisualizationInput,
   options?: AudioVisualizationOptions
-): Promise<AudioVisualizationProfile> {
+): Promise<AudioVisualizationProfile>;
+export async function computeAudioVisualizationProfile(
+  input: AudioVisualizationInput,
+  options?: ComputeAudioVisualizationProfileOptions
+): Promise<
+  | AudioVisualizationProfile
+  | (AudioVisualizationProfile & { saved: SavedAudioVisualizationRef })
+> {
+  const persist =
+    options != null && 'persist' in options ? options.persist : undefined;
+  const analysisOptions: AudioVisualizationOptions = { ...(options ?? {}) };
+  if ('persist' in analysisOptions) {
+    delete (analysisOptions as { persist?: unknown }).persist;
+  }
+
   const normalizedInput = normalizeInput(input);
-  const normalizedOptions = normalizeOptions(options);
-  const onProgress = options?.onProgress;
+  const normalizedOptions = normalizeOptions(analysisOptions);
+  const onProgress = analysisOptions.onProgress;
 
   const progressOperationId = onProgress
     ? `viz_${Date.now()}_${++visualizationProgressOpCounter}`
@@ -515,7 +540,7 @@ export async function computeAudioVisualizationProfile(
       frames = data;
     }
 
-    return {
+    const profile: AudioVisualizationProfile = {
       kind: DEFAULT_KIND,
       sampleRate,
       durationMs,
@@ -525,17 +550,35 @@ export async function computeAudioVisualizationProfile(
       frameDurationMs,
       frames,
     };
+
+    if (persist != null) {
+      const saved = await saveAudioVisualizationProfile(profile, persist);
+      return { ...profile, saved };
+    }
+
+    return profile;
   } finally {
     progressSubscription?.remove();
   }
 }
+
+export {
+  loadAudioVisualizationProfile,
+  saveAudioVisualizationProfile,
+} from './persist';
 
 export type {
   AudioVisualizationInput,
   AudioVisualizationKind,
   AudioVisualizationOptions,
   AudioVisualizationProfile,
+  AudioVisualizationProfileFormat,
   AudioVisualizationTimeAggregate,
+  ComputeAudioVisualizationProfileOptions,
+  LoadAudioVisualizationProfileOptions,
+  LoadAudioVisualizationProfileSource,
+  PersistAudioVisualizationProfile,
+  SavedAudioVisualizationRef,
   VisualizationProgressEvent,
   VisualizationProgressPhase,
 } from './types';
