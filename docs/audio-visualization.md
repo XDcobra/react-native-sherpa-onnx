@@ -290,17 +290,69 @@ Prefer `kind: 'offline'` with an existing `off_*` buffer when the pipeline alrea
 - `frameCount * barCount <= 131072` (otherwise `AUDIO_VISUALIZATION_PAYLOAD_TOO_LARGE`)
 - `maxAnalysisDurationMs` can cap analysis to first `N` ms
 
+## Sidecar persist (`sherpa_viz_v1`)
+
+Compute analyzes PCM. Persist is opt-in and separate from audio encode:
+
+- `saveAudioVisualizationProfile(profile, { destination, … })` — write an already-computed profile
+- `loadAudioVisualizationProfile(FileSource)` — read sidecar only (**no** PCM decode)
+- `computeAudioVisualizationProfile(input, { …, persist: { destination, … } })` — compute then write; return value includes `saved`
+
+Filename convention (app-owned): place the sidecar next to the audio file:
+
+```text
+recording.m4a
+recording.m4a.sviz
+```
+
+Binary format: magic `SVIZ`, version `1`, kind `spectrum_bars`, `levels` (required), optional timeline `frames`.
+
+```ts
+import {
+  computeAudioVisualizationProfile,
+  loadAudioVisualizationProfile,
+  saveAudioVisualizationProfile,
+} from 'react-native-sherpa-onnx/visualization';
+
+const profile = await computeAudioVisualizationProfile(fileInput, {
+  barCount: 96,
+  persist: {
+    destination: { kind: 'fs', path: '/tmp/recording.m4a.sviz' },
+    includeFrames: false,
+    overwrite: true,
+  },
+});
+console.log(profile.saved.output);
+
+// Later: load sidecar — do not recompute STFT if missing.
+const cached = await loadAudioVisualizationProfile({
+  kind: 'fs',
+  path: '/tmp/recording.m4a.sviz',
+});
+```
+
+Without `persist` / without calling `save*`, nothing is written. If a history entry has audio but no `.sviz`, treat UI as **playback-only** (no STFT recompute on open).
+
 ## Types and constants
 
 ```ts
-import { computeAudioVisualizationProfile } from 'react-native-sherpa-onnx/visualization';
+import {
+  computeAudioVisualizationProfile,
+  loadAudioVisualizationProfile,
+  saveAudioVisualizationProfile,
+} from 'react-native-sherpa-onnx/visualization';
 
 import type {
   AudioVisualizationInput,
   AudioVisualizationKind,
   AudioVisualizationOptions,
   AudioVisualizationProfile,
+  AudioVisualizationProfileFormat,
   AudioVisualizationTimeAggregate,
+  ComputeAudioVisualizationProfileOptions,
+  LoadAudioVisualizationProfileOptions,
+  PersistAudioVisualizationProfile,
+  SavedAudioVisualizationRef,
   VisualizationProgressEvent,
   VisualizationProgressPhase,
 } from 'react-native-sherpa-onnx/visualization';
@@ -312,6 +364,9 @@ import type {
 | --- | --- |
 | `AUDIO_VISUALIZATION_INVALID_INPUT` | Input shape or handle/source is invalid. |
 | `AUDIO_VISUALIZATION_INVALID_OPTIONS` | Options are invalid (kind/ranges/finiteness). |
+| `AUDIO_VISUALIZATION_INVALID_PROFILE` | Profile payload for save is incomplete. |
+| `AUDIO_VISUALIZATION_SIDECAR_INVALID` | Sidecar bytes are truncated or corrupt. |
+| `AUDIO_VISUALIZATION_SIDECAR_UNSUPPORTED` | Magic/version/kind rejected (`strict`). |
 | `AUDIO_VISUALIZATION_PAYLOAD_TOO_LARGE` | Timeline payload exceeds max allowed size. |
 | `AUDIO_BUFFER_NOT_FOUND` | Offline/live buffer id not found. |
 | `AUDIO_INVALID_STATE` | Live buffer is not finalized. |

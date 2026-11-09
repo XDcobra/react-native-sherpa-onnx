@@ -13,8 +13,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   computeAudioVisualizationProfile,
+  loadAudioVisualizationProfile,
+  saveAudioVisualizationProfile,
   type AudioVisualizationProfile,
 } from 'react-native-sherpa-onnx/visualization';
+import { CachesDirectoryPath } from '@dr.pogodin/react-native-fs';
 import { CODEC_ASSET_ENTRIES, type CodecAssetFormat } from '../../audioConfig';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import { Spectrum3DView } from '../../components/Spectrum3DView';
@@ -111,6 +114,8 @@ export default function AudioVisualizationScreen() {
   const [profile, setProfile] = useState<AudioVisualizationProfile | null>(
     null
   );
+  const [sidecarPath, setSidecarPath] = useState<string | null>(null);
+  const [sidecarBusy, setSidecarBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -174,6 +179,7 @@ export default function AudioVisualizationScreen() {
     setLoading(true);
     setError(null);
     setProfile(null);
+    setSidecarPath(null);
     setActiveFrameIndex(0);
     setIsPlaying(false);
 
@@ -232,6 +238,54 @@ export default function AudioVisualizationScreen() {
     setSelectedSampleFormat(format);
     setSelectedSource(resolveBundledCodecSource(format));
   }, []);
+
+  const onSaveSidecar = useCallback(async () => {
+    if (!profile) {
+      return;
+    }
+    setSidecarBusy(true);
+    try {
+      const path = `${CachesDirectoryPath}/viz_sidecar_demo.sviz`;
+      const saved = await saveAudioVisualizationProfile(profile, {
+        destination: { kind: 'fs', path },
+        includeFrames: true,
+        overwrite: true,
+      });
+      const outPath = saved.output.kind === 'fs' ? saved.output.path : path;
+      setSidecarPath(outPath);
+      Alert.alert('Sidecar saved', outPath);
+    } catch (saveError) {
+      Alert.alert('Sidecar save failed', normalizeError(saveError));
+    } finally {
+      setSidecarBusy(false);
+    }
+  }, [profile]);
+
+  const onClearAndLoadSidecar = useCallback(async () => {
+    if (!sidecarPath) {
+      Alert.alert('No sidecar', 'Save a sidecar first.');
+      return;
+    }
+    setSidecarBusy(true);
+    try {
+      setProfile(null);
+      const loaded = await loadAudioVisualizationProfile({
+        kind: 'fs',
+        path: sidecarPath,
+      });
+      setProfile(loaded);
+      setActiveFrameIndex(0);
+      setIsPlaying(false);
+      Alert.alert(
+        'Sidecar loaded',
+        `bars=${loaded.barCount} frames=${loaded.frameCount}`
+      );
+    } catch (loadError) {
+      Alert.alert('Sidecar load failed', normalizeError(loadError));
+    } finally {
+      setSidecarBusy(false);
+    }
+  }, [sidecarPath]);
 
   const onSwitchMode = useCallback(
     (mode: ViewMode) => {
@@ -437,6 +491,39 @@ export default function AudioVisualizationScreen() {
         {error ? (
           <View style={styles.section}>
             <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {profile ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Sidecar (save → load)</Text>
+            <Text style={styles.sectionHint}>
+              Persist the in-memory profile to a `.sviz` file, clear UI state,
+              then reload bars from the sidecar without re-decoding audio.
+            </Text>
+            <View style={styles.rowWrap}>
+              <Pressable
+                style={[styles.chip, sidecarBusy ? styles.chipActive : null]}
+                disabled={sidecarBusy}
+                onPress={() => {
+                  onSaveSidecar().catch(() => {});
+                }}
+              >
+                <Text style={styles.chipText}>Save .sviz</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.chip, sidecarBusy ? styles.chipActive : null]}
+                disabled={sidecarBusy || !sidecarPath}
+                onPress={() => {
+                  onClearAndLoadSidecar().catch(() => {});
+                }}
+              >
+                <Text style={styles.chipText}>Clear + load .sviz</Text>
+              </Pressable>
+            </View>
+            {sidecarPath ? (
+              <Text style={styles.sourceMeta}>{sidecarPath}</Text>
+            ) : null}
           </View>
         ) : null}
 
