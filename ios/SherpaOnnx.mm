@@ -180,6 +180,16 @@ extern "C" void slm_release_all_link_maps(void);
     });
 }
 
+- (void)probeArchive:(NSString *)sourcePath
+       expectedBytes:(NSNumber *)expectedBytes
+             resolve:(RCTPromiseResolveBlock)resolve
+              reject:(RCTPromiseRejectBlock)reject
+{
+    (void)reject;
+    SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
+    resolve([helper probe:sourcePath expectedBytes:expectedBytes]);
+}
+
 - (void)extractArchive:(NSString *)sourcePath
             targetPath:(NSString *)targetPath
                  force:(BOOL)force
@@ -188,18 +198,21 @@ extern "C" void slm_release_all_link_maps(void);
 showNotificationsEnabled:(NSNumber *)showNotificationsEnabled
      notificationTitle:(NSString *)notificationTitle
       notificationText:(NSString *)notificationText
+    skipIntegrityProbe:(NSNumber *)skipIntegrityProbe
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject
 {
     (void)showNotificationsEnabled;
     (void)notificationTitle;
     (void)notificationText;
+    const BOOL skipProbe = skipIntegrityProbe != nil && [skipIntegrityProbe boolValue];
     SherpaOnnxArchiveHelper *helper = [SherpaOnnxArchiveHelper new];
     NSDictionary *result = [helper extract:sourcePath
                                 targetPath:targetPath
                                      force:force
                                skipEntries:(int)skipEntries
                                operationId:operationId
+                        skipIntegrityProbe:skipProbe
                                   progress:^(long long bytes, long long totalBytes, double percent, int entryIndex) {
         [self sendEventWithName:@"extractArchiveProgress"
                            body:@{ @"sourcePath": sourcePath,

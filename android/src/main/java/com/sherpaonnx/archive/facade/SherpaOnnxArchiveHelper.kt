@@ -39,6 +39,7 @@ class SherpaOnnxArchiveHelper {
     promise: Promise,
     onProgress: (bytes: Long, totalBytes: Long, percent: Double, entryIndex: Int) -> Unit,
     extractionNotification: SherpaOnnxExtractionNotificationHelper? = null,
+    skipIntegrityProbe: Boolean = false,
   ) {
     extractExecutor.execute {
       val notif = extractionNotification
@@ -50,7 +51,16 @@ class SherpaOnnxArchiveHelper {
             notif?.updateProgress(percent)
           }
         }
-        nativeExtract(sourcePath, targetPath, force, skipEntries, operationId, wrappedCallback, promise)
+        nativeExtract(
+          sourcePath,
+          targetPath,
+          force,
+          skipEntries,
+          operationId,
+          wrappedCallback,
+          skipIntegrityProbe,
+          promise,
+        )
       } catch (e: Exception) {
         val result = Arguments.createMap()
         result.putBoolean("success", false)
@@ -117,6 +127,15 @@ class SherpaOnnxArchiveHelper {
     nativeComputeFileSha256(filePath, promise)
   }
 
+  /**
+   * Probe archive integrity (stat + libarchive open + first header).
+   * [expectedBytes] null or <= 0 skips the size completeness check.
+   */
+  fun probeArchive(sourcePath: String, expectedBytes: Double?, promise: Promise) {
+    val expected = expectedBytes ?: -1.0
+    nativeProbeArchive(sourcePath, expected, promise)
+  }
+
   // Native JNI methods
 
   private external fun nativeExtract(
@@ -126,6 +145,7 @@ class SherpaOnnxArchiveHelper {
     skipEntries: Int,
     operationId: String,
     progressCallback: Any?,
+    skipIntegrityProbe: Boolean,
     promise: Promise
   )
 
@@ -143,6 +163,12 @@ class SherpaOnnxArchiveHelper {
 
   private external fun nativeComputeFileSha256(
     filePath: String,
+    promise: Promise
+  )
+
+  private external fun nativeProbeArchive(
+    sourcePath: String,
+    expectedBytes: Double,
     promise: Promise
   )
 }

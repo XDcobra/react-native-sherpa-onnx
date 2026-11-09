@@ -24,10 +24,30 @@ struct ExtractionResult {
   std::string error;               // error message (on failure)
 };
 
+/**
+ * Pre-extract integrity check (stat + libarchive open + first header).
+ * Does not extract.
+ */
+struct ArchiveProbeResult {
+  bool ok = false;
+  long long file_size = 0;
+  std::string format;       // e.g. tar.zst / tar.bz2 when known
+  std::string error_code;   // DOWNLOAD_INTEGRITY_TRUNCATED / DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT
+  std::string error;
+};
+
 class ArchiveHelper {
  public:
   /** Callback to read bytes from a stream (e.g. Java InputStream via JNI). */
   using StreamReadCallback = std::ptrdiff_t (*)(void* buf, size_t len, void* user_data);
+
+  /**
+   * Probe a filesystem archive before extract.
+   * @param expected_bytes  When > 0 and file is smaller → truncated. Pass -1 to skip.
+   */
+  static ArchiveProbeResult Probe(
+      const std::string& source_path,
+      long long expected_bytes = -1);
 
   /**
    * Progress callback.
@@ -48,6 +68,7 @@ class ArchiveHelper {
    * @param skip_entries  Number of entries to skip (0 = fresh, N = resume after entry N-1)
    * @param on_progress   Progress callback (nullable)
    * @param operation_id  Unique ID for per-operation cancellation
+   * @param skip_integrity_probe  When true, skip Probe() before extract
    */
   static ExtractionResult Extract(
       const std::string& source_path,
@@ -55,7 +76,8 @@ class ArchiveHelper {
       bool force,
       int skip_entries,
       ProgressCallback on_progress,
-      const std::string& operation_id);
+      const std::string& operation_id,
+      bool skip_integrity_probe = false);
 
   /**
    * Extract a tar archive from a stream (e.g. Android AssetManager).

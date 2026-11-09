@@ -23,6 +23,7 @@ typedef void (^SherpaOnnxArchiveProgressBlock)(long long bytes, long long totalB
  * @param force        Overwrite existing target
  * @param skipEntries  Number of entries to skip (0 = fresh, N = resume after N-1)
  * @param operationId  Unique ID for per-operation cancellation
+ * @param skipIntegrityProbe  When YES, skip pre-extract probe
  * @param progress     Progress callback (nullable)
  *
  * @return Dictionary with: success, paused, lastEntryIndex, lastEntryPath,
@@ -33,12 +34,21 @@ typedef void (^SherpaOnnxArchiveProgressBlock)(long long bytes, long long totalB
                      force:(BOOL)force
                skipEntries:(int)skipEntries
                operationId:(NSString *)operationId
+        skipIntegrityProbe:(BOOL)skipIntegrityProbe
                   progress:(nullable SherpaOnnxArchiveProgressBlock)progress;
 
 /**
  * Cancel an ongoing extraction by operation ID.
  */
 + (void)cancelOperation:(NSString *)operationId;
+
+/**
+ * Pre-extract integrity probe (stat + libarchive open + first header).
+ * @param expectedBytes  When > 0 and file is smaller → truncated. Pass nil to skip.
+ * @return Dictionary: ok, fileSize, format?, code?, message?
+ */
+- (NSDictionary *)probe:(NSString *)sourcePath
+          expectedBytes:(nullable NSNumber *)expectedBytes;
 
 /**
  * Compute SHA-256 hex digest of a file.

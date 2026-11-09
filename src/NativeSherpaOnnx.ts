@@ -3105,6 +3105,21 @@ export interface Spec extends TurboModule {
   // ==================== Helper - Extraction ====================
 
   /**
+   * Pre-extract integrity probe (stat + libarchive open + first header).
+   * Does not extract. Pass `expectedBytes` > 0 to fail when on-disk size is smaller.
+   */
+  probeArchive(
+    sourcePath: string,
+    expectedBytes?: number | null
+  ): Promise<{
+    ok: boolean;
+    fileSize: number;
+    format?: string;
+    code?: string;
+    message?: string;
+  }>;
+
+  /**
    * Extract a tar archive (.tar.bz2, .tar.zst, etc.) from a filesystem path. Native layer auto-detects format.
    *
    * @param skipEntries - 0 for a fresh run; for resume, pass `lastEntryIndex + 1` from a paused result.
@@ -3121,7 +3136,9 @@ export interface Spec extends TurboModule {
     operationId: string,
     showNotificationsEnabled?: boolean,
     notificationTitle?: string,
-    notificationText?: string
+    notificationText?: string,
+    /** When true, skip native pre-extract integrity probe. Default false. */
+    skipIntegrityProbe?: boolean
   ): Promise<ExtractArchiveResult>;
 
   /**
