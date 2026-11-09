@@ -205,7 +205,7 @@ This screen validates file and conversion workflows: pick **Audio**, **Video**, 
 | --------------------------------------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------- |
 | Static (`levels`)                                                           | Heatmap (`frames`)                                                       | Pseudo-3D (`frames`, Skia)                                            |
 
-Open **Audio visualization** from Home. The screen runs one `computeAudioVisualizationProfile` call (timeline enabled), then renders SDK data in four tabs: **Static**, **Animated**, **Heatmap**, and **3D**.
+Open **Audio visualization** from Home. The screen runs one `computeAudioVisualizationProfile` call (timeline enabled), then renders SDK data in four tabs: **Static**, **Animated**, **Heatmap**, and **3D**. Use **Save .sviz** / **Clear + load .sviz** to exercise the sidecar persist API (compute → save → clear → load without re-decoding audio).
 
 - **Static** — mirrored bar chart from global `levels`.
 - **Animated** — same bars driven by timeline frame index (playback scrub).

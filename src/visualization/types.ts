@@ -2,9 +2,49 @@ import type {
   LiveBufferHandleFinished,
   OfflineAudioBufferIdSource,
 } from '../audiobuffer/types';
-import type { FileSource } from '../fileio/types';
+import type {
+  FileDestination,
+  FileSource,
+  ResolvedFileRef,
+} from '../fileio/types';
 
 export type AudioVisualizationKind = 'spectrum_bars';
+
+/** Magic "SVIZ" + versioned payload next to audio. */
+export type AudioVisualizationProfileFormat = 'sherpa_viz_v1';
+
+/** Shared persist knobs (destination is required whenever this object appears). */
+export type PersistAudioVisualizationProfile = {
+  destination: FileDestination;
+  /** Default `sherpa_viz_v1`. */
+  format?: AudioVisualizationProfileFormat;
+  /**
+   * When false, omit timeline `frames` even if present (smaller sidecar).
+   * Default: true iff `profile.frames` is non-empty.
+   */
+  includeFrames?: boolean;
+  /** Default false (fail if file exists). */
+  overwrite?: boolean;
+};
+
+export type LoadAudioVisualizationProfileOptions = {
+  /** Reject unsupported magic/version/kind. Default true. */
+  strict?: boolean;
+};
+
+export type SavedAudioVisualizationRef = {
+  format: AudioVisualizationProfileFormat;
+  output: ResolvedFileRef;
+  kind: AudioVisualizationKind;
+  barCount: number;
+  durationMs: number;
+  sampleRate: number;
+  hasFrames: boolean;
+};
+
+export type LoadAudioVisualizationProfileSource =
+  | FileSource
+  | { kind: 'file'; source: FileSource };
 
 export type AudioVisualizationTimeAggregate = 'max_hold' | 'mean';
 
@@ -51,6 +91,14 @@ export type AudioVisualizationOptions = {
    */
   onProgress?: (event: VisualizationProgressEvent) => void;
 };
+
+/** Compute options: either plain analysis, or analysis + required persist. */
+export type ComputeAudioVisualizationProfileOptions =
+  | AudioVisualizationOptions
+  | (AudioVisualizationOptions & {
+      /** If present, profile is also written; `destination` is required on this object. */
+      persist: PersistAudioVisualizationProfile;
+    });
 
 export type AudioVisualizationProfile = {
   kind: AudioVisualizationKind;

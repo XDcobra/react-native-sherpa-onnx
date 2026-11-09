@@ -11,11 +11,12 @@
 #include <vector>
 
 namespace Ort {
-class Env;
-class Session;
-class SessionOptions;
-class MemoryInfo;
-class Value;
+// Match onnxruntime_cxx_api.h (struct, not class) to avoid -Wmismatched-tags.
+struct Env;
+struct Session;
+struct SessionOptions;
+struct MemoryInfo;
+struct Value;
 }  // namespace Ort
 
 namespace sherpa_onnx {

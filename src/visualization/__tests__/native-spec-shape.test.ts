@@ -2,6 +2,8 @@ jest.mock('../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {
     computeAudioVisualizationProfile: jest.fn(),
+    saveAudioVisualizationProfile: jest.fn(),
+    loadAudioVisualizationProfile: jest.fn(),
     installJSI: jest.fn(() => true),
   },
 }));
@@ -14,13 +16,17 @@ describe('visualization native spec shape', () => {
     delete (global as { __SherpaOnnxJSI?: unknown }).__SherpaOnnxJSI;
   });
 
-  test('exposes computeAudioVisualizationProfile', () => {
+  test('exposes compute/save/load AudioVisualizationProfile', () => {
     const native = SherpaOnnx as unknown as {
       computeAudioVisualizationProfile?: unknown;
+      saveAudioVisualizationProfile?: unknown;
+      loadAudioVisualizationProfile?: unknown;
       installJSI?: unknown;
     };
 
     expect(typeof native.computeAudioVisualizationProfile).toBe('function');
+    expect(typeof native.saveAudioVisualizationProfile).toBe('function');
+    expect(typeof native.loadAudioVisualizationProfile).toBe('function');
     expect(typeof native.installJSI).toBe('function');
   });
 

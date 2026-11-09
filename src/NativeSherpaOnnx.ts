@@ -673,6 +673,41 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
+   * Persist a visualization profile as a `sherpa_viz_v1` sidecar.
+   * `persist.destination` is required (FileDestination).
+   */
+  saveAudioVisualizationProfile(
+    profile: Object,
+    persist: Object
+  ): Promise<{
+    format: string;
+    kind: string;
+    barCount: number;
+    durationMs: number;
+    sampleRate: number;
+    hasFrames: boolean;
+    output: { outputKind: string; outputPath: string };
+  }>;
+
+  /**
+   * Load a visualization profile sidecar (no PCM decode).
+   * `source` is a FileSource or `{ kind: 'file', source: FileSource }`.
+   */
+  loadAudioVisualizationProfile(
+    source: Object,
+    options?: Object
+  ): Promise<{
+    kind: string;
+    sampleRate: number;
+    durationMs: number;
+    barCount: number;
+    levels: number[];
+    frameCount: number;
+    frameDurationMs: number;
+    framesTransferId?: string;
+  }>;
+
+  /**
    * Create an offline audio buffer from a live buffer.
    * @param liveBufferId - The live buffer to snapshot/convert.
    * @param options.mode - "fullIfSpooled" (default) or "windowSnapshot".
