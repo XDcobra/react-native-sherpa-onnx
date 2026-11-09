@@ -198,6 +198,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         // JS context may be torn down
       }
     }
+    it.onPlayerPosition = { playerId, bufferId, positionMs ->
+      try {
+        val eventEmitter = reactApplicationContext
+          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        val payload = Arguments.createMap()
+        payload.putString("playerId", playerId)
+        payload.putString("bufferId", bufferId)
+        payload.putDouble("positionMs", positionMs)
+        eventEmitter.emit("pcmPlayerPosition", payload)
+      } catch (_: Exception) {
+        // JS context may be torn down
+      }
+    }
   }
   private val ttsHelper = SherpaOnnxTtsCoordinator(
     reactApplicationContext,

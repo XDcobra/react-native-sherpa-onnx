@@ -69,6 +69,8 @@ bool PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSampl
         enqueueCv.notify_all();
         if (remaining == 0 && sourceExhausted.load() && gen == drainGeneration.load()) {
             if (!endedEmitted.exchange(true)) {
+                stopPositionReporting();
+                isPlaying.store(false);
                 if (onEndedCallback) onEndedCallback();
             }
         }
@@ -81,25 +83,68 @@ void PcmPlayerSession::markSourceExhausted() {
     sourceExhausted.store(true);
     // Check if all buffers already consumed
     if (buffersInFlight.load() == 0 && !endedEmitted.exchange(true)) {
+        stopPositionReporting();
+        isPlaying.store(false);
         if (onEndedCallback) onEndedCallback();
     }
 }
 
 void PcmPlayerSession::pause() {
     if (destroyed || playerNode == nil) return;
+    stopPositionReporting();
+    isPlaying.store(false);
     [playerNode pause];
 }
 
 void PcmPlayerSession::resume() {
     if (destroyed || playerNode == nil) return;
     [playerNode play];
+    isPlaying.store(true);
+    startPositionReporting();
 }
 
-void PcmPlayerSession::resetForSeek(int64_t newSeekPositionSamples) {
+void PcmPlayerSession::startPositionReporting() {
+    if (destroyed) return;
+    stopPositionReporting();
+    if (onPositionCallback == nullptr) return;
+
+    const int32_t interval = std::max(16, std::min(250, positionIntervalMs));
+    dispatch_queue_t queue = dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0);
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    if (timer == nil) return;
+    positionTimer = timer;
+    dispatch_source_set_timer(
+        timer,
+        dispatch_time(DISPATCH_TIME_NOW, 0),
+        (uint64_t)interval * NSEC_PER_MSEC,
+        ((uint64_t)interval * NSEC_PER_MSEC) / 5
+    );
+    PcmPlayerSession *session = this;
+    dispatch_source_set_event_handler(timer, ^{
+        if (session->destroyed || !session->isPlaying.load()) {
+            return;
+        }
+        auto cb = session->onPositionCallback;
+        if (cb) {
+            cb(session->getPositionMs());
+        }
+    });
+    dispatch_resume(timer);
+}
+
+void PcmPlayerSession::stopPositionReporting() {
+    if (positionTimer != nil) {
+        dispatch_source_cancel(positionTimer);
+        positionTimer = nil;
+    }
+}
+
+void PcmPlayerSession::resetForSeek(int64_t newSeekPositionSamples, bool resumePlayback) {
     // Increment generation to invalidate in-flight completion handlers
     drainGeneration.fetch_add(1);
+    stopPositionReporting();
 
-    // Stop and restart the player node to clear all scheduled buffers
+    // Stop and clear scheduled buffers
     if (playerNode != nil) {
         [playerNode stop];
     }
@@ -116,9 +161,13 @@ void PcmPlayerSession::resetForSeek(int64_t newSeekPositionSamples) {
     }
     enqueueCv.notify_all();
 
-    // Restart the player node
-    if (playerNode != nil) {
+    // Preserve prior play/pause intent — seek must not auto-resume.
+    if (resumePlayback && playerNode != nil) {
         [playerNode play];
+        isPlaying.store(true);
+        startPositionReporting();
+    } else {
+        isPlaying.store(false);
     }
 }
 
@@ -141,6 +190,8 @@ double PcmPlayerSession::getPositionMs() {
 void PcmPlayerSession::destroy() {
     if (destroyed) return;
     destroyed = true;
+    isPlaying.store(false);
+    stopPositionReporting();
     drainGeneration.fetch_add(1);
     {
         std::lock_guard<std::mutex> lock(enqueueMutex);
@@ -157,6 +208,7 @@ void PcmPlayerSession::destroy() {
     audioEngine = nil;
     audioFormat = nil;
     onEndedCallback = nullptr;
+    onPositionCallback = nullptr;
 }
 
 std::shared_ptr<PcmPlayerSession> pcmPlayerGet(const std::string &playerId) {

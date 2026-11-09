@@ -19,12 +19,24 @@ export interface PcmPlayerEndedEvent {
   bufferId: string;
 }
 
+/** Native playhead push while the player is actively playing. */
+export interface PcmPlayerPositionEvent {
+  playerId: string;
+  bufferId: string;
+  positionMs: number;
+}
+
 /** Options for creating a pipeline-based PCM player. */
 export interface PcmPlayerOptions {
   /** Optional volume scale [0, 1]. Default: 1.0. */
   volume?: number;
   /** Callback fired when playback reaches end-of-stream. Fires once per playback run. */
   onEnded?: (event: PcmPlayerEndedEvent) => void;
+  /**
+   * Native playhead updates while playing (no JS polling).
+   * Emitted from the native PCM session on a ~50ms cadence while PLAYING.
+   */
+  onPosition?: (event: PcmPlayerPositionEvent) => void;
 }
 
 /** Pipeline audio buffer player session. */
@@ -53,6 +65,7 @@ export interface PcmPlayer {
    * - Offline buffers: clamps to [0, durationMs].
    * - Live buffers (recording): rejects with PCM_PLAYER_SEEK_OUT_OF_RANGE if outside available ring window.
    * - Live buffers (finished): seeks within available data.
+   * Preserves pause/play intent (seek while paused stays paused).
    * @throws {Error} `PCM_PLAYER_SEEK_OUT_OF_RANGE` — live seek is outside the available ring window.
    * @throws {Error} `PCM_PLAYER_NOT_FOUND` — player id is unknown.
    * @throws {Error} `PCM_PLAYER_DESTROYED` — player was already destroyed.
@@ -69,7 +82,7 @@ export interface PcmPlayer {
   restart(): Promise<void>;
 
   /**
-   * Get the current playback position in milliseconds.
+   * Get the current playback position in milliseconds (pull). Prefer `onPosition` for UI.
    * @throws {Error} `PCM_PLAYER_NOT_FOUND` — player id is unknown.
    * @throws {Error} `PCM_PLAYER_DESTROYED` — player was already destroyed.
    * @throws {Error} `PCM_PLAYER_ERROR` — native position read failed.

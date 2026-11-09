@@ -26,13 +26,18 @@ struct PcmPlayerSession {
 
     // ---- onEnded support ----
     std::function<void()> onEndedCallback;
+    /** Native playhead push while playing; invoked on the timer queue. */
+    std::function<void(double positionMs)> onPositionCallback;
     std::atomic<int32_t> buffersInFlight{0};
     std::atomic<bool> sourceExhausted{false};
     std::atomic<bool> endedEmitted{false};
     std::atomic<int32_t> drainGeneration{0};
+    std::atomic<bool> isPlaying{false};
 
     // ---- Position tracking ----
     std::atomic<int64_t> seekPositionSamples{0};
+    __strong dispatch_source_t positionTimer = nil;
+    int32_t positionIntervalMs = 50;
 
     // ---- Source metadata ----
     bool hasOfflineSource = false;
@@ -57,12 +62,15 @@ struct PcmPlayerSession {
     void resume();
     void destroy();
     double getPositionMs();
+    void startPositionReporting();
+    void stopPositionReporting();
 
     /**
      * Reset playback state for seek. Stops playerNode, clears scheduled buffers,
      * resets counters. Caller must re-enqueue data after this.
+     * Preserves prior play/pause intent when `resumePlayback` is false.
      */
-    void resetForSeek(int64_t newSeekPositionSamples);
+    void resetForSeek(int64_t newSeekPositionSamples, bool resumePlayback = true);
 };
 
 // Global player registry (thread-safe via g_pcm_player_mutex).

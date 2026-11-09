@@ -427,6 +427,7 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
             return;
         }
         [session->playerNode play];
+        session->isPlaying.store(true);
 
         std::string playerIdStr = [playerId UTF8String];
 
@@ -445,6 +446,19 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
                 }];
             });
         };
+        session->onPositionCallback = [weakSelf, playerIdCopy, bufferIdCopy](double positionMs) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                SherpaOnnx *strongSelf = weakSelf;
+                if (!strongSelf) return;
+                [strongSelf sendEventWithName:@"pcmPlayerPosition"
+                                         body:@{
+                    @"playerId": playerIdCopy,
+                    @"bufferId": bufferIdCopy,
+                    @"positionMs": @(positionMs),
+                }];
+            });
+        };
+        session->startPositionReporting();
 
         // Clean up old player with same ID
         auto oldLiveWorker = pcm_take_live_worker(playerIdStr);
@@ -742,6 +756,8 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
         if (it != g_pcm_live_entries.end()) liveEntry = it->second;
     }
 
+    const bool resumePlayback = session->isPlaying.load();
+
     if (liveEntry) {
         // Validate seek range for live buffers
         int64_t oldest = liveEntry->oldestAvailablePos();
@@ -759,8 +775,8 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
         auto oldOfflineWorker = pcm_take_offline_worker(playerIdStr);
         if (oldOfflineWorker) oldOfflineWorker->stop();
 
-        // Reset session for seek
-        session->resetForSeek(sampleIndex);
+        // Reset session for seek (preserve pause)
+        session->resetForSeek(sampleIndex, resumePlayback);
 
         // Start new drain from seek position
         int32_t gen = session->drainGeneration.load();
@@ -781,8 +797,8 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
         int64_t maxSamples = session->offlineTotalSamples;
         if (sampleIndex > maxSamples) sampleIndex = maxSamples;
 
-        // Reset session for seek
-        session->resetForSeek(sampleIndex);
+        // Reset session for seek (preserve pause)
+        session->resetForSeek(sampleIndex, resumePlayback);
 
         // Restart bounded offline drain from seek position.
         int32_t gen = session->drainGeneration.load();

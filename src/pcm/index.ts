@@ -4,4 +4,5 @@ export type {
   PcmPlayerOptions,
   PcmPlayerAudioBuffer,
   PcmPlayerEndedEvent,
+  PcmPlayerPositionEvent,
 } from './types';

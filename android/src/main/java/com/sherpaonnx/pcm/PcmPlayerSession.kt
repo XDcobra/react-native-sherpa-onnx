@@ -17,6 +17,7 @@ private const val DEFAULT_DRAIN_CHUNK_SIZE = 4096
 private const val DEFAULT_MAX_BUFFERED_MS = 300
 private const val DRAIN_WAIT_MS = 10L
 private const val WRITE_WAIT_MS = 200L
+private const val DEFAULT_POSITION_INTERVAL_MS = 50
 
 private data class ChunkSlot(
   val data: FloatArray,
@@ -50,6 +51,16 @@ internal class PcmPlayerSession(
 
   /** Callback invoked on a background thread when a terminal playback error occurs. */
   var onTerminalError: ((code: String, message: String) -> Unit)? = null
+
+  /**
+   * Native playhead push while PLAYING. Interval is wall-clock ms between emits.
+   * Fired on the position-reporting thread (not the main thread).
+   */
+  var onPosition: ((positionMs: Double) -> Unit)? = null
+
+  private val positionReporting = AtomicBoolean(false)
+  @Volatile private var positionThread: Thread? = null
+  private val positionIntervalMs = AtomicInteger(DEFAULT_POSITION_INTERVAL_MS)
 
   // ---- Generation counter for seek/restart cancellation ----
   private val drainGeneration = AtomicInteger(0)
@@ -444,6 +455,14 @@ internal class PcmPlayerSession(
     seekLock.withLock {
       if (destroyed || terminalError != null) return false
 
+      val wasPlaying =
+        try {
+          track.playState == AudioTrack.PLAYSTATE_PLAYING
+        } catch (_: IllegalStateException) {
+          false
+        }
+      stopPositionReporting()
+
       // 1. Increment generation to abort current drain threads
       drainGeneration.incrementAndGet()
 
@@ -471,18 +490,21 @@ internal class PcmPlayerSession(
       seekPositionSamples = sampleIndex
       endedEmitted.set(false)
 
-      // 6. Restart AudioTrack
-      try {
-        track.play()
-      } catch (_: IllegalStateException) {
-        return false
-      }
-
-      // 7. Restart drain from new position
+      // 6. Restart drain from new position (queue fills while we may stay paused)
       if (offlineEntry != null) {
         startOfflineDrain(startSampleIndex = sampleIndex)
       } else if (liveEntry != null) {
         startLiveDrain(startAbsolutePos = sampleIndex)
+      }
+
+      // 7. Preserve prior play/pause intent — seek must not auto-resume.
+      if (wasPlaying) {
+        try {
+          track.play()
+        } catch (_: IllegalStateException) {
+          return false
+        }
+        startPositionReporting()
       }
 
       return true
@@ -499,17 +521,60 @@ internal class PcmPlayerSession(
 
   fun pause() {
     if (destroyed) return
+    stopPositionReporting()
     track.pause()
   }
 
   fun resume() {
     if (destroyed) return
     track.play()
+    startPositionReporting()
+  }
+
+  fun startPositionReporting(intervalMs: Int = DEFAULT_POSITION_INTERVAL_MS) {
+    if (destroyed) return
+    positionIntervalMs.set(intervalMs.coerceIn(16, 250))
+    if (!positionReporting.compareAndSet(false, true)) {
+      return
+    }
+    positionThread = Thread({
+      while (positionReporting.get() && !destroyed) {
+        try {
+          if (track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+            onPosition?.invoke(getPositionMs())
+          }
+        } catch (_: Exception) {
+          break
+        }
+        try {
+          Thread.sleep(positionIntervalMs.get().toLong())
+        } catch (_: InterruptedException) {
+          break
+        }
+      }
+    }, "pcm-pos-$playerId").also {
+      it.isDaemon = true
+      it.start()
+    }
+  }
+
+  fun stopPositionReporting() {
+    positionReporting.set(false)
+    val thread = positionThread
+    positionThread = null
+    if (thread != null && Thread.currentThread() != thread) {
+      try {
+        thread.join(200)
+      } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+      }
+    }
   }
 
   fun destroy() {
     if (!cleanupStarted.compareAndSet(false, true)) return
     destroyed = true
+    stopPositionReporting()
 
     // Increment generation to stop drain threads
     drainGeneration.incrementAndGet()
@@ -540,6 +605,7 @@ internal class PcmPlayerSession(
     try { track.release() } catch (_: Exception) {}
     onEnded = null
     onTerminalError = null
+    onPosition = null
   }
 
   private fun joinDrainThreads() {
@@ -589,6 +655,7 @@ internal class PcmPlayerSession(
     }
     // Fire onEnded once per drain cycle
     if (!destroyed && drainGeneration.get() == gen && endedEmitted.compareAndSet(false, true)) {
+      stopPositionReporting()
       val snapshotEnd = queueSnapshot()
             onEnded?.invoke()
     }

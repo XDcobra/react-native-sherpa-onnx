@@ -25,6 +25,9 @@ internal class PcmPlayerService(
   /** Callback to emit pcmPlayerEnded events to JS. Set by the module. */
   var onPlayerEnded: ((playerId: String, bufferId: String) -> Unit)? = null
 
+  /** Callback to emit pcmPlayerPosition events to JS while playing. */
+  var onPlayerPosition: ((playerId: String, bufferId: String, positionMs: Double) -> Unit)? = null
+
   fun create(
     playerId: String,
     audioBufferId: String,
@@ -113,6 +116,9 @@ internal class PcmPlayerService(
       session.onEnded = {
         onPlayerEnded?.invoke(session.playerId, session.bufferId)
       }
+      session.onPosition = { positionMs ->
+        onPlayerPosition?.invoke(session.playerId, session.bufferId, positionMs)
+      }
       session.onTerminalError = fun(code, message) {
         Log.e(TAG, "PCM player terminal error playerId=$playerId code=$code message=$message")
         val removed = registry.remove(playerId)
@@ -132,6 +138,7 @@ internal class PcmPlayerService(
 
       registry.put(session)
       track.play()
+      session.startPositionReporting()
 
       if (liveEntry != null) {
         session.startLiveDrain()

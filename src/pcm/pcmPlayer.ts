@@ -35,7 +35,7 @@ function getEventEmitter(): NativeEventEmitter {
  * and plays them via native audio backend (AudioTrack on Android, AVAudioEngine on iOS).
  *
  * @param audioBuffer - Live or offline audio buffer to play from
- * @param options - Player configuration (volume, onEnded, etc.)
+ * @param options - Player configuration (volume, onEnded, onPosition, etc.)
  * @returns Promise resolving to a PcmPlayer handle
  * @throws {Error} `AUDIO_INVALID_ARGUMENT` — audio buffer id is malformed.
  * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer is not in the native registry.
@@ -50,9 +50,13 @@ export async function createPcmPlayer(
   const bufferId = resolvePipelineAudioBufferId(audioBuffer);
   const volume = options?.volume ?? 1.0;
 
-  // Subscribe to ended event before creating the player to avoid race conditions
+  // Subscribe before create to avoid missing the first events.
   let endedSubscription: ReturnType<NativeEventEmitter['addListener']> | null =
     null;
+  let positionSubscription: ReturnType<
+    NativeEventEmitter['addListener']
+  > | null = null;
+
   if (options?.onEnded) {
     const onEnded = options.onEnded;
     endedSubscription = getEventEmitter().addListener('pcmPlayerEnded', ((
@@ -65,10 +69,31 @@ export async function createPcmPlayer(
     }) as any);
   }
 
+  if (options?.onPosition) {
+    const onPosition = options.onPosition;
+    positionSubscription = getEventEmitter().addListener('pcmPlayerPosition', ((
+      rawEvent: unknown
+    ) => {
+      const event = rawEvent as {
+        playerId: string;
+        bufferId: string;
+        positionMs: number;
+      };
+      if (event.playerId === playerId) {
+        onPosition({
+          playerId: event.playerId,
+          bufferId: event.bufferId,
+          positionMs: event.positionMs,
+        });
+      }
+    }) as any);
+  }
+
   try {
     await SherpaOnnx.createPcmPlayer(playerId, bufferId, volume);
   } catch (e) {
     endedSubscription?.remove();
+    positionSubscription?.remove();
     throw e;
   }
 
@@ -112,6 +137,8 @@ export async function createPcmPlayer(
       destroyed = true;
       endedSubscription?.remove();
       endedSubscription = null;
+      positionSubscription?.remove();
+      positionSubscription = null;
       await SherpaOnnx.destroyPcmPlayer(playerId);
     },
   };
