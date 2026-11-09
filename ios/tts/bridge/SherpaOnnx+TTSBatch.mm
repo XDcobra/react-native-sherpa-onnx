@@ -196,12 +196,75 @@ static NSString *const kOfflineTtsOomMessage =
             cloneOpt = GenerationExtraFromOptions(options);
         }
 
-        auto result = wrapper->generate(
-            text,
-            static_cast<int32_t>(sid),
-            static_cast<float>(speed),
-            cloneOpt
-        );
+        NSString *operationId = nil;
+        if (options != nil) {
+            id opRaw = options[@"operationId"];
+            if ([opRaw isKindOfClass:[NSString class]]) {
+                NSString *trimmed = [(NSString *)opRaw stringByTrimmingCharactersInSet:
+                                     [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if ([trimmed length] > 0) {
+                    operationId = trimmed;
+                }
+            }
+        }
+
+        sherpaonnx::TtsWrapper::AudioResult result;
+        result.sampleRate = 0;
+        if (operationId != nil) {
+            __block std::vector<float> collected;
+            collected.reserve(16000);
+            __weak SherpaOnnx *weakSelf = self;
+            NSString *opIdCopy = [operationId copy];
+            auto streamCb = [&collected, weakSelf, opIdCopy](
+                                const float *chunk, int32_t n, float progress) -> int32_t {
+                if (chunk != nullptr && n > 0) {
+                    collected.insert(collected.end(), chunk, chunk + n);
+                }
+                float clamped = progress;
+                if (clamped < 0.f) clamped = 0.f;
+                if (clamped > 1.f) clamped = 1.f;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    SherpaOnnx *emitter = weakSelf;
+                    if (!emitter) {
+                        return;
+                    }
+                    [emitter sendEventWithName:@"ttsGenerateProgress"
+                                          body:@{
+                                              @"operationId": opIdCopy,
+                                              @"progress": @(clamped),
+                                          }];
+                });
+                return 1;
+            };
+            bool ok = false;
+            if (cloneOpt.has_value()) {
+                ok = wrapper->generateStream(
+                    text,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed),
+                    streamCb,
+                    cloneOpt);
+            } else {
+                ok = wrapper->generateStream(
+                    text,
+                    static_cast<int32_t>(sid),
+                    static_cast<float>(speed),
+                    streamCb);
+            }
+            if (!ok || collected.empty()) {
+                reject(@"TTS_GENERATE_ERROR", @"TTS generated empty audio", nil);
+                return;
+            }
+            result.samples = std::move(collected);
+            result.sampleRate = wrapper->getSampleRate();
+        } else {
+            result = wrapper->generate(
+                text,
+                static_cast<int32_t>(sid),
+                static_cast<float>(speed),
+                cloneOpt
+            );
+        }
 
         if (result.samples.empty() || result.sampleRate == 0) {
             reject(@"TTS_GENERATE_ERROR", @"TTS generated empty audio", nil);

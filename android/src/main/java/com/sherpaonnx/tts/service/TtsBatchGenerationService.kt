@@ -1,10 +1,14 @@
 package com.sherpaonnx.tts.service
 
 import android.util.Log
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.sherpaonnx.tts.config.TtsGenerationOptionsParser
 import com.sherpaonnx.tts.core.TtsEngineRepository
+import com.sherpaonnx.tts.nativeapi.TtsGenerateProgressCallback
 import com.sherpaonnx.tts.nativeapi.TtsNative
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.OfflineEntry
@@ -14,11 +18,15 @@ import com.sherpaonnx.text.pipeline.TextPipelineRegistry
 
 internal class TtsBatchGenerationService(
   private val repository: TtsEngineRepository,
+  private val reactContext: ReactApplicationContext,
 ) {
 
   /**
    * Buffer-to-buffer TTS synthesis: reads text from an OfflineTextBuffer,
    * writes PCM into an empty OfflineAudioBuffer.
+   *
+   * When `options.operationId` is set, uses Sherpa Generate callback progress and
+   * emits `ttsGenerateProgress` events `{ operationId, progress }`.
    */
   fun synthesizeTts(
     instanceId: String,
@@ -87,6 +95,8 @@ internal class TtsBatchGenerationService(
 
       val sid = TtsGenerationOptionsParser.getSid(options)
       val speed = TtsGenerationOptionsParser.getSpeed(options)
+      val operationId = options?.getString("operationId")?.trim().orEmpty()
+      val progressCallback = makeProgressCallback(operationId)
 
       val gateKey = inst.gateKey()
       if (!NativeInstanceGate.beginUse(gateKey)) {
@@ -127,23 +137,44 @@ internal class TtsBatchGenerationService(
           val silenceScale = TtsGenerationOptionsParser.getSilenceScale(options)
           val numSteps = TtsGenerationOptionsParser.getNumSteps(options)
           val refText = options?.getString("referenceText") ?: ""
-          val raw = TtsNative.nativeGenerateWithOptions(
-            instanceId = instanceId,
-            text = "",
-            sid = sid,
-            speed = speed,
-            applyNumSteps = true,
-            numSteps = numSteps,
-            silenceScale = silenceScale,
-            referenceAudio = null,
-            referenceSampleRate = 0,
-            referenceText = refText,
-            referenceBufferId = refBufferId,
-            textBufferId = textInBufferId,
-            extra = TtsGenerationOptionsParser.buildExtraMap(options),
-            phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
-            tokens = TtsGenerationOptionsParser.parseTokens(options),
-          )
+          val raw = if (progressCallback != null) {
+            TtsNative.nativeGenerateWithOptionsWithProgress(
+              instanceId = instanceId,
+              text = "",
+              sid = sid,
+              speed = speed,
+              applyNumSteps = true,
+              numSteps = numSteps,
+              silenceScale = silenceScale,
+              referenceAudio = null,
+              referenceSampleRate = 0,
+              referenceText = refText,
+              extra = TtsGenerationOptionsParser.buildExtraMap(options),
+              phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
+              tokens = TtsGenerationOptionsParser.parseTokens(options),
+              referenceBufferId = refBufferId,
+              textBufferId = textInBufferId,
+              progressCallback = progressCallback,
+            )
+          } else {
+            TtsNative.nativeGenerateWithOptions(
+              instanceId = instanceId,
+              text = "",
+              sid = sid,
+              speed = speed,
+              applyNumSteps = true,
+              numSteps = numSteps,
+              silenceScale = silenceScale,
+              referenceAudio = null,
+              referenceSampleRate = 0,
+              referenceText = refText,
+              referenceBufferId = refBufferId,
+              textBufferId = textInBufferId,
+              extra = TtsGenerationOptionsParser.buildExtraMap(options),
+              phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
+              tokens = TtsGenerationOptionsParser.parseTokens(options),
+            )
+          }
           TtsNative.readAudioResult(raw)
             ?: run {
               promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
@@ -153,29 +184,61 @@ internal class TtsBatchGenerationService(
           promise.reject("TTS_GENERATE_ERROR", "Pocket TTS requires reference audio for voice cloning. Pass voiceClone in options.")
           return
         } else if (TtsGenerationOptionsParser.needsGenerationOptions(options)) {
-          val raw = TtsNative.nativeGenerateWithOptions(
-            instanceId = instanceId,
-            text = "",
-            sid = sid,
-            speed = speed,
-            applyNumSteps = TtsGenerationOptionsParser.hasNumSteps(options),
-            numSteps = TtsGenerationOptionsParser.getNumSteps(options),
-            silenceScale = TtsGenerationOptionsParser.getSilenceScale(options),
-            referenceAudio = null,
-            referenceSampleRate = 0,
-            referenceText = null,
-            textBufferId = textInBufferId,
-            extra = TtsGenerationOptionsParser.buildExtraMap(options),
-            phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
-            tokens = TtsGenerationOptionsParser.parseTokens(options),
-          )
+          val raw = if (progressCallback != null) {
+            TtsNative.nativeGenerateWithOptionsWithProgress(
+              instanceId = instanceId,
+              text = "",
+              sid = sid,
+              speed = speed,
+              applyNumSteps = TtsGenerationOptionsParser.hasNumSteps(options),
+              numSteps = TtsGenerationOptionsParser.getNumSteps(options),
+              silenceScale = TtsGenerationOptionsParser.getSilenceScale(options),
+              referenceAudio = null,
+              referenceSampleRate = 0,
+              referenceText = null,
+              extra = TtsGenerationOptionsParser.buildExtraMap(options),
+              phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
+              tokens = TtsGenerationOptionsParser.parseTokens(options),
+              referenceBufferId = null,
+              textBufferId = textInBufferId,
+              progressCallback = progressCallback,
+            )
+          } else {
+            TtsNative.nativeGenerateWithOptions(
+              instanceId = instanceId,
+              text = "",
+              sid = sid,
+              speed = speed,
+              applyNumSteps = TtsGenerationOptionsParser.hasNumSteps(options),
+              numSteps = TtsGenerationOptionsParser.getNumSteps(options),
+              silenceScale = TtsGenerationOptionsParser.getSilenceScale(options),
+              referenceAudio = null,
+              referenceSampleRate = 0,
+              referenceText = null,
+              textBufferId = textInBufferId,
+              extra = TtsGenerationOptionsParser.buildExtraMap(options),
+              phonemeCodepoints = TtsGenerationOptionsParser.parsePhonemeCodepoints(options),
+              tokens = TtsGenerationOptionsParser.parseTokens(options),
+            )
+          }
           TtsNative.readAudioResult(raw)
             ?: run {
               promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
               return
             }
         } else {
-          val raw = TtsNative.nativeGenerate(instanceId, "", sid, speed, textInBufferId)
+          val raw = if (progressCallback != null) {
+            TtsNative.nativeGenerateWithProgress(
+              instanceId,
+              "",
+              sid,
+              speed,
+              textInBufferId,
+              progressCallback,
+            )
+          } else {
+            TtsNative.nativeGenerate(instanceId, "", sid, speed, textInBufferId)
+          }
           TtsNative.readAudioResult(raw)
             ?: run {
               promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
@@ -206,6 +269,28 @@ internal class TtsBatchGenerationService(
     } catch (e: Exception) {
       Log.e("SherpaOnnxTts", "synthesizeTts error: ${e.message}", e)
       promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to synthesize speech", e)
+    }
+  }
+
+  private fun makeProgressCallback(operationId: String): TtsGenerateProgressCallback? {
+    if (operationId.isEmpty()) return null
+    return TtsGenerateProgressCallback { progress ->
+      emitGenerateProgress(operationId, progress)
+      1
+    }
+  }
+
+  private fun emitGenerateProgress(operationId: String, progress: Float) {
+    try {
+      val payload = Arguments.createMap().apply {
+        putString("operationId", operationId)
+        putDouble("progress", progress.toDouble().coerceIn(0.0, 1.0))
+      }
+      reactContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("ttsGenerateProgress", payload)
+    } catch (_: Exception) {
+      // Bridge may already be tearing down.
     }
   }
 }

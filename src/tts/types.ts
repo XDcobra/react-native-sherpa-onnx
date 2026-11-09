@@ -13,7 +13,6 @@ import type {
 import type {
   ErrorRecoveryStrategy,
   FailedSegmentInfo,
-  OrchestrationProgress,
   RetryExhaustedFallback,
   SkippedSegmentInfo,
 } from '../pipeline/offlineOrchestrator';
@@ -437,6 +436,30 @@ export type TtsPhonemeInput =
     };
 
 /**
+ * Deterministic offline TTS progress for {@link TtsSynthesisOptions.onProgress}.
+ *
+ * Composition (always):
+ * `fraction = (segmentIndex + clamp01(generateFraction)) / segmentCount`
+ *
+ * - `segmentation.mode === 'off'`: `segmentCount === 1`, so `fraction === generateFraction`.
+ * - `segmentation.mode === 'auto'`: segment `i` owns bar slice `[i/N, (i+1)/N]`;
+ *   Sherpa batch/`maxNumSentences` progress fills the slice.
+ *
+ * Sherpa `generateFraction` is batch/sentence based (not sample-exact). Short
+ * one-batch segments often jump `0 → 1` within the slice.
+ */
+export type TtsSynthesisProgress = {
+  /** Overall 0..1 for a single progress bar (monotonic). */
+  fraction: number;
+  /** 0-based index of the segment currently synthesizing. */
+  segmentIndex: number;
+  segmentCount: number;
+  /** Sherpa generate progress within the current segment, 0..1. */
+  generateFraction: number;
+  elapsedMs: number;
+};
+
+/**
  * Options for buffer-to-buffer TTS synthesis via `tts.synthesize()`.
  * No subtitle/alignment options — those are separate modules.
  *
@@ -480,7 +503,11 @@ export type TtsSynthesisOptions = {
   errorRecovery?: ErrorRecoveryStrategy;
   maxRetriesPerSegment?: number;
   retryExhaustedFallback?: RetryExhaustedFallback;
-  onProgress?: (progress: OrchestrationProgress) => void;
+  /**
+   * Offline synthesis progress (`segmentation.mode` `'off'` or `'auto'`).
+   * See {@link TtsSynthesisProgress} for the composition formula.
+   */
+  onProgress?: (progress: TtsSynthesisProgress) => void;
   overlapChars?: number;
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;

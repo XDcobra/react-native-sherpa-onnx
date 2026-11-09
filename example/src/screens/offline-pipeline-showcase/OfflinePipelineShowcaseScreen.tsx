@@ -507,15 +507,20 @@ export default function OfflinePipelineShowcaseScreen() {
           const frac = p.fraction ?? 0;
           setTtsProgress(Math.round(frac * 100));
           setStatusText(
-            `TTS segment ${p.currentSegment + 1}/${
-              p.totalSegments
-            } (${Math.round(frac * 100)}%)`
+            `TTS segment ${p.segmentIndex + 1}/${p.segmentCount} (${Math.round(
+              frac * 100
+            )}%)`
           );
+          // One list row per segment start (generateFraction === 0); avoid
+          // flooding the event log with intra-segment Sherpa ticks.
+          if (p.generateFraction > 0) {
+            return;
+          }
           const ev: SegmentEvent = {
-            index: ttsEventsBase + p.currentSegment,
+            index: ttsEventsBase + p.segmentIndex,
             phase: 'tts',
-            label: `TTS Audio-Chunk ${p.currentSegment + 1}/${p.totalSegments}`,
-            durationMs: p.currentSegmentDurationMs ?? 0,
+            label: `TTS Audio-Chunk ${p.segmentIndex + 1}/${p.segmentCount}`,
+            durationMs: 0,
           };
           setSegmentEvents((prev) => {
             const next = [...prev];

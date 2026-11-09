@@ -291,6 +291,121 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerate(
   return AudioResultToMap(env, audio);
 }
 
+namespace {
+
+struct ProgressBridge {
+  JNIEnv* env = nullptr;
+  jobject callback = nullptr;
+  jmethodID onProgress = nullptr;
+};
+
+int32_t InvokeProgress(ProgressBridge* bridge, float progress) {
+  if (bridge == nullptr || bridge->env == nullptr || bridge->callback == nullptr ||
+      bridge->onProgress == nullptr) {
+    return 1;
+  }
+  const jint cont =
+      bridge->env->CallIntMethod(bridge->callback, bridge->onProgress, progress);
+  if (bridge->env->ExceptionCheck()) {
+    bridge->env->ExceptionClear();
+    return 0;
+  }
+  return cont == 0 ? 0 : 1;
+}
+
+bool ResolveProgressBridge(JNIEnv* env, jobject progressCallback,
+                           ProgressBridge* out) {
+  if (out == nullptr) return false;
+  *out = ProgressBridge{};
+  if (progressCallback == nullptr) return true;
+  jclass cls = env->GetObjectClass(progressCallback);
+  if (!cls) return false;
+  jmethodID mid = env->GetMethodID(cls, "onProgress", "(F)I");
+  env->DeleteLocalRef(cls);
+  if (!mid) {
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    return false;
+  }
+  out->env = env;
+  out->callback = progressCallback;
+  out->onProgress = mid;
+  return true;
+}
+
+sherpaonnx::TtsWrapper::AudioResult GenerateCollecting(
+    const std::shared_ptr<sherpaonnx::TtsWrapper>& inst,
+    const std::string& text,
+    int32_t sid,
+    float speed,
+    const std::optional<sherpaonnx::VoiceCloneOptions>& cloning,
+    ProgressBridge* bridge) {
+  sherpaonnx::TtsWrapper::AudioResult result;
+  result.sampleRate = 0;
+  if (!inst) return result;
+
+  std::vector<float> samples;
+  samples.reserve(16000);
+  auto streamCb = [&](const float* chunk, int32_t n, float progress) -> int32_t {
+    if (chunk != nullptr && n > 0) {
+      samples.insert(samples.end(), chunk, chunk + n);
+    }
+    return InvokeProgress(bridge, progress);
+  };
+
+  bool ok = false;
+  if (cloning.has_value()) {
+    ok = inst->generateStream(text, sid, speed, streamCb, cloning);
+  } else {
+    ok = inst->generateStream(text, sid, speed, streamCb);
+  }
+  if (!ok || samples.empty()) {
+    return result;
+  }
+  result.samples = std::move(samples);
+  result.sampleRate = inst->getSampleRate();
+  return result;
+}
+
+}  // namespace
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerateWithProgress(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring text, jint sid,
+    jfloat speed, jstring textBufferId, jobject progressCallback) {
+  auto inst = Lookup(CopyJstring(env, instanceId));
+  if (!inst || !inst->isInitialized()) {
+    jmethodID mapPut = nullptr;
+    jobject map = NewHashMap(env, &mapPut);
+    if (!map) return nullptr;
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", "TTS not initialized");
+    return map;
+  }
+  ProgressBridge bridge;
+  if (!ResolveProgressBridge(env, progressCallback, &bridge)) {
+    jmethodID mapPut = nullptr;
+    jobject map = NewHashMap(env, &mapPut);
+    if (!map) return nullptr;
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error",
+                          "Invalid TTS progress callback");
+    return map;
+  }
+  std::string textErr;
+  const std::string resolved = ResolveTtsText(env, text, textBufferId, &textErr);
+  if (!textErr.empty() && !CopyJstring(env, textBufferId).empty()) {
+    jmethodID mapPut = nullptr;
+    jobject map = NewHashMap(env, &mapPut);
+    if (!map) return nullptr;
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", textErr);
+    return map;
+  }
+  const auto audio = GenerateCollecting(inst, resolved, sid, speed, std::nullopt,
+                                        &bridge);
+  return AudioResultToMap(env, audio);
+}
+
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerateWithOptions(
     JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring text, jint sid,
@@ -362,6 +477,92 @@ Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerateWithOptions(
     return map;
   }
   const auto audio = inst->generate(resolved, sid, speed, std::optional(opts));
+  return AudioResultToMap(env, audio);
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_tts_nativeapi_TtsNative_nativeGenerateWithOptionsWithProgress(
+    JNIEnv* env, jclass /* clazz */, jstring instanceId, jstring text, jint sid,
+    jfloat speed, jboolean applyNumSteps, jint numSteps, jfloat silenceScale,
+    jfloatArray referenceAudio, jint referenceSampleRate, jstring referenceText,
+    jobject extraMap, jobjectArray phonemeCodepoints, jobjectArray tokens,
+    jstring referenceBufferId, jstring textBufferId, jobject progressCallback) {
+  auto inst = Lookup(CopyJstring(env, instanceId));
+  if (!inst || !inst->isInitialized()) {
+    jmethodID mapPut = nullptr;
+    jobject map = NewHashMap(env, &mapPut);
+    if (!map) return nullptr;
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", "TTS not initialized");
+    return map;
+  }
+
+  ProgressBridge bridge;
+  if (!ResolveProgressBridge(env, progressCallback, &bridge)) {
+    jmethodID mapPut = nullptr;
+    jobject map = NewHashMap(env, &mapPut);
+    if (!map) return nullptr;
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error",
+                          "Invalid TTS progress callback");
+    return map;
+  }
+
+  sherpaonnx::VoiceCloneOptions opts;
+  opts.apply_num_steps = applyNumSteps == JNI_TRUE;
+  opts.num_steps = numSteps;
+  opts.silence_scale = silenceScale;
+  opts.reference_text = CopyJstring(env, referenceText);
+  PaOfflineSampleView refView;
+  const std::string refId = CopyJstring(env, referenceBufferId);
+  if (!refId.empty()) {
+    std::string errCode;
+    std::string errMsg;
+    if (!pa_acquire_offline_sample_view(refId, -1, -1, &refView, &errCode, &errMsg)) {
+      jmethodID mapPut = nullptr;
+      jobject map = NewHashMap(env, &mapPut);
+      if (!map) return nullptr;
+      sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+      sherpaonnx::PutString(env, map, mapPut, "error",
+                            errMsg.empty() ? "Reference audio buffer not found" : errMsg);
+      return map;
+    }
+    if (refView.count == 0 || refView.data == nullptr || refView.sampleRate <= 0) {
+      jmethodID mapPut = nullptr;
+      jobject map = NewHashMap(env, &mapPut);
+      if (!map) return nullptr;
+      sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+      sherpaonnx::PutString(env, map, mapPut, "error", "Reference audio is empty");
+      return map;
+    }
+    opts.reference_pcm = refView.data;
+    opts.reference_pcm_count = static_cast<int32_t>(refView.count);
+    opts.reference_sample_rate = refView.sampleRate;
+    opts.reference_keepalive = refView.entry;
+  } else {
+    opts.reference_audio = CopyFloatArray(env, referenceAudio);
+    opts.reference_sample_rate = referenceSampleRate;
+  }
+  if (extraMap != nullptr) {
+    for (const auto& kv : HashMapToStringMap(env, extraMap)) {
+      opts.extra[kv.first] = kv.second;
+    }
+  }
+  opts.phoneme_codepoints = ParsePhonemes(env, phonemeCodepoints);
+  opts.tokens = ParseTokens(env, tokens);
+
+  std::string textErr;
+  const std::string resolved = ResolveTtsText(env, text, textBufferId, &textErr);
+  if (!textErr.empty() && !CopyJstring(env, textBufferId).empty()) {
+    jmethodID mapPut = nullptr;
+    jobject map = NewHashMap(env, &mapPut);
+    if (!map) return nullptr;
+    sherpaonnx::PutBoolean(env, map, mapPut, "success", false);
+    sherpaonnx::PutString(env, map, mapPut, "error", textErr);
+    return map;
+  }
+  const auto audio = GenerateCollecting(inst, resolved, sid, speed,
+                                        std::optional(opts), &bridge);
   return AudioResultToMap(env, audio);
 }
 

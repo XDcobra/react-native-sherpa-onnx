@@ -5,6 +5,10 @@ import type { OfflineTextBufferIdSource } from '../textbuffer/types';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import { validateSegmentationConfig } from '../segment/validation';
 import { toNativeSynthesisOptions } from './ttsNativeBridge';
+import {
+  createTtsProgressEmitter,
+  synthesizeTtsWithProgress,
+} from './synthesizeWithProgress';
 import type { TtsSynthesisOptions } from './types';
 
 const DEFAULT_TTS_SEGMENTATION_POLICY: SegmentationPolicy = {
@@ -28,23 +32,47 @@ export async function runOfflineTtsPipeline(
   });
 
   const sampleRate = await SherpaOnnx.getTtsSampleRate(instanceId);
+  const startedAtMs = Date.now();
+  const emit = createTtsProgressEmitter(options.onProgress, startedAtMs);
+  const nativeOptions = toNativeSynthesisOptions(options) ?? undefined;
 
   return runOfflineTextToAudioPipeline(
     textIn,
-    async (segIn, segOut) => {
-      await SherpaOnnx.synthesizeTts(
+    async (segIn, segOut, ctx) => {
+      emit({
+        segmentIndex: ctx.segmentIndex,
+        segmentCount: ctx.segmentCount,
+        generateFraction: 0,
+      });
+      await synthesizeTtsWithProgress(
         instanceId,
         segIn.bufferId,
         segOut.bufferId,
-        toNativeSynthesisOptions(options) ?? undefined
+        nativeOptions,
+        options.onProgress
+          ? (generateFraction) => {
+              emit({
+                segmentIndex: ctx.segmentIndex,
+                segmentCount: ctx.segmentCount,
+                generateFraction,
+                elapsedMs: Date.now() - startedAtMs,
+              });
+            }
+          : undefined
       );
+      emit({
+        segmentIndex: ctx.segmentIndex,
+        segmentCount: ctx.segmentCount,
+        generateFraction: 1,
+        elapsedMs: Date.now() - startedAtMs,
+      });
     },
     {
       segmentation,
       errorRecovery: options.errorRecovery,
       maxRetriesPerSegment: options.maxRetriesPerSegment,
       retryExhaustedFallback: options.retryExhaustedFallback,
-      onProgress: options.onProgress,
+      deferProgressToConsumer: true,
       overlapChars: options.overlapChars,
       textSkipPlaceholder: options.textSkipPlaceholder,
       linkMap: options.linkMap,

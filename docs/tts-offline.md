@@ -429,14 +429,33 @@ More end-to-end patterns: [feature-pipelines.md#tts-offline-patterns](feature-pi
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none |
+| `onProgress` | `TtsSynthesisProgress` | throughout offline synthesize | `mode: 'off'` and `mode: 'auto'` |
 
-Shapes: [Types](#types).
+### Progress semantics
+
+One event drives the UI bar. Composition is always:
+
+```text
+fraction = (segmentIndex + clamp01(generateFraction)) / segmentCount
+```
+
+| Mode | Meaning |
+| --- | --- |
+| `off` | `segmentCount === 1` → `fraction === generateFraction` (Sherpa batch progress) |
+| `auto` | Segment `i` owns bar slice `[i/N, (i+1)/N]`; Sherpa fills the slice |
+
+- `fraction` is monotonic; the SDK emits `generateFraction: 1` after each segment and finishes at `1.0`.
+- Optional label: `Segment ${segmentIndex + 1} / ${segmentCount}`.
+- Sherpa `generateFraction` is **batch/sentence** based (`maxNumSentences`), not sample-exact. Short one-batch segments often jump `0 → 1` within their slice. Use `maxNumSentences: 1` at init for finer steps when needed.
 
 ```ts
 const result = await tts.synthesize(textBuf, audioBuf, {
   segmentation: { mode: 'auto' },
-  onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
+  onProgress: (p) => {
+    console.log(
+      `${Math.round(p.fraction * 100)}% · segment ${p.segmentIndex + 1}/${p.segmentCount}`
+    );
+  },
 });
 ```
 
@@ -456,7 +475,8 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTSInitializeOptions` | Discriminated union: concrete `modelType` required for `modelOptions` |
 | `TTSInitializeOptionsBase` | Shared fields: `modelSource`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsUpdateOptions` | Arg to `updateParams()` — same per-`modelType` coupling as init |
-| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, lang?, extra?, voiceClone?, phonemeCodepoints?, tokens?, segmentation?, … }` — `numSteps` for **supertonic** (no clone), **zipvoice**, **pocket** (with `voiceClone`); `phonemeCodepoints` (vits/matcha/kokoro/kitten) or `tokens` (ZipVoice) are exclusive; see `supportsNumSteps` / `requiresVoiceCloneForNumSteps` |
+| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, lang?, extra?, voiceClone?, phonemeCodepoints?, tokens?, segmentation?, onProgress?, … }` — `numSteps` for **supertonic** (no clone), **zipvoice**, **pocket** (with `voiceClone`); `phonemeCodepoints` (vits/matcha/kokoro/kitten) or `tokens` (ZipVoice) are exclusive; see `supportsNumSteps` / `requiresVoiceCloneForNumSteps` |
+| `TtsSynthesisProgress` | `{ fraction, segmentIndex, segmentCount, generateFraction, elapsedMs }` — composed offline progress; see [JS Events](#js-events) |
 | `TtsPhonemeInput` | `{ phonemeCodepoints: number[][] } \| { tokens: string[][] }` — Unicode codepoints vs ZipVoice phoneme strings; not `tokens.txt` |
 | `TtsKittenCustomConfig` | `{ ttsModel, tokens, voices, lexicon? }` — no `dataDir` |
 | `TtsVoiceClone` | `TtsVoiceCloneZipvoice \| TtsVoiceClonePocket` |
@@ -568,7 +588,10 @@ try {
   const result = await tts.synthesize(textBuf, audioBuf, {
     segmentation: { mode: 'auto' }, // default policy: text_synthetic_auto, maxLengthChars: 500
     errorRecovery: 'skip',
-    onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
+    onProgress: (p) =>
+      console.log(
+        `${Math.round(p.fraction * 100)}% · segment ${p.segmentIndex + 1}/${p.segmentCount}`
+      ),
   });
   console.log(result.status, result.totalSegments);
   await saveAudioAsFile(audioBuf, { kind: 'fs', path: '/output/long.wav' }, 'wav');

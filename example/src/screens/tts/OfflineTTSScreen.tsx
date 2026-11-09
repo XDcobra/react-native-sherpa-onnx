@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   type TtsSynthesisOptions,
+  type TtsSynthesisProgress,
   type TtsSynthesisResult,
   type TtsMatchaModelOptions,
   type TtsVitsModelOptions,
@@ -92,6 +93,8 @@ export default function OfflineTTSScreen() {
     GeneratedResult[]
   >([]);
   const [generating, setGenerating] = useState(false);
+  const [synthesisProgress, setSynthesisProgress] =
+    useState<TtsSynthesisProgress | null>(null);
   const [offlineSegConfig, setOfflineSegConfig] =
     useState<SegmentationControlConfig>({ mode: 'off' });
   const [lastSynthesisResult, setLastSynthesisResult] =
@@ -410,6 +413,7 @@ export default function OfflineTTSScreen() {
     }
 
     setGenerating(true);
+    setSynthesisProgress(null);
     setError(null);
     setGeneratedAudio(null);
     setSavedAudioPath(null);
@@ -456,6 +460,9 @@ export default function OfflineTTSScreen() {
       }
 
       options.segmentation = buildSegmentationOption(offlineSegConfig);
+      options.onProgress = (progress) => {
+        setSynthesisProgress(progress);
+      };
 
       // Voice clone: create buffer from raw reference samples
       let refAudioBuf: OfflineAudioBufferRef | undefined;
@@ -825,6 +832,27 @@ export default function OfflineTTSScreen() {
               />
 
               <View style={styles.generateActionsSpacer} />
+              {generating && synthesisProgress != null ? (
+                <View style={styles.progressBlock}>
+                  <Text style={styles.progressLabel}>
+                    {Math.round(synthesisProgress.fraction * 100)}% · Segment{' '}
+                    {synthesisProgress.segmentIndex + 1}/
+                    {synthesisProgress.segmentCount}
+                  </Text>
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {
+                          width: `${Math.round(
+                            synthesisProgress.fraction * 100
+                          )}%`,
+                        },
+                      ]}
+                    />
+                  </View>
+                </View>
+              ) : null}
               <TouchableOpacity
                 style={[
                   styles.generateButton,

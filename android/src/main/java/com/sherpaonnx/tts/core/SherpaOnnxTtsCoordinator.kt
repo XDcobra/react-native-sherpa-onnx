@@ -43,7 +43,7 @@ internal class SherpaOnnxTtsCoordinator(
     ttsInitExecutor
   )
 
-  private val batchGenerationService = TtsBatchGenerationService(repository)
+  private val batchGenerationService = TtsBatchGenerationService(repository, reactContext)
 
   private val lifecycleService = TtsLifecycleService(
     repository,

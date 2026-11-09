@@ -432,6 +432,25 @@ export const styles = StyleSheet.create({
   generateActionsSpacer: {
     height: 24,
   },
+  progressBlock: {
+    marginBottom: 12,
+  },
+  progressLabel: {
+    fontSize: 13,
+    color: '#3A3A3C',
+    marginBottom: 6,
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#E5E5EA',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#007AFF',
+    borderRadius: 4,
+  },
   generateButton: {
     backgroundColor: '#007AFF',
     borderRadius: 8,
