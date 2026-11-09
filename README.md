@@ -108,7 +108,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 - ✅ Model setup & detection: [Model setup](./docs/model-setup.md) · [Model detection & init](./docs/model-detect.md) · [Model languages](./docs/model-languages.md)
 - ✅ Runtime model delivery: [Download manager](./docs/download-manager.md) · [Extraction API](./docs/extraction.md) · [PAD & ODR](./docs/model-delivery-pad-odr.md)
 - ✅ Acceleration & diagnostics: [Execution providers](./docs/execution-providers.md) · [Native diagnostics](./docs/native-diagnostics.md) · [Memory planning](./docs/memory-and-models.md)
-- ✅ Build optimization: [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md) · opt-in [PDFium](./docs/pdf-offline.md) · [libwebp](./docs/imagebuffer-offline.md)
+- ✅ Build optimization: [Disable FFmpeg](./docs/disable-ffmpeg.md) · [Disable libarchive](./docs/disable-libarchive.md) · opt-in [lexbor](./docs/document-offline.md) · [PDFium](./docs/pdf-offline.md) · [libwebp](./docs/imagebuffer-offline.md)
 - ✅ Codec policies (HW / SW / preferHardware): [Codecs](./docs/codecs.md)
 
 ### Input & output formats

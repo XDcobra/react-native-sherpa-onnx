@@ -903,10 +903,13 @@ set_tests_properties(pdf_text_layer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
-# Offline e-document extractor (EPUB/FB2/CBZ; libarchive optional)
+# Offline e-document extractor (EPUB/FB2/CBZ; libarchive optional; lexbor opt-in)
 set(DOC_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/document")
 set(DOC_IMAGE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image")
 set(DOC_REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+# Host tests enable lexbor by default so EPUB/MOBI fixtures stay green.
+# Pass -DSHERPA_ONNX_HOST_ENABLE_LEXBOR=OFF to exercise ERR_DOC_LEXBOR_DISABLED.
+option(SHERPA_ONNX_HOST_ENABLE_LEXBOR "Link lexbor for document_host_test" ON)
 set(LEXBOR_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(LEXBOR_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(LEXBOR_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -914,7 +917,7 @@ set(LEXBOR_BUILD_TESTS_CPP OFF CACHE BOOL "" FORCE)
 set(LEXBOR_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(LEXBOR_BUILD_UTILS OFF CACHE BOOL "" FORCE)
 set(LEXBOR_INSTALL_HEADERS OFF CACHE BOOL "" FORCE)
-if(NOT TARGET lexbor_static)
+if(SHERPA_ONNX_HOST_ENABLE_LEXBOR AND NOT TARGET lexbor_static)
   add_subdirectory("${DOC_REPO_ROOT}/third_party/lexbor"
                    "${CMAKE_CURRENT_BINARY_DIR}/lexbor" EXCLUDE_FROM_ALL)
 endif()
@@ -935,11 +938,22 @@ add_executable(document_host_test
 target_include_directories(document_host_test PRIVATE
   "${DOC_CPP_ROOT}"
   "${DOC_REPO_ROOT}/third_party/pugixml/src"
-  "${DOC_REPO_ROOT}/third_party/lexbor/source"
   "${DOC_IMAGE_ROOT}"
   "${DOC_IMAGE_ROOT}/decode"
 )
-target_link_libraries(document_host_test PRIVATE ${PDF_GTEST_LIBS} lexbor_static)
+target_link_libraries(document_host_test PRIVATE ${PDF_GTEST_LIBS})
+target_compile_definitions(document_host_test PRIVATE
+  SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+if(SHERPA_ONNX_HOST_ENABLE_LEXBOR)
+  target_include_directories(document_host_test PRIVATE
+    "${DOC_REPO_ROOT}/third_party/lexbor/source")
+  target_link_libraries(document_host_test PRIVATE lexbor_static)
+  target_compile_definitions(document_host_test PRIVATE SHERPA_ONNX_HAS_LEXBOR=1)
+  message(STATUS "document_host_test: lexbor enabled")
+else()
+  message(STATUS "document_host_test: lexbor disabled (ERR_DOC_LEXBOR_DISABLED stub)")
+endif()
 find_path(LIBARCHIVE_INCLUDE_DIR archive.h
   HINTS /opt/homebrew/opt/libarchive/include /opt/homebrew/include /usr/local/include /usr/include)
 find_library(LIBARCHIVE_LIBRARY archive
@@ -947,10 +961,7 @@ find_library(LIBARCHIVE_LIBRARY archive
 if(LIBARCHIVE_INCLUDE_DIR AND LIBARCHIVE_LIBRARY)
   target_include_directories(document_host_test PRIVATE "${LIBARCHIVE_INCLUDE_DIR}")
   target_link_libraries(document_host_test PRIVATE "${LIBARCHIVE_LIBRARY}")
-  target_compile_definitions(document_host_test PRIVATE
-    HAVE_LIBARCHIVE=1
-    SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
-  )
+  target_compile_definitions(document_host_test PRIVATE HAVE_LIBARCHIVE=1)
   message(STATUS "document_host_test: libarchive enabled")
 else()
   message(STATUS "document_host_test: libarchive not found (disabled-stub cases only)")

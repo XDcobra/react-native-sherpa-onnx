@@ -102,6 +102,15 @@ else()
     message(STATUS "PDFium disabled (default). Set sherpaOnnxEnablePdfium=true to link text-layer extract.")
 endif()
 
+# Optional: enable lexbor (gradle.properties: sherpaOnnxEnableLexbor=true). Default OFF.
+set(USE_LEXBOR OFF)
+if(SHERPA_ONNX_ENABLE_LEXBOR)
+    set(USE_LEXBOR ON)
+    message(STATUS "lexbor enabled (SHERPA_ONNX_ENABLE_LEXBOR=ON).")
+else()
+    message(STATUS "lexbor disabled (default). Set sherpaOnnxEnableLexbor=true to link document HTML extract.")
+endif()
+
 # Source files by domain (see docs/NATIVE_NAMING_CONVENTION.md). model_detect: subdirs common/stt/tts/enhancement/alignment; flat #includes via multiple include paths below.
 set(SOURCES
     ort/ApplyOrtProvider.cpp
@@ -361,6 +370,7 @@ set(SOURCES
     video/platform/android/AMediaCodecEncoder.cpp
 )
 
+if(USE_LEXBOR)
 # lexbor: prebuilt shared .so (TAG + Gradle download). No in-tree source build.
 set(LEXBOR_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/lexbor_prebuilt/android")
 set(LEXBOR_PREBUILT_LIB "${LEXBOR_PREBUILT_BASE}/${ANDROID_ABI}/lib")
@@ -383,13 +393,14 @@ if(EXISTS "${LEXBOR_PREBUILT_BASE}/include/lexbor/html/parser.h")
 elseif(EXISTS "${LEXBOR_INCLUDE_CPP}/lexbor/html/parser.h")
     set(LEXBOR_INCLUDE_DIR "${LEXBOR_INCLUDE_CPP}")
 endif()
-if(NOT USE_LEXBOR_PREBUILT OR NOT LEXBOR_INCLUDE_DIR)
-    message(FATAL_ERROR
-        "lexbor prebuilt not found (liblexbor.so + lexbor/html/parser.h). "
-        "Run a Gradle Android build so prebuilts download, or publish "
-        "third_party/lexbor_prebuilt (see README).")
+if(USE_LEXBOR_PREBUILT AND LEXBOR_INCLUDE_DIR)
+    message(STATUS "lexbor: using prebuilt (libs: ${LEXBOR_LIB_DIR}, include: ${LEXBOR_INCLUDE_DIR})")
+else()
+    message(WARNING "lexbor prebuilt not found for ${ANDROID_ABI}. "
+                    "sherpaOnnxEnableLexbor=true requires prebuilts "
+                    "(third_party/lexbor_prebuilt or Maven/GitHub).")
 endif()
-message(STATUS "lexbor: using prebuilt (libs: ${LEXBOR_LIB_DIR}, include: ${LEXBOR_INCLUDE_DIR})")
+endif(USE_LEXBOR)
 
 # libyuv: prebuilt shared .so (TAG + Gradle download). No in-tree source build.
 set(LIBYUV_PREBUILT_BASE "${PROJECT_ROOT}/../third_party/libyuv_prebuilt/android")
@@ -645,7 +656,7 @@ endif()
 if(USE_PDFIUM AND PDFIUM_INCLUDE_DIR)
     target_include_directories(sherpaonnx PRIVATE ${PDFIUM_INCLUDE_DIR})
 endif()
-if(LEXBOR_INCLUDE_DIR)
+if(USE_LEXBOR AND LEXBOR_INCLUDE_DIR)
     target_include_directories(sherpaonnx PRIVATE ${LEXBOR_INCLUDE_DIR})
 endif()
 # When USE_FFMPEG=OFF, do NOT define HAVE_FFMPEG at all. Then #ifdef HAVE_FFMPEG is false
@@ -663,6 +674,9 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_INCLUDE_DIR)
     target_compile_definitions(sherpaonnx PRIVATE HAVE_PDFIUM=1)
 endif()
+if(USE_LEXBOR AND USE_LEXBOR_PREBUILT AND LEXBOR_INCLUDE_DIR)
+    target_compile_definitions(sherpaonnx PRIVATE SHERPA_ONNX_HAS_LEXBOR=1)
+endif()
 
 # Link libraries (Kotlin API from AAR handles STT/TTS incl. Zipvoice)
 if(USE_FFMPEG)
@@ -677,7 +691,7 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${PDFIUM_LIB_DIR})
 endif()
-if(USE_LEXBOR_PREBUILT AND LEXBOR_LIB_DIR)
+if(USE_LEXBOR AND USE_LEXBOR_PREBUILT AND LEXBOR_LIB_DIR)
     target_link_directories(sherpaonnx PRIVATE ${LEXBOR_LIB_DIR})
 endif()
 if(USE_LIBYUV_PREBUILT AND LIBYUV_LIB_DIR)
@@ -721,7 +735,10 @@ endif()
 if(USE_PDFIUM AND USE_PDFIUM_PREBUILT AND PDFIUM_LIB_DIR)
     target_link_libraries(sherpaonnx PRIVATE pdfium)
 endif()
-target_link_libraries(sherpaonnx PRIVATE log android jnigraphics lexbor yuv mediandk z)
+if(USE_LEXBOR AND USE_LEXBOR_PREBUILT AND LEXBOR_LIB_DIR)
+    target_link_libraries(sherpaonnx PRIVATE lexbor)
+endif()
+target_link_libraries(sherpaonnx PRIVATE log android jnigraphics yuv mediandk z)
 
 # Compiler flags for our library
 target_compile_options(sherpaonnx PRIVATE

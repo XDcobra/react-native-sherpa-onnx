@@ -12,6 +12,9 @@ namespace document {
 struct HtmlExtract {
   std::string text;  // blocks joined with \n\n
   std::vector<std::string> blocks;  // one per block element
+  /** Set when lexbor was not linked (`ERR_DOC_LEXBOR_DISABLED`). */
+  std::string error_code;
+  std::string error_message;
 };
 
 /** lexbor HTML5 parse → TTS text. Skips script/style/head/template/rt/rp. */

@@ -9,6 +9,8 @@ Source adapter like [`pdf/`](pdf-offline.md): not a reader and not OCR. Recogniz
 
 libarchive is **default-on**. Disable at build time → `ERR_DOC_ARCHIVE_DISABLED` (no `isLibarchiveEnabled()`). Log tag `[SherpaOnnx:doc]`.
 
+**lexbor is opt-in (default off).** EPUB/MOBI HTML text extract needs it. Enable with `sherpaOnnxEnableLexbor=true` (Android) or `SHERPA_ONNX_ENABLE_LEXBOR=1` (iOS); otherwise `extractDocumentText` for those formats returns `ERR_DOC_LEXBOR_DISABLED`. FB2 (pugixml) and CBZ/CBR image extract do not require lexbor.
+
 ## Typical pipeline
 
 The SDK does not sniff-then-dispatch. Start with `extractDocumentText` unless you already know it is a comic. Every branch ends on an `OfflineTextBuffer` (markup, OCR, or app-joined). **Typical goal is TTS** (`createTTS().synthesize`). Because buffers are the pipeline contract, any other feature that takes that TextBuffer works the same way — offline punctuation, alignment, and so on. See [feature-pipelines.md](feature-pipelines.md).
@@ -227,6 +229,7 @@ Blocks joined with `\n\n`; `<br>` → `\n`; ruby keeps `rb`, drops `rt`/`rp`; `s
 | Code | When |
 |------|------|
 | `ERR_DOC_ARCHIVE_DISABLED` | libarchive built out |
+| `ERR_DOC_LEXBOR_DISABLED` | lexbor not linked (`sherpaOnnxEnableLexbor=true` / `SHERPA_ONNX_ENABLE_LEXBOR=1`); EPUB/MOBI HTML text |
 | `ERR_DOC_UNSUPPORTED_FORMAT` | PDF, HTML file, KFX / AZW4 / Topaz / audio / dictionary MOBI, unknown |
 | `ERR_DOC_DRM` | Content encryption / password-protected archive |
 | `ERR_DOC_OPEN_FAILED` | Unreadable, non-seekable stream, or archive over **10 000** entries / **64 MiB** per file / **512 MiB** uncompressed |

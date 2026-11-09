@@ -187,7 +187,12 @@ Pod::Spec.new do |s|
     has_libarchive = true
   end
 
-  has_lexbor = File.exist?(lexbor_xcframework)
+  # Opt-in (default off). Require explicit SHERPA_ONNX_ENABLE_LEXBOR=1 and xcframework present.
+  has_lexbor = false
+  enable_lexbor = ENV['SHERPA_ONNX_ENABLE_LEXBOR']
+  if (enable_lexbor == '1' || enable_lexbor == 'true') && File.exist?(lexbor_xcframework)
+    has_lexbor = true
+  end
 
   # Opt-in (default off). Require explicit SHERPA_ONNX_ENABLE_LIBWEBP=1 and xcframework present.
   has_libwebp = false
@@ -258,7 +263,9 @@ Pod::Spec.new do |s|
   ffmpeg_device_slice = File.join(ffmpeg_xcframework, "ios-arm64")
 
   gcc_defs = '$(inherited) PLATFORM_CONFIG_H=\\"libarchive_darwin_config.h\\"'
-  gcc_defs += ' LEXBOR_STATIC=1' if has_lexbor
+  if has_lexbor
+    gcc_defs += ' LEXBOR_STATIC=1 SHERPA_ONNX_HAS_LEXBOR=1'
+  end
   gcc_defs += ' HAVE_FFMPEG=1' if has_ffmpeg
   gcc_defs += ' HAVE_LIBARCHIVE=1' if has_libarchive
   gcc_defs += ' HAVE_LIBWEBP=1' if has_libwebp

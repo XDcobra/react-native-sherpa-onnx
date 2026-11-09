@@ -11,6 +11,9 @@ Build [lexbor](https://github.com/lexbor/lexbor) for Android and iOS and publish
   - `.github/workflows/build-lexbor-android-release.yml` — zip + AAR + GitHub Release + Maven publish
   - `.github/workflows/framework-lexbor-ios-framework.yml` — XCFramework zip + GitHub Release
 - **SDK resolution:** Gradle (`prebuilt-download.gradle`) cascade THIRD_PARTY → LOCAL_SDK → MAVEN_AAR → GITHUB_RELEASE. iOS: `scripts/setup-ios-framework.sh` downloads the XCFramework from the iOS release tag.
-- **Always-on:** Document HTML extract (`extractDocumentText` EPUB XHTML) links lexbor. There is no disable flag.
+- **Opt-in (default off):** Document HTML extract (EPUB/MOBI via `extractDocumentText`) links lexbor only when enabled:
+  - Android: `sherpaOnnxEnableLexbor=true` in `gradle.properties` (passes `-DSHERPA_ONNX_ENABLE_LEXBOR=ON`)
+  - iOS: `SHERPA_ONNX_ENABLE_LEXBOR=1` before `pod install` / `setup-ios-framework.sh`
+  - Without enable: download/link skipped; runtime returns `ERR_DOC_LEXBOR_DISABLED`. CBZ/CBR images and FB2 (pugixml) still work without lexbor.
 
 Bump version: update submodule pin and reset `*_RELEASE_TAG` to `lexbor-*-v<upstream>-1`, or keep the upstream pin and increment `-N`, then re-run the release workflows.

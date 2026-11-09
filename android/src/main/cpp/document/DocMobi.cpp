@@ -1070,6 +1070,13 @@ ExtractTextResult ExtractMobiText(const DocumentSource& src,
     r.error_message = err_msg;
     return r;
   }
+#if !defined(SHERPA_ONNX_HAS_LEXBOR) || !SHERPA_ONNX_HAS_LEXBOR
+  r.error_code = kErrLexborDisabled;
+  r.error_message =
+      "lexbor is not linked. Rebuild with sherpaOnnxEnableLexbor=true "
+      "(Android) or SHERPA_ONNX_ENABLE_LEXBOR=1 (iOS).";
+  return r;
+#endif
   DOC_LOGI("mobi open records=%zu textRec=%u kf8=%d raw=%zu parts=%zu",
            book.pdb.NumRecords(), book.hdr.num_text_records, book.hdr.kf8 ? 1 : 0,
            book.raw_text.size(), book.html_parts.size());
@@ -1082,6 +1089,11 @@ ExtractTextResult ExtractMobiText(const DocumentSource& src,
     const std::string& html = book.html_parts[i];
     const HtmlExtract hx = ExtractHtmlText(
         reinterpret_cast<const uint8_t*>(html.data()), html.size());
+    if (!hx.error_code.empty()) {
+      r.error_code = hx.error_code;
+      r.error_message = hx.error_message;
+      return r;
+    }
     const std::string href = "part-" + std::to_string(section_index);
     DocSection sec;
     sec.section_index = section_index;
@@ -1131,6 +1143,11 @@ ExtractImagesResult ExtractMobiImages(const DocumentSource& src,
     const std::string& html = book.html_parts[i];
     const HtmlExtract hx = ExtractHtmlText(
         reinterpret_cast<const uint8_t*>(html.data()), html.size());
+    if (!hx.error_code.empty()) {
+      r.error_code = hx.error_code;
+      r.error_message = hx.error_message;
+      return r;
+    }
     if (!HtmlIsImageOnly(hx)) {
       ++section_index;
       continue;

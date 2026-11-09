@@ -71,6 +71,17 @@ describe('document offline api', () => {
     ).rejects.toMatchObject({ code: DocumentErrorCode.ARCHIVE_DISABLED });
   });
 
+  it('maps lexbor-disabled native error', async () => {
+    mockNative.extractDocumentText.mockRejectedValue(
+      new Error(
+        'ERR_DOC_LEXBOR_DISABLED: lexbor is not linked. Rebuild with sherpaOnnxEnableLexbor=true'
+      )
+    );
+    await expect(
+      extractDocumentText({ kind: 'fs', path: '/tmp/a.epub' }, TEXT_OUT)
+    ).rejects.toMatchObject({ code: DocumentErrorCode.LEXBOR_DISABLED });
+  });
+
   it('maps no-text native error from code', async () => {
     mockNative.extractDocumentText.mockRejectedValue(
       Object.assign(new Error('comic has no markup'), {
