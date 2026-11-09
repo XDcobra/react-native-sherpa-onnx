@@ -1,7 +1,7 @@
 asset_name,license_type,commercial_use,confidence,detection_source,license_file
-sherpa-onnx-spleeter-2stems-fp16.tar.bz2,mit,unknown,high,manual,https://github.com/deezer/spleeter
-sherpa-onnx-spleeter-2stems-int8.tar.bz2,mit,unknown,high,manual,https://github.com/deezer/spleeter
-sherpa-onnx-spleeter-2stems.tar.bz2,mit,unknown,high,manual,https://github.com/deezer/spleeter
+sherpa-onnx-spleeter-2stems-fp16.tar.bz2,mit,yes,high,manual,https://github.com/deezer/spleeter/blob/master/LICENSE
+sherpa-onnx-spleeter-2stems-int8.tar.bz2,mit,yes,high,manual,https://github.com/deezer/spleeter/blob/master/LICENSE
+sherpa-onnx-spleeter-2stems.tar.bz2,mit,yes,high,manual,https://github.com/deezer/spleeter/blob/master/LICENSE
 UVR-MDX-NET-Inst_1.onnx,mit,unknown,high,manual,https://github.com/anjok07/ultimatevocalremovergui#license
 UVR-MDX-NET-Inst_2.onnx,mit,unknown,high,manual,https://github.com/anjok07/ultimatevocalremovergui#license
 UVR-MDX-NET-Inst_3.onnx,mit,unknown,high,manual,https://github.com/anjok07/ultimatevocalremovergui#license
