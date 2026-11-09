@@ -11,6 +11,7 @@
 // When sherpaOnnxDisableFfmpeg=true (gradle.properties), FFmpeg is not required; see docs/disable-ffmpeg.md.
 // When sherpaOnnxDisableLibarchive=true (gradle.properties), libarchive is not required; see docs/disable-libarchive.md.
 // When sherpaOnnxEnableLibwebp=false (default), libwebp is not required (ImageBuffer WebP decode/export disabled).
+// When sherpaOnnxEnableLexbor=false (default), lexbor is not required (document HTML extract disabled).
 
 def sherpaOnnxDisableFfmpeg = (project.findProperty("sherpaOnnxDisableFfmpeg") ?: "false").toString().toLowerCase() in ["true", "1"]
 def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarchive") ?: "false").toString().toLowerCase() in ["true", "1"]
@@ -18,6 +19,8 @@ def sherpaOnnxDisableLibarchive = (project.findProperty("sherpaOnnxDisableLibarc
 def sherpaOnnxEnableLibwebp = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
 // Opt-in (default false). When false, skip all PDFium download/link requirements.
 def sherpaOnnxEnablePdfium = (project.findProperty("sherpaOnnxEnablePdfium") ?: "false").toString().toLowerCase() in ["true", "1"]
+// Opt-in (default false). When false, skip all lexbor download/link requirements.
+def sherpaOnnxEnableLexbor = (project.findProperty("sherpaOnnxEnableLexbor") ?: "false").toString().toLowerCase() in ["true", "1"]
 // Opt-in (default false). When true, resolve com.xdcobra.sherpa:ffmpeg-vsw and the vsw GitHub zip.
 def sherpaOnnxEnableVideoSwDecoders = (project.findProperty("sherpaOnnxEnableVideoSwDecoders") ?: "false").toString().toLowerCase() in ["true", "1"]
 
@@ -566,9 +569,12 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     }
 
     // =====================================================================
-    // lexbor: JNI (.so) + C headers (document EPUB HTML)
+    // lexbor: JNI (.so) + C headers (document EPUB HTML) — opt-in only
     // =====================================================================
-    if (lexborNeedsUpdate) {
+    if (!sherpaOnnxEnableLexbor) {
+      lexborResolved = true
+      logPrebuilt("lexbor", "skipped", "disabled", "sherpaOnnxEnableLexbor=false (default)")
+    } else if (lexborNeedsUpdate) {
       def tpJni = hasAllLibsUnder(thirdPartyLexborDir, requiredLexborSoFiles)
       def tpHdr = new File(thirdPartyLexborDir, "include/lexbor/html/parser.h").exists()
       if (tpJni && tpHdr) {
@@ -1004,7 +1010,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     if (!repo) {
       def needFfmpeg = !sherpaOnnxDisableFfmpeg && !ffmpegResolved
       def needLibarchive = !sherpaOnnxDisableLibarchive && !libarchiveResolved
-      def needLexbor = !lexborResolved
+      def needLexbor = sherpaOnnxEnableLexbor && !lexborResolved
       def needLibyuv = !libyuvResolved
       def needLibwebp = sherpaOnnxEnableLibwebp && !libwebpResolved
       def needPdfium = sherpaOnnxEnablePdfium && !pdfiumResolved
@@ -1019,6 +1025,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           "sherpaOnnxDisableLibarchive=${sherpaOnnxDisableLibarchive}",
           "sherpaOnnxEnableLibwebp=${sherpaOnnxEnableLibwebp}",
           "sherpaOnnxEnablePdfium=${sherpaOnnxEnablePdfium}",
+          "sherpaOnnxEnableLexbor=${sherpaOnnxEnableLexbor}",
           "sherpaResolved=${sherpaResolved}",
           "ffmpegResolved=${ffmpegResolved}",
           "libarchiveResolved=${libarchiveResolved}",
@@ -1035,6 +1042,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
           (sherpaOnnxDisableLibarchive ? "(libarchive disabled via sherpaOnnxDisableLibarchive=true.) " : "") +
           (!sherpaOnnxEnableLibwebp ? "(libwebp disabled via sherpaOnnxEnableLibwebp=false.) " : "") +
           (!sherpaOnnxEnablePdfium ? "(pdfium disabled via sherpaOnnxEnablePdfium=false.) " : "") +
+          (!sherpaOnnxEnableLexbor ? "(lexbor disabled via sherpaOnnxEnableLexbor=false.) " : "") +
           "Diagnostics: [${diag}]"
         )
       }
@@ -1043,7 +1051,7 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
     def willUseGithub = !sherpaResolved ||
         (!sherpaOnnxDisableFfmpeg && !ffmpegResolved) ||
         (!sherpaOnnxDisableLibarchive && !libarchiveResolved) ||
-        (!lexborResolved) ||
+        (sherpaOnnxEnableLexbor && !lexborResolved) ||
         (!libyuvResolved) ||
         (sherpaOnnxEnableLibwebp && !libwebpResolved) ||
         (sherpaOnnxEnablePdfium && !pdfiumResolved)
@@ -1123,10 +1131,14 @@ project.tasks.register("downloadNativeLibsIfNeeded") {
       logPrebuilt("libarchive", "native", "GITHUB_RELEASE", tag)
     }
 
-    if (!lexborResolved) {
+    if (sherpaOnnxEnableLexbor && !lexborResolved) {
       def tagFile = file("${project.projectDir.parent}/third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG")
       def tag = readReleaseTag(tagFile)
-      if (!tag) throw new RuntimeException("Missing or empty third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG")
+      if (!tag) {
+        throw new RuntimeException(
+            "sherpaOnnxEnableLexbor=true but missing third_party/lexbor_prebuilt/ANDROID_RELEASE_TAG. " +
+            "Publish via build-lexbor-android-release or use THIRD_PARTY under third_party/lexbor_prebuilt/android.")
+      }
       def zipFile = new File(downloadDir, "lexbor-android.zip")
       def url = "${baseUrl}/${tag}/lexbor-android.zip"
       project.exec { commandLine 'curl', '-sSL', '-o', zipFile, url; workingDir project.projectDir }
@@ -1329,10 +1341,12 @@ project.tasks.register("checkJniLibs") {
           }
         }
       }
-      requiredLexborSoFiles.each { soName ->
-        def soFile = new File(dir, soName)
-        if (!soFile.exists()) {
-          throw new RuntimeException("Missing required lexbor library '${soName}' for ABI ${abi}. Run a Gradle Android build so prebuilts download, or ensure Maven com.xdcobra.sherpa:lexbor resolves (see third_party/lexbor_prebuilt/README.md).")
+      if (sherpaOnnxEnableLexbor) {
+        requiredLexborSoFiles.each { soName ->
+          def soFile = new File(dir, soName)
+          if (!soFile.exists()) {
+            throw new RuntimeException("Missing required lexbor library '${soName}' for ABI ${abi}. sherpaOnnxEnableLexbor=true requires prebuilts (see third_party/lexbor_prebuilt/README.md).")
+          }
         }
       }
       requiredLibyuvSoFiles.each { soName ->

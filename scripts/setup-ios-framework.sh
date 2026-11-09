@@ -103,8 +103,14 @@ else
   [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_DISABLE_LIBARCHIVE is set. Skipping libarchive framework download.${NC}" >&2
 fi
 
-FRAMEWORK_SLUGS+=(lexbor)
 FRAMEWORK_SLUGS+=(libyuv)
+
+# lexbor is opt-in (default off) — only download when explicitly enabled.
+if [ "${SHERPA_ONNX_ENABLE_LEXBOR:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_LEXBOR:-false}" = "true" ]; then
+  FRAMEWORK_SLUGS+=(lexbor)
+else
+  [ "$INTERACTIVE" = true ] && echo -e "${YELLOW}SHERPA_ONNX_ENABLE_LEXBOR not set. Skipping lexbor framework download.${NC}" >&2
+fi
 
 # libwebp is opt-in (default off) — only download when explicitly enabled.
 if [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-0}" = "1" ] || [ "${SHERPA_ONNX_ENABLE_LIBWEBP:-false}" = "true" ]; then

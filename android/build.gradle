@@ -60,6 +60,8 @@ android {
   def sherpaOnnxEnableLibwebp = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
   // When true, PDFium is linked for PDF text-layer extract. Default false (opt-in; binary size).
   def sherpaOnnxEnablePdfium = (project.findProperty("sherpaOnnxEnablePdfium") ?: "false").toString().toLowerCase() in ["true", "1"]
+  // When true, lexbor is linked for document HTML extract (EPUB/FB2/MOBI). Default false (opt-in).
+  def sherpaOnnxEnableLexbor = (project.findProperty("sherpaOnnxEnableLexbor") ?: "false").toString().toLowerCase() in ["true", "1"]
   // Opt-in FFmpeg variant with H.264/HEVC software video decoders (ffmpeg-vsw). Default off.
   def sherpaOnnxEnableVideoSwDecoders = (project.findProperty("sherpaOnnxEnableVideoSwDecoders") ?: "false").toString().toLowerCase() in ["true", "1"]
 
@@ -85,6 +87,7 @@ android {
         if (sherpaOnnxDisableLibarchive) cmakeArgList.add("-DSHERPA_ONNX_DISABLE_LIBARCHIVE=ON")
         if (sherpaOnnxEnableLibwebp) cmakeArgList.add("-DSHERPA_ONNX_ENABLE_LIBWEBP=ON")
         if (sherpaOnnxEnablePdfium) cmakeArgList.add("-DSHERPA_ONNX_ENABLE_PDFIUM=ON")
+        if (sherpaOnnxEnableLexbor) cmakeArgList.add("-DSHERPA_ONNX_ENABLE_LEXBOR=ON")
         arguments(*cmakeArgList)
       }
     }
@@ -146,6 +149,15 @@ android {
     }
   }
 
+  // When lexbor is not opted in, exclude leftover liblexbor.so from a previous enabled build.
+  if (!sherpaOnnxEnableLexbor) {
+    packaging {
+      jniLibs {
+        excludes += ["**/liblexbor.so"]
+      }
+    }
+  }
+
   lint {
     disable.add("GradleCompatible")
   }
@@ -200,7 +212,10 @@ dependencies {
   def enableVideoSwDecoders = (project.findProperty("sherpaOnnxEnableVideoSwDecoders") ?: "false").toString().toLowerCase() in ["true", "1"]
   ffmpegAar "com.xdcobra.sherpa:ffmpeg${enableVideoSwDecoders ? '-vsw' : ''}:${ffmpegVersion}@aar"
   libarchiveAar "com.xdcobra.sherpa:libarchive:${libarchiveVersion}@aar"
-  lexborAar "com.xdcobra.sherpa:lexbor:${lexborVersion}@aar"
+  def enableLexborDep = (project.findProperty("sherpaOnnxEnableLexbor") ?: "false").toString().toLowerCase() in ["true", "1"]
+  if (enableLexborDep) {
+    lexborAar "com.xdcobra.sherpa:lexbor:${lexborVersion}@aar"
+  }
   libyuvAar "com.xdcobra.sherpa:libyuv:${libyuvVersion}@aar"
   def enableLibwebpDep = (project.findProperty("sherpaOnnxEnableLibwebp") ?: "false").toString().toLowerCase() in ["true", "1"]
   if (enableLibwebpDep) {
