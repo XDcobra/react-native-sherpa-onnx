@@ -88,6 +88,7 @@ Creates and starts a native playback session that consumes from a pipeline audio
 | `audioBuffer` | `OfflineAudioBufferRef \| LiveAudioBufferRef \| OfflineBufferHandle \| LiveBufferHandle \| string` | required | Buffer ref/handle or raw `bufferId` |
 | `options.volume` | `number` | `1.0` | Volume scale in range `[0, 1]` |
 | `options.onEnded` | `(event: { playerId: string; bufferId: string }) => void` | `undefined` | Called once when playback run reaches EOF |
+| `options.onPosition` | `(event: { playerId: string; bufferId: string; positionMs: number }) => void` | `undefined` | Native playhead push while PLAYING (~50 ms). Prefer this over polling `getPlaybackPositionMs` for UI. |
 
 To choose playback hardware for this pipeline, enumerate devices via `react-native-sherpa-onnx/audio` and then set `outputDeviceId` through `setPipelineAudioRoutePreference(...)`.
 
@@ -102,6 +103,11 @@ function createPcmPlayer(
   options?: {
     volume?: number;
     onEnded?: (event: { playerId: string; bufferId: string }) => void;
+    onPosition?: (event: {
+      playerId: string;
+      bufferId: string;
+      positionMs: number;
+    }) => void;
   }
 ): Promise<PcmPlayer>;
 ```
@@ -110,6 +116,7 @@ function createPcmPlayer(
 const player = await createPcmPlayer(audioBuffer, {
   volume: 1.0,
   onEnded: (event) => console.log(event.playerId, event.bufferId),
+  onPosition: (event) => console.log('pos', event.positionMs),
 });
 ```
 
