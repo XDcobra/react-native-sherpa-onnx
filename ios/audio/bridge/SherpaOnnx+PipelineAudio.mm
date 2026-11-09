@@ -21,6 +21,7 @@
 #include "AudioDecodeSession.h"
 #include "AudioEncodeSession.h"
 #include "AudioVisualization.h"
+#include "AudioVisualizationSidecar.h"
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -1210,6 +1211,281 @@ static std::string pa_tempDir() {
       } catch (...) {
         dispatch_async(dispatch_get_main_queue(), ^{
           reject(@"VISUALIZATION_INTERNAL_ERROR", @"Unknown visualization error", nil);
+        });
+      }
+    }
+  });
+}
+
+- (void)saveAudioVisualizationProfile:(NSDictionary *)profile
+                              persist:(NSDictionary *)persist
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject
+{
+  if (![profile isKindOfClass:[NSDictionary class]] ||
+      ![persist isKindOfClass:[NSDictionary class]]) {
+    reject(@"AUDIO_VISUALIZATION_INVALID_OPTIONS", @"profile and persist are required", nil);
+    return;
+  }
+
+  NSDictionary *destination = persist[@"destination"];
+  if (![destination isKindOfClass:[NSDictionary class]]) {
+    reject(@"AUDIO_VISUALIZATION_INVALID_OPTIONS", @"persist.destination is required", nil);
+    return;
+  }
+
+  BOOL overwrite = NO;
+  if ([persist[@"overwrite"] isKindOfClass:[NSNumber class]]) {
+    overwrite = [persist[@"overwrite"] boolValue];
+  }
+
+  BOOL includeFramesExplicit = persist[@"includeFrames"] != nil;
+  BOOL includeFramesFlag = includeFramesExplicit
+    ? [persist[@"includeFrames"] boolValue]
+    : YES;
+
+  dispatch_async(SherpaAudioDecodeQueue(), ^{
+    @autoreleasepool {
+      try {
+        sherpa::AudioVisualizationProfile nativeProfile;
+        nativeProfile.sampleRate = [profile[@"sampleRate"] respondsToSelector:@selector(intValue)]
+          ? [profile[@"sampleRate"] intValue]
+          : 0;
+        nativeProfile.durationMs = [profile[@"durationMs"] respondsToSelector:@selector(longLongValue)]
+          ? [profile[@"durationMs"] longLongValue]
+          : 0;
+        nativeProfile.barCount = [profile[@"barCount"] respondsToSelector:@selector(intValue)]
+          ? [profile[@"barCount"] intValue]
+          : 0;
+        nativeProfile.frameCount = [profile[@"frameCount"] respondsToSelector:@selector(intValue)]
+          ? [profile[@"frameCount"] intValue]
+          : 0;
+        nativeProfile.frameDurationMs = [profile[@"frameDurationMs"] respondsToSelector:@selector(doubleValue)]
+          ? [profile[@"frameDurationMs"] doubleValue]
+          : 0.0;
+
+        if (nativeProfile.barCount <= 0) {
+          throw std::runtime_error("AUDIO_VISUALIZATION_INVALID_PROFILE: barCount required");
+        }
+
+        NSArray *levels = profile[@"levels"];
+        if (![levels isKindOfClass:[NSArray class]] || (int)levels.count < nativeProfile.barCount) {
+          throw std::runtime_error("AUDIO_VISUALIZATION_INVALID_PROFILE: levels required");
+        }
+        nativeProfile.levels.resize(static_cast<size_t>(nativeProfile.barCount));
+        for (int i = 0; i < nativeProfile.barCount; ++i) {
+          double raw = [levels[i] respondsToSelector:@selector(doubleValue)]
+            ? [levels[i] doubleValue]
+            : 0.0;
+          nativeProfile.levels[static_cast<size_t>(i)] =
+            static_cast<float>(std::max(0.0, std::min(1.0, raw)));
+        }
+
+        const bool wantFrames = includeFramesFlag && nativeProfile.frameCount > 0;
+        if (wantFrames) {
+          NSArray *frames = profile[@"frames"];
+          const size_t expected =
+            static_cast<size_t>(nativeProfile.frameCount) *
+            static_cast<size_t>(nativeProfile.barCount);
+          if (![frames isKindOfClass:[NSArray class]] || frames.count < expected) {
+            throw std::runtime_error(
+              "AUDIO_VISUALIZATION_INVALID_PROFILE: frames required when includeFrames");
+          }
+          nativeProfile.frames.resize(expected);
+          for (size_t i = 0; i < expected; ++i) {
+            double raw = [frames[i] respondsToSelector:@selector(doubleValue)]
+              ? [frames[i] doubleValue]
+              : 0.0;
+            nativeProfile.frames[i] =
+              static_cast<float>(std::max(0.0, std::min(1.0, raw)));
+          }
+        } else {
+          nativeProfile.frameCount = 0;
+          nativeProfile.frameDurationMs = 0.0;
+          nativeProfile.frames.clear();
+        }
+
+        sherpa::AudioVisualizationSidecarEncodeOptions encodeOptions;
+        encodeOptions.includeFrames = wantFrames;
+        std::string encodeError;
+        auto bytes = sherpa::encodeAudioVisualizationSidecar(
+          nativeProfile, encodeOptions, &encodeError);
+        if (bytes.empty()) {
+          throw std::runtime_error(
+            encodeError.empty()
+              ? "AUDIO_VISUALIZATION_SIDECAR_ENCODE_FAILED"
+              : encodeError);
+        }
+
+        NSString *errCode = nil, *errMsg = nil;
+        FileIOWriteHandle *wh = [FileIOResolver resolveDestination:destination
+                                                         overwrite:overwrite
+                                           createParentDirectories:NO
+                                                             error:&errCode
+                                                           message:&errMsg];
+        if (!wh) {
+          dispatch_async(dispatch_get_main_queue(), ^{
+            reject(errCode ?: @"FILEIO_RESOLVE_ERROR", errMsg ?: @"Failed to resolve destination", nil);
+          });
+          return;
+        }
+
+        NSData *data = [NSData dataWithBytes:bytes.data() length:bytes.size()];
+        if (wh.isFilePath) {
+          NSError *writeErr = nil;
+          if (![data writeToFile:wh.filePath options:NSDataWritingAtomic error:&writeErr]) {
+            [wh cleanup];
+            dispatch_async(dispatch_get_main_queue(), ^{
+              reject(@"FILEIO_WRITE_ERROR",
+                     writeErr.localizedDescription ?: @"Write failed",
+                     writeErr);
+            });
+            return;
+          }
+        } else {
+          [wh cleanup];
+          dispatch_async(dispatch_get_main_queue(), ^{
+            reject(@"FILEIO_UNSUPPORTED_ON_PLATFORM",
+                   @"Non-path FileDestination is not supported for visualization sidecars on iOS",
+                   nil);
+          });
+          return;
+        }
+
+        NSString *outputPath = wh.resultPath ?: wh.filePath;
+        [wh cleanup];
+
+        NSDictionary *result = @{
+          @"format": @"sherpa_viz_v1",
+          @"kind": @"spectrum_bars",
+          @"barCount": @(nativeProfile.barCount),
+          @"durationMs": @(nativeProfile.durationMs),
+          @"sampleRate": @(nativeProfile.sampleRate),
+          @"hasFrames": @(wantFrames),
+          @"output": @{
+            @"outputKind": @"fs",
+            @"outputPath": outputPath ?: @"",
+          },
+        };
+        dispatch_async(dispatch_get_main_queue(), ^{
+          resolve(result);
+        });
+      } catch (const std::runtime_error &e) {
+        std::string msg = e.what();
+        NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
+        NSString *nsCode = @"VISUALIZATION_INTERNAL_ERROR";
+        if (msg.rfind("AUDIO_VISUALIZATION_", 0) == 0 || msg.rfind("FILEIO_", 0) == 0) {
+          auto colonPos = msg.find(':');
+          std::string code = colonPos == std::string::npos ? msg : msg.substr(0, colonPos);
+          nsCode = [NSString stringWithUTF8String:code.c_str()];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(nsCode, nsMsg, nil);
+        });
+      } catch (...) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(@"VISUALIZATION_INTERNAL_ERROR", @"Unknown sidecar save error", nil);
+        });
+      }
+    }
+  });
+}
+
+- (void)loadAudioVisualizationProfile:(NSDictionary *)source
+                              options:(NSDictionary *)options
+                              resolve:(RCTPromiseResolveBlock)resolve
+                               reject:(RCTPromiseRejectBlock)reject
+{
+  if (![source isKindOfClass:[NSDictionary class]]) {
+    reject(@"AUDIO_VISUALIZATION_INVALID_INPUT", @"source is required", nil);
+    return;
+  }
+
+  NSDictionary *resolvedSource = source;
+  if ([source[@"kind"] isKindOfClass:[NSString class]] &&
+      [source[@"kind"] isEqualToString:@"file"] &&
+      [source[@"source"] isKindOfClass:[NSDictionary class]]) {
+    resolvedSource = source[@"source"];
+  }
+
+  BOOL strict = YES;
+  if ([options isKindOfClass:[NSDictionary class]] &&
+      [options[@"strict"] isKindOfClass:[NSNumber class]]) {
+    strict = [options[@"strict"] boolValue];
+  }
+
+  dispatch_async(SherpaAudioDecodeQueue(), ^{
+    @autoreleasepool {
+      NSString *errCode = nil, *errMsg = nil;
+      FileIOReadHandle *rh = [FileIOResolver resolveSource:resolvedSource
+                                                     error:&errCode
+                                                   message:&errMsg];
+      if (!rh) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(errCode ?: @"FILEIO_RESOLVE_ERROR", errMsg ?: @"Failed to resolve source", nil);
+        });
+        return;
+      }
+
+      NSData *data = nil;
+      @try {
+        if (rh.isFilePath) {
+          data = [NSData dataWithContentsOfFile:rh.filePath];
+        } else if (rh.stream != nil) {
+          [rh.stream open];
+          NSMutableData *buffer = [NSMutableData data];
+          uint8_t chunk[65536];
+          NSInteger bytesRead = 0;
+          while ((bytesRead = [rh.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
+            [buffer appendBytes:chunk length:bytesRead];
+          }
+          data = buffer;
+        }
+      } @finally {
+        [rh cleanup];
+      }
+
+      if (data == nil || data.length == 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(@"AUDIO_VISUALIZATION_SIDECAR_INVALID", @"empty payload", nil);
+        });
+        return;
+      }
+
+      try {
+        sherpa::AudioVisualizationProfile profile;
+        std::string decodeError;
+        if (!sherpa::decodeAudioVisualizationSidecar(
+              static_cast<const uint8_t *>(data.bytes),
+              static_cast<size_t>(data.length),
+              strict,
+              &profile,
+              &decodeError)) {
+          throw std::runtime_error(
+            decodeError.empty()
+              ? "AUDIO_VISUALIZATION_SIDECAR_INVALID"
+              : decodeError);
+        }
+
+        NSDictionary *result = pa_visualizationProfileToDict(profile);
+        dispatch_async(dispatch_get_main_queue(), ^{
+          resolve(result);
+        });
+      } catch (const std::runtime_error &e) {
+        std::string msg = e.what();
+        NSString *nsMsg = [NSString stringWithUTF8String:msg.c_str()];
+        NSString *nsCode = @"VISUALIZATION_INTERNAL_ERROR";
+        if (msg.rfind("AUDIO_VISUALIZATION_", 0) == 0 || msg.rfind("FILEIO_", 0) == 0) {
+          auto colonPos = msg.find(':');
+          std::string code = colonPos == std::string::npos ? msg : msg.substr(0, colonPos);
+          nsCode = [NSString stringWithUTF8String:code.c_str()];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(nsCode, nsMsg, nil);
+        });
+      } catch (...) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(@"VISUALIZATION_INTERNAL_ERROR", @"Unknown sidecar load error", nil);
         });
       }
     }

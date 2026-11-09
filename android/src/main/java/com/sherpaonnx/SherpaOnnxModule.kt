@@ -1932,6 +1932,175 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  override fun saveAudioVisualizationProfile(
+    profile: ReadableMap,
+    persist: ReadableMap,
+    promise: Promise,
+  ) {
+    decodeExecutor.execute {
+      try {
+        val destination = persist.getMap("destination")
+          ?: throw IllegalArgumentException(
+            "AUDIO_VISUALIZATION_INVALID_OPTIONS: persist.destination is required",
+          )
+        val includeFramesExplicit =
+          persist.hasKey("includeFrames") && !persist.isNull("includeFrames")
+        val includeFramesFlag =
+          if (includeFramesExplicit) persist.getBoolean("includeFrames") else true
+        val overwrite =
+          if (persist.hasKey("overwrite") && !persist.isNull("overwrite")) {
+            persist.getBoolean("overwrite")
+          } else {
+            false
+          }
+
+        val barCount = when {
+          profile.hasKey("barCount") && !profile.isNull("barCount") ->
+            profile.getInt("barCount")
+          else -> 0
+        }
+        if (barCount <= 0) {
+          throw IllegalArgumentException(
+            "AUDIO_VISUALIZATION_INVALID_PROFILE: barCount required",
+          )
+        }
+        val sampleRate =
+          if (profile.hasKey("sampleRate") && !profile.isNull("sampleRate")) {
+            profile.getInt("sampleRate")
+          } else {
+            0
+          }
+        val durationMs =
+          if (profile.hasKey("durationMs") && !profile.isNull("durationMs")) {
+            profile.getDouble("durationMs").toLong()
+          } else {
+            0L
+          }
+        val frameCount =
+          if (profile.hasKey("frameCount") && !profile.isNull("frameCount")) {
+            profile.getInt("frameCount")
+          } else {
+            0
+          }
+        val frameDurationMs =
+          if (profile.hasKey("frameDurationMs") && !profile.isNull("frameDurationMs")) {
+            profile.getDouble("frameDurationMs")
+          } else {
+            0.0
+          }
+
+        val levelsArray = profile.getArray("levels")
+          ?: throw IllegalArgumentException(
+            "AUDIO_VISUALIZATION_INVALID_PROFILE: levels required",
+          )
+        val levels = FloatArray(barCount) { i ->
+          if (i < levelsArray.size()) {
+            levelsArray.getDouble(i).toFloat().coerceIn(0f, 1f)
+          } else {
+            0f
+          }
+        }
+
+        val wantFrames = includeFramesFlag && frameCount > 0
+        val frames: FloatArray? = if (wantFrames) {
+          val framesArray = profile.getArray("frames")
+          val expected = frameCount * barCount
+          if (framesArray == null || framesArray.size() < expected) {
+            throw IllegalArgumentException(
+              "AUDIO_VISUALIZATION_INVALID_PROFILE: frames required when includeFrames",
+            )
+          }
+          FloatArray(expected) { i ->
+            framesArray.getDouble(i).toFloat().coerceIn(0f, 1f)
+          }
+        } else {
+          null
+        }
+
+        val bytes = nativeEncodeVisualizationSidecar(
+          sampleRate,
+          durationMs,
+          barCount,
+          levels,
+          if (wantFrames) frameCount else 0,
+          if (wantFrames) frameDurationMs else 0.0,
+          frames,
+          wantFrames,
+        )
+
+        val written = fileIOHelper.saveBytes(bytes, destination, overwrite)
+        val result = Arguments.createMap()
+        result.putString("format", "sherpa_viz_v1")
+        result.putString("kind", "spectrum_bars")
+        result.putInt("barCount", barCount)
+        result.putDouble("durationMs", durationMs.toDouble())
+        result.putInt("sampleRate", sampleRate)
+        result.putBoolean("hasFrames", wantFrames)
+        result.putMap("output", written)
+        promise.resolve(result)
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: "VISUALIZATION_INTERNAL_ERROR: sidecar save failed"
+        val code = when {
+          msg.startsWith("AUDIO_VISUALIZATION_") -> msg.substringBefore(":").trim()
+          msg.startsWith("FILEIO_") -> msg.substringBefore(":").trim()
+          else -> "VISUALIZATION_INTERNAL_ERROR"
+        }
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("VISUALIZATION_INTERNAL_ERROR", e.message, e)
+      }
+    }
+  }
+
+  override fun loadAudioVisualizationProfile(
+    source: ReadableMap,
+    options: ReadableMap?,
+    promise: Promise,
+  ) {
+    decodeExecutor.execute {
+      try {
+        val strict =
+          if (options != null && options.hasKey("strict") && !options.isNull("strict")) {
+            options.getBoolean("strict")
+          } else {
+            true
+          }
+
+        val resolvedSource =
+          if (source.hasKey("kind") && source.getString("kind") == "file" && source.hasKey("source")) {
+            source.getMap("source")
+              ?: throw IllegalArgumentException(
+                "AUDIO_VISUALIZATION_INVALID_INPUT: file wrapper requires source",
+              )
+          } else {
+            source
+          }
+
+        val bytes = fileIOHelper.readAllBytes(resolvedSource)
+        @Suppress("UNCHECKED_CAST")
+        val nativeResult = nativeDecodeVisualizationSidecar(bytes, strict)
+          as? HashMap<String, Any>
+          ?: throw RuntimeException("VISUALIZATION_INTERNAL_ERROR: Null sidecar decode result")
+
+        promise.resolve(normalizeVisualizationNativeResult(nativeResult, 0))
+      } catch (e: com.sherpaonnx.fileio.FileIOException) {
+        promise.reject(e.code, e.message, e)
+      } catch (e: RuntimeException) {
+        val msg = e.message ?: "VISUALIZATION_INTERNAL_ERROR: sidecar load failed"
+        val code = when {
+          msg.startsWith("AUDIO_VISUALIZATION_") -> msg.substringBefore(":").trim()
+          msg.startsWith("FILEIO_") -> msg.substringBefore(":").trim()
+          else -> "VISUALIZATION_INTERNAL_ERROR"
+        }
+        promise.reject(code, msg, e)
+      } catch (e: Exception) {
+        promise.reject("VISUALIZATION_INTERNAL_ERROR", e.message, e)
+      }
+    }
+  }
+
   override fun decodeFileToOfflineBuffer(
     source: ReadableMap,
     targetSampleRateHz: Double,
@@ -8257,6 +8426,26 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     external fun nativeReleaseVisualizationAccumulator(
       accumulatorPtr: Long,
     )
+
+    /** Encode a visualization profile to sherpa_viz_v1 bytes. */
+    @JvmStatic
+    external fun nativeEncodeVisualizationSidecar(
+      sampleRate: Int,
+      durationMs: Long,
+      barCount: Int,
+      levels: FloatArray,
+      frameCount: Int,
+      frameDurationMs: Double,
+      frames: FloatArray?,
+      includeFrames: Boolean,
+    ): ByteArray
+
+    /** Decode sherpa_viz_v1 bytes to a visualization profile HashMap. */
+    @JvmStatic
+    external fun nativeDecodeVisualizationSidecar(
+      bytes: ByteArray,
+      strict: Boolean,
+    ): HashMap<String, Any>?
 
     /** Compute visualization profile directly from a file source (path/fd) in native C++. */
     @JvmStatic

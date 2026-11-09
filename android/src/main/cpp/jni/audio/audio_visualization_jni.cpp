@@ -5,9 +5,12 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
+#include <cstdint>
 
 #include "AudioDecodeSession.h"
 #include "AudioVisualization.h"
+#include "AudioVisualizationSidecar.h"
 
 namespace {
 
@@ -604,6 +607,145 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeComputeVisualizationProfileFromFile(
     env->ThrowNew(
         env->FindClass("java/lang/RuntimeException"),
         "VISUALIZATION_INTERNAL_ERROR: Unknown error during file visualization");
+    return nullptr;
+  }
+}
+
+JNIEXPORT jbyteArray JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeEncodeVisualizationSidecar(
+    JNIEnv *env,
+    jclass /*clazz*/,
+    jint sampleRate,
+    jlong durationMs,
+    jint barCount,
+    jfloatArray levels,
+    jint frameCount,
+    jdouble frameDurationMs,
+    jfloatArray frames,
+    jboolean includeFrames) {
+  try {
+    sherpa::AudioVisualizationProfile profile;
+    profile.sampleRate = static_cast<int>(sampleRate);
+    profile.durationMs = static_cast<int64_t>(durationMs);
+    profile.barCount = static_cast<int>(barCount);
+    profile.frameCount = static_cast<int>(frameCount);
+    profile.frameDurationMs = static_cast<double>(frameDurationMs);
+
+    if (!levels) {
+      throw std::runtime_error(
+          "AUDIO_VISUALIZATION_INVALID_PROFILE: levels required");
+    }
+    const jsize levelsLen = env->GetArrayLength(levels);
+    if (levelsLen < barCount) {
+      throw std::runtime_error(
+          "AUDIO_VISUALIZATION_INVALID_PROFILE: levels shorter than barCount");
+    }
+    profile.levels.resize(static_cast<size_t>(barCount));
+    env->GetFloatArrayRegion(
+        levels, 0, barCount, profile.levels.data());
+
+    const bool wantFrames = includeFrames == JNI_TRUE && frameCount > 0;
+    if (wantFrames) {
+      if (!frames) {
+        throw std::runtime_error(
+            "AUDIO_VISUALIZATION_INVALID_PROFILE: frames required when includeFrames");
+      }
+      const size_t expected =
+          static_cast<size_t>(frameCount) * static_cast<size_t>(barCount);
+      const jsize framesLen = env->GetArrayLength(frames);
+      if (static_cast<size_t>(framesLen) < expected) {
+        throw std::runtime_error(
+            "AUDIO_VISUALIZATION_INVALID_PROFILE: frames shorter than frameCount * barCount");
+      }
+      profile.frames.resize(expected);
+      env->GetFloatArrayRegion(
+          frames,
+          0,
+          static_cast<jsize>(expected),
+          profile.frames.data());
+    } else {
+      profile.frameCount = 0;
+      profile.frameDurationMs = 0.0;
+      profile.frames.clear();
+    }
+
+    sherpa::AudioVisualizationSidecarEncodeOptions options;
+    options.includeFrames = wantFrames;
+    std::string error;
+    auto bytes = sherpa::encodeAudioVisualizationSidecar(profile, options, &error);
+    if (bytes.empty()) {
+      throw std::runtime_error(
+          error.empty()
+              ? "AUDIO_VISUALIZATION_SIDECAR_ENCODE_FAILED"
+              : error);
+    }
+
+    jbyteArray out = env->NewByteArray(static_cast<jsize>(bytes.size()));
+    if (!out) {
+      throw std::runtime_error(
+          "VISUALIZATION_INTERNAL_ERROR: Failed to allocate sidecar bytes");
+    }
+    env->SetByteArrayRegion(
+        out,
+        0,
+        static_cast<jsize>(bytes.size()),
+        reinterpret_cast<const jbyte *>(bytes.data()));
+    return out;
+  } catch (const std::runtime_error &e) {
+    env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+    return nullptr;
+  } catch (...) {
+    env->ThrowNew(
+        env->FindClass("java/lang/RuntimeException"),
+        "VISUALIZATION_INTERNAL_ERROR: Unknown sidecar encode error");
+    return nullptr;
+  }
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeVisualizationSidecar(
+    JNIEnv *env,
+    jclass /*clazz*/,
+    jbyteArray bytes,
+    jboolean strict) {
+  try {
+    if (!bytes) {
+      throw std::runtime_error(
+          "AUDIO_VISUALIZATION_SIDECAR_INVALID: empty payload");
+    }
+    const jsize len = env->GetArrayLength(bytes);
+    if (len <= 0) {
+      throw std::runtime_error(
+          "AUDIO_VISUALIZATION_SIDECAR_INVALID: empty payload");
+    }
+    std::vector<uint8_t> buffer(static_cast<size_t>(len));
+    env->GetByteArrayRegion(
+        bytes,
+        0,
+        len,
+        reinterpret_cast<jbyte *>(buffer.data()));
+
+    sherpa::AudioVisualizationProfile profile;
+    std::string error;
+    if (!sherpa::decodeAudioVisualizationSidecar(
+            buffer.data(),
+            buffer.size(),
+            strict == JNI_TRUE,
+            &profile,
+            &error)) {
+      throw std::runtime_error(
+          error.empty()
+              ? "AUDIO_VISUALIZATION_SIDECAR_INVALID"
+              : error);
+    }
+    return profileToHashMap(env, std::move(profile));
+  } catch (const std::runtime_error &e) {
+    env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+    return nullptr;
+  } catch (...) {
+    env->ThrowNew(
+        env->FindClass("java/lang/RuntimeException"),
+        "VISUALIZATION_INTERNAL_ERROR: Unknown sidecar decode error");
     return nullptr;
   }
 }

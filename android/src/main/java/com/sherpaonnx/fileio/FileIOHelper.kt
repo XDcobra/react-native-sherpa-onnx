@@ -8,6 +8,7 @@ import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReadableMap
+import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.File
 import java.io.FileInputStream
@@ -169,6 +170,60 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
     } catch (e: Exception) {
       Log.e(logTag, "saveText error", e)
       promise.reject(FileIOErrorCodes.WRITE_ERROR, e.message, e)
+    }
+  }
+
+  /** Write raw bytes to a FileDestination (same resolve rules as [saveText]). */
+  fun saveBytes(
+    bytes: ByteArray,
+    destination: ReadableMap,
+    overwrite: Boolean,
+  ): WritableMap {
+    val writeHandle = resolver.resolveDestination(
+      destination = destination,
+      overwrite = overwrite,
+      createParentDirectories = false,
+    )
+    return writeHandle.use { wh ->
+      val outputKind: String
+      val outputPath: String
+      when (wh) {
+        is FileIOResolver.WriteHandle.FilePath -> {
+          outputKind = "fs"
+          outputPath = wh.file.absolutePath
+          wh.file.writeBytes(bytes)
+        }
+        is FileIOResolver.WriteHandle.Stream -> {
+          outputKind = "contentUri"
+          outputPath = wh.resultUri.toString()
+          wh.outputStream.write(bytes)
+          wh.outputStream.flush()
+        }
+      }
+      Arguments.createMap().apply {
+        putString("outputKind", outputKind)
+        putString("outputPath", outputPath)
+      }
+    }
+  }
+
+  /** Read an entire FileSource into memory. */
+  fun readAllBytes(source: ReadableMap): ByteArray {
+    val readHandle = resolver.resolveSource(source)
+    return try {
+      when (readHandle) {
+        is FileIOResolver.ReadHandle.FilePath -> {
+          readHandle.file.readBytes()
+        }
+        is FileIOResolver.ReadHandle.FileDescriptor -> {
+          FileInputStream(readHandle.pfd.fileDescriptor).use { it.readBytes() }
+        }
+        is FileIOResolver.ReadHandle.Stream -> {
+          readHandle.inputStream.readBytes()
+        }
+      }
+    } finally {
+      readHandle.close()
     }
   }
 
