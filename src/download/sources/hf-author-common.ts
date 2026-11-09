@@ -169,6 +169,7 @@ export type HfSiblingLike = {
   lfs?: {
     size?: number;
     sha256?: string;
+    oid?: string;
   };
 };
 
@@ -197,6 +198,8 @@ export function buildFolderAssetsFromHfSiblings(
       sha256:
         typeof sibling.lfs?.sha256 === 'string'
           ? sibling.lfs.sha256.toLowerCase()
+          : typeof sibling.lfs?.oid === 'string'
+          ? sibling.lfs.oid.toLowerCase()
           : undefined,
     });
   }

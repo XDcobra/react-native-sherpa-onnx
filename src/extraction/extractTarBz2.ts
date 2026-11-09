@@ -13,6 +13,8 @@ export type ExtractProgressEvent = {
 export type NativeExtractPathExtra = {
   skipEntries?: number;
   operationId?: string;
+  /** When true, native Extract skips its integrity probe. */
+  skipIntegrityProbe?: boolean;
 };
 
 /**
@@ -83,7 +85,8 @@ export async function extractTarBz2(
       operationId,
       notification?.showNotificationsEnabled,
       notification?.notificationTitle,
-      notification?.notificationText
+      notification?.notificationText,
+      extra?.skipIntegrityProbe === true
     );
 
     if (!result.success && result.paused) {

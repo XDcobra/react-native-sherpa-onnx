@@ -330,6 +330,7 @@ function trackDownloadTask({
             deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
             onProgress: opts?.onProgress,
             showExtractionNotifications: opts?.showExtractionNotifications,
+            skipIntegrityProbe: opts?.skipIntegrityProbe,
             getDownloadedList: () =>
               listDownloadedModels(category, { source: sourceId }),
             extractionOperationId: `extract:${makeModelOperationKey(

@@ -150,6 +150,7 @@ Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeExtract(
     jint j_skip_entries,
     jstring j_operation_id,
     jobject j_progress_callback,
+    jboolean j_skip_integrity_probe,
     jobject j_promise) {
 
   const char* src = env->GetStringUTFChars(j_source_path, nullptr);
@@ -174,7 +175,8 @@ Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeExtract(
 
   ExtractionResult result = ArchiveHelper::Extract(
       source_str, target_str, j_force == JNI_TRUE,
-      static_cast<int>(j_skip_entries), on_progress, operation_id);
+      static_cast<int>(j_skip_entries), on_progress, operation_id,
+      j_skip_integrity_probe == JNI_TRUE);
 
   ResolveWithExtractionResult(env, j_promise, result, target_str);
 
@@ -291,5 +293,65 @@ Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeComputeFileSha2
                          env->NewStringUTF(error_msg.c_str()));
   }
 
+  env->DeleteLocalRef(promise_class);
+}
+
+// ── JNI: nativeProbeArchive ─────────────────────────────────────
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeProbeArchive(
+    JNIEnv* env,
+    jobject,
+    jstring j_source_path,
+    jdouble j_expected_bytes,
+    jobject j_promise) {
+  const char* path = env->GetStringUTFChars(j_source_path, nullptr);
+  std::string source_str(path);
+  env->ReleaseStringUTFChars(j_source_path, path);
+
+  // NaN / negative → skip expected-bytes check (-1).
+  long long expected = -1;
+  if (j_expected_bytes == j_expected_bytes && j_expected_bytes > 0) {
+    expected = static_cast<long long>(j_expected_bytes);
+  }
+
+  ArchiveProbeResult probe = ArchiveHelper::Probe(source_str, expected);
+
+  jclass promise_class = env->GetObjectClass(j_promise);
+  jmethodID resolve = env->GetMethodID(promise_class, "resolve", "(Ljava/lang/Object;)V");
+
+  jclass arguments_class = env->FindClass("com/facebook/react/bridge/Arguments");
+  jmethodID create_map = env->GetStaticMethodID(
+      arguments_class, "createMap", "()Lcom/facebook/react/bridge/WritableMap;");
+  jobject map = env->CallStaticObjectMethod(arguments_class, create_map);
+
+  jclass map_class = env->FindClass("com/facebook/react/bridge/WritableMap");
+  jmethodID putBoolean =
+      env->GetMethodID(map_class, "putBoolean", "(Ljava/lang/String;Z)V");
+  jmethodID putString =
+      env->GetMethodID(map_class, "putString", "(Ljava/lang/String;Ljava/lang/String;)V");
+  jmethodID putDouble =
+      env->GetMethodID(map_class, "putDouble", "(Ljava/lang/String;D)V");
+
+  env->CallVoidMethod(map, putBoolean, env->NewStringUTF("ok"),
+                      probe.ok ? JNI_TRUE : JNI_FALSE);
+  env->CallVoidMethod(map, putDouble, env->NewStringUTF("fileSize"),
+                      static_cast<jdouble>(probe.file_size));
+  if (!probe.format.empty()) {
+    env->CallVoidMethod(map, putString, env->NewStringUTF("format"),
+                        env->NewStringUTF(probe.format.c_str()));
+  }
+  if (!probe.ok) {
+    if (!probe.error_code.empty()) {
+      env->CallVoidMethod(map, putString, env->NewStringUTF("code"),
+                          env->NewStringUTF(probe.error_code.c_str()));
+    }
+    if (!probe.error.empty()) {
+      env->CallVoidMethod(map, putString, env->NewStringUTF("message"),
+                          env->NewStringUTF(probe.error.c_str()));
+    }
+  }
+
+  env->CallVoidMethod(j_promise, resolve, map);
   env->DeleteLocalRef(promise_class);
 }

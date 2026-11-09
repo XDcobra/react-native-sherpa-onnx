@@ -13,6 +13,7 @@
 #endif
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <cstring>
 #include <filesystem>
@@ -333,6 +334,140 @@ static struct archive* CreateDiskWriter() {
 #endif  // HAVE_LIBARCHIVE
 }  // namespace
 
+// ── Public API — probe ──────────────────────────────────────────
+
+namespace {
+
+constexpr const char* kErrIntegrityTruncated = "DOWNLOAD_INTEGRITY_TRUNCATED";
+constexpr const char* kErrUnsupportedFormat = "DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT";
+
+#ifdef HAVE_LIBARCHIVE
+static std::string FormatHintFromPath(const std::string& path) {
+  auto ends_with = [&](const char* suffix) {
+    const size_t n = std::strlen(suffix);
+    return path.size() >= n &&
+           path.compare(path.size() - n, n, suffix) == 0;
+  };
+  if (ends_with(".tar.zst") || ends_with(".zst")) return "tar.zst";
+  if (ends_with(".tar.bz2") || ends_with(".bz2")) return "tar.bz2";
+  if (ends_with(".tar.xz") || ends_with(".xz")) return "tar.xz";
+  if (ends_with(".tar.gz") || ends_with(".tgz") || ends_with(".gz")) return "tar.gz";
+  return "";
+}
+
+static std::string MapLibarchiveProbeError(const char* err) {
+  if (!err) return kErrIntegrityTruncated;
+  std::string lower(err);
+  for (char& c : lower) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  if (lower.find("unrecognized") != std::string::npos ||
+      lower.find("unsupported") != std::string::npos ||
+      lower.find("invalid") != std::string::npos) {
+    return kErrUnsupportedFormat;
+  }
+  return kErrIntegrityTruncated;
+}
+#endif  // HAVE_LIBARCHIVE
+
+}  // namespace
+
+ArchiveProbeResult ArchiveHelper::Probe(
+    const std::string& source_path,
+    long long expected_bytes) {
+  ArchiveProbeResult result;
+
+#ifndef HAVE_LIBARCHIVE
+  (void)source_path;
+  (void)expected_bytes;
+  result.error_code = kErrUnsupportedFormat;
+  result.error =
+      "libarchive not available. Build with libarchive or set "
+      "sherpaOnnxDisableLibarchive=false in gradle.properties. "
+      "See docs/disable-libarchive.md.";
+  return result;
+#else
+  if (!std::filesystem::exists(source_path)) {
+    result.error_code = kErrIntegrityTruncated;
+    result.error = "Archive not found at " + source_path;
+    result.format = FormatHintFromPath(source_path);
+    return result;
+  }
+
+  try {
+    result.file_size =
+        static_cast<long long>(std::filesystem::file_size(source_path));
+  } catch (const std::exception& e) {
+    result.error_code = kErrIntegrityTruncated;
+    result.error = std::string("Failed to get file size: ") + e.what();
+    result.format = FormatHintFromPath(source_path);
+    return result;
+  }
+
+  if (expected_bytes > 0 && result.file_size < expected_bytes) {
+    result.error_code = kErrIntegrityTruncated;
+    result.error = "Archive is truncated (" + std::to_string(result.file_size) +
+                   "/" + std::to_string(expected_bytes) + " bytes)";
+    result.format = FormatHintFromPath(source_path);
+    return result;
+  }
+
+  struct archive* archive = archive_read_new();
+  if (!archive) {
+    result.error_code = kErrIntegrityTruncated;
+    result.error = "Failed to create archive reader";
+    result.format = FormatHintFromPath(source_path);
+    return result;
+  }
+
+  archive_read_support_format_tar(archive);
+  archive_read_support_filter_bzip2(archive);
+  archive_read_support_filter_gzip(archive);
+  archive_read_support_filter_xz(archive);
+  archive_read_support_filter_zstd(archive);
+
+  int open_rc = archive_read_open_filename(archive, source_path.c_str(), 64 * 1024);
+  if (open_rc != ARCHIVE_OK) {
+    const char* err = archive_error_string(archive);
+    result.error_code = MapLibarchiveProbeError(err);
+    result.error = err ? std::string("Failed to open archive: ") + err
+                       : "Failed to open archive";
+    result.format = FormatHintFromPath(source_path);
+    archive_read_free(archive);
+    return result;
+  }
+
+  struct archive_entry* entry = nullptr;
+  int header_rc = archive_read_next_header(archive, &entry);
+  if (header_rc != ARCHIVE_OK && header_rc != ARCHIVE_EOF) {
+    const char* err = archive_error_string(archive);
+    result.error_code = MapLibarchiveProbeError(err);
+    result.error = err ? std::string("Archive truncated or corrupt: ") + err
+                       : "Archive truncated or corrupt";
+    result.format = FormatHintFromPath(source_path);
+    archive_read_free(archive);
+    return result;
+  }
+
+  // Prefer path hint; empty archives (EOF with no entries) still count as openable.
+  result.format = FormatHintFromPath(source_path);
+  if (result.format.empty()) {
+    const char* filter = archive_filter_name(archive, 0);
+    if (filter) {
+      std::string f(filter);
+      if (f.find("zstd") != std::string::npos) result.format = "tar.zst";
+      else if (f.find("bzip2") != std::string::npos) result.format = "tar.bz2";
+      else if (f.find("xz") != std::string::npos) result.format = "tar.xz";
+      else if (f.find("gzip") != std::string::npos) result.format = "tar.gz";
+    }
+  }
+
+  archive_read_free(archive);
+  result.ok = true;
+  return result;
+#endif  // HAVE_LIBARCHIVE
+}
+
 // ── Public API — file-based extraction ──────────────────────────
 
 ExtractionResult ArchiveHelper::Extract(
@@ -341,7 +476,8 @@ ExtractionResult ArchiveHelper::Extract(
     bool force,
     int skip_entries,
     ProgressCallback on_progress,
-    const std::string& operation_id) {
+    const std::string& operation_id,
+    bool skip_integrity_probe) {
 
   ClearCancelFlag(operation_id);
   ExtractionResult result;
@@ -349,11 +485,21 @@ ExtractionResult ArchiveHelper::Extract(
 #ifndef HAVE_LIBARCHIVE
   (void)source_path; (void)target_path; (void)force;
   (void)skip_entries; (void)on_progress; (void)operation_id;
+  (void)skip_integrity_probe;
   result.error = "libarchive not available. Build with libarchive or set "
                  "sherpaOnnxDisableLibarchive=false in gradle.properties. "
                  "See docs/disable-libarchive.md.";
   return result;
 #else
+  if (!skip_integrity_probe) {
+    ArchiveProbeResult probe = Probe(source_path, /*expected_bytes=*/-1);
+    if (!probe.ok) {
+      result.error = probe.error.empty() ? "Archive integrity check failed"
+                                         : probe.error;
+      return result;
+    }
+  }
+
   // ── Validate source ──
   if (!std::filesystem::exists(source_path)) {
     result.error = "Source file does not exist";

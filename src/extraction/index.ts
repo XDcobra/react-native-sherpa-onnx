@@ -15,6 +15,7 @@ import { DeviceEventEmitter, Platform } from 'react-native';
 import { readDir, stat, exists } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { extractTarBz2 } from './extractTarBz2';
+import { probeArchiveIntegrity } from './archiveIntegrity';
 import type {
   BundledArchive,
   ExtractArchiveOptions,
@@ -31,6 +32,13 @@ export type {
   ExtractResult,
   ExtractProgressEvent,
 } from './types';
+
+export {
+  probeArchiveIntegrity,
+  type ProbeArchiveFormat,
+  type ProbeArchiveIntegrityOptions,
+  type ProbeArchiveIntegrityResult,
+} from './archiveIntegrity';
 
 // ── Constants & helpers ───────────────────────────────────────────
 
@@ -192,6 +200,14 @@ export async function extractArchive(
     );
   }
 
+  // Filesystem: probe unless skipped. Do not pass archive.fileSize as
+  // expectedBytes (usually on-disk size). Catalog size → probeArchiveIntegrity.
+  if (options?.skipIntegrityProbe !== true) {
+    await probeArchiveIntegrity(archive.archivePath, {
+      format: archive.format,
+    });
+  }
+
   return extractTarBz2(
     archive.archivePath,
     targetPath,
@@ -199,7 +215,10 @@ export async function extractArchive(
     onProgress,
     signal,
     notification,
-    nativeExtra
+    {
+      ...nativeExtra,
+      skipIntegrityProbe: options?.skipIntegrityProbe === true,
+    }
   );
 }
 

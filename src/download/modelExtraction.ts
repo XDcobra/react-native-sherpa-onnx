@@ -7,6 +7,7 @@ import {
   unlink,
 } from '@dr.pogodin/react-native-fs';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import { probeArchiveIntegrity } from '../extraction/archiveIntegrity';
 import { makeModelOperationKey } from './activeModelOperations';
 import { listDownloadedModels, getModelPath } from './localModels';
 import {
@@ -157,6 +158,20 @@ async function runExtraction(
     );
   }
 
+  // Structural probe (bz2/zst/gz/xz) before extract when path is a known archive.
+  const lowerPath = downloadPath.toLowerCase();
+  if (
+    opts?.skipIntegrityProbe !== true &&
+    (lowerPath.endsWith('.tar.bz2') ||
+      lowerPath.endsWith('.tar.zst') ||
+      lowerPath.endsWith('.tar.gz') ||
+      lowerPath.endsWith('.tar.xz'))
+  ) {
+    await probeArchiveIntegrity(downloadPath, {
+      expectedBytes: model.bytes > 0 ? model.bytes : undefined,
+    });
+  }
+
   await mkdir(getSourceModelsBaseDir(category, sourceId));
 
   const key = makeModelOperationKey(category, id, sourceId);
@@ -187,6 +202,7 @@ async function runExtraction(
       deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
       onProgress: opts?.onProgress,
       showExtractionNotifications: opts?.showExtractionNotifications,
+      skipIntegrityProbe: opts?.skipIntegrityProbe,
       getDownloadedList: () =>
         listDownloadedModels(category, { source: sourceId }),
       extractionOperationId: activeOperation.operationId,

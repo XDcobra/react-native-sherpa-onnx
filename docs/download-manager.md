@@ -291,7 +291,7 @@ function ensureModel(
 ): Promise<EnsureModelResult>;
 ```
 
-One-call flow: ready check -> resume extraction -> resume download -> extract archive -> download.
+One-call flow: ready check → resume extraction → resume download → extract archive → download. Integrity: see [table](#integrity-download--extractmodel).
 
 ## Registry
 
@@ -396,6 +396,18 @@ Built-in source ids:
 - `github_xdcobra`
 - `huggingface`
 
+## Integrity (download / extractModel)
+
+Automatic checks before/around unpack. Digests come from HF LFS (when listed) or GitHub `checksum.txt` when present.
+
+| Check | When | Opt-out |
+| --- | --- | --- |
+| Size vs `model.bytes` | `model.bytes > 0` and on-disk size smaller | none |
+| [`probeArchiveIntegrity`](extraction.md#probearchiveintegrityfilepath-options) | path ends with `.tar.bz2` / `.tar.zst` / `.tar.gz` / `.tar.xz` | `skipIntegrityProbe: true` |
+| SHA-256 vs `model.sha256` | digest known | `verifyChecksum: false` |
+
+Related options: `verifyChecksum?`, `skipIntegrityProbe?`, `onChecksumMismatch?`, `deleteArchiveAfterExtract?`, `showExtractionNotifications?` (Android only).
+
 ## Download
 
 ### `downloadModel(category, modelId, options?)`
@@ -408,7 +420,7 @@ function downloadModel(
 ): Promise<DownloadResult>;
 ```
 
-Starts model download and post-processing.
+Starts model download and post-processing (integrity table above).
 
 ### `pauseDownload(category, modelId, source?)`
 
@@ -469,7 +481,7 @@ function extractModel(
 ): Promise<DownloadResult>;
 ```
 
-Starts extraction from an already available archive.
+Starts extraction from an already available archive (same integrity checks as download).
 
 ### `pauseExtraction(category, modelId, source?)`
 
@@ -674,53 +686,118 @@ Returns SDK storage base path.
 
 ## Types and constants
 
-### Core model and download types
+```ts
+import {
+  ModelCategory,
+  BUILTIN_SOURCE_IDS,
+  SUPPORTED_ARCHIVE_FORMATS,
+  DOWNLOAD_ERROR_CODES,
+  PauseError,
+  DownloadError,
+  isPauseError,
+  isPauseCompatibleError,
+  isDownloadError,
+  isDownloadErrorCode,
+  isActiveExtractionPhase,
+  isArchiveLayout,
+  isFolderLayout,
+  isSupportedArchiveFormat,
+} from 'react-native-sherpa-onnx/download';
 
-- `ModelCategory`
-- `ModelMeta`
-- `Progress`
-- `ProgressPhase`
-- `EnsureModelOptions`
-- `EnsureModelResult`
-- `DownloadOptions`
-- `DownloadResult`
-- `DownloadState`
-- `ExtractOptions`
-- `ExtractionState`
-- `ModelWithMetadata`
-- `CacheStatus`
-- `ChecksumMismatchInfo`
+import type {
+  ModelMeta,
+  Progress,
+  ProgressPhase,
+  EnsureModelOptions,
+  EnsureModelResult,
+  DownloadOptions,
+  DownloadResult,
+  DownloadState,
+  ExtractOptions,
+  ExtractionState,
+  ModelWithMetadata,
+  CacheStatus,
+  ChecksumMismatchInfo,
+  BuiltinSourceId,
+  SourceProvider,
+  SourceModel,
+  SourceAssetLayout,
+  SourceAssetEntry,
+  SourceArchiveFormat,
+  SourceFetchContext,
+  SourceFetchOptions,
+  SourceFetchResult,
+  SourceConfig,
+  RequestPolicy,
+  DownloadErrorCode,
+} from 'react-native-sherpa-onnx/download';
+```
 
-### Source types and constants
+```ts
+type ModelMeta = {
+  id: string;
+  displayName: string;
+  sourceId: string;
+  layout: SourceAssetLayout;
+  assets: SourceAssetEntry[];
+  bytes: number;
+  sha256?: string;
+  category: ModelCategory;
+  modelType?: string;
+  languages?: string[];
+  // …
+};
 
-- `BUILTIN_SOURCE_IDS`
-- `BuiltinSourceId`
-- `SourceProvider`
-- `SourceModel`
-- `SourceAssetLayout`
-- `SourceAssetEntry`
-- `SourceArchiveFormat`
-- `SourceFetchContext`
-- `SourceFetchOptions`
-- `SourceFetchResult`
-- `SourceConfig`
-- `RequestPolicy`
-- `SUPPORTED_ARCHIVE_FORMATS`
+type Progress = {
+  bytesProcessed: number;
+  totalBytes: number;
+  percent: number;
+  phase: ProgressPhase;
+  archiveEntryIndex?: number;
+  assetIndex?: number;
+  assetCount?: number;
+};
 
-### Error and guards
+type EnsureModelOptions = {
+  source?: string | 'default';
+  onProgress?: (progress: Progress) => void;
+  signal?: AbortSignal;
+  overwrite?: boolean;
+  verifyChecksum?: boolean;
+  onChecksumMismatch?: (info: ChecksumMismatchInfo) => Promise<boolean>;
+  deleteArchiveAfterExtract?: boolean;
+  skipIntegrityProbe?: boolean;
+  showExtractionNotifications?: boolean;
+};
 
-- `PauseError`
-- `DownloadError`
-- `DownloadErrorCode`
-- `DOWNLOAD_ERROR_CODES`
-- `isPauseError(error)`
-- `isPauseCompatibleError(error)`
-- `isDownloadError(error)`
-- `isDownloadErrorCode(value)`
-- `isActiveExtractionPhase(phase)`
-- `isArchiveLayout(layout)`
-- `isFolderLayout(layout)`
-- `isSupportedArchiveFormat(format)`
+type DownloadOptions = EnsureModelOptions;
+type ExtractOptions = Omit<EnsureModelOptions, 'overwrite'>;
+
+type EnsureModelResult = { modelId: string; localPath: string };
+type DownloadResult = EnsureModelResult;
+
+type SourceAssetLayout =
+  | { kind: 'archive'; format: SourceArchiveFormat; extract: boolean }
+  | { kind: 'folder'; format: 'none'; extract: false };
+
+type SourceAssetEntry = {
+  relativePath: string;
+  url: string;
+  bytes?: number;
+  sha256?: string;
+};
+
+type SourceArchiveFormat = 'tar.bz2' | 'tar.gz' | 'tar.xz' | 'tar.zst';
+
+type ChecksumMismatchInfo = {
+  category: ModelCategory;
+  modelId: string;
+  filePath: string;
+  expected?: string;
+  actual?: string;
+  reason: 'CHECKSUM_MISMATCH' | 'CHECKSUM_FAILED';
+};
+```
 
 ## Error codes
 
@@ -731,10 +808,10 @@ Returns SDK storage base path.
 | `DOWNLOAD_SOURCE_AUTH_FAILED`          | Auth/token failure for source request            |
 | `DOWNLOAD_NETWORK_FAILED`              | Network/transport failure during source fetch    |
 | `DOWNLOAD_HTTP_STATUS`                 | Non-success HTTP status from remote              |
-| `DOWNLOAD_INTEGRITY_CHECKSUM_MISMATCH` | Hash mismatch after transfer                     |
-| `DOWNLOAD_INTEGRITY_TRUNCATED`         | File size indicates truncated transfer           |
+| `DOWNLOAD_INTEGRITY_CHECKSUM_MISMATCH` | Hash mismatch after transfer (GH `checksum.txt` / HF LFS digest when present) |
+| `DOWNLOAD_INTEGRITY_TRUNCATED`         | Undersized vs expected bytes, or archive probe fail before extract           |
 | `DOWNLOAD_EXTRACT_FAILED`              | Archive extraction failed                        |
-| `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT`  | Layout uses unsupported archive format           |
+| `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT`  | Unsupported archive format (layout or probe)     |
 | `DOWNLOAD_DISK_SPACE_INSUFFICIENT`     | Available disk is below required threshold       |
 | `DOWNLOAD_CANCELLED`                   | Explicit cancellation/abort                      |
 | `DOWNLOAD_PAUSED`                      | Explicit pause state                             |
@@ -750,7 +827,7 @@ When handling failures, branch on `isPauseError(error)` / `isPauseCompatibleErro
 | `DOWNLOAD_SOURCE_AUTH_FAILED`         | Missing/invalid token or headers                     | Use `configureSource(sourceId, { token, headers })`                  |
 | `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT` | Provider returned unsupported archive layout         | Return one of supported formats only                                 |
 | `DOWNLOAD_INVALID_LAYOUT`             | Provider returned inconsistent `layout`/`assets`     | Validate provider output before returning models                     |
-| Truncated archive/checksum mismatch   | Interrupted or corrupted transfer                    | `deleteIncompleteDownload(...)`, then download again                 |
+| Truncated archive / probe / checksum  | Incomplete transfer or bad archive                   | `deleteIncompleteDownload(...)`, then download again; see [extraction probe](extraction.md#probearchiveintegrityfilepath-options) |
 | Empty model list                      | Fetch failed and no valid cache present              | Check network/source endpoint and retry refresh                      |
 
 ## Use case examples

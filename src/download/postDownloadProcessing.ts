@@ -130,6 +130,7 @@ export type RunPostDownloadProcessingOptions = {
   extractionNotificationText?: string;
   extractionOperationId?: string;
   extractionSkipEntries?: number;
+  skipIntegrityProbe?: boolean;
 };
 
 export async function runPostDownloadProcessing(
@@ -169,6 +170,7 @@ async function runPostDownloadProcessingBody(
     extractionNotificationText,
     extractionOperationId,
     extractionSkipEntries,
+    skipIntegrityProbe,
   } = options;
 
   const isAborted = (): boolean => Boolean(signal?.aborted);
@@ -268,6 +270,7 @@ async function runPostDownloadProcessingBody(
       {
         operationId: extractionOperationId,
         skipEntries: extractionSkipEntries,
+        skipIntegrityProbe: skipIntegrityProbe === true,
       }
     );
 

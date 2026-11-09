@@ -2,188 +2,264 @@
 
 ## Introduction
 
-The `react-native-sherpa-onnx/extraction` subpath provides a unified API to **list** and **extract** compressed model archives (`.tar.zst` and `.tar.bz2`). After extraction to a target directory (e.g. `DocumentDirectoryPath/models`), use `listModelsAtPath` and `{ kind: 'fs', path }` from the main package to discover and use the extracted models.
+**Import path:** `react-native-sherpa-onnx/extraction`
+
+List and extract compressed model archives (`.tar.zst` / `.tar.bz2`; extract also accepts `.tar.gz` / `.tar.xz`). After unpack, use `listModelsAtPath` and `{ kind: 'fs', path }` from the main package for discovery and engine init. Delivery (PAD / ODR): [model-delivery-pad-odr.md](./model-delivery-pad-odr.md). Uncompressed folders do not need this API — use [model-setup.md](./model-setup.md).
 
 ---
 
 ## Quick start
 
+### Filesystem / PAD STORAGE_FILES / ODR / downloads
+
 ```ts
 import {
   listBundledArchives,
-  listBundledArchivesFromApkAssets,
   extractArchive,
 } from 'react-native-sherpa-onnx/extraction';
-import { getAssetPackPath } from 'react-native-sherpa-onnx/utils';
+import {
+  ensureAssetPackReady,
+  getAssetPackPath,
+} from 'react-native-sherpa-onnx/utils';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 
-const packPath = await getAssetPackPath('sherpa_models');
-const archives = packPath
-  ? await listBundledArchives(packPath)
-  : await listBundledArchivesFromApkAssets('models');
-if (archives?.length) {
-  for (const archive of archives) {
-    await extractArchive(archive, `${DocumentDirectoryPath}/models`, {
-      onProgress: (event) => console.log(archive.modelId, event.percent),
-    });
-  }
+const targetDir = `${DocumentDirectoryPath}/models`;
+
+// PAD/ODR: fetch first; skip ensureAssetPackReady for plain bundle/downloads dirs
+await ensureAssetPackReady('core_models');
+const packPath = await getAssetPackPath('core_models');
+if (!packPath) throw new Error('pack path not ready');
+
+const archives = await listBundledArchives(packPath);
+for (const archive of archives) {
+  await extractArchive(archive, targetDir, {
+    onProgress: (e) => console.log(archive.modelId, e.percent),
+  });
 }
 ```
 
-Use this path when model archives are shipped via **PAD / ODR / main bundle** (see [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) for install-time vs on-demand), or any known directory, and must be unpacked before `createSTT` / `createTTS` / other engine initialization.
+Same pattern for iOS main-bundle `MainBundlePath + '/models'` or a downloads folder: pass that absolute directory to `listBundledArchives`. See [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) for fetch/progress/remove.
 
----
+### Android APK assets (`fromAsset`)
 
-## Table of Contents
+```ts
+import {
+  listBundledArchivesFromApkAssets,
+  extractArchive,
+} from 'react-native-sherpa-onnx/extraction';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 
-- [When to use](#when-to-use)
-- [Normal assets vs. PAD assets](#normal-assets-vs-pad-assets)
-- [API Reference](#api-reference)
-  - [`listBundledArchivesFromApkAssets`](#listbundledarchivesfromapkassetsassetprefix)
-  - [`listBundledArchives`](#listbundledarchivesdirectorypath)
-  - [`extractArchive`](#extractarchivearchive-targetpath-options)
-  - [`Types`](#types)
-- [Formats](#formats)
-- [Function overview table](#function-overview-table)
-- [Path expectations table](#path-expectations-table)
-- [Examples](#examples)
-  - [PAD compressed archives (Android)](#1-pad-compressed-archives-android)
-  - [iOS ODR tag archives](#2-ios-odr-tag-archives)
-  - [iOS main bundle archives](#3-ios-main-bundle-archives)
-  - [Non-PAD compressed archives (any platform)](#4-non-pad-compressed-archives-any-platform)
-- [Workflow: from archive to model init](#workflow-from-archive-to-model-init)
-- [See also](#see-also)
+const targetDir = `${DocumentDirectoryPath}/models`;
 
----
-
-## When to use
-
-Use this API whenever your models are delivered as **compressed archives** (`.tar.zst` or `.tar.bz2`) that need to be extracted before the native sherpa-onnx engine can use them. Common scenarios:
-
-| Scenario | Function | Platform |
-| --- | --- | --- |
-| Android ship dir or APK `models/` prefix | `listBundledArchives` / `listBundledArchivesFromApkAssets` | Android |
-| iOS ODR tag (after `fetchAssetPack`) | `listBundledArchives(await getAssetPackPath(tag))` | iOS |
-| iOS main-bundle archives | `listBundledArchives` | iOS (and Android) |
-| Archives downloaded to the filesystem | `listBundledArchives` | Both |
-| Extract any of the above | `extractArchive` | Both |
-| Parallel extraction | `extractArchive` (concurrent) | Both |
-
-If your models are already extracted (uncompressed folders) — for example plain PAD packs or bundled assets — you do **not** need this API. Use the path helpers from the [main package](model-setup.md) directly.
-
----
-
-## Normal assets vs. PAD assets
-
-Understanding the distinction helps when reading the API, but **you never need to handle the difference yourself** — `extractArchive` does it automatically.
-
-| | Normal (filesystem) archive | PAD APK_ASSETS archive |
-| --- | --- | --- |
-| **Where it lives** | On the filesystem — iOS bundle, Documents dir, PAD `STORAGE_FILES`, or any directory | Embedded inside the APK (Android only) |
-| **How you list it** | `listBundledArchives(directoryPath)` | `listBundledArchivesFromApkAssets('models')` |
-| **`fromAsset`** | `undefined` / absent | `true` |
-| **`archivePath`** | Absolute filesystem path (e.g. `/data/.../whisper.tar.zst`) | Asset path (e.g. `models/whisper.tar.zst`) — pack content is merged at app asset root |
-| **`fileSize`** | Available (from `stat`) | Not available (0 or absent) |
-| **Extraction method** | Native reads from filesystem path | Native streams from Android `AssetManager` — no temp copy |
-| **Platform** | iOS + Android | Android only |
-
-### PAD/ODR vs extraction
-
-**PAD/ODR** ([model-delivery-pad-odr.md](./model-delivery-pad-odr.md)) only delivers a **`…/models` path** (or nothing for APK_ASSETS). **This subpath** lists and extracts `.tar.zst` / `.tar.bz2`:
-
-```
-await ensureAssetPackReady('core_models');          // delivery (utils)
-const packPath = await getAssetPackPath('core_models');
-const archives = packPath
-  ? await listBundledArchives(packPath)             // STORAGE_FILES
-  : await listBundledArchivesFromApkAssets('models'); // APK_ASSETS install-time
+// Install-time / APK_ASSETS: list under app asset root "models/" (not a PAD pack name)
+const archives = await listBundledArchivesFromApkAssets('models');
+for (const archive of archives) {
+  // archive.fromAsset === true → stream extract; no integrity probe
+  await extractArchive(archive, targetDir, {
+    onProgress: (e) => console.log(archive.modelId, e.percent),
+  });
+}
 ```
 
-Install-time PAD merges pack assets at app asset root **`models/`** — not looked up by pack name in native code.
+Android only. Use this when archives live in the APK asset tree and `getAssetPackPath` returns null.
+
+---
+
+## Path expectations
+
+`extractArchive` picks the native path from `fromAsset` / `archivePath` — you do not choose the extractor.
+
+| Source | How to list | `archivePath` | `fromAsset` | `fileSize` | Extract |
+| --- | --- | --- | --- | --- | --- |
+| **PAD STORAGE_FILES** | `listBundledArchives(await getAssetPackPath(pack))` | Absolute FS path | absent | yes | `extractArchive` |
+| **PAD APK_ASSETS** | `listBundledArchivesFromApkAssets('models')` | `models/name.tar.zst` | `true` | no | `extractArchive` |
+| **iOS ODR tag** | `listBundledArchives(packPath)` after [fetch](./model-delivery-pad-odr.md) | Absolute FS path | absent | yes | `extractArchive` |
+| **iOS main bundle** | `listBundledArchives(MainBundlePath + '/models')` | Absolute FS path | absent | yes | `extractArchive` |
+| **Downloaded archive** | `listBundledArchives(…/downloads)` | Absolute FS path | absent | yes | `extractArchive` |
+| **Any other directory** | `listBundledArchives(path)` | Absolute FS path | absent | yes | `extractArchive` |
+
+Install-time PAD merges pack assets at app asset root `models/` (not looked up by pack name).
+
+---
+
+## Formats
+
+Sniff is by archive signature (libarchive auto-detect), not extension.
+
+| API | Formats |
+| --- | --- |
+| `listBundledArchives*` (`BundledArchive.format`) | `.tar.zst`, `.tar.bz2` only |
+| `extractArchive` | also `.tar.gz`, `.tar.xz` if you pass a path |
+
+Out of scope: zip, 7z, RAR (RAR is [`document/`](document-offline.md) CBR). Disable libarchive → extract fails.
 
 ---
 
 ## API reference
 
-Import from the extraction subpath:
-
-```typescript
+```ts
 import {
   listBundledArchives,
   listBundledArchivesFromApkAssets,
+  probeArchiveIntegrity,
   extractArchive,
-  type BundledArchive,
-  type ExtractArchiveOptions,
-  type ExtractResult,
-  type ExtractProgressEvent,
 } from 'react-native-sherpa-onnx/extraction';
 ```
 
-### listBundledArchivesFromApkAssets(assetPrefix)
+### `listBundledArchivesFromApkAssets(assetPrefix?)`
 
 ```ts
-function listBundledArchivesFromApkAssets(assetPrefix?: string): Promise<BundledArchive[]>
+function listBundledArchivesFromApkAssets(
+  assetPrefix?: string
+): Promise<BundledArchive[]>;
 ```
-
-**Android only.** Lists `.tar.zst` / `.tar.bz2` under an APK asset prefix (default `models`). `fromAsset: true` for `extractArchive`. Not tied to PAD pack names.
-
-### listBundledArchives(directoryPath)
 
 ```ts
-function listBundledArchives(directoryPath: string): Promise<BundledArchive[]>
+const archives = await listBundledArchivesFromApkAssets('models');
+// archives[0].fromAsset === true
 ```
 
-Lists `.tar.zst` and `.tar.bz2` files in the given filesystem directory. **Cross-platform.** Use for:
+**Android only.** Lists `.tar.zst` / `.tar.bz2` under an APK asset prefix (default `models`). Sets `fromAsset: true` for `extractArchive`. Not tied to PAD pack names.
 
-- iOS main-bundle archives (`MainBundlePath + '/models'`)
-- Archives downloaded to the documents directory
-- PAD STORAGE_FILES path (if you prefer calling `getAssetPackPath` yourself)
-- Any other folder
+### `listBundledArchives(directoryPath)`
 
-Returns an empty array when the directory does not exist or contains no matching archives.
+```ts
+function listBundledArchives(directoryPath: string): Promise<BundledArchive[]>;
+```
 
-### extractArchive(archive, targetPath, options?)
+```ts
+const archives = await listBundledArchives(`${DocumentDirectoryPath}/downloads`);
+```
+
+Cross-platform list of `.tar.zst` / `.tar.bz2` in a filesystem directory (PAD STORAGE_FILES, ODR path, main bundle, downloads). Empty array if missing or no matches.
+
+### `probeArchiveIntegrity(filePath, options?)`
+
+```ts
+function probeArchiveIntegrity(
+  filePath: string,
+  options?: {
+    expectedBytes?: number;
+    throwOnFailure?: boolean; // default true
+  }
+): Promise<ProbeArchiveIntegrityResult>;
+```
+
+```ts
+const result = await probeArchiveIntegrity(archivePath, {
+  expectedBytes: catalogBytes,
+  throwOnFailure: false,
+});
+if (!result.ok) {
+  console.log(result.code, result.message);
+}
+```
+
+Reject a bad/incomplete **filesystem** archive before extract setup/UI. Call only when you need that earlier than `extractArchive` (which already probes). Not for APK asset streams.
+
+### `extractArchive(archive, targetPath, options?)`
 
 ```ts
 function extractArchive(
   archive: BundledArchive,
   targetPath: string,
   options?: ExtractArchiveOptions
-): Promise<ExtractResult>
+): Promise<ExtractResult>;
 ```
 
-Extracts one archive into `targetPath`. Handles both source types transparently:
+```ts
+await extractArchive(archive, targetDir, {
+  force: true, // default; overwrite under targetDir
+  // skipIntegrityProbe: true, // only if you already verified the file
+  onProgress: (e) => console.log(archive.modelId, e.percent),
+  signal: controller.signal, // per-operation cancel
+  showNotificationsEnabled: false, // Android system notification; ignored on iOS
+});
+```
 
-- **Filesystem archives** --> regular path-based extraction via native `extractTarZst` / `extractTarBz2`.
-- **APK asset archives** (`fromAsset: true`) --> streams from the APK via `extractTarZstFromAsset` / `extractTarBz2FromAsset` (no temp copy).
+Unpack one archive into `targetDir` before `listModelsAtPath` / engine init.
+
+| Source | Behavior |
+| --- | --- |
+| Filesystem path | Probes then extracts (unless `skipIntegrityProbe: true`) |
+| APK asset (`fromAsset`) | Stream extract; no probe |
+
+- `archive.fileSize` is **not** catalog expected size — pass `expectedBytes` to `probeArchiveIntegrity` yourself if needed.
+- `ExtractResult.sha256` is a computed digest of the source archive (output). SHA verify vs catalog lives on download / `extractModel`.
+- Parallelism: Android up to **2** concurrent extracts (queue beyond); iOS multiple via GCD. `AbortSignal` cancels only that operation.
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
 | `force` | `boolean` | `true` | Overwrite existing files in `targetPath` |
-| `onProgress` | `(event) => void` | — | Callback with `{ bytes, totalBytes, percent, entryIndex? }`. `entryIndex` is the 0-based archive entry when native emits it (Android path/stream, iOS path). Parallel extractions are filtered by source path / `operationId`. |
-| `signal` | `AbortSignal` | — | Cancel extraction (throws `AbortError`). Cancellation is **per-operation**, so cancelling one archive won't affect others. |
-| `showNotificationsEnabled` | `boolean` | `true` | **Android:** Native `NotificationManager` progress notification during extraction (updated on the native thread). Set `false` to disable (e.g. first-run prep with in-app UI only). **iOS:** Ignored; no extraction progress notification is shown. |
-| `notificationTitle` | `string` | generic | **Android:** Notification title. **iOS:** Ignored. |
-| `notificationText` | `string` | generic | **Android:** Base notification text; progress percent is appended. **iOS:** Ignored. |
+| `skipIntegrityProbe` | `boolean` | `false` | Skip JS + native pre-extract probe (only if already verified) |
+| `onProgress` | `(event) => void` | — | `{ bytes, totalBytes, percent, entryIndex? }`; filtered by source / `operationId` |
+| `signal` | `AbortSignal` | — | Cancel this extraction (`AbortError`) |
+| `showNotificationsEnabled` | `boolean` | `true` | **Android:** system progress notification; **iOS:** ignored |
+| `notificationTitle` | `string` | generic | **Android** only |
+| `notificationText` | `string` | generic | **Android** only; percent appended |
 
-**Note on Parallelism:**
-- **Android:** Supports up to **2 concurrent extractions** via a fixed thread pool. Additional requests are queued.
-- **iOS:** Supports multiple concurrent extractions via GCD.
-- **Cancellation:** Aborting a specific `AbortSignal` only cancels that specific extraction.
+---
 
-### Types
+## Pipeline composition
+
+### Typical upstream
+
+| Source | Notes |
+| --- | --- |
+| PAD / ODR | [ensureAssetPackReady](./model-delivery-pad-odr.md) → `getAssetPackPath` → `listBundledArchives` |
+| APK assets | `listBundledArchivesFromApkAssets('models')` |
+| Bundle / downloads | `listBundledArchives(absoluteDir)` |
+
+### Typical downstream
+
+| Destination | Notes |
+| --- | --- |
+| Model discovery | `listModelsAtPath(targetDir)` |
+| Engine init | `createSTT` / `createTTS` / … with `{ kind: 'fs', path }` — [model-setup.md](./model-setup.md) |
+
+```mermaid
+flowchart LR
+  list[listBundledArchives_or_FromApkAssets] --> extract[extractArchive]
+  extract --> discover[listModelsAtPath]
+  discover --> engines[createSTT_createTTS_etc]
+```
+
+---
+
+## Types and constants
+
+```ts
+import {
+  listBundledArchives,
+  listBundledArchivesFromApkAssets,
+  probeArchiveIntegrity,
+  extractArchive,
+} from 'react-native-sherpa-onnx/extraction';
+
+import type {
+  BundledArchive,
+  ExtractArchiveOptions,
+  ExtractResult,
+  ExtractArchiveResult,
+  ExtractProgressEvent,
+  ProbeArchiveFormat,
+  ProbeArchiveIntegrityOptions,
+  ProbeArchiveIntegrityResult,
+} from 'react-native-sherpa-onnx/extraction';
+```
 
 ```ts
 type BundledArchive = {
-  modelId: string;       // derived from filename (e.g. "whisper-tiny" from "whisper-tiny.tar.zst")
-  archivePath: string;   // filesystem path or asset path (APK_ASSETS: "models/name.tar.zst")
+  modelId: string;
+  archivePath: string;
   format: 'tar.zst' | 'tar.bz2';
-  fileSize?: number;     // bytes (filesystem only)
-  fromAsset?: boolean;   // true for APK_ASSETS archives
+  fileSize?: number;
+  fromAsset?: boolean;
 };
 
 type ExtractArchiveOptions = {
   force?: boolean;
+  skipIntegrityProbe?: boolean;
   onProgress?: (event: ExtractProgressEvent) => void;
   signal?: AbortSignal;
   showNotificationsEnabled?: boolean;
@@ -193,111 +269,81 @@ type ExtractArchiveOptions = {
 
 type ExtractResult = {
   success: boolean;
-  path?: string;    // extracted directory
-  sha256?: string;  // source archive digest
-  reason?: string;  // error description
+  path?: string;
+  sha256?: string; // computed source digest (output)
+  reason?: string;
 };
 
 type ExtractProgressEvent = {
   bytes: number;
   totalBytes: number;
-  percent: number;       // 0–100
-  entryIndex?: number;   // 0-based archive entry (when native provides it)
+  percent: number;
+  entryIndex?: number;
 };
+
+type ProbeArchiveFormat = 'tar.bz2' | 'tar.zst' | 'tar.gz' | 'tar.xz';
+
+type ProbeArchiveIntegrityResult =
+  | { ok: true; format: ProbeArchiveFormat | null; fileSize: number }
+  | {
+      ok: false;
+      code: 'DOWNLOAD_INTEGRITY_TRUNCATED' | 'DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT';
+      message: string;
+      format: ProbeArchiveFormat | null;
+      fileSize: number;
+    };
 ```
 
-## Formats
+Prefer `ExtractResult` in app code; `ExtractArchiveResult` is the native wire shape.
 
-Sniff is by archive signature (libarchive auto-detect), not extension.
+---
 
-| API | Formats |
+## Error codes
+
+| Code | Where |
 | --- | --- |
-| `listBundledArchives*` (`BundledArchive.format`) | **`.tar.zst`**, **`.tar.bz2` only** |
-| `extractArchive` | also **`.tar.gz`**, **`.tar.xz`** if you pass a path |
+| `DOWNLOAD_INTEGRITY_TRUNCATED` | `probeArchiveIntegrity` / filesystem `extractArchive` |
+| `DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT` | same |
+| `AbortError` | `signal` cancel |
+| plain `Error` / `FILEIO_*` | native extract / path resolve |
 
-Out of scope: **zip**, 7z, RAR (RAR is [`document/`](document-offline.md) CBR, not extraction). Disable libarchive → extract fails.
+---
 
-## Types and constants
+## Use case examples
+
+<details>
+<summary>PAD STORAGE_FILES or APK_ASSETS (Android)</summary>
 
 ```ts
-import {
-  listBundledArchives, // list compressed archives in a filesystem directory
-  listBundledArchivesFromApkAssets, // Android APK asset prefix (e.g. models/)
-  extractArchive, // extract one archive descriptor into target directory
-} from 'react-native-sherpa-onnx/extraction';
-
-import type {
-  BundledArchive, // archive descriptor (modelId, path, format, source type)
-  ExtractArchiveOptions, // extraction options (force/progress/cancel/notification)
-  ExtractResult, // extraction result payload (discriminated union from extractArchive)
-  ExtractArchiveResult, // native wire shape; use ExtractResult for app code
-  ExtractProgressEvent, // progress event payload
-} from 'react-native-sherpa-onnx/extraction';
-```
-
----
-
-## Function overview table
-
-| Function | Input | Returns | Platform | Use case |
-| --- | --- | --- | --- | --- |
-| `listBundledArchivesFromApkAssets(prefix)` | APK asset prefix | `BundledArchive[]` | Android | Install-time ship under `models/` |
-| `listBundledArchives(dirPath)` | Absolute directory path | `BundledArchive[]` | iOS + Android | List archives in any filesystem directory |
-| `extractArchive(archive, target)` | `BundledArchive` + target dir | `ExtractResult` | iOS + Android | Extract a single archive (any source) |
-
----
-
-## Path expectations table
-
-| Source | How to list | `archivePath` format | `fromAsset` | `fileSize` | Extraction path |
-| --- | --- | --- | --- | --- | --- |
-| **PAD STORAGE_FILES** | `listBundledArchives(await getAssetPackPath(pack))` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
-| **PAD APK_ASSETS** | `listBundledArchivesFromApkAssets('models')` | `models/name.tar.zst` (app asset root) | `true` | ❌ | `extractTarZstFromAsset` / `extractTarBz2FromAsset` (stream) |
-| **iOS ODR tag** | `listBundledArchives(packPath)` after [fetch](./model-delivery-pad-odr.md) | Absolute filesystem path | absent | ✅ | path-based extract |
-| **iOS main bundle** | `listBundledArchives(MainBundlePath + '/models')` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
-| **Downloaded archive** | `listBundledArchives(DocumentDirectoryPath + '/downloads')` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
-| **Any other directory** | `listBundledArchives(path)` | Absolute filesystem path | absent | ✅ | `extractTarZst` / `extractTarBz2` (path) |
-
-> The consumer never needs to pick the extraction method — `extractArchive` reads `fromAsset` and `archivePath` to choose the correct native call automatically.
-
----
-
-## Examples
-
-### 1. PAD compressed archives (Android)
-
-```typescript
 import {
   listBundledArchives,
   listBundledArchivesFromApkAssets,
   extractArchive,
 } from 'react-native-sherpa-onnx/extraction';
-import { getAssetPackPath } from 'react-native-sherpa-onnx/utils';
+import { getAssetPackPath, listModelsAtPath } from 'react-native-sherpa-onnx/utils';
 import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { listModelsAtPath } from 'react-native-sherpa-onnx/utils';
 
 const targetDir = `${DocumentDirectoryPath}/models`;
-
 const packPath = await getAssetPackPath('sherpa_models');
 const archives = packPath
   ? await listBundledArchives(packPath)
   : await listBundledArchivesFromApkAssets('models');
-if (archives.length) {
-  for (const archive of archives) {
-    await extractArchive(archive, targetDir, {
-      onProgress: (e) => console.log(archive.modelId, `${e.percent}%`),
-    });
-  }
+
+for (const archive of archives) {
+  await extractArchive(archive, targetDir, {
+    onProgress: (e) => console.log(archive.modelId, `${e.percent}%`),
+  });
 }
 
-// Discover extracted models
 const models = await listModelsAtPath(targetDir, true);
-// --> [{ folder: 'whisper-tiny', hint: 'stt' }, ...]
 ```
 
-### 2. iOS ODR tag archives
+</details>
 
-```typescript
+<details>
+<summary>iOS ODR tag archives</summary>
+
+```ts
 import {
   ensureAssetPackReady,
   getAssetPackPath,
@@ -312,120 +358,67 @@ await ensureAssetPackReady(TAG);
 const packPath = await getAssetPackPath(TAG);
 if (!packPath) throw new Error('ODR tag not ready');
 
-const archives = await listBundledArchives(packPath);
-for (const archive of archives) {
+for (const archive of await listBundledArchives(packPath)) {
   await extractArchive(archive, targetDir, {
     onProgress: (e) => console.log(archive.modelId, e.percent),
   });
 }
 ```
 
-See [model-delivery-pad-odr.md](./model-delivery-pad-odr.md) for `fetchAssetPack`, progress, and `removeAssetPack` on iOS.
+</details>
 
-### 3. iOS main bundle archives
+<details>
+<summary>iOS main bundle archives</summary>
 
-```typescript
+```ts
 import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
 import { MainBundlePath, DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
 
-const bundleDir = `${MainBundlePath}/models`;
-const targetDir = `${DocumentDirectoryPath}/models`;
-
-const archives = await listBundledArchives(bundleDir);
+const archives = await listBundledArchives(`${MainBundlePath}/models`);
 for (const archive of archives) {
-  await extractArchive(archive, targetDir, { force: false });
-}
-```
-
-### 4. Non-PAD compressed archives (any platform)
-
-If your app ships or downloads `.tar.zst` / `.tar.bz2` archives **outside** of Play Asset Delivery — for example archives bundled in the Android `assets/` folder, copied from the iOS bundle, or downloaded via the network — use `listBundledArchives` to discover them and `extractArchive` to extract.
-
-```typescript
-import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
-import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
-import { fileModelPath, listModelsAtPath } from 'react-native-sherpa-onnx/utils';
-import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
-
-// Suppose you downloaded model archives to a "downloads" folder
-const downloadsDir = `${DocumentDirectoryPath}/downloads`;
-const modelsDir = `${DocumentDirectoryPath}/models`;
-
-const archives = await listBundledArchives(downloadsDir);
-// --> [{ modelId: 'whisper-tiny-en', archivePath: '/.../whisper-tiny-en.tar.zst', format: 'tar.zst', fileSize: 41230000 }]
-
-for (const archive of archives) {
-  const result = await extractArchive(archive, modelsDir, {
-    force: false, // skip if already extracted
-    onProgress: (e) => console.log(archive.modelId, `${e.percent}%`),
+  await extractArchive(archive, `${DocumentDirectoryPath}/models`, {
+    force: false,
   });
-  console.log('Extracted to:', result.path);
 }
-
-// Use the extracted models
-const models = await listModelsAtPath(modelsDir, true);
-const sttModel = models.find((m) => m.hint === 'stt');
-if (sttModel) {
-  const mp = fileModelPath(`${modelsDir}/${sttModel.folder}`);
-  const detection = await detectSttModel(mp);
-  if (detection.success) {
-    const stt = await createSTT({ modelSource: mp, modelType: 'auto' });
-    // ready to transcribe
-  }
-}
-```
-
----
-
-## Workflow: from archive to model init
-
-```
- ┌─────────────────────┐     ┌────────────────────┐     ┌─────────────────────┐
- │  List archives       │     │  Extract            │     │  Use models          │
- │                      │     │                     │     │                      │
- │ listBundledArchives()│────▶│ extractArchive()    │────▶│ listModelsAtPath()   │
- │ listBundledArchives  │     │   (path or APK      │     │ createSTT / TTS()    │
- │ FromApkAssets()      │     │    asset stream)    │     │                      │
- └─────────────────────┘     └────────────────────┘     └─────────────────────┘
-```
-
-1. **List** — get `BundledArchive[]` descriptors for your archives
-2. **Extract** — extract each archive to a shared models directory
-3. **Use** — discover the resulting model folders and initialize engines
-
----
-
-## See also
-
-- [Ship model delivery (PAD & ODR)](model-delivery-pad-odr.md) — install-time, on-demand, fetch/progress, removal
-- [Model setup](model-setup.md) — path helpers, `getAssetPackPath`, `listModelsAtPath`, `bundledModelFileSource`
-- [Download manager](download-manager.md) — downloading models from the network
-- [STT](stt-offline.md) — Speech-to-Text API
-- [TTS](tts-offline.md) — Text-to-Speech API
-
-## Error codes
-
-Extraction errors can surface as plain `Error` values from native decode/extract pipelines and as `AbortError` when `AbortSignal` cancels the operation. File/source resolution failures can also propagate `FILEIO_*` style failures from underlying path handling.
-
-## Use case examples
-
-<details>
-<summary>Extract downloaded archives then discover model folders for runtime selection</summary>
-
-```ts
-const archives = await listBundledArchives(`${DocumentDirectoryPath}/downloads`);
-for (const archive of archives) {
-  await extractArchive(archive, `${DocumentDirectoryPath}/models`, { force: false });
-}
-
-const models = await listModelsAtPath(`${DocumentDirectoryPath}/models`, true);
-console.log(models);
 ```
 
 </details>
 
 <details>
-<summary>Cancel one extraction without stopping other parallel archive jobs</summary>
+<summary>Downloaded archives then STT init</summary>
+
+```ts
+import { listBundledArchives, extractArchive } from 'react-native-sherpa-onnx/extraction';
+import { DocumentDirectoryPath } from '@dr.pogodin/react-native-fs';
+import { fileModelPath, listModelsAtPath } from 'react-native-sherpa-onnx/utils';
+import { createSTT, detectSttModel } from 'react-native-sherpa-onnx/stt';
+
+const downloadsDir = `${DocumentDirectoryPath}/downloads`;
+const modelsDir = `${DocumentDirectoryPath}/models`;
+
+for (const archive of await listBundledArchives(downloadsDir)) {
+  await extractArchive(archive, modelsDir, {
+    force: false,
+    onProgress: (e) => console.log(archive.modelId, `${e.percent}%`),
+  });
+}
+
+const sttModel = (await listModelsAtPath(modelsDir, true)).find(
+  (m) => m.hint === 'stt'
+);
+if (sttModel) {
+  const mp = fileModelPath(`${modelsDir}/${sttModel.folder}`);
+  const detection = await detectSttModel(mp);
+  if (detection.success) {
+    const stt = await createSTT({ modelSource: mp, modelType: 'auto' });
+  }
+}
+```
+
+</details>
+
+<details>
+<summary>Cancel one extraction without stopping parallel jobs</summary>
 
 ```ts
 const controller = new AbortController();
@@ -436,12 +429,21 @@ const p = extractArchive(archive, targetDir, {
 });
 
 controller.abort();
-await p;
+await p; // AbortError for this job only
 ```
 
 </details>
 
+---
+
+## See also
+
+- [Ship model delivery (PAD & ODR)](model-delivery-pad-odr.md) — install-time, on-demand, fetch/progress, removal
+- [Model setup](model-setup.md) — path helpers, `getAssetPackPath`, `listModelsAtPath`, `bundledModelFileSource`
+- [Download manager](download-manager.md) — network download + integrity options
+- [STT](stt-offline.md) — Speech-to-Text API
+- [TTS](tts-offline.md) — Text-to-Speech API
+
 ## Native crash diagnostics
 
 If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK **last-activity ring buffer** (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) — Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.
-

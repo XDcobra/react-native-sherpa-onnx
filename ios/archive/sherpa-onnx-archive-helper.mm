@@ -148,14 +148,131 @@ static NSString* ComputeFileSha256Internal(NSString* filePath, NSError** error) 
   }
 }
 
+- (NSDictionary *)probe:(NSString *)sourcePath
+          expectedBytes:(NSNumber *)expectedBytes
+{
+  NSString *const kTruncated = @"DOWNLOAD_INTEGRITY_TRUNCATED";
+  NSString *const kUnsupported = @"DOWNLOAD_EXTRACT_UNSUPPORTED_FORMAT";
+
+  auto formatHint = ^NSString *(NSString *path) {
+    NSString *lower = path.lowercaseString;
+    if ([lower hasSuffix:@".tar.zst"] || [lower hasSuffix:@".zst"]) return @"tar.zst";
+    if ([lower hasSuffix:@".tar.bz2"] || [lower hasSuffix:@".bz2"]) return @"tar.bz2";
+    if ([lower hasSuffix:@".tar.xz"] || [lower hasSuffix:@".xz"]) return @"tar.xz";
+    if ([lower hasSuffix:@".tar.gz"] || [lower hasSuffix:@".tgz"] || [lower hasSuffix:@".gz"])
+      return @"tar.gz";
+    return @"";
+  };
+
+#ifndef HAVE_LIBARCHIVE
+  (void)expectedBytes;
+  return @{
+    @"ok": @NO,
+    @"fileSize": @(0),
+    @"format": formatHint(sourcePath),
+    @"code": kUnsupported,
+    @"message": @"libarchive is disabled in this build. Rebuild without SHERPA_ONNX_DISABLE_LIBARCHIVE=1."
+  };
+#else
+  NSFileManager *fm = [NSFileManager defaultManager];
+  if (![fm fileExistsAtPath:sourcePath]) {
+    return @{
+      @"ok": @NO,
+      @"fileSize": @(0),
+      @"format": formatHint(sourcePath),
+      @"code": kTruncated,
+      @"message": [NSString stringWithFormat:@"Archive not found at %@", sourcePath]
+    };
+  }
+
+  NSDictionary *attrs = [fm attributesOfItemAtPath:sourcePath error:nil];
+  long long fileSize = [attrs fileSize];
+  if (expectedBytes != nil && expectedBytes.longLongValue > 0 &&
+      fileSize < expectedBytes.longLongValue) {
+    return @{
+      @"ok": @NO,
+      @"fileSize": @(fileSize),
+      @"format": formatHint(sourcePath),
+      @"code": kTruncated,
+      @"message": [NSString stringWithFormat:@"Archive is truncated (%lld/%lld bytes)",
+                   fileSize, expectedBytes.longLongValue]
+    };
+  }
+
+  struct archive *archive = archive_read_new();
+  if (!archive) {
+    return @{
+      @"ok": @NO,
+      @"fileSize": @(fileSize),
+      @"format": formatHint(sourcePath),
+      @"code": kTruncated,
+      @"message": @"Failed to create archive reader"
+    };
+  }
+  ConfigureArchiveFormats(archive);
+
+  int open_rc = archive_read_open_filename(archive, sourcePath.UTF8String, 64 * 1024);
+  if (open_rc != ARCHIVE_OK) {
+    const char *err = archive_error_string(archive);
+    NSString *msg = err
+        ? [NSString stringWithFormat:@"Failed to open archive: %s", err]
+        : @"Failed to open archive";
+    NSString *code = kTruncated;
+    if (err) {
+      NSString *lower = [[NSString stringWithUTF8String:err] lowercaseString];
+      if ([lower containsString:@"unrecognized"] ||
+          [lower containsString:@"unsupported"] ||
+          [lower containsString:@"invalid"]) {
+        code = kUnsupported;
+      }
+    }
+    archive_read_free(archive);
+    return @{
+      @"ok": @NO,
+      @"fileSize": @(fileSize),
+      @"format": formatHint(sourcePath),
+      @"code": code,
+      @"message": msg
+    };
+  }
+
+  struct archive_entry *entry = nullptr;
+  int header_rc = archive_read_next_header(archive, &entry);
+  if (header_rc != ARCHIVE_OK && header_rc != ARCHIVE_EOF) {
+    const char *err = archive_error_string(archive);
+    NSString *msg = err
+        ? [NSString stringWithFormat:@"Archive truncated or corrupt: %s", err]
+        : @"Archive truncated or corrupt";
+    archive_read_free(archive);
+    return @{
+      @"ok": @NO,
+      @"fileSize": @(fileSize),
+      @"format": formatHint(sourcePath),
+      @"code": kTruncated,
+      @"message": msg
+    };
+  }
+
+  NSString *format = formatHint(sourcePath);
+  archive_read_free(archive);
+  return @{
+    @"ok": @YES,
+    @"fileSize": @(fileSize),
+    @"format": format ?: @"",
+  };
+#endif
+}
+
 - (NSDictionary *)extract:(NSString *)sourcePath
                 targetPath:(NSString *)targetPath
                      force:(BOOL)force
                skipEntries:(int)skipEntries
                operationId:(NSString *)operationId
+        skipIntegrityProbe:(BOOL)skipIntegrityProbe
                   progress:(SherpaOnnxArchiveProgressBlock)progress
 {
 #ifndef HAVE_LIBARCHIVE
+  (void)skipIntegrityProbe;
   return @{
     @"success": @NO,
     @"paused": @NO,
@@ -165,6 +282,20 @@ static NSString* ComputeFileSha256Internal(NSString* filePath, NSError** error) 
     @"reason": @"libarchive is disabled in this build. Rebuild without SHERPA_ONNX_DISABLE_LIBARCHIVE=1."
   };
 #else
+  if (!skipIntegrityProbe) {
+    NSDictionary *probe = [self probe:sourcePath expectedBytes:nil];
+    if (![probe[@"ok"] boolValue]) {
+      return @{
+        @"success": @NO,
+        @"paused": @NO,
+        @"lastEntryIndex": @(-1),
+        @"bytesExtracted": @(0),
+        @"lastEntryPath": @"",
+        @"reason": probe[@"message"] ?: @"Archive integrity check failed"
+      };
+    }
+  }
+
   std::string opId = [operationId UTF8String] ?: "";
   clearCancelFlag(opId);
 

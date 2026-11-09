@@ -788,6 +788,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     assetHelper.resolveBundledAssetPath(relativePath, promise)
   }
 
+  override fun probeArchive(
+    sourcePath: String,
+    expectedBytes: Double?,
+    promise: Promise,
+  ) {
+    archiveHelper.probeArchive(sourcePath, expectedBytes, promise)
+  }
+
   override fun extractArchive(
     sourcePath: String,
     targetPath: String,
@@ -797,6 +805,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     showNotificationsEnabled: Boolean?,
     notificationTitle: String?,
     notificationText: String?,
+    skipIntegrityProbe: Boolean?,
     promise: Promise,
   ) {
     val notif = extractionNotificationOrNull(
@@ -815,6 +824,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         emitExtractProgress(operationId, sourcePath, bytes, total, percent, entryIndex)
       },
       notif,
+      skipIntegrityProbe == true,
     )
   }
 

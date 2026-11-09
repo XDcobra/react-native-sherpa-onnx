@@ -95,6 +95,11 @@ export type ExtractArchiveOptions = {
   /** AbortSignal to cancel the extraction. */
   signal?: AbortSignal;
   /**
+   * When true, skip the pre-extract integrity probe (JS + native). Default false.
+   * Use only if you already verified the archive yourself.
+   */
+  skipIntegrityProbe?: boolean;
+  /**
    * **Android:** When true (default), the native layer posts a system notification with extraction
    * progress. Set to false to disable (e.g. first-run bundled-model prep with in-app UI only).
    * **iOS:** Accepted for API parity; no notification is shown.

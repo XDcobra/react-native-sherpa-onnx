@@ -104,6 +104,8 @@ type HuggingFaceSibling = {
   size?: number;
   lfs?: {
     sha256?: string;
+    /** Same content digest as sha256 on tree/paths-info responses. */
+    oid?: string;
     size?: number;
   };
 };
@@ -120,9 +122,10 @@ export const huggingfaceProvider: SourceProvider = {
 
     for (const spec of specs) {
       const revision = spec.revision ?? 'main';
+      // blobs=true is required for siblings[].lfs.sha256 / size.
       const url =
         `https://huggingface.co/api/models/${spec.repo}` +
-        `?revision=${encodeURIComponent(revision)}`;
+        `?revision=${encodeURIComponent(revision)}&blobs=true`;
 
       let body: { siblings?: HuggingFaceSibling[] };
       try {
@@ -156,12 +159,24 @@ export const huggingfaceProvider: SourceProvider = {
         continue;
       }
 
-      const assets = selected.map((entry) => ({
-        relativePath: entry.rfilename,
-        url: repoFileUrl(spec.repo, revision, entry.rfilename),
-        bytes: entry.lfs?.size ?? entry.size,
-        sha256: entry.lfs?.sha256?.toLowerCase(),
-      }));
+      const assets = selected.map((entry) => {
+        // api/models?blobs=true → lfs.sha256; tree/paths-info → lfs.oid (same hex).
+        const lfs = entry.lfs as
+          | { sha256?: string; oid?: string; size?: number }
+          | undefined;
+        const digest =
+          typeof lfs?.sha256 === 'string'
+            ? lfs.sha256
+            : typeof lfs?.oid === 'string'
+            ? lfs.oid
+            : undefined;
+        return {
+          relativePath: entry.rfilename,
+          url: repoFileUrl(spec.repo, revision, entry.rfilename),
+          bytes: lfs?.size ?? entry.size,
+          sha256: digest?.toLowerCase(),
+        };
+      });
 
       const bytes = assets.reduce((sum, asset) => sum + (asset.bytes ?? 0), 0);
       const modelId = modelIdFromSpec(spec);
