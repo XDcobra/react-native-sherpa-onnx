@@ -186,8 +186,10 @@ await player.destroy();
 ### Offline buffer
 
 - `seekToMs(positionMs)` is clamped to `[0, durationMs]`.
+- Seek preserves prior play/pause intent (seek while paused stays paused).
 - Seeking to exact EOF is valid and may lead to immediate `onEnded` when resumed.
 - `onEnded` fires once per playback run.
+- `onPosition` emits only while PLAYING; pause stops ticks.
 - `restart()` resets to beginning and clears ended-state.
 
 ### Live buffer
@@ -196,7 +198,29 @@ await player.destroy();
 - Out-of-range seek rejects with `PCM_PLAYER_SEEK_OUT_OF_RANGE`.
 - `onEnded` does not fire while recording.
 - `onEnded` fires after `finalizeLiveAudioBuffer(...)` and true EOF is reached.
+- `onPosition` follows the same PLAYING-only rule as offline (silent while recording if paused).
 - `restart()` seeks to oldest currently available retained sample.
+
+## JS Events
+
+Create-time callbacks on `createPcmPlayer` (wired to native `pcmPlayerEnded` / `pcmPlayerPosition`). Prefer these over pulling `getPlaybackPositionMs` in a JS timer.
+
+| Callback | Payload | Fires when | Notes |
+| --- | --- | --- | --- |
+| `onEnded` | `PcmPlayerEndedEvent` | playback run reaches true EOF | Once per run; after live finalize + drain for live buffers |
+| `onPosition` | `PcmPlayerPositionEvent` | while native state is PLAYING (~50 ms) | Stops on pause/destroy; resume restarts ticks |
+
+Shapes: [Types and constants](#types-and-constants).
+
+```ts
+const player = await createPcmPlayer(audioBuffer, {
+  onEnded: (e) => console.log('ended', e.playerId, e.bufferId),
+  onPosition: (e) => {
+    // Drive UI playhead from native pushes — no setInterval polling.
+    console.log(e.positionMs);
+  },
+});
+```
 
 ## Error codes
 
@@ -218,11 +242,20 @@ import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm'; // create pipeli
 
 import type {
   PcmPlayer, // player handle with pause/resume/seek/restart/destroy
-  PcmPlayerOptions, // create options (volume, onEnded)
+  PcmPlayerOptions, // create options (volume, onEnded, onPosition)
   PcmPlayerAudioBuffer, // accepted audio-buffer id source for player input
   PcmPlayerEndedEvent, // onEnded callback payload
+  PcmPlayerPositionEvent, // onPosition callback payload
 } from 'react-native-sherpa-onnx/pcm';
 ```
+
+| Type | Description |
+| --- | --- |
+| `PcmPlayer` | Session handle: `pause`, `resume`, `seekToMs`, `restart`, `getPlaybackPositionMs`, `destroy` |
+| `PcmPlayerOptions` | `{ volume?, onEnded?, onPosition? }` |
+| `PcmPlayerAudioBuffer` | Offline/live ref, handle, or raw `bufferId` string |
+| `PcmPlayerEndedEvent` | `{ playerId, bufferId }` — see [JS Events](#js-events) |
+| `PcmPlayerPositionEvent` | `{ playerId, bufferId, positionMs }` — see [JS Events](#js-events) |
 
 ## Architecture Notes
 
