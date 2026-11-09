@@ -197,6 +197,13 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
     r.error_message = err_msg;
     return r;
   }
+#if !defined(SHERPA_ONNX_HAS_LEXBOR) || !SHERPA_ONNX_HAS_LEXBOR
+  r.error_code = kErrLexborDisabled;
+  r.error_message =
+      "lexbor is not linked. Rebuild with sherpaOnnxEnableLexbor=true "
+      "(Android) or SHERPA_ONNX_ENABLE_LEXBOR=1 (iOS).";
+  return r;
+#endif
   std::string opf_path;
   std::map<std::string, ManifestItem> manifest;
   std::vector<SpineItem> spine;
@@ -250,6 +257,11 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
       return r;
     }
     const HtmlExtract hx = ExtractHtmlText(xhtml.data(), xhtml.size());
+    if (!hx.error_code.empty()) {
+      r.error_code = hx.error_code;
+      r.error_message = hx.error_message;
+      return r;
+    }
     if (HtmlIsImageOnly(hx)) {
       sec.kind = "image";
       r.sections.push_back(sec);
@@ -324,6 +336,11 @@ ExtractImagesResult ExtractEpubImages(ArchiveReader& ar,
         continue;
       }
       const HtmlExtract hx = ExtractHtmlText(xhtml.data(), xhtml.size());
+      if (!hx.error_code.empty()) {
+        r.error_code = hx.error_code;
+        r.error_message = hx.error_message;
+        return r;
+      }
       if (!HtmlIsImageOnly(hx)) {
         ++section_index;
         continue;

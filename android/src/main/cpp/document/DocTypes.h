@@ -12,6 +12,7 @@ namespace sherpa_onnx {
 namespace document {
 
 inline constexpr const char* kErrArchiveDisabled = "ERR_DOC_ARCHIVE_DISABLED";
+inline constexpr const char* kErrLexborDisabled = "ERR_DOC_LEXBOR_DISABLED";
 inline constexpr const char* kErrUnsupportedFormat = "ERR_DOC_UNSUPPORTED_FORMAT";
 inline constexpr const char* kErrDrm = "ERR_DOC_DRM";
 inline constexpr const char* kErrOpenFailed = "ERR_DOC_OPEN_FAILED";

@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#if defined(SHERPA_ONNX_HAS_LEXBOR) && SHERPA_ONNX_HAS_LEXBOR
+
 #include <lexbor/dom/interface.h>
 #include <lexbor/dom/interfaces/character_data.h>
 #include <lexbor/html/html.h>
@@ -197,3 +199,42 @@ std::string FirstImageRecindex(const uint8_t* data, size_t size) {
 
 }  // namespace document
 }  // namespace sherpa_onnx
+
+#else  // !SHERPA_ONNX_HAS_LEXBOR
+
+namespace sherpa_onnx {
+namespace document {
+
+namespace {
+
+constexpr const char* kLexborDisabledMsg =
+    "lexbor is not linked. Rebuild with sherpaOnnxEnableLexbor=true "
+    "(Android) or SHERPA_ONNX_ENABLE_LEXBOR=1 (iOS).";
+
+}  // namespace
+
+HtmlExtract ExtractHtmlText(const uint8_t* data, size_t size) {
+  (void)data;
+  (void)size;
+  HtmlExtract out;
+  out.error_code = kErrLexborDisabled;
+  out.error_message = kLexborDisabledMsg;
+  return out;
+}
+
+std::string FirstImageHref(const uint8_t* data, size_t size) {
+  (void)data;
+  (void)size;
+  return {};
+}
+
+std::string FirstImageRecindex(const uint8_t* data, size_t size) {
+  (void)data;
+  (void)size;
+  return {};
+}
+
+}  // namespace document
+}  // namespace sherpa_onnx
+
+#endif  // SHERPA_ONNX_HAS_LEXBOR
