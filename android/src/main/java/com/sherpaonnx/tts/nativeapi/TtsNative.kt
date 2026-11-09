@@ -37,6 +37,20 @@ internal object TtsNative {
   ): HashMap<String, Any>?
 
   /**
+   * Same as [nativeGenerate] but streams via OfflineTts callback and reports
+   * Sherpa progress (0..1) through [progressCallback].
+   */
+  @JvmStatic
+  external fun nativeGenerateWithProgress(
+    instanceId: String,
+    text: String,
+    sid: Int,
+    speed: Float,
+    textBufferId: String?,
+    progressCallback: TtsGenerateProgressCallback?,
+  ): HashMap<String, Any>?
+
+  /**
    * GenerationConfig path (clone and/or numSteps/extra/phonemes).
    * Pass empty [referenceAudio] and referenceSampleRate=0 for non-clone config.
    * When [referenceBufferId] is set, native reads that offline buffer as the reference
@@ -60,6 +74,29 @@ internal object TtsNative {
     tokens: Array<Array<String>>?,
     referenceBufferId: String? = null,
     textBufferId: String? = null,
+  ): HashMap<String, Any>?
+
+  /**
+   * Same as [nativeGenerateWithOptions] with Sherpa progress via [progressCallback].
+   */
+  @JvmStatic
+  external fun nativeGenerateWithOptionsWithProgress(
+    instanceId: String,
+    text: String,
+    sid: Int,
+    speed: Float,
+    applyNumSteps: Boolean,
+    numSteps: Int,
+    silenceScale: Float,
+    referenceAudio: FloatArray?,
+    referenceSampleRate: Int,
+    referenceText: String?,
+    extra: HashMap<String, String>?,
+    phonemeCodepoints: Array<IntArray>?,
+    tokens: Array<Array<String>>?,
+    referenceBufferId: String?,
+    textBufferId: String?,
+    progressCallback: TtsGenerateProgressCallback?,
   ): HashMap<String, Any>?
 
   @JvmStatic

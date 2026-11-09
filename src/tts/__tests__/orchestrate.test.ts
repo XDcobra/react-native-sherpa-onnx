@@ -26,7 +26,11 @@ describe('runOfflineTtsPipeline', () => {
     native.synthesizeTts.mockResolvedValue(undefined);
     (runOfflineTextToAudioPipeline as jest.Mock).mockImplementation(
       async (_input, consumer, _config) => {
-        await consumer({ bufferId: 'txt_seg' }, { bufferId: 'off_seg' });
+        await consumer(
+          { bufferId: 'txt_seg' },
+          { bufferId: 'off_seg' },
+          { segmentIndex: 0, segmentCount: 1, elapsedMs: 0 }
+        );
         return {
           status: 'complete',
           totalSegments: 1,
@@ -69,6 +73,7 @@ describe('runOfflineTtsPipeline', () => {
         },
         sampleRate: 22050,
         channels: 1,
+        deferProgressToConsumer: true,
       })
     );
     expect(native.synthesizeTts).toHaveBeenCalledWith(

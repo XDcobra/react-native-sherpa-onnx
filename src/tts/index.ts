@@ -57,6 +57,10 @@ import type {
   LiveTextBufferRef,
 } from '../textbuffer/types';
 import { runOfflineTtsPipeline } from './orchestrate';
+import {
+  createTtsProgressEmitter,
+  synthesizeTtsWithProgress,
+} from './synthesizeWithProgress';
 import { validateLiveOfflinePipelineOptions } from '../livePipeline';
 import {
   attachSegmentationEngine,
@@ -476,12 +480,37 @@ export async function createTTS(
       });
 
       if (segmentation.mode === 'off') {
-        await SherpaOnnx.synthesizeTts(
+        const emit = createTtsProgressEmitter(
+          batchOpts?.onProgress,
+          startedAtMs
+        );
+        emit({
+          segmentIndex: 0,
+          segmentCount: 1,
+          generateFraction: 0,
+        });
+        await synthesizeTtsWithProgress(
           instanceId,
           textInId,
           audioOutId,
-          toNativeSynthesisOptions(batchOpts) ?? undefined
+          toNativeSynthesisOptions(batchOpts) ?? undefined,
+          batchOpts?.onProgress
+            ? (generateFraction) => {
+                emit({
+                  segmentIndex: 0,
+                  segmentCount: 1,
+                  generateFraction,
+                  elapsedMs: Date.now() - startedAtMs,
+                });
+              }
+            : undefined
         );
+        emit({
+          segmentIndex: 0,
+          segmentCount: 1,
+          generateFraction: 1,
+          elapsedMs: Date.now() - startedAtMs,
+        });
         return {
           status: 'complete',
           totalSegments: 1,
@@ -636,6 +665,7 @@ export type {
   TtsUpdateOptionsEmpty,
   TtsPhonemeInput,
   TtsSynthesisOptions,
+  TtsSynthesisProgress,
   TtsSynthesisResult,
   TtsExecutionProvider,
   TtsVoiceClone,

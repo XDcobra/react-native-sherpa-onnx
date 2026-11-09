@@ -73,11 +73,23 @@ export interface OrchestrationConfig {
   maxRetriesPerSegment?: number;
   retryExhaustedFallback?: RetryExhaustedFallback;
   onProgress?: (progress: OrchestrationProgress) => void;
+  /**
+   * When true, skip {@link onProgress} reporting so the consumer can own
+   * composed progress (used by offline TTS with Sherpa generateFraction).
+   */
+  deferProgressToConsumer?: boolean;
   overlapSamples?: number;
   overlapChars?: number;
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;
 }
+
+/** Per-segment context passed to {@link runOfflineTextToAudioPipeline} consumers. */
+export type TextToAudioSegmentContext = {
+  segmentIndex: number;
+  segmentCount: number;
+  elapsedMs: number;
+};
 
 export interface OrchestrationResult<TOutput> {
   outputBuffer?: TOutput;
@@ -297,7 +309,7 @@ function reportProgress(
   totalSegments: number,
   currentSegmentDurationMs: number
 ): void {
-  if (!config.onProgress) return;
+  if (!config.onProgress || config.deferProgressToConsumer) return;
   const fraction = totalSegments > 0 ? currentSegment / totalSegments : 1;
   config.onProgress({
     currentSegment,
@@ -1072,7 +1084,8 @@ export async function runOfflineTextToAudioPipeline(
   input: OfflineTextBufferIdSource,
   consumer: (
     segIn: OfflineTextBufferRef,
-    segOut: OfflineAudioBufferRef
+    segOut: OfflineAudioBufferRef,
+    ctx: TextToAudioSegmentContext
   ) => Promise<void>,
   config: OrchestrationConfig & { sampleRate: number; channels?: number }
 ): Promise<TextToAudioOrchestrationResult> {
@@ -1213,7 +1226,11 @@ export async function runOfflineTextToAudioPipeline(
               monoChannels
             );
 
-            await consumer(tempIn, tempOut);
+            await consumer(tempIn, tempOut, {
+              segmentIndex: i,
+              segmentCount: totalSegments,
+              elapsedMs: Date.now() - session.startedAtMs,
+            });
 
             const outInfo = await getPipelineAudioBufferInfo(tempOut.bufferId);
             if (outInfo.kind !== 'offlinePcmBuffer') {
