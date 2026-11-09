@@ -11,6 +11,7 @@ import {
   registerActivePostProcess,
   unregisterActivePostProcess,
 } from './activeModelOperations';
+import { resolveArchiveChecksum } from './checksumOverrides';
 import { emitDownloadProgress, emitModelsListUpdated } from './downloadEvents';
 import {
   getExtractionStatePath,
@@ -291,8 +292,12 @@ async function runPostDownloadProcessingBody(
   }
 
   const shouldVerifyChecksum = verifyChecksum !== false;
-  if (shouldVerifyChecksum && model.sha256) {
-    const expectedSha = model.sha256.toLowerCase();
+  const expectedShaResolved = resolveArchiveChecksum(
+    downloadPath,
+    model.sha256
+  );
+  if (shouldVerifyChecksum && expectedShaResolved) {
+    const expectedSha = expectedShaResolved.toLowerCase();
     let issue: ChecksumMismatchInfo | null = null;
 
     if (isArchive) {
@@ -303,7 +308,7 @@ async function runPostDownloadProcessingBody(
           category,
           modelId: id,
           filePath: downloadPath,
-          expected: model.sha256,
+          expected: expectedSha,
           reason: 'CHECKSUM_FAILED',
         };
       } else if (actualSha !== expectedSha) {
@@ -311,7 +316,7 @@ async function runPostDownloadProcessingBody(
           category,
           modelId: id,
           filePath: downloadPath,
-          expected: model.sha256,
+          expected: expectedSha,
           actual: actualSha,
           reason: 'CHECKSUM_MISMATCH',
         };
@@ -323,7 +328,7 @@ async function runPostDownloadProcessingBody(
           category,
           modelId: id,
           filePath: downloadPath,
-          expected: model.sha256,
+          expected: expectedSha,
           reason:
             checksumResult.error === 'CHECKSUM_MISMATCH'
               ? 'CHECKSUM_MISMATCH'
