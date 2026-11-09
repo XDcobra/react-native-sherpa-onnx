@@ -7,8 +7,8 @@
 #include <vector>
 
 namespace Ort {
-class Session;
-class SessionOptions;
+struct Session;
+struct SessionOptions;
 }  // namespace Ort
 
 namespace sherpa_onnx {

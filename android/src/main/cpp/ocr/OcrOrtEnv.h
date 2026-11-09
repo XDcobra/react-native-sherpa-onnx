@@ -6,7 +6,7 @@
 #pragma once
 
 namespace Ort {
-class Env;
+struct Env;
 }
 
 namespace sherpa_onnx {
