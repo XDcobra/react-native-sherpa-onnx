@@ -35,6 +35,7 @@ export type AssetPackDeliveryFailureReason =
   | 'stalled'
   | 'wifi'
   | 'insufficient_storage'
+  | 'integrity'
   | 'unknown';
 
 export type AssetPackDeliveryError = Error & {
@@ -409,6 +410,20 @@ export function classifyAssetPackDeliveryFailure(
   ) {
     return 'insufficient_storage';
   }
+  if (
+    haystack.includes('download_integrity') ||
+    haystack.includes('integrity_truncated') ||
+    haystack.includes('truncated') ||
+    haystack.includes('checksum mismatch') ||
+    haystack.includes('integrity') ||
+    haystack.includes('missing end-of-stream') ||
+    haystack.includes('not a bzip2') ||
+    haystack.includes('not a zstd') ||
+    haystack.includes('not an xz') ||
+    haystack.includes('not a gzip')
+  ) {
+    return 'integrity';
+  }
   return 'unknown';
 }
 
@@ -422,6 +437,7 @@ function isDeliveryReason(
     value === 'stalled' ||
     value === 'wifi' ||
     value === 'insufficient_storage' ||
+    value === 'integrity' ||
     value === 'unknown'
   );
 }
@@ -433,7 +449,8 @@ export function isRetryableAssetPackFailure(
     reason === 'network' ||
     reason === 'stalled' ||
     reason === 'background_denied' ||
-    reason === 'wifi'
+    reason === 'wifi' ||
+    reason === 'integrity'
   );
 }
 

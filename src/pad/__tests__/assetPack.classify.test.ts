@@ -58,10 +58,29 @@ describe('classifyAssetPackDeliveryFailure', () => {
     ).toBe('stalled');
   });
 
+  it('maps integrity / truncated archive messages', () => {
+    expect(
+      classifyAssetPackDeliveryFailure(
+        new Error('Archive truncated (missing end-of-stream)')
+      )
+    ).toBe('integrity');
+    expect(
+      classifyAssetPackDeliveryFailure(
+        new Error('DOWNLOAD_INTEGRITY_TRUNCATED: size below expected')
+      )
+    ).toBe('integrity');
+    expect(
+      classifyAssetPackDeliveryFailure(
+        new Error('checksum mismatch for model.tar.bz2')
+      )
+    ).toBe('integrity');
+  });
+
   it('marks play_unavailable as non-retryable', () => {
     expect(isRetryableAssetPackFailure('play_unavailable')).toBe(false);
     expect(isRetryableAssetPackFailure('network')).toBe(true);
     expect(isRetryableAssetPackFailure('background_denied')).toBe(true);
     expect(isRetryableAssetPackFailure('stalled')).toBe(true);
+    expect(isRetryableAssetPackFailure('integrity')).toBe(true);
   });
 });
