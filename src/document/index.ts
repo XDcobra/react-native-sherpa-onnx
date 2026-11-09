@@ -5,6 +5,7 @@
  * - `extractDocumentImages` — image-only sections / CBZ / CBR → OfflineImageBuffer.
  *
  * libarchive is default-on. Disable → `ERR_DOC_ARCHIVE_DISABLED`.
+ * lexbor is opt-in (default off). EPUB/MOBI HTML without it → `ERR_DOC_LEXBOR_DISABLED`.
  */
 
 import {
@@ -122,6 +123,7 @@ function mapSections(raw: unknown): DocumentSectionInfo[] {
  * @throws {Error} `ERR_DOC_INVALID_ARGUMENT` — `source` is not a `FileSource`.
  * @throws {Error} `ERR_DOC_CANCELLED` — `signal` aborted.
  * @throws {Error} `TEXT_INVALID_ARGUMENT` — missing or malformed `txt_off_*` / `txt_live_*` id.
+ * @throws {Error} `ERR_DOC_LEXBOR_DISABLED` — lexbor not linked (EPUB/MOBI HTML).
  * @throws {Error} `ERR_DOC_UNSUPPORTED_FORMAT` — file is not a supported markup format.
  * @throws {Error} `ERR_DOC_OPEN_FAILED` — document could not be opened.
  * @throws {Error} `ERR_DOC_DRM` — document is DRM-protected.

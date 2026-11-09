@@ -86,6 +86,7 @@ TEST(DocPath, NaturalSortPage2BeforePage10) {
             0);
 }
 
+#if defined(SHERPA_ONNX_HAS_LEXBOR) && SHERPA_ONNX_HAS_LEXBOR
 TEST(DocHtml, DropsScriptAndAltDoesNotCount) {
   const char* html =
       "<html><head><title>T</title></head><body>"
@@ -106,6 +107,15 @@ TEST(DocHtml, BlocksAndRuby) {
   EXPECT_NE(hx.text.find("World"), std::string::npos);
   EXPECT_EQ(hx.text.find("kan"), std::string::npos);
 }
+#else
+TEST(DocHtml, DisabledWithoutLexbor) {
+  const char* html = "<p>Hello</p>";
+  auto hx = sherpa_onnx::document::ExtractHtmlText(
+      reinterpret_cast<const uint8_t*>(html), std::strlen(html));
+  EXPECT_EQ(hx.error_code, "ERR_DOC_LEXBOR_DISABLED");
+  EXPECT_NE(hx.error_message.find("sherpaOnnxEnableLexbor"), std::string::npos);
+}
+#endif
 
 TEST(DocumentExtract, PdfAndHtmlAreUnsupported) {
   const auto pdf = FixturePath("not-a-book.pdf");
@@ -131,6 +141,17 @@ TEST(DocumentExtract, DisabledWithoutLibarchive) {
   auto t = sherpa_onnx::document::ExtractDocumentText(Src(FixturePath("mixed.epub")));
   EXPECT_FALSE(t.ok);
   EXPECT_EQ(t.error_code, "ERR_DOC_ARCHIVE_DISABLED");
+}
+#else
+
+#if !defined(SHERPA_ONNX_HAS_LEXBOR) || !SHERPA_ONNX_HAS_LEXBOR
+TEST(DocumentExtract, EpubTextDisabledWithoutLexbor) {
+  const auto path = FixturePath("mixed.epub");
+  RequireFixture(path);
+  auto t = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  EXPECT_FALSE(t.ok);
+  EXPECT_EQ(t.error_code, "ERR_DOC_LEXBOR_DISABLED");
+  EXPECT_NE(t.error_message.find("sherpaOnnxEnableLexbor"), std::string::npos);
 }
 #else
 
@@ -177,19 +198,21 @@ TEST(DocumentExtract, TextOnlyEpubNoImages) {
   EXPECT_EQ(images.error_code, "ERR_DOC_NO_IMAGES");
 }
 
+TEST(DocumentExtract, FontOnlyEncryptionIsNotDrm) {
+  const auto path = FixturePath("font-embed.epub");
+  RequireFixture(path);
+  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
+}
+
+#endif  // SHERPA_ONNX_HAS_LEXBOR
+
 TEST(DocumentExtract, DrmEncryptionXml) {
   const auto path = FixturePath("drm.epub");
   RequireFixture(path);
   auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
   EXPECT_FALSE(text.ok);
   EXPECT_EQ(text.error_code, "ERR_DOC_DRM");
-}
-
-TEST(DocumentExtract, FontOnlyEncryptionIsNotDrm) {
-  const auto path = FixturePath("font-embed.epub");
-  RequireFixture(path);
-  auto text = sherpa_onnx::document::ExtractDocumentText(Src(path));
-  ASSERT_TRUE(text.ok) << text.error_code << " " << text.error_message;
 }
 
 TEST(DocumentExtract, Fb2UncompressedAndZip) {
@@ -249,6 +272,7 @@ TEST(DocumentExtract, CbrTruncatedIsOpenFailed) {
   EXPECT_EQ(images.error_code, "ERR_DOC_OPEN_FAILED");
 }
 
+#if defined(SHERPA_ONNX_HAS_LEXBOR) && SHERPA_ONNX_HAS_LEXBOR
 TEST(DocumentExtract, MobiUncompressedText) {
   const auto path = FixturePath("tiny.mobi");
   RequireFixture(path);
@@ -280,6 +304,7 @@ TEST(DocumentExtract, MobiPalmDocCompressionAsciiHtml) {
   EXPECT_NE(text.text.find("PalmDOC chapter"), std::string::npos);
   EXPECT_NE(text.text.find("cloak came off"), std::string::npos);
 }
+#endif  // SHERPA_ONNX_HAS_LEXBOR
 
 TEST(DocumentExtract, MobiDrmIsRejected) {
   const auto path = FixturePath("drm.mobi");
@@ -313,6 +338,7 @@ TEST(DocumentExtract, MobiDictionaryExthIsUnsupported) {
   EXPECT_EQ(text.error_code, "ERR_DOC_UNSUPPORTED_FORMAT");
 }
 
+#if defined(SHERPA_ONNX_HAS_LEXBOR) && SHERPA_ONNX_HAS_LEXBOR
 TEST(DocumentExtract, MobiKf8FdstSplitsFlows) {
   const auto path = FixturePath("fdst.azw3");
   RequireFixture(path);
@@ -360,6 +386,7 @@ TEST(DocumentExtract, CommittedAzw3Kf8Version) {
   EXPECT_FALSE(images.ok);
   EXPECT_EQ(images.error_code, "ERR_DOC_NO_IMAGES");
 }
+#endif  // SHERPA_ONNX_HAS_LEXBOR
 
 TEST(DocumentExtract, GarbageIsUnsupportedOrOpenFailed) {
   const auto path = FixturePath("garbage.bin");

@@ -11,6 +11,7 @@ export type { OfflineTextBufferHandle, OfflineTextBufferIdSource };
 
 export const DocumentErrorCode = {
   ARCHIVE_DISABLED: 'ERR_DOC_ARCHIVE_DISABLED',
+  LEXBOR_DISABLED: 'ERR_DOC_LEXBOR_DISABLED',
   UNSUPPORTED_FORMAT: 'ERR_DOC_UNSUPPORTED_FORMAT',
   DRM: 'ERR_DOC_DRM',
   OPEN_FAILED: 'ERR_DOC_OPEN_FAILED',
