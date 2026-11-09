@@ -190,6 +190,11 @@ export type EnsureModelOptions = SourceSelectorOptions & {
   onChecksumMismatch?: (info: ChecksumMismatchInfo) => Promise<boolean>;
   deleteArchiveAfterExtract?: boolean;
   /**
+   * When true, skip archive integrity probe before extract (JS + native).
+   * Default false. Prefer leaving on unless you already verified the file.
+   */
+  skipIntegrityProbe?: boolean;
+  /**
    * When false, native Android extraction progress notifications are suppressed.
    * Use when the host app shows its own unified download notification.
    */

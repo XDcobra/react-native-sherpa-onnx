@@ -116,7 +116,12 @@ export { getProtectedKeys } from './protectedModelKeys';
 
 export { purgeAll, type PurgeAllResult } from './bulkPurge';
 
-export { checkDiskSpace } from './validation';
+export { checkDiskSpace, validateChecksum } from './validation';
+
+export {
+  resolveHuggingFaceRepoDigests,
+  type HfFileDigest,
+} from './hfDigestResolve';
 
 export {
   BUILTIN_SOURCE_IDS,
