@@ -226,6 +226,7 @@ set(SOURCES
     jni/audio/audio_f32le_to_format.cpp
     jni/audio/AudioDecodeSession.cpp
     jni/audio/AudioVisualization.cpp
+    jni/audio/AudioVisualizationSidecar.cpp
     jni/audio/FfmpegFormatGuard.cpp
     jni/audio/audio_decode_jni.cpp
     jni/audio/audio_visualization_jni.cpp
