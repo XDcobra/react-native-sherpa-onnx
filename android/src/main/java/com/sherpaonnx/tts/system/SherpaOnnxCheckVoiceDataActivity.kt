@@ -16,8 +16,9 @@ abstract class SherpaOnnxCheckVoiceDataActivity : Activity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
-    val requested =
-      intent.getStringArrayListExtra(TextToSpeech.Engine.EXTRA_CHECK_VOICE_DATA_FOR)
+    // Android deprecated TextToSpeech.Engine.EXTRA_CHECK_VOICE_DATA_FOR with no replacement
+    // extra; Settings may still send the wire key "checkVoiceDataFor".
+    val requested = intent.getStringArrayListExtra(EXTRA_CHECK_VOICE_DATA_FOR)
     SystemTtsLog.i(
       "CHECK_TTS_DATA start requested=${requested?.size ?: 0} " +
         SystemTtsLog.joinLimited(requested.orEmpty()),
@@ -66,5 +67,10 @@ abstract class SherpaOnnxCheckVoiceDataActivity : Activity() {
     )
     setResult(resultCode, returnData)
     finish()
+  }
+
+  companion object {
+    /** Same string as deprecated [TextToSpeech.Engine.EXTRA_CHECK_VOICE_DATA_FOR]. */
+    private const val EXTRA_CHECK_VOICE_DATA_FOR = "checkVoiceDataFor"
   }
 }
