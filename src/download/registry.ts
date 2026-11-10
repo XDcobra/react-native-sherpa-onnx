@@ -6,7 +6,6 @@ import {
 } from '@dr.pogodin/react-native-fs';
 import { CACHE_TTL_MINUTES } from './constants';
 import { emitModelsListUpdated } from './downloadEvents';
-import { applyKnownChecksumOverrides } from './checksumOverrides';
 import { getCacheDir, getCachePath, getPrimaryAssetFilename } from './paths';
 import {
   DownloadError,
@@ -172,10 +171,9 @@ async function getChecksumsForSource(
       requestPolicy: toRequestPolicy(options),
     });
 
-    const checksums = applyKnownChecksumOverrides(
+    const checksums =
       (await provider.getChecksums?.(category, ctx)) ??
-        new Map<string, string>()
-    );
+      new Map<string, string>();
 
     checksumCacheBySourceCategory.set(key, checksums);
     return checksums;

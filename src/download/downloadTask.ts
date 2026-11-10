@@ -9,7 +9,6 @@ import {
   writeFile,
 } from '@dr.pogodin/react-native-fs';
 import { makeModelOperationKey } from './activeModelOperations';
-import { resolveArchiveChecksum } from './checksumOverrides';
 import { runAssetIndicesWithConcurrency } from './downloadConcurrency';
 import {
   cancelForegroundDownload,
@@ -566,13 +565,11 @@ async function verifyDownloadedAssetChecksum(params: {
     onChecksumMismatch,
   } = params;
 
-  const resolvedExpected = resolveArchiveChecksum(relativePath, expectedSha256);
-
-  if (verifyChecksum === false || !resolvedExpected) {
+  if (verifyChecksum === false || !expectedSha256) {
     return;
   }
 
-  const expected = resolvedExpected.toLowerCase();
+  const expected = expectedSha256.toLowerCase();
   const result = await validateChecksum(filePath, expected);
   if (result.success) {
     return;
