@@ -50,6 +50,9 @@ export {
   getStorageBasePath,
 } from './localModels';
 
+/** On-disk layout helpers — use these instead of interpolating {@link ModelCategory} enum strings. */
+export { getModelsBaseDir, getSourceModelsBaseDir, getModelDir } from './paths';
+
 export {
   configureDownloadManager,
   downloadModel,
