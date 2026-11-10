@@ -2019,10 +2019,98 @@ static void pa_cleanupOutputFile(NSString *path) {
   }
 }
 
+struct PaMsRange {
+  double startMs = 0;
+  double endMs = 0;
+};
+
+struct PaFrameSpan {
+  int64_t startFrame = 0;
+  int64_t endFrame = 0;
+  int64_t length() const { return std::max<int64_t>(0, endFrame - startFrame); }
+};
+
+static bool pa_parseMsRanges(NSArray *ranges, std::vector<PaMsRange> *out, NSString **errMsg) {
+  out->clear();
+  if (ranges == nil || ranges.count == 0) return true;
+  for (NSUInteger i = 0; i < ranges.count; ++i) {
+    id item = ranges[i];
+    if (![item isKindOfClass:[NSDictionary class]]) {
+      if (errMsg) {
+        *errMsg = @"AUDIO_SAVE_INVALID_RANGE: ranges must be objects with startMs/endMs";
+      }
+      return false;
+    }
+    NSDictionary *map = (NSDictionary *)item;
+    double startMs = [map[@"startMs"] respondsToSelector:@selector(doubleValue)]
+                         ? [map[@"startMs"] doubleValue]
+                         : NAN;
+    double endMs = [map[@"endMs"] respondsToSelector:@selector(doubleValue)]
+                       ? [map[@"endMs"] doubleValue]
+                       : NAN;
+    if (!std::isfinite(startMs) || !std::isfinite(endMs) || endMs <= startMs) {
+      if (errMsg) {
+        *errMsg = @"AUDIO_SAVE_INVALID_RANGE: each range requires finite startMs < endMs (exclusive end)";
+      }
+      return false;
+    }
+    out->push_back(PaMsRange{startMs, endMs});
+  }
+  return true;
+}
+
+static std::vector<PaMsRange> pa_normalizeMsRanges(std::vector<PaMsRange> ranges) {
+  if (ranges.empty()) return ranges;
+  std::sort(ranges.begin(), ranges.end(), [](const PaMsRange &a, const PaMsRange &b) {
+    if (a.startMs != b.startMs) return a.startMs < b.startMs;
+    return a.endMs < b.endMs;
+  });
+  std::vector<PaMsRange> merged;
+  for (const auto &r : ranges) {
+    if (merged.empty() || r.startMs > merged.back().endMs) {
+      merged.push_back(r);
+    } else if (r.endMs > merged.back().endMs) {
+      merged.back().endMs = r.endMs;
+    }
+  }
+  return merged;
+}
+
+static int64_t pa_msToFrame(double ms, int sampleRate) {
+  if (!std::isfinite(ms) || sampleRate <= 0) return 0;
+  return std::max<int64_t>(0, (int64_t)std::floor(ms * (double)sampleRate / 1000.0));
+}
+
+static std::vector<PaFrameSpan> pa_toFrameSpans(
+    const std::vector<PaMsRange> &rangesMs, int sampleRate, int64_t totalFrames) {
+  std::vector<PaFrameSpan> spans;
+  if (rangesMs.empty() || sampleRate <= 0 || totalFrames <= 0) return spans;
+  for (const auto &r : rangesMs) {
+    int64_t start = std::clamp(pa_msToFrame(r.startMs, sampleRate), (int64_t)0, totalFrames);
+    int64_t end = std::clamp(pa_msToFrame(r.endMs, sampleRate), (int64_t)0, totalFrames);
+    if (end > start) spans.push_back(PaFrameSpan{start, end});
+  }
+  if (spans.empty()) return spans;
+  std::sort(spans.begin(), spans.end(), [](const PaFrameSpan &a, const PaFrameSpan &b) {
+    if (a.startFrame != b.startFrame) return a.startFrame < b.startFrame;
+    return a.endFrame < b.endFrame;
+  });
+  std::vector<PaFrameSpan> merged;
+  for (const auto &s : spans) {
+    if (merged.empty() || s.startFrame > merged.back().endFrame) {
+      merged.push_back(s);
+    } else if (s.endFrame > merged.back().endFrame) {
+      merged.back().endFrame = s.endFrame;
+    }
+  }
+  return merged;
+}
+
 static std::string pa_encodeViaPcm(
     const float *samples, int numSamples, int sampleRate, int channelCount,
     const char *outputPath, const char *format, int outputSampleRateHz,
-    int bitrate, int quality, std::atomic<bool> &cancelFlag) {
+    int bitrate, int quality, std::atomic<bool> &cancelFlag,
+    const std::vector<PaMsRange> &rangesMs = {}) {
   sherpa::AudioEncodeConfig config{};
   config.outputPath = outputPath;
   config.formatHint = format;
@@ -2033,17 +2121,30 @@ static std::string pa_encodeViaPcm(
   config.quality = quality;
 
   std::string errorOut;
-  int totalFrames = numSamples / channelCount;
-  auto session = sherpa::AudioEncodeSession::create(config, totalFrames, nullptr, cancelFlag, errorOut);
+  int64_t totalFrames = channelCount > 0 ? (numSamples / channelCount) : 0;
+  std::vector<PaFrameSpan> spans;
+  if (rangesMs.empty()) {
+    spans.push_back(PaFrameSpan{0, totalFrames});
+  } else {
+    spans = pa_toFrameSpans(pa_normalizeMsRanges(rangesMs), sampleRate, totalFrames);
+  }
+  int64_t selectedFrames = 0;
+  for (const auto &s : spans) selectedFrames += s.length();
+  if (selectedFrames <= 0) return "AUDIO_SAVE_BUFFER_EMPTY: Buffer is empty";
+
+  auto session = sherpa::AudioEncodeSession::create(
+      config, (int)selectedFrames, nullptr, cancelFlag, errorOut);
   if (!session) return errorOut;
 
   const int chunkFrames = 4096;
-  int offset = 0;
-  while (offset < totalFrames) {
-    int chunk = std::min(chunkFrames, totalFrames - offset);
-    std::string err = session->feedChunk(samples + offset * channelCount, chunk);
-    if (!err.empty()) return err;
-    offset += chunk;
+  for (const auto &span : spans) {
+    int64_t at = span.startFrame;
+    while (at < span.endFrame) {
+      int chunk = (int)std::min<int64_t>(chunkFrames, span.endFrame - at);
+      std::string err = session->feedChunk(samples + at * channelCount, chunk);
+      if (!err.empty()) return err;
+      at += chunk;
+    }
   }
   return session->finish();
 }
@@ -2051,32 +2152,132 @@ static std::string pa_encodeViaPcm(
 static std::string pa_encodeViaDecodeFile(
     const char *inputPath, const char *outputPath, const char *format,
     int outputSampleRateHz, int bitrate, int quality,
-    std::atomic<bool> &cancelFlag) {
-  // Batch decode the file first
+    std::atomic<bool> &cancelFlag,
+    const std::vector<PaMsRange> &rangesMs = {}) {
   sherpa::AudioDecodeConfig decConfig{};
   decConfig.targetSampleRate = 0; // keep source rate
   decConfig.forceMono = true;
   decConfig.chunkSize = 8192;
 
+  const bool useRanges = !rangesMs.empty();
+  std::vector<PaMsRange> normalized = useRanges ? pa_normalizeMsRanges(rangesMs) : std::vector<PaMsRange>{};
   std::vector<float> allSamples;
-  auto onChunk = [&allSamples](const float *samples, int frameCount) {
-    allSamples.insert(allSamples.end(), samples, samples + frameCount);
+  std::unique_ptr<sherpa::AudioEncodeSession> session;
+  int srcRate = 0;
+  int64_t absoluteFrame = 0;
+  int64_t fedFrames = 0;
+  std::vector<PaFrameSpan> spans;
+  std::string encodeCreateError;
+
+  auto ensureSession = [&](int rate, int64_t selectedEstimate) -> bool {
+    if (session) return true;
+    srcRate = rate;
+    sherpa::AudioEncodeConfig config{};
+    config.outputPath = outputPath;
+    config.formatHint = format;
+    config.inputSampleRate = rate;
+    config.inputChannelCount = 1;
+    config.outputSampleRateHz = outputSampleRateHz;
+    config.bitrate = bitrate;
+    config.quality = quality;
+    session = sherpa::AudioEncodeSession::create(
+        config, (int)selectedEstimate, nullptr, cancelFlag, encodeCreateError);
+    return (bool)session;
+  };
+
+  auto onChunk = [&](const float *samples, int frameCount) {
+    if (!useRanges) {
+      allSamples.insert(allSamples.end(), samples, samples + frameCount);
+      return;
+    }
+    if (srcRate <= 0) {
+      // Wait for stream info — buffer briefly.
+      allSamples.insert(allSamples.end(), samples, samples + frameCount);
+      return;
+    }
+    const int64_t chunkStart = absoluteFrame;
+    const int64_t chunkEnd = absoluteFrame + frameCount;
+    for (const auto &span : spans) {
+      if (span.endFrame <= chunkStart) continue;
+      if (span.startFrame >= chunkEnd) break;
+      const int64_t from = std::max(span.startFrame, chunkStart);
+      const int64_t to = std::min(span.endFrame, chunkEnd);
+      const int take = (int)(to - from);
+      if (take <= 0) continue;
+      if (!ensureSession(srcRate, std::max<int64_t>(1, fedFrames + take))) {
+        throw std::runtime_error(encodeCreateError.empty()
+                                     ? "AUDIO_SAVE_ENCODE_ERROR: Failed to create encode session"
+                                     : encodeCreateError);
+      }
+      const int localStart = (int)(from - chunkStart);
+      std::string err = session->feedChunk(samples + localStart, take);
+      if (!err.empty()) throw std::runtime_error(err);
+      fedFrames += take;
+    }
+    absoluteFrame = chunkEnd;
+  };
+
+  auto onStreamInfo = [&](int sourceSr, int /*sourceCh*/) {
+    if (!useRanges || srcRate > 0 || sourceSr <= 0) return;
+    srcRate = sourceSr;
+    // Clamp with a large upper bound until decode finishes; EOF stops feed early.
+    spans = pa_toFrameSpans(normalized, srcRate, (int64_t)1e15);
+    if (spans.empty()) {
+      throw std::runtime_error("AUDIO_SAVE_BUFFER_EMPTY: Buffer is empty");
+    }
+    if (!allSamples.empty()) {
+      std::vector<float> pending = std::move(allSamples);
+      allSamples.clear();
+      absoluteFrame = 0;
+      onChunk(pending.data(), (int)pending.size());
+    }
   };
 
   sherpa::AudioDecodeResult decResult;
   try {
-    decResult = sherpa::decodeFile(inputPath, decConfig, onChunk, nullptr, nullptr, cancelFlag);
+    decResult = sherpa::decodeFile(
+        inputPath, decConfig, onChunk, nullptr,
+        useRanges ? onStreamInfo : sherpa::DecodeStreamInfoCallback{},
+        cancelFlag);
   } catch (const std::exception &e) {
-    return std::string("AUDIO_SAVE_SOURCE_NOT_FOUND: ") + e.what();
+    std::string msg = e.what();
+    if (msg.find("AUDIO_SAVE_") == 0) return msg;
+    return std::string("AUDIO_SAVE_SOURCE_NOT_FOUND: ") + msg;
   }
 
-  if (allSamples.empty()) {
-    return "AUDIO_SAVE_SOURCE_NOT_FOUND: Decoded file is empty";
+  if (!useRanges) {
+    if (allSamples.empty()) {
+      return "AUDIO_SAVE_SOURCE_NOT_FOUND: Decoded file is empty";
+    }
+    int rate = decResult.sourceSampleRate > 0 ? decResult.sourceSampleRate : 16000;
+    return pa_encodeViaPcm(allSamples.data(), (int)allSamples.size(), rate, 1,
+                           outputPath, format, outputSampleRateHz, bitrate, quality, cancelFlag);
   }
 
-  int srcRate = decResult.sourceSampleRate > 0 ? decResult.sourceSampleRate : 16000;
-  return pa_encodeViaPcm(allSamples.data(), (int)allSamples.size(), srcRate, 1,
-                         outputPath, format, outputSampleRateHz, bitrate, quality, cancelFlag);
+  if (srcRate <= 0) {
+    int rate = decResult.sourceSampleRate > 0 ? decResult.sourceSampleRate : 0;
+    if (rate <= 0) return "AUDIO_SAVE_SOURCE_NOT_FOUND: Missing source sample rate";
+    srcRate = rate;
+    int64_t totalFrames = decResult.totalFramesDecoded > 0
+                              ? decResult.totalFramesDecoded
+                              : (int64_t)allSamples.size();
+    spans = pa_toFrameSpans(normalized, srcRate, totalFrames);
+    if (spans.empty()) return "AUDIO_SAVE_BUFFER_EMPTY: Buffer is empty";
+    if (!allSamples.empty()) {
+      std::vector<float> pending = std::move(allSamples);
+      allSamples.clear();
+      absoluteFrame = 0;
+      try {
+        onChunk(pending.data(), (int)pending.size());
+      } catch (const std::exception &e) {
+        return e.what();
+      }
+    }
+  }
+
+  if (fedFrames <= 0) return "AUDIO_SAVE_BUFFER_EMPTY: Buffer is empty";
+  if (!session) return "AUDIO_SAVE_ENCODE_ERROR: Encode session was not created";
+  return session->finish();
 }
 
 // ---- Save audio buffer to file ----
@@ -2087,6 +2288,7 @@ static std::string pa_encodeViaDecodeFile(
                       bitrate:(double)bitrate
                       quality:(double)quality
                   operationId:(NSString *)operationId
+                       ranges:(NSArray *)ranges
                       resolve:(RCTPromiseResolveBlock)resolve
                        reject:(RCTPromiseRejectBlock)reject
 {
@@ -2094,6 +2296,13 @@ static std::string pa_encodeViaDecodeFile(
   std::string fmt = [[format lowercaseString] UTF8String];
 
   if (!pa_validateSaveParams(fmt, rate, reject)) return;
+
+  std::vector<PaMsRange> rangesMs;
+  NSString *rangeErr = nil;
+  if (!pa_parseMsRanges(ranges, &rangesMs, &rangeErr)) {
+    reject(@"AUDIO_SAVE_INVALID_RANGE", rangeErr, nil);
+    return;
+  }
 
   // Register cancel flag
   auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
@@ -2147,7 +2356,7 @@ static std::string pa_encodeViaDecodeFile(
       err = pa_encodeViaPcm(ptr, n,
                              entry->sampleRate, entry->channelCount,
                              outputPathStr.c_str(), fmt.c_str(), rate,
-                             (int)bitrate, (int)quality, *cancelFlag);
+                             (int)bitrate, (int)quality, *cancelFlag, rangesMs);
     }
   }
   // Live buffer?
@@ -2177,12 +2386,12 @@ static std::string pa_encodeViaDecodeFile(
 
     if (entry->hasActiveSpool) {
       err = pa_encodeViaDecodeFile(entry->spoolPath.c_str(), outputPathStr.c_str(), fmt.c_str(),
-                                    rate, (int)bitrate, (int)quality, *cancelFlag);
+                                    rate, (int)bitrate, (int)quality, *cancelFlag, rangesMs);
     } else {
       auto snapshot = entry->snapshotRing();
       err = pa_encodeViaPcm(snapshot.data(), (int)snapshot.size(), entry->sampleRate, 1,
                              outputPathStr.c_str(), fmt.c_str(), rate,
-                             (int)bitrate, (int)quality, *cancelFlag);
+                             (int)bitrate, (int)quality, *cancelFlag, rangesMs);
     }
   }
   else {
@@ -2199,9 +2408,11 @@ static std::string pa_encodeViaDecodeFile(
 
   if (!err.empty()) {
     [wh cleanup]; pa_cleanupOutputFile(outputPath);
-    NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
     NSString *nsErr = [NSString stringWithUTF8String:err.c_str()];
+    NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
     if ([nsErr containsString:@"CANCELLED"]) code = @"AUDIO_SAVE_CANCELLED";
+    else if ([nsErr hasPrefix:@"AUDIO_SAVE_BUFFER_EMPTY"]) code = @"AUDIO_SAVE_BUFFER_EMPTY";
+    else if ([nsErr hasPrefix:@"AUDIO_SAVE_INVALID_RANGE"]) code = @"AUDIO_SAVE_INVALID_RANGE";
     reject(code, nsErr, nil);
     return;
   }
@@ -2218,6 +2429,7 @@ static std::string pa_encodeViaDecodeFile(
                     bitrate:(double)bitrate
                     quality:(double)quality
                 operationId:(NSString *)operationId
+                     ranges:(NSArray *)ranges
                     resolve:(RCTPromiseResolveBlock)resolve
                      reject:(RCTPromiseRejectBlock)reject
 {
@@ -2225,6 +2437,13 @@ static std::string pa_encodeViaDecodeFile(
   std::string fmt = [[format lowercaseString] UTF8String];
 
   if (!pa_validateSaveParams(fmt, rate, reject)) return;
+
+  std::vector<PaMsRange> rangesMs;
+  NSString *rangeErr = nil;
+  if (!pa_parseMsRanges(ranges, &rangesMs, &rangeErr)) {
+    reject(@"AUDIO_SAVE_INVALID_RANGE", rangeErr, nil);
+    return;
+  }
 
   // Register cancel flag
   auto cancelFlag = std::make_shared<std::atomic<bool>>(false);
@@ -2269,7 +2488,7 @@ static std::string pa_encodeViaDecodeFile(
   std::string outputPathStr = [outputPath UTF8String];
 
   std::string err = pa_encodeViaDecodeFile(inputPathStr.c_str(), outputPathStr.c_str(), fmt.c_str(),
-                                            rate, (int)bitrate, (int)quality, *cancelFlag);
+                                            rate, (int)bitrate, (int)quality, *cancelFlag, rangesMs);
 
   {
     std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex);
@@ -2280,9 +2499,12 @@ static std::string pa_encodeViaDecodeFile(
 
   if (!err.empty()) {
     [wh cleanup]; pa_cleanupOutputFile(outputPath);
-    NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
     NSString *nsErr = [NSString stringWithUTF8String:err.c_str()];
+    NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
     if ([nsErr containsString:@"CANCELLED"]) code = @"AUDIO_SAVE_CANCELLED";
+    else if ([nsErr hasPrefix:@"AUDIO_SAVE_BUFFER_EMPTY"]) code = @"AUDIO_SAVE_BUFFER_EMPTY";
+    else if ([nsErr hasPrefix:@"AUDIO_SAVE_INVALID_RANGE"]) code = @"AUDIO_SAVE_INVALID_RANGE";
+    else if ([nsErr hasPrefix:@"AUDIO_SAVE_SOURCE_NOT_FOUND"]) code = @"AUDIO_SAVE_SOURCE_NOT_FOUND";
     reject(code, nsErr, nil);
     return;
   }
