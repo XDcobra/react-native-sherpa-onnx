@@ -146,6 +146,21 @@ const ref = await saveAudioAsFile(
 
 `onProgress` receives an `AudioSaveProgressEvent` with a per-operation `operationId`, current `phase`, frame counters, and percent.
 
+### Multi-range export
+
+Pass `ranges` to concatenate selected time spans natively (no JS `Float32Array` merge). Works for offline/live buffers and `FileSource` inputs.
+
+```ts
+await saveAudioAsFile(buffer, { kind: 'fs', path: '/tmp/clips.wav' }, 'wav', {
+  ranges: [
+    { startMs: 0, endMs: 1500 },
+    { startMs: 4000, endMs: 5200 },
+  ],
+});
+```
+
+`endMs` is exclusive. Overlapping/touching ranges are merged. Out-of-bounds edges are clamped to media duration.
+
 ## API reference
 
 ### `saveAudioAsFile(input, output, format, options?)`
@@ -172,6 +187,7 @@ Parameters:
   - `outputSampleRateHz?: number`
   - `quality?: 'low' | 'medium' | 'high'`
   - `bitrate?: number`
+  - `ranges?: ReadonlyArray<{ startMs: number; endMs: number }>` — optional half-open ms ranges concatenated natively (omitted/empty = full input; overlapping/touching merged)
   - `signal?: AbortSignal`
   - `onProgress?: (event: AudioSaveProgressEvent) => void`
 
@@ -305,11 +321,12 @@ Promise rejections use `AUDIO_SAVE_*` codes:
 | `AUDIO_SAVE_BUFFER_NOT_FOUND` | The referenced audio buffer does not exist in the native registry. |
 | `AUDIO_SAVE_BUFFER_NOT_FINALIZED` | A live buffer is still recording and must be finalized first. |
 | `AUDIO_SAVE_BUFFER_INVALIDATED` | A live buffer became invalid after transfer/disposal and can no longer be saved. |
-| `AUDIO_SAVE_BUFFER_EMPTY` | The resolved input contains zero samples. |
+| `AUDIO_SAVE_BUFFER_EMPTY` | The resolved input contains zero samples, or selected `ranges` yield zero frames. |
 | `AUDIO_SAVE_SOURCE_NOT_FOUND` | A `FileSource` input could not be resolved or decoded. |
 | `AUDIO_SAVE_UNSUPPORTED_FORMAT` | The requested output format is not supported. |
 | `AUDIO_SAVE_INVALID_SAMPLE_RATE` | `outputSampleRateHz` is invalid for the selected codec. |
 | `AUDIO_SAVE_INVALID_QUALITY` | `quality` or `bitrate` values are invalid. |
+| `AUDIO_SAVE_INVALID_RANGE` | A range is NaN or inverted (`endMs` must be greater than `startMs`). |
 | `AUDIO_SAVE_ENCODE_ERROR` | Native decode or encode processing failed. |
 | `AUDIO_SAVE_FILE_WRITE_ERROR` | The destination file could not be written. |
 | `AUDIO_SAVE_DESTINATION_INVALID` | Destination resolution produced an invalid output path. |

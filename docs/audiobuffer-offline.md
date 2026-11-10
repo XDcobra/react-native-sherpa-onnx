@@ -244,7 +244,25 @@ import { saveAudioAsFile, saveAudioAsWav16k } from 'react-native-sherpa-onnx/aud
 await saveAudioAsFile(offline, { kind: 'fs', path: '/tmp/offline.wav' }, 'wav');
 await saveAudioAsWav16k(offline, { kind: 'fs', path: '/tmp/offline_16k.wav' });
 await saveAudioAsFile(offline, { kind: 'fs', path: '/tmp/offline.flac' }, 'flac');
+
+// Multi-range export (native concat; no JS Float32 merge). `endMs` is exclusive.
+await saveAudioAsFile(offline, { kind: 'fs', path: '/tmp/selection.wav' }, 'wav', {
+  ranges: [
+    { startMs: 0, endMs: 1500 },
+    { startMs: 4000, endMs: 5200 },
+  ],
+});
+
+// Same API with a FileSource — decode stays native.
+await saveAudioAsFile(
+  { kind: 'fs', path: '/tmp/archive.opus' },
+  { kind: 'fs', path: '/tmp/selection.m4a' },
+  'm4a',
+  { ranges: [{ startMs: 12000, endMs: 18000 }] }
+);
 ```
+
+Omitted / empty `ranges` keeps full-input behavior. Overlapping or touching ranges are merged before encode. Invalid bounds throw `AUDIO_SAVE_INVALID_RANGE`; a selection that yields zero frames throws `AUDIO_SAVE_BUFFER_EMPTY`.
 
 ### Conversion: Offline buffer <--> Live buffer
 
