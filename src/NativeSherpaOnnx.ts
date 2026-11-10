@@ -3194,7 +3194,9 @@ export interface Spec extends TurboModule {
     outputSampleRateHz: number,
     bitrate: number,
     quality: number,
-    operationId: string
+    operationId: string,
+    /** Optional ms ranges `{startMs,endMs}`; null/empty = full buffer. */
+    ranges?: Array<{ startMs: number; endMs: number }> | null
   ): Promise<{
     outputKind: string;
     outputPath: string;
@@ -3211,6 +3213,7 @@ export interface Spec extends TurboModule {
    * @param bitrate - Target bitrate in kbps (0 = codec default or quality-derived)
    * @param quality - 0=default, 1=low, 2=medium, 3=high
    * @param operationId - For progress/cancel correlation
+   * @param ranges - Optional ms ranges `{startMs,endMs}`; null/empty = full file
    */
   saveFileAsAudioFile(
     source: Object,
@@ -3219,7 +3222,8 @@ export interface Spec extends TurboModule {
     outputSampleRateHz: number,
     bitrate: number,
     quality: number,
-    operationId: string
+    operationId: string,
+    ranges?: Array<{ startMs: number; endMs: number }> | null
   ): Promise<{
     outputKind: string;
     outputPath: string;

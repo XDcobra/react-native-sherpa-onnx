@@ -17,6 +17,7 @@ import type {
   ResolvedFileRef,
 } from '../fileio/types';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { normalizeAudioTimeRanges } from './ranges';
 
 let eventEmitter: NativeEventEmitter | null = null;
 function getEventEmitter(): NativeEventEmitter {
@@ -86,8 +87,10 @@ function mapQuality(quality?: 'low' | 'medium' | 'high'): number {
  * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — destination or source kind is not valid on this OS.
  * @throws {Error} `AUDIO_INVALID_ARGUMENT` — buffer id is malformed.
  * @throws {Error} `AUDIO_SAVE_UNSUPPORTED_FORMAT` — format is not supported.
+ * @throws {Error} `AUDIO_SAVE_INVALID_RANGE` — a range is NaN or inverted (`endMs` must be > `startMs`).
  * @throws {Error} `AUDIO_SAVE_BUFFER_NOT_FOUND` — buffer is not in the native registry.
  * @throws {Error} `AUDIO_SAVE_BUFFER_NOT_FINALIZED` — live buffer is still recording.
+ * @throws {Error} `AUDIO_SAVE_BUFFER_EMPTY` — buffer or selected ranges yield zero frames.
  * @throws {Error} `AUDIO_SAVE_ENCODE_ERROR` — native encode or conversion failed.
  */
 export async function saveAudioAsFile(
@@ -102,6 +105,7 @@ export async function saveAudioAsFile(
   const outputSampleRateHz = options?.outputSampleRateHz ?? 0;
   const bitrate = options?.bitrate ?? 0;
   const quality = mapQuality(options?.quality);
+  const ranges = normalizeAudioTimeRanges(options?.ranges) ?? null;
 
   let progressSubscription: { remove: () => void } | null = null;
   let abortHandler: (() => void) | null = null;
@@ -146,7 +150,8 @@ export async function saveAudioAsFile(
         outputSampleRateHz,
         bitrate,
         quality,
-        operationId
+        operationId,
+        ranges
       );
     } else {
       // Buffer path: resolve to string bufferId, look up in native registry
@@ -157,7 +162,8 @@ export async function saveAudioAsFile(
         outputSampleRateHz,
         bitrate,
         quality,
-        operationId
+        operationId,
+        ranges
       );
     }
 
@@ -195,6 +201,7 @@ export function saveAudioAsWav16k(
 export type {
   AudioOutputFormat,
   AudioSaveInput,
+  AudioTimeRange,
   SaveAudioOptions,
   AudioSaveProgressEvent,
   PipelineAudioProfile,
@@ -205,6 +212,7 @@ export type {
 } from './types';
 export { AudioSaveErrorCode } from './types';
 export type { AudioSaveErrorCodeValue } from './types';
+export { normalizeAudioTimeRanges } from './ranges';
 
 // ── Pipeline Audio Session API ────────────────────────────────────────────
 

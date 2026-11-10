@@ -41,6 +41,16 @@ export interface AudioSaveProgressEvent {
 }
 
 /**
+ * Half-open time range in milliseconds (`endMs` exclusive).
+ * Used by {@link SaveAudioOptions.ranges} for multi-range native export.
+ */
+export type AudioTimeRange = {
+  startMs: number;
+  /** Exclusive end; must be greater than `startMs`. */
+  endMs: number;
+};
+
+/**
  * Options for audio save operations.
  */
 export interface SaveAudioOptions {
@@ -71,6 +81,14 @@ export interface SaveAudioOptions {
    * 0 or omitted = use `quality` mapping or codec default.
    */
   bitrate?: number;
+
+  /**
+   * Optional time ranges to export (concatenated in order).
+   * Omitted / empty = full input (current behavior).
+   * Overlapping/touching ranges are normalized (merged) before encode.
+   * Units are milliseconds; `endMs` is exclusive.
+   */
+  ranges?: ReadonlyArray<AudioTimeRange>;
 
   /** AbortSignal to cancel the save operation. */
   signal?: AbortSignal;
@@ -108,6 +126,8 @@ export const AudioSaveErrorCode = {
   FILE_WRITE_ERROR: 'AUDIO_SAVE_FILE_WRITE_ERROR',
   /** Destination resolved to an invalid/empty output path. */
   DESTINATION_INVALID: 'AUDIO_SAVE_DESTINATION_INVALID',
+  /** A range has NaN/inverted bounds (`endMs` must be > `startMs`). */
+  INVALID_RANGE: 'AUDIO_SAVE_INVALID_RANGE',
   /** Operation was cancelled via AbortSignal. */
   CANCELLED: 'AUDIO_SAVE_CANCELLED',
 } as const;
