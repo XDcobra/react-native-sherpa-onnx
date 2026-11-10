@@ -10,8 +10,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 internal object TtsJniCallbackFactory {
   /** Box for JNI: must be real [java.lang.Integer], not Kotlin [Int] (primitive `invoke([F)I` breaks sherpa JNI). */
-  @Suppress("DEPRECATION")
-  fun boxForTtsJni(n: Int): java.lang.Integer = java.lang.Integer(n)
+  fun boxForTtsJni(n: Int): java.lang.Integer =
+    // valueOf avoids deprecated Integer(int); cast keeps the JNI boxed type (Kotlin maps Integer→Int).
+    java.lang.Integer.valueOf(n) as java.lang.Integer
 
   @Suppress("UNCHECKED_CAST")
   fun ttsStreamChunkCallbackForJni(
@@ -20,7 +21,8 @@ internal object TtsJniCallbackFactory {
   ): kotlin.Function1<FloatArray, Int> {
     val boxed =
       object : kotlin.jvm.functions.Function1<FloatArray, java.lang.Integer> {
-        override fun invoke(chunk: FloatArray): java.lang.Integer {
+        override fun invoke(p1: FloatArray): java.lang.Integer {
+          val chunk = p1
           if (cancelled.get()) return boxForTtsJni(0)
           onChunk(chunk)
           return boxForTtsJni(chunk.size)
