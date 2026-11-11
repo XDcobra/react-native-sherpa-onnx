@@ -511,12 +511,22 @@ internal class PcmPlayerSession(
     }
   }
 
+  /** Absolute playback sample index (seek base + frames played in this cycle). */
+  private fun absolutePlaybackSample(): Long {
+    if (destroyed || sampleRate <= 0) return seekPositionSamples
+    val headPos = try {
+      track.playbackHeadPosition.toLong()
+    } catch (_: IllegalStateException) {
+      return seekPositionSamples
+    }
+    val framesPlayed = (headPos - headPosAtCycleStart).coerceAtLeast(0)
+    return seekPositionSamples + framesPlayed
+  }
+
   /** Get estimated playback position in milliseconds. */
   fun getPositionMs(): Double {
     if (destroyed || sampleRate <= 0) return 0.0
-    val headPos = try { track.playbackHeadPosition.toLong() } catch (_: IllegalStateException) { 0L }
-    val framesPlayed = (headPos - headPosAtCycleStart).coerceAtLeast(0)
-    return (seekPositionSamples + framesPlayed).toDouble() / sampleRate * 1000.0
+    return absolutePlaybackSample().toDouble() / sampleRate * 1000.0
   }
 
   fun pause() {
@@ -525,9 +535,26 @@ internal class PcmPlayerSession(
     track.pause()
   }
 
+  /**
+   * Resume after [pause]. Re-seeks to the current playhead before
+   * [AudioTrack.play]: pause can leave the track buffer empty (OEM) or the
+   * write thread parked after EOS-wait yield — re-seek refills from that sample.
+   */
   fun resume() {
     if (destroyed) return
-    track.play()
+    val sample = absolutePlaybackSample()
+    // wasPlaying is false while paused; seek keeps pause, then we play.
+    if (!seekToSample(sample)) {
+      android.util.Log.w(
+        "PcmPlayer",
+        "resume seek failed playerId=$playerId sample=$sample; playing in place"
+      )
+    }
+    try {
+      track.play()
+    } catch (_: IllegalStateException) {
+      return
+    }
     startPositionReporting()
   }
 
@@ -636,28 +663,75 @@ internal class PcmPlayerSession(
     }
   }
 
-  /** Called by the write thread when EOS_MARKER is dequeued. Waits for playback to finish, then fires onEnded. */
+  /**
+   * Called by the write thread when EOS_MARKER is dequeued. Waits for AudioTrack to
+   * finish playing all written frames, then fires onEnded.
+   *
+   * Contracts:
+   * - Pause mid-buffer is not EOS ([AudioTrack.PLAYSTATE_PAUSED] while frames remain).
+   * - EOS with [framesWrittenInCycle] == 0 is a seek/restart race (drain exhausted
+   *   before any write in this generation) — never emit ended for that.
+   */
   private fun handleSourceExhausted() {
     val gen = drainGeneration.get()
     val targetFrames = framesWrittenInCycle
-    val snapshotStart = queueSnapshot()
-        // Wait for AudioTrack to finish playing all written frames
+    if (targetFrames <= 0L) {
+      // Seek/restart race: EOS before any write in this generation.
+      return
+    }
+    // Wait for AudioTrack to finish playing all written frames (or destroy/seek).
     while (!destroyed && drainGeneration.get() == gen) {
-      val headPos = try { track.playbackHeadPosition.toLong() } catch (_: IllegalStateException) { break }
-      val played = headPos - headPosAtCycleStart
-      if (played >= targetFrames) break
-      if (track.playState != AudioTrack.PLAYSTATE_PLAYING) break
-      try {
-        Thread.sleep(20)
-      } catch (_: InterruptedException) {
+      val headPos = try {
+        track.playbackHeadPosition.toLong()
+      } catch (_: IllegalStateException) {
+        return
+      }
+      val played = (headPos - headPosAtCycleStart).coerceAtLeast(0)
+      if (played >= targetFrames) {
         break
       }
+      val playState = try {
+        track.playState
+      } catch (_: IllegalStateException) {
+        return
+      }
+      when (playState) {
+        AudioTrack.PLAYSTATE_PAUSED -> {
+          // Pause is not EOS. Yield; [resume] re-seeks and refills the buffer.
+          return
+        }
+        AudioTrack.PLAYSTATE_PLAYING -> {
+          try {
+            Thread.sleep(20)
+          } catch (_: InterruptedException) {
+            return
+          }
+        }
+        else -> {
+          // STOPPED / uninitialized without finishing — do not emit ended.
+          return
+        }
+      }
     }
-    // Fire onEnded once per drain cycle
-    if (!destroyed && drainGeneration.get() == gen && endedEmitted.compareAndSet(false, true)) {
+    if (destroyed || drainGeneration.get() != gen) {
+      return
+    }
+    val headPos = try {
+      track.playbackHeadPosition.toLong()
+    } catch (_: IllegalStateException) {
+      return
+    }
+    val played = (headPos - headPosAtCycleStart).coerceAtLeast(0)
+    if (played < targetFrames) {
+      return
+    }
+    if (endedEmitted.compareAndSet(false, true)) {
+      android.util.Log.i(
+        "PcmPlayer",
+        "ended playerId=$playerId gen=$gen targetFrames=$targetFrames played=$played"
+      )
       stopPositionReporting()
-      val snapshotEnd = queueSnapshot()
-            onEnded?.invoke()
+      onEnded?.invoke()
     }
   }
 }
