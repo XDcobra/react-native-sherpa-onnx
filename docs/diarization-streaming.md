@@ -163,7 +163,7 @@ console.log(det.modelType);   // 'sortformer'
 
 ### `createStreamingDiarization(options)`
 
-Creates and initializes the native streaming diarization engine. Init modes: **`auto`** (default — `modelSource` + optional `modelType`) or **`custom`** (`initMode: 'custom'` + `customConfig: { model, metadata? }`). Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `numThreads`, `provider`, `debug`.
+Creates and initializes the native streaming diarization engine. Init modes: **`auto`** (default — `modelSource` + optional `modelType`) or **`custom`** (`initMode: 'custom'` + `customConfig: { model, metadata? }`). Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `latencyPreset`, `numThreads`, `provider`, `debug`.
 
 ```ts
 function createStreamingDiarization(
@@ -314,7 +314,7 @@ await pipeline.completed;
 
 ### Streaming latency profiles
 
-NeMo Sortformer supports dynamic sequence lengths. Configure `chunkLen`, `rightContext`, and `fifoLen` to trade off latency vs accuracy:
+NeMo Sortformer supports dynamic sequence lengths. Configure `chunkLen`, `rightContext`, and `fifoLen` to trade off latency vs accuracy — or pass a pack-defined `latencyPreset` when `metadata.json` ships a `latency_presets` map (Nemotron-3).
 
 | Profile | `chunkLen` | `rightContext` | `fifoLen` | Latency | Stride (Update Rate) | Use Case |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -331,6 +331,24 @@ const engine = await createStreamingDiarization({
 });
 console.log(engine.latencySeconds); // 1.04
 ```
+
+**Nemotron-3** (`diar_streaming_nemotron3_sortformer_8spk*`) uses the same Sortformer streaming API and runner. Pack metadata includes named presets (`offline`, `low_latency`, `very_low_latency`, `ultra_low_latency`). Prefer presets over hard-coded v2.1 numbers:
+
+```ts
+// File / batch: large buffer (≈30.4s) — still createStreamingDiarization + feed()
+const offlineEngine = await createStreamingDiarization({
+  modelSource: { kind: 'fs', path: '/path/to/diar_streaming_nemotron3_sortformer_8spk-int8' },
+  latencyPreset: 'offline',
+});
+
+// Live mic
+const liveEngine = await createStreamingDiarization({
+  modelSource: { kind: 'fs', path: '/path/to/diar_streaming_nemotron3_sortformer_8spk-int8' },
+  latencyPreset: 'low_latency',
+});
+```
+
+Explicit `chunkLen` / `rightContext` / `fifoLen` still override a preset when set. This is **not** the pyannote offline path — see [diarization-offline.md](diarization-offline.md).
 
 ---
 
@@ -417,7 +435,7 @@ const segmentOut = await createLiveSegmentBuffer({
 | --- | --- |
 | `StreamingDiarizationConcreteModelType` | `'sortformer'` |
 | `StreamingDiarizationModelType` | `'sortformer' \| 'auto'` |
-| `StreamingDiarizationInitOptionsShared` | Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `numThreads`, `provider`, `debug` |
+| `StreamingDiarizationInitOptionsShared` | Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `latencyPreset`, `numThreads`, `provider`, `debug` |
 | `StreamingDiarizationAutoInitializeOptions` | Auto init: `modelSource`, `quantization?`, `modelType?` + shared tuning |
 | `StreamingDiarizationCustomInitializeOptions` | Custom init: `initMode: 'custom'`, `modelType`, `customConfig: { model, metadata? }` + shared tuning |
 | `StreamingDiarizationInitializeOptions` | Union of auto and custom init options |

@@ -6,6 +6,8 @@
 
 On-device **batch** speaker diarization: who spoke when in a recording, as anonymous cluster indices. Uses a **pyannote / reverb** segmentation model plus a separate **speaker-embedding** model and agglomerative clustering. Segmentation packs from the `speaker-segmentation-models` release contain **only** the pyannote/reverb ONNX — you must supply a speaker-embedding model separately (same packs as [speaker identification](speaker-identification-offline.md)).
 
+**Sortformer / Nemotron-3 are not this API.** Those packs use [`createStreamingDiarization`](diarization-streaming.md) (same engine for live mic and file `feed`), optionally with `latencyPreset: 'offline'` for a large buffer. Do not pass them to `createDiarization`.
+
 Import path: **`react-native-sherpa-onnx/diarization`**.
 
 ## Quick start
