@@ -123,11 +123,22 @@ fixture + latency matrix is the published contract. SDK note: preds are
 - Rationale: same as Parse “instruction” gates — acceleration must not change
   which streaming/quant cuts we claim are safe.
 
-## SDK pack id
+## SDK pack ids (GitHub `diarization-models` release)
 
-`diar_streaming_nemotron3_sortformer_8spk` (keeps `sortformer` in the name for
-existing model detection; `metadata.json` sets `max_speakers: 8`).
+Separate archives. FP16/INT8 keep `model.onnx` + `model.onnx_data` (ORT
+external-data basename; no rewrite). FP32 is a single embedded `model.onnx`.
 
-After a green INT8/FP16 cut, add rows to
-`scripts/diarization-models/sources.csv` pointing at the Hub `model.onnx`
-URLs and ship via `build_and_upload.js`.
+| Archive id | Hub pack | Notes |
+|---|---|---|
+| `diar_streaming_nemotron3_sortformer_8spk` | `onnx/fp32/` | reference / full precision |
+| `diar_streaming_nemotron3_sortformer_8spk-fp16` | `onnx/fp16/` | high-end |
+| `diar_streaming_nemotron3_sortformer_8spk-int8` | `onnx/int8/` | mobile / smaller |
+
+All keep `sortformer` in the name for existing model detection;
+`metadata.json` sets `max_speakers: 8`. Rows live in
+`scripts/diarization-models/sources.csv` (`onnx_data_url` for external weights). Publish with:
+
+```bash
+# dry-run locally, then workflow_dispatch Publish diarization model assets
+node scripts/diarization-models/build_and_upload.js --dry-run
+```

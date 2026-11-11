@@ -1,9 +1,10 @@
 {
   "id": "diar_streaming_nemotron3_sortformer_8spk",
-  "name": "Nemotron 3 Diarization (Sortformer 8-speaker)",
+  "name": "Nemotron 3 Diarization FP32 (Sortformer 8-speaker)",
   "model_type": "sortformer",
   "architecture": "streaming_sortformer_8spk_nemotron3",
   "version": "3",
+  "quantization": "fp32",
   "streaming": true,
   "sample_rate": 16000,
   "feature_dim": 128,

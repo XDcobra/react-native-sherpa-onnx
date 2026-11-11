@@ -1,0 +1,57 @@
+{
+  "id": "diar_streaming_nemotron3_sortformer_8spk-int8",
+  "name": "Nemotron 3 Diarization INT8 (Sortformer 8-speaker)",
+  "model_type": "sortformer",
+  "architecture": "streaming_sortformer_8spk_nemotron3",
+  "version": "3",
+  "quantization": "int8",
+  "streaming": true,
+  "sample_rate": 16000,
+  "feature_dim": 128,
+  "embedding_dim": 512,
+  "subsampling": 8,
+  "max_speakers": 8,
+  "chunk_len": 340,
+  "fifo_len": 40,
+  "spkcache_len": 264,
+  "right_context": 40,
+  "spkcache_update_period": 300,
+  "default_latency_preset": "offline",
+  "latency_presets": {
+    "offline": {
+      "latency_s": 30.4,
+      "spkcache_len": 264,
+      "fifo_len": 40,
+      "chunk_len": 340,
+      "right_context": 40,
+      "spkcache_update_period": 300
+    },
+    "low_latency": {
+      "latency_s": 1.04,
+      "spkcache_len": 264,
+      "fifo_len": 264,
+      "chunk_len": 9,
+      "right_context": 4,
+      "spkcache_update_period": 222
+    },
+    "very_low_latency": {
+      "latency_s": 0.64,
+      "spkcache_len": 264,
+      "fifo_len": 264,
+      "chunk_len": 6,
+      "right_context": 2,
+      "spkcache_update_period": 222
+    },
+    "ultra_low_latency": {
+      "latency_s": 0.32,
+      "spkcache_len": 264,
+      "fifo_len": 264,
+      "chunk_len": 3,
+      "right_context": 1,
+      "spkcache_update_period": 222
+    }
+  },
+  "license": "openmdw-1.1",
+  "attribution": "Licensed by NVIDIA Corporation under the OpenMDW License Agreement v1.1",
+  "source_repo": "nvidia/Nemotron-3-Diarization"
+}

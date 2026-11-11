@@ -1957,6 +1957,18 @@
       {
         "id": "diar_streaming_sortformer_4spk-v2.1",
         "hints": ["en"]
+      },
+      {
+        "id": "diar_streaming_nemotron3_sortformer_8spk",
+        "hints": ["en"]
+      },
+      {
+        "id": "diar_streaming_nemotron3_sortformer_8spk-fp16",
+        "hints": ["en"]
+      },
+      {
+        "id": "diar_streaming_nemotron3_sortformer_8spk-int8",
+        "hints": ["en"]
       }
     ]
   }

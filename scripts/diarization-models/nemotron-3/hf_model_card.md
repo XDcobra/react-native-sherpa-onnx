@@ -42,10 +42,9 @@ Download and run these on-device models in your pocket — anytime, anywhere —
 
 | Folder | Role | Size | Recipe |
 | --- | --- | ---: | --- |
-| `onnx/fp16` | Desktop / high-end | **201 MB** | FP16 weights, float32 I/O |
-| `onnx/int8` | High-end mobile | **107 MB** | Per-channel dynamic INT8 MatMul |
-
-Local FP32 source pack is **401 MB** (not uploaded by default).
+| `onnx/fp32` | Reference / desktop | **382 MB** | Full FP32 graph (single `model.onnx`) |
+| `onnx/fp16` | High-end | **201 MB** | FP16 weights, float32 I/O + `model.onnx_data` |
+| `onnx/int8` | High-end mobile | **107 MB** | Per-channel dynamic INT8 MatMul + `model.onnx_data` |
 
 ![Published pack size](figures/pack-size.png)
 

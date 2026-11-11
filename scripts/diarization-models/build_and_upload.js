@@ -6,6 +6,8 @@ const { Buffer } = require('node:buffer');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const { Readable } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { fileURLToPath } = require('node:url');
@@ -181,21 +183,35 @@ async function readSources(csvPath) {
   }
 
   const header = rows[0].map(normalizeCell);
-  const hasMetadataCol = header.length >= 6 && header[5] === 'metadata';
+  const col = Object.create(null);
+  for (let i = 0; i < header.length; i += 1) {
+    if (header[i]) {
+      col[header[i]] = i;
+    }
+  }
 
-  if (
-    header.length < 5 ||
-    header[0] !== 'id' ||
-    header[1] !== 'onnx_url' ||
-    header[2] !== 'license' ||
-    header[3] !== 'license_type' ||
-    header[4] !== 'commercial_use'
-  ) {
-    throw new Error(
-      `Invalid CSV header. Expected at least id;onnx_url;license;license_type;commercial_use (got ${header.join(
-        ';'
-      )})`
-    );
+  const required = [
+    'id',
+    'onnx_url',
+    'license',
+    'license_type',
+    'commercial_use',
+  ];
+  for (const name of required) {
+    if (col[name] === undefined) {
+      throw new Error(
+        `Invalid CSV header. Missing column '${name}' (got ${header.join(';')})`
+      );
+    }
+  }
+
+  const knownColumns = new Set([...required, 'metadata', 'onnx_data_url']);
+  for (const name of header) {
+    if (name && !knownColumns.has(name)) {
+      throw new Error(
+        `Invalid CSV header. Unknown column '${name}' (got ${header.join(';')})`
+      );
+    }
   }
 
   const csvDir = path.dirname(path.resolve(csvPath));
@@ -206,24 +222,26 @@ async function readSources(csvPath) {
     const lineNumber = i + 1;
     const row = rows[i];
 
-    if (row.length > (hasMetadataCol ? 6 : 5)) {
+    if (row.length > header.length) {
       throw new Error(
-        `Line ${lineNumber}: too many columns (expected ${
-          hasMetadataCol ? 6 : 5
-        })`
+        `Line ${lineNumber}: too many columns (expected ${header.length})`
       );
     }
 
-    while (row.length < (hasMetadataCol ? 6 : 5)) {
+    while (row.length < header.length) {
       row.push('');
     }
 
-    const modelId = normalizeCell(row[0]);
-    const onnxUrl = normalizeCell(row[1]);
-    const licenseUrl = normalizeCell(row[2]);
-    const licenseType = normalizeCell(row[3]);
-    let commercialUse = normalizeCell(row[4]).toLowerCase();
-    const metadataSource = hasMetadataCol ? normalizeCell(row[5]) : '';
+    const cell = (name) =>
+      col[name] === undefined ? '' : normalizeCell(row[col[name]]);
+
+    const modelId = cell('id');
+    const onnxUrl = cell('onnx_url');
+    const licenseUrl = cell('license');
+    const licenseType = cell('license_type');
+    const commercialUse = cell('commercial_use').toLowerCase();
+    const metadataSource = cell('metadata');
+    const onnxDataUrl = cell('onnx_data_url');
 
     if (!modelId) {
       throw new Error(`Line ${lineNumber}: id is required`);
@@ -239,9 +257,15 @@ async function readSources(csvPath) {
     if (!licenseType) {
       throw new Error(`Line ${lineNumber}: license_type is required`);
     }
-    if (commercialUse !== 'yes' && commercialUse !== 'no') {
+    if (
+      commercialUse !== 'yes' &&
+      commercialUse !== 'no' &&
+      commercialUse !== 'conditional'
+    ) {
       throw new Error(
-        `Line ${lineNumber}: commercial_use must be "yes" or "no" (got "${row[4]}")`
+        `Line ${lineNumber}: commercial_use must be "yes", "no", or "conditional" (got "${
+          row[col.commercial_use]
+        }")`
       );
     }
     if (seen.has(modelId)) {
@@ -252,6 +276,7 @@ async function readSources(csvPath) {
     sources.push({
       modelId,
       onnxUrl,
+      onnxDataUrl,
       licenseUrl,
       licenseType,
       commercialUse,
@@ -343,6 +368,15 @@ async function downloadFile(url, destination) {
     throw new Error(
       `HTTP ${response.status} while downloading ${url}: ${body}`
     );
+  }
+
+  // Stream large ONNX external-data sidecars instead of buffering in RAM.
+  if (response.body && typeof Readable.fromWeb === 'function') {
+    await pipeline(
+      Readable.fromWeb(response.body),
+      fs.createWriteStream(destination)
+    );
+    return;
   }
 
   const arrayBuffer = await response.arrayBuffer();
@@ -636,6 +670,12 @@ async function buildArchives(sources, buildDir, distDir) {
     const modelPath = path.join(modelDir, 'model.onnx');
     console.log(`[download] ${source.modelId}: model.onnx`);
     await downloadFile(source.onnxUrl, modelPath);
+
+    if (source.onnxDataUrl) {
+      const dataPath = path.join(modelDir, 'model.onnx_data');
+      console.log(`[download] ${source.modelId}: model.onnx_data`);
+      await downloadFile(source.onnxDataUrl, dataPath);
+    }
 
     if (source.licenseUrl) {
       const licensePath = path.join(modelDir, 'LICENSE');

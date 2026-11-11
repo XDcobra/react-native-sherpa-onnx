@@ -96,9 +96,9 @@ def write_repo_manifest(stage: Path, variants: list[str]) -> None:
 def parse_args(argv):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "--include-fp32",
+        "--skip-fp32",
         action="store_true",
-        help="Also stage onnx/fp32 (large). Default: fp16 + int8 only.",
+        help="Omit onnx/fp32 from the stage (default ships fp32 + fp16 + int8).",
     )
     p.add_argument(
         "--int8-from-exp",
@@ -130,7 +130,7 @@ def main(argv=None) -> int:
     write_gitattributes(HF_STAGE)
 
     variants: list[str] = []
-    if args.include_fp32:
+    if not args.skip_fp32:
         copy_pack(ONNX_DIR, HF_STAGE / "onnx" / "fp32")
         variants.append("fp32")
 
