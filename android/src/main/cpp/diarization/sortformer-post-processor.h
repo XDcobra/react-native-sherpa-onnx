@@ -29,6 +29,12 @@ class SortformerPostProcessor {
 
   const SortformerPostProcessorConfig& config() const { return config_; }
 
+  void SetFrameDuration(float seconds) {
+    if (seconds > 0.0f) {
+      config_.frame_duration = seconds;
+    }
+  }
+
   /**
    * Applies median filtering across time for each speaker column.
    *
