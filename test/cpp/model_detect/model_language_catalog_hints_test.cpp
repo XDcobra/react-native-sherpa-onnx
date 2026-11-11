@@ -205,7 +205,7 @@ INSTANTIATE_TEST_SUITE_P(
             {"en"}},
         NameOnlyLanguageHintCase{
             LanguageHintDomain::kSpeakerEmbedding, "wespeaker_en_voxceleb_CAM++", {"en"}},
-        // Diarization segmentation is language-agnostic
+        // Diarization: pyannote / reverb language-agnostic; NeMo Sortformer EN
         NameOnlyLanguageHintCase{
             LanguageHintDomain::kDiarization,
             "sherpa-onnx-pyannote-segmentation-3-0",
@@ -213,7 +213,16 @@ INSTANTIATE_TEST_SUITE_P(
         NameOnlyLanguageHintCase{
             LanguageHintDomain::kDiarization, "sherpa-onnx-reverb-diarization-v1", {}},
         NameOnlyLanguageHintCase{
-            LanguageHintDomain::kDiarization, "sherpa-onnx-reverb-diarization-v2", {}}),
+            LanguageHintDomain::kDiarization, "sherpa-onnx-reverb-diarization-v2", {}},
+        NameOnlyLanguageHintCase{
+            LanguageHintDomain::kDiarization,
+            "diar_streaming_sortformer_4spk-v2.1",
+            {"en"}},
+        // No curated pack entry → empty (multilingual / language-agnostic).
+        NameOnlyLanguageHintCase{
+            LanguageHintDomain::kDiarization,
+            "diar_streaming_nemotron3_sortformer_8spk",
+            {}}),
     [](const ::testing::TestParamInfo<NameOnlyLanguageHintCase>& info) {
         std::string name = LanguageHintDomainName(info.param.domain);
         name.push_back('_');

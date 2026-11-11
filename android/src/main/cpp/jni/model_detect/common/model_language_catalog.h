@@ -59,6 +59,15 @@ void ApplyCuratedSpeakerEmbeddingLanguageRows(
     SpeakerEmbeddingDetectResult& result,
     const std::string& modelKey);
 
+/**
+ * When a curated diarization pack match exists for modelKey, replace
+ * derivedLanguages (same pattern as speaker embedding). No-op when no match —
+ * language-agnostic packs simply have no catalog entry.
+ */
+void ApplyCuratedDiarizationLanguageRows(
+    DiarizationDetectResult& result,
+    const std::string& modelKey);
+
 } // namespace sherpaonnx
 
 #endif

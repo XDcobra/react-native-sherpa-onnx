@@ -1951,5 +1951,13 @@
         "hints": ["zh"]
       }
     ]
+  },
+  "diarization": {
+    "entries": [
+      {
+        "id": "diar_streaming_sortformer_4spk-v2.1",
+        "hints": ["en"]
+      }
+    ]
   }
 }

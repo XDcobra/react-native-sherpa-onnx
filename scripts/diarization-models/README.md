@@ -2,6 +2,10 @@
 
 This folder contains a CSV-driven pipeline that builds one `.tar.bz2` archive per model ID and uploads missing archives to the GitHub release tag `diarization-models`.
 
+For **Nemotron-3** Sortformer export / quant / CPU parity (Parse-style HF card),
+see [`nemotron-3/README.md`](nemotron-3/README.md). Publish Hub packs first, then
+add `sources.csv` rows pointing at the ONNX URLs.
+
 Release page:
 https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/diarization-models
 

@@ -323,4 +323,24 @@ void ApplyCuratedSpeakerEmbeddingLanguageRows(
     }
 }
 
+void ApplyCuratedDiarizationLanguageRows(
+    DiarizationDetectResult& result,
+    const std::string& modelKey) {
+    if (modelKey.empty()) {
+        return;
+    }
+    const auto& rows =
+        model_language_catalog::DiarizationPackRowsForModelKey(modelKey);
+    if (rows.empty()) {
+        return;
+    }
+    result.derivedLanguages = rows;
+    if (std::find(
+            result.detectionSources.begin(),
+            result.detectionSources.end(),
+            DetectionSource::kCuratedCatalog) == result.detectionSources.end()) {
+        result.detectionSources.push_back(DetectionSource::kCuratedCatalog);
+    }
+}
+
 } // namespace sherpaonnx
