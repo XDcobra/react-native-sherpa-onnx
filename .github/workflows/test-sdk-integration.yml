@@ -141,8 +141,8 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          # Use the RN template Gradle wrapper (0.83.x → Gradle 9.0). Do not
-          # force an older wrapper — that breaks AGP from the template.
+          # Use the RN template Gradle wrapper as-is (0.83.x → Gradle 9).
+          # Do not re-pin — an older wrapper breaks the template AGP line.
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/testproject-build-android.log
           GRADLE_EXIT=${PIPESTATUS[0]}
@@ -284,8 +284,8 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk-expo.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk-expo.outputs.ndk-path }}
         run: |
+          # Use the Expo prebuild Gradle wrapper as-is (no version re-pin).
           chmod +x gradlew
-          ./gradlew wrapper --gradle-version 8.13
           ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/testexpo-build-android.log
           GRADLE_EXIT=${PIPESTATUS[0]}
           if [ "$GRADLE_EXIT" -ne 0 ]; then
