@@ -66,8 +66,7 @@ set(PRODUCTION_SOURCES
 add_executable(model_detect_test
   "${MODEL_DETECT_TEST_DIR}/model_detect_test.cpp"
   "${MODEL_DETECT_TEST_DIR}/model_detect_test_utils.cpp"
-  "${MODEL_DETECT_TEST_DIR}/tts_catalog_hints_test.cpp"
-  "${MODEL_DETECT_TEST_DIR}/curated_language_catalog_test.cpp"
+  "${MODEL_DETECT_TEST_DIR}/model_language_catalog_hints_test.cpp"
   "${MODEL_DETECT_TEST_DIR}/custom_path_requirements_catalog_test.cpp"
 )
 
