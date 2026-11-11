@@ -6,6 +6,7 @@ import {
 } from '@dr.pogodin/react-native-fs';
 import { CACHE_TTL_MINUTES } from './constants';
 import { emitModelsListUpdated } from './downloadEvents';
+import { filterLanguageIdWhisperModels } from './languageIdWhisper';
 import { getCacheDir, getCachePath, getPrimaryAssetFilename } from './paths';
 import {
   DownloadError,
@@ -26,6 +27,24 @@ import {
   type CacheStatus,
   type ModelMeta,
 } from './types';
+
+/** LanguageId is a Whisper-filtered view over the STT (asr-models) catalog. */
+function catalogCategoryFor(category: ModelCategory): ModelCategory {
+  return category === ModelCategory.LanguageId ? ModelCategory.Stt : category;
+}
+
+function maybeFilterLanguageIdCatalog(
+  category: ModelCategory,
+  models: ModelMeta[]
+): ModelMeta[] {
+  if (category !== ModelCategory.LanguageId) {
+    return models;
+  }
+  return filterLanguageIdWhisperModels(models).map((model) => ({
+    ...model,
+    category: ModelCategory.LanguageId,
+  }));
+}
 
 type SourceSelector = {
   source?: string | 'default';
@@ -191,9 +210,10 @@ export async function listModels(
   options?: SourceSelector
 ): Promise<ModelMeta[]> {
   ensureBuiltinSourcesRegistered();
-  const sourceId = resolveSourceId(category, options?.source);
-  const cache = await loadCacheFromDisk(category, sourceId);
-  return cache?.models ?? [];
+  const storageCategory = catalogCategoryFor(category);
+  const sourceId = resolveSourceId(storageCategory, options?.source);
+  const cache = await loadCacheFromDisk(storageCategory, sourceId);
+  return maybeFilterLanguageIdCatalog(category, cache?.models ?? []);
 }
 
 /**
@@ -210,6 +230,14 @@ export async function refreshModels(
   options?: RefreshModelsOptions
 ): Promise<ModelMeta[]> {
   ensureBuiltinSourcesRegistered();
+
+  // LanguageId: refresh STT once, then return the Whisper multilingual slice.
+  if (category === ModelCategory.LanguageId) {
+    const sttModels = await refreshModels(ModelCategory.Stt, options);
+    const filtered = maybeFilterLanguageIdCatalog(category, sttModels);
+    emitModelsListUpdated(category, filtered);
+    return filtered;
+  }
 
   const sourceId = resolveSourceId(category, options?.source);
   const provider = getSource(sourceId);
@@ -285,8 +313,9 @@ export async function getModelsCacheStatus(
   category: ModelCategory,
   options?: SourceSelector
 ): Promise<CacheStatus> {
-  const sourceId = resolveSourceId(category, options?.source);
-  const cached = await loadCacheFromDisk(category, sourceId);
+  const storageCategory = catalogCategoryFor(category);
+  const sourceId = resolveSourceId(storageCategory, options?.source);
+  const cached = await loadCacheFromDisk(storageCategory, sourceId);
 
   if (!cached) {
     return {

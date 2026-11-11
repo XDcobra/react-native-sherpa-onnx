@@ -66,10 +66,12 @@ export const CATEGORY_CONFIG: Record<ModelCategory, CategoryConfig> = {
     cacheFile: 'ocr-models.json',
     baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/ocr`,
   },
+  // LanguageId reuses STT Whisper packs (same asr-models tag + on-disk stt dir).
+  // Catalog list/refresh aliases STT in registry.ts; do not use a separate install root.
   [ModelCategory.LanguageId]: {
     tag: 'asr-models',
-    cacheFile: 'language-id-models.json',
-    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/language-id`,
+    cacheFile: 'asr-models.json',
+    baseDir: `${DocumentDirectoryPath}/sherpa-onnx/models/stt`,
   },
   [ModelCategory.Kws]: {
     tag: 'kws-models',

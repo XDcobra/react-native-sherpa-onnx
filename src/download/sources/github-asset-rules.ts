@@ -1,3 +1,4 @@
+import { isLanguageIdWhisperModelId } from '../languageIdWhisper';
 import { ModelCategory } from '../types';
 
 export function getAssetExtension(name: string): 'tar.bz2' | 'onnx' | null {
@@ -58,10 +59,7 @@ export function isAssetSupportedForCategory(
     case ModelCategory.LanguageId:
       return (
         ext === 'tar.bz2' &&
-        lower.includes('whisper') &&
-        !lower.includes('.en.') &&
-        !lower.endsWith('.en.tar.bz2') &&
-        !lower.includes('aishell')
+        isLanguageIdWhisperModelId(stripAssetExtension(name, 'tar.bz2'))
       );
     case ModelCategory.Kws:
       return ext === 'tar.bz2' && lower.includes('kws');

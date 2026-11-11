@@ -96,6 +96,11 @@ export {
 } from './sources/github-asset-rules';
 
 export {
+  filterLanguageIdWhisperModels,
+  isLanguageIdWhisperModelId,
+} from './languageIdWhisper';
+
+export {
   buildSourceModelsFromGithubReleaseAssets,
   deriveDisplayName,
   type GitHubReleaseAsset,
