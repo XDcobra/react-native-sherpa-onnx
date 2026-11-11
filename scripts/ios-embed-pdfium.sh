@@ -37,9 +37,11 @@ if [[ "${PLATFORM_NAME:-}" == *simulator* ]]; then
 fi
 
 SRC="${XCFW}/${SLICE}/pdfium.framework"
-if [ ! -d "$SRC" ]; then
-  echo "error: pdfium.framework missing at $SRC" >&2
-  exit 1
+# PDFium is opt-in (SDK default off). A partial/leftover xcframework must not
+# fail the app build — skip embed when this platform slice is absent.
+if [ ! -d "$SRC" ] || [ ! -f "${SRC}/pdfium" ]; then
+  echo "note: pdfium.framework not available at $SRC; skipping embed (optional)" >&2
+  exit 0
 fi
 
 DEST="${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}"
