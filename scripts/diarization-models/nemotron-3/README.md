@@ -112,7 +112,11 @@ build/diarization-models/nemotron-3/.venv/bin/python \
 
 No DIHARD DER on the card: too heavy for this release artifact; the step
 fixture + latency matrix is the published contract. SDK note: preds are
-**10 ms high-res** — `pred_frames = (spkcache + fifo + chunk) × 8`.
+**10 ms high-res** — `pred_frames ≈ (spkcache + fifo) × 8 + mel_len`.
+`SortformerStreamingModel` detects this via `pred_upsample` (metadata or
+tensor shape) and post-processes at 10 ms; FIFO/spkcache bookkeeping stays
+encoder-rate. Offline vs live is `latencyPreset` on
+`createStreamingDiarization` — not a second ONNX or `createDiarization`.
 
 ## CoreML policy (macOS)
 

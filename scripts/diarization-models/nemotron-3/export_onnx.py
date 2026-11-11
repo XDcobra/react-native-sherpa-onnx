@@ -175,6 +175,7 @@ def write_metadata(out_dir: Path, preset: dict) -> None:
         "feature_dim": FEAT_DIM,
         "embedding_dim": EMB_DIM,
         "subsampling": SUBSAMPLING,
+        "pred_upsample": SUBSAMPLING,
         "max_speakers": MAX_SPEAKERS,
         "chunk_len": preset["chunk_len"],
         "fifo_len": preset["fifo_len"],
