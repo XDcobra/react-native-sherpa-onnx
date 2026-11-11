@@ -65,7 +65,9 @@ static std::string CollapseLocaleLanguageRegionUnderscore(const std::string& id)
 }
 
 static bool IsFalsePositiveTwoLetter(const std::string& tok) {
-    return tok == "hf" || tok == "ll";
+    // hf/ll: TTS filename noise. sv: "speaker verification" (not Swedish).
+    // cn: region tag from zh-cn splits (keep zh only).
+    return tok == "hf" || tok == "ll" || tok == "sv" || tok == "cn";
 }
 
 static bool AllLowerAscii2(const std::string& t) {

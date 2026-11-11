@@ -13,6 +13,7 @@ enum class ModelLanguageDomain {
     kStt,
     kAlignment,
     kOcr,
+    kSpeakerEmbedding,
 };
 
 /**
@@ -48,6 +49,14 @@ void AppendCuratedAlignmentLanguageRowsIfEmpty(
 
 void AppendCuratedOcrLanguageRowsIfEmpty(
     OcrDetectResult& result,
+    const std::string& modelKey);
+
+/**
+ * When a curated speaker-embedding pack match exists for modelKey, replace
+ * derivedLanguages (heuristics can mis-tag "sv" / "cn"). No-op when no match.
+ */
+void ApplyCuratedSpeakerEmbeddingLanguageRows(
+    SpeakerEmbeddingDetectResult& result,
     const std::string& modelKey);
 
 } // namespace sherpaonnx

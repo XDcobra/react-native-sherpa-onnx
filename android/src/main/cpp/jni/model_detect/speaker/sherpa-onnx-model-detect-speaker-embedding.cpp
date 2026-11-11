@@ -3,6 +3,7 @@
 #include "sherpa-onnx-speaker-embedding-online-guard.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
 #include "sherpa-onnx-catalog-metadata.h"
+#include "model_language_catalog.h"
 
 #include <algorithm>
 #include <optional>
@@ -315,6 +316,7 @@ SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModel(
         result = DetectSpeakerEmbeddingModelFromFiles({}, syntheticDir, requestedModelType, quantization);
         std::string ignoredSizeTier;
         FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, assetName);
+        ApplyCuratedSpeakerEmbeddingLanguageRows(result, assetName);
         return result;
     }
 
@@ -336,6 +338,12 @@ SpeakerEmbeddingDetectResult DetectSpeakerEmbeddingModel(
     if (has_asset && (result.quantization.empty() || result.quantization == "unknown")) {
         std::string ignoredSizeTier;
         FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, *asset_name_opt);
+    }
+    if (has_asset) {
+        ApplyCuratedSpeakerEmbeddingLanguageRows(result, *asset_name_opt);
+    } else {
+        ApplyCuratedSpeakerEmbeddingLanguageRows(
+            result, BasenameLastPathComponent(modelDir));
     }
     return result;
 }

@@ -1863,5 +1863,93 @@
         "vi"
       ]
     }
+  },
+  "speakerEmbedding": {
+    "entries": [
+      {
+        "id": "3dspeaker_speech_campplus_sv_en_voxceleb_16k",
+        "hints": ["en"]
+      },
+      {
+        "id": "3dspeaker_speech_campplus_sv_zh-cn_16k-common",
+        "hints": ["zh"]
+      },
+      {
+        "id": "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced",
+        "hints": ["zh", "en"]
+      },
+      {
+        "id": "3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common",
+        "hints": ["zh"]
+      },
+      {
+        "id": "3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common",
+        "hints": ["zh"]
+      },
+      {
+        "id": "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k",
+        "hints": ["zh"]
+      },
+      {
+        "id": "3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k",
+        "hints": ["zh"]
+      },
+      {
+        "id": "3dspeaker_speech_eres2net_sv_en_voxceleb_16k",
+        "hints": ["en"]
+      },
+      {
+        "id": "3dspeaker_speech_eres2net_sv_zh-cn_16k-common",
+        "hints": ["zh"]
+      },
+      {
+        "id": "nemo_en_speakerverification_speakernet",
+        "hints": ["en"]
+      },
+      {
+        "id": "nemo_en_titanet_large",
+        "hints": ["en"]
+      },
+      {
+        "id": "nemo_en_titanet_small",
+        "hints": ["en"]
+      },
+      {
+        "id": "wespeaker_en_voxceleb_CAM++",
+        "hints": ["en"]
+      },
+      {
+        "id": "wespeaker_en_voxceleb_CAM++_LM",
+        "hints": ["en"]
+      },
+      {
+        "id": "wespeaker_en_voxceleb_resnet152_LM",
+        "hints": ["en"]
+      },
+      {
+        "id": "wespeaker_en_voxceleb_resnet221_LM",
+        "hints": ["en"]
+      },
+      {
+        "id": "wespeaker_en_voxceleb_resnet293_LM",
+        "hints": ["en"]
+      },
+      {
+        "id": "wespeaker_en_voxceleb_resnet34",
+        "hints": ["en"]
+      },
+      {
+        "id": "wespeaker_en_voxceleb_resnet34_LM",
+        "hints": ["en"]
+      },
+      {
+        "id": "wespeaker_zh_cnceleb_resnet34",
+        "hints": ["zh"]
+      },
+      {
+        "id": "wespeaker_zh_cnceleb_resnet34_LM",
+        "hints": ["zh"]
+      }
+    ]
   }
 }
