@@ -188,8 +188,32 @@ function validateCatalog(catalog) {
   if (catalog.version !== 1) {
     throw new Error(`Unsupported catalog version: ${catalog.version}`);
   }
-  if (!catalog.tts || !catalog.stt || !catalog.alignment || !catalog.ocr) {
-    throw new Error('Catalog must have tts, stt, alignment, and ocr domains');
+  if (
+    !catalog.tts ||
+    !catalog.stt ||
+    !catalog.alignment ||
+    !catalog.ocr ||
+    !catalog.speakerEmbedding
+  ) {
+    throw new Error(
+      'Catalog must have tts, stt, alignment, ocr, and speakerEmbedding domains'
+    );
+  }
+  if (
+    !Array.isArray(catalog.speakerEmbedding.entries) ||
+    catalog.speakerEmbedding.entries.length === 0
+  ) {
+    throw new Error('speakerEmbedding.entries must be a non-empty array');
+  }
+  for (const entry of catalog.speakerEmbedding.entries) {
+    if (typeof entry?.id !== 'string' || !entry.id.trim()) {
+      throw new Error('speakerEmbedding.entries require a non-empty id');
+    }
+    if (!Array.isArray(entry.hints) || entry.hints.length === 0) {
+      throw new Error(
+        `speakerEmbedding entry ${JSON.stringify(entry.id)} requires non-empty hints`
+      );
+    }
   }
   if (!catalog.alignment.wav2vec2?.hints?.length) {
     throw new Error('alignment.wav2vec2.hints must be a non-empty array');
@@ -461,6 +485,45 @@ function emitCpp(catalog, sttRowsByType, ocrPackLangs) {
   lines.push('    if (byId != kById.end()) return byId->second;');
   lines.push('    const auto byStem = kByStem.find(OcrPackLanguageStem(lower));');
   lines.push('    if (byStem != kByStem.end()) return byStem->second;');
+  lines.push('    return kEmpty;');
+  lines.push('}');
+  lines.push('');
+
+  // Speaker-embedding pack rows (curated per asset id)
+  const speakerEntries = catalog.speakerEmbedding?.entries ?? [];
+  lines.push('inline std::string SpeakerEmbeddingPackLanguageStem(const std::string& modelKey) {');
+  lines.push('    std::string stem = modelKey;');
+  lines.push('    for (char& c : stem) {');
+  lines.push('        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));');
+  lines.push('    }');
+  lines.push('    const std::string suffixes[] = {".onnx", ".tar.bz2", ".tar.gz", ".tar.zst"};');
+  lines.push('    for (const auto& suf : suffixes) {');
+  lines.push('        if (stem.size() >= suf.size() &&');
+  lines.push('            stem.compare(stem.size() - suf.size(), suf.size(), suf) == 0) {');
+  lines.push('            stem.resize(stem.size() - suf.size());');
+  lines.push('            break;');
+  lines.push('        }');
+  lines.push('    }');
+  lines.push('    return stem;');
+  lines.push('}');
+  lines.push('');
+  lines.push('inline const std::vector<PublicLanguageRow>& SpeakerEmbeddingPackRowsForModelKey(');
+  lines.push('    const std::string& modelKey) {');
+  lines.push('    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kById = {');
+  for (const entry of speakerEntries) {
+    const id = String(entry.id).toLowerCase();
+    lines.push(
+      `        {${cppString(id)}, ${cppRowArray(rowsFromTtsHints(entry.hints))}},`
+    );
+  }
+  lines.push('    };');
+  lines.push('    static const std::vector<PublicLanguageRow> kEmpty;');
+  lines.push('    if (modelKey.empty()) return kEmpty;');
+  lines.push('    const std::string stem = SpeakerEmbeddingPackLanguageStem(modelKey);');
+  lines.push('    const auto byId = kById.find(stem);');
+  lines.push('    if (byId != kById.end()) return byId->second;');
+  lines.push('    const auto byRaw = kById.find(modelKey);');
+  lines.push('    if (byRaw != kById.end()) return byRaw->second;');
   lines.push('    return kEmpty;');
   lines.push('}');
   lines.push('');

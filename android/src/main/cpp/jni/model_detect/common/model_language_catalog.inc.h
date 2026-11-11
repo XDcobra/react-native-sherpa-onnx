@@ -164,6 +164,57 @@ inline const std::vector<PublicLanguageRow>& OcrPackRowsForModelKey(
     return kEmpty;
 }
 
+inline std::string SpeakerEmbeddingPackLanguageStem(const std::string& modelKey) {
+    std::string stem = modelKey;
+    for (char& c : stem) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    const std::string suffixes[] = {".onnx", ".tar.bz2", ".tar.gz", ".tar.zst"};
+    for (const auto& suf : suffixes) {
+        if (stem.size() >= suf.size() &&
+            stem.compare(stem.size() - suf.size(), suf.size(), suf) == 0) {
+            stem.resize(stem.size() - suf.size());
+            break;
+        }
+    }
+    return stem;
+}
+
+inline const std::vector<PublicLanguageRow>& SpeakerEmbeddingPackRowsForModelKey(
+    const std::string& modelKey) {
+    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kById = {
+        {"3dspeaker_speech_campplus_sv_en_voxceleb_16k", {PublicLanguageRow{"en", "en"}}},
+        {"3dspeaker_speech_campplus_sv_zh-cn_16k-common", {PublicLanguageRow{"zh", "zh"}}},
+        {"3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced", {PublicLanguageRow{"zh", "zh"}, PublicLanguageRow{"en", "en"}}},
+        {"3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common", {PublicLanguageRow{"zh", "zh"}}},
+        {"3dspeaker_speech_eres2net_base_200k_sv_zh-cn_16k-common", {PublicLanguageRow{"zh", "zh"}}},
+        {"3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k", {PublicLanguageRow{"zh", "zh"}}},
+        {"3dspeaker_speech_eres2net_large_sv_zh-cn_3dspeaker_16k", {PublicLanguageRow{"zh", "zh"}}},
+        {"3dspeaker_speech_eres2net_sv_en_voxceleb_16k", {PublicLanguageRow{"en", "en"}}},
+        {"3dspeaker_speech_eres2net_sv_zh-cn_16k-common", {PublicLanguageRow{"zh", "zh"}}},
+        {"nemo_en_speakerverification_speakernet", {PublicLanguageRow{"en", "en"}}},
+        {"nemo_en_titanet_large", {PublicLanguageRow{"en", "en"}}},
+        {"nemo_en_titanet_small", {PublicLanguageRow{"en", "en"}}},
+        {"wespeaker_en_voxceleb_cam++", {PublicLanguageRow{"en", "en"}}},
+        {"wespeaker_en_voxceleb_cam++_lm", {PublicLanguageRow{"en", "en"}}},
+        {"wespeaker_en_voxceleb_resnet152_lm", {PublicLanguageRow{"en", "en"}}},
+        {"wespeaker_en_voxceleb_resnet221_lm", {PublicLanguageRow{"en", "en"}}},
+        {"wespeaker_en_voxceleb_resnet293_lm", {PublicLanguageRow{"en", "en"}}},
+        {"wespeaker_en_voxceleb_resnet34", {PublicLanguageRow{"en", "en"}}},
+        {"wespeaker_en_voxceleb_resnet34_lm", {PublicLanguageRow{"en", "en"}}},
+        {"wespeaker_zh_cnceleb_resnet34", {PublicLanguageRow{"zh", "zh"}}},
+        {"wespeaker_zh_cnceleb_resnet34_lm", {PublicLanguageRow{"zh", "zh"}}},
+    };
+    static const std::vector<PublicLanguageRow> kEmpty;
+    if (modelKey.empty()) return kEmpty;
+    const std::string stem = SpeakerEmbeddingPackLanguageStem(modelKey);
+    const auto byId = kById.find(stem);
+    if (byId != kById.end()) return byId->second;
+    const auto byRaw = kById.find(modelKey);
+    if (byRaw != kById.end()) return byRaw->second;
+    return kEmpty;
+}
+
 inline std::string ModelOptionIdForHint(
     const std::string& modelType,
     const std::string& hint) {
