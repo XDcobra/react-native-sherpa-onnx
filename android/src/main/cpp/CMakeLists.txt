@@ -171,6 +171,7 @@ set(SOURCES
     diarization/sortformer-fbank.cpp
     diarization/sortformer-post-processor.cpp
     diarization/sortformer-streaming-model.cpp
+    diarization/streaming-diarizer-factory.cpp
     diarization/sherpa-onnx-streaming-diarization-wrapper.cpp
     jni/diarization/sherpa-onnx-diarization-jni.cpp
     jni/segment/sherpa-onnx-pyannote-segmentation-jni.cpp

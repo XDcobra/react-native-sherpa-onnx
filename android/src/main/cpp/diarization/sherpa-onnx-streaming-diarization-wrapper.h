@@ -60,7 +60,8 @@ class StreamingDiarizationWrapper {
       int32_t medianWindow,
       int32_t chunkLen = -1,
       int32_t rightContext = -1,
-      int32_t fifoLen = -1);
+      int32_t fifoLen = -1,
+      const std::string& latencyPreset = "");
 
   StreamingDiarizationFeedResult feed(const float* samples, size_t count);
   StreamingDiarizationFeedResult flush();

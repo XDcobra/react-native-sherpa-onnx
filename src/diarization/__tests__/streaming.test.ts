@@ -152,6 +152,36 @@ describe('createStreamingDiarization', () => {
     );
   });
 
+  it('forwards latencyPreset for pack metadata presets', async () => {
+    (SherpaOnnx.initializeStreamingDiarization as jest.Mock).mockResolvedValue({
+      success: true,
+      sampleRate: 16000,
+      maxSpeakers: 8,
+      feedSamples: 486400,
+      strideSamples: 435200,
+      latencySeconds: 30.4,
+    });
+
+    await createStreamingDiarization({
+      initMode: 'custom',
+      modelType: 'sortformer',
+      customConfig: {
+        model: { kind: 'fs', path: '/tmp/nemotron/model.onnx' },
+        metadata: { kind: 'fs', path: '/tmp/nemotron/metadata.json' },
+      },
+      latencyPreset: 'offline',
+    });
+
+    expect(SherpaOnnx.initializeStreamingDiarization).toHaveBeenCalledWith(
+      expect.stringMatching(/^diar_stream_/),
+      expect.objectContaining({
+        model: '/tmp/nemotron/model.onnx',
+        metadata: '/tmp/nemotron/metadata.json',
+        latencyPreset: 'offline',
+      })
+    );
+  });
+
   it('starts streaming pipeline with zero-JS cursor-to-segment loop', async () => {
     (SherpaOnnx.initializeStreamingDiarization as jest.Mock).mockResolvedValue({
       success: true,

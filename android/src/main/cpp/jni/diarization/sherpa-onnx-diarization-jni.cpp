@@ -664,17 +664,21 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
     jint medianWindow,
     jint chunkLen,
     jint rightContext,
-    jint fifoLen
+    jint fifoLen,
+    jstring latencyPreset
 ) {
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
   const std::string modelPathStr = CopyRequiredJstring(env, modelPath);
   const std::string metadataPathStr = metadataPath ? CopyRequiredJstring(env, metadataPath) : "";
   const auto providerOpt = CopyOptionalJstring(env, provider);
+  const std::string latencyPresetStr =
+      latencyPreset ? CopyRequiredJstring(env, latencyPreset) : "";
 
-  LOGI("nativeInitializeStreamingDiarization: id=%s model=%s meta=%s threads=%d chunkLen=%d rightContext=%d fifoLen=%d",
+  LOGI("nativeInitializeStreamingDiarization: id=%s model=%s meta=%s threads=%d chunkLen=%d rightContext=%d fifoLen=%d preset=%s",
        instanceIdStr.c_str(), modelPathStr.c_str(), metadataPathStr.c_str(),
        static_cast<int>(numThreads), static_cast<int>(chunkLen),
-       static_cast<int>(rightContext), static_cast<int>(fifoLen));
+       static_cast<int>(rightContext), static_cast<int>(fifoLen),
+       latencyPresetStr.c_str());
 
   auto wrapper = std::make_shared<sherpaonnx::StreamingDiarizationWrapper>();
   auto result = wrapper->initialize(
@@ -692,7 +696,8 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeInitial
       medianWindow,
       chunkLen,
       rightContext,
-      fifoLen);
+      fifoLen,
+      latencyPresetStr);
 
   if (result.success) {
     std::lock_guard<std::mutex> lock(g_streaming_diarization_mutex);

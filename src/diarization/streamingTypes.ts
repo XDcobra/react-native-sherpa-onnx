@@ -51,6 +51,13 @@ export interface StreamingDiarizationInitOptionsShared {
    * Default: derived from model metadata (124).
    */
   fifoLen?: number;
+  /**
+   * Named latency preset from pack `metadata.json` → `latency_presets`
+   * (e.g. `offline`, `low_latency`, `very_low_latency`, `ultra_low_latency`).
+   * Applies chunk/fifo/right_context from that preset; explicit `chunkLen` /
+   * `rightContext` / `fifoLen` still win when set.
+   */
+  latencyPreset?: string;
 }
 
 export type StreamingDiarizationAutoInitializeOptions =
