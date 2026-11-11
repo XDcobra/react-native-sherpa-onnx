@@ -1426,6 +1426,25 @@ describe('createSpeakerIdentification', () => {
     ).rejects.toThrow(/SID_ENROLLMENT_MODEL_MISMATCH/);
   });
 
+  it('importEnrollments accepts same weights path with different numThreads', async () => {
+    const sid = await createSpeakerIdentification({
+      modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+      numThreads: 2,
+    });
+    await expect(
+      sid.importEnrollments({
+        version: 1,
+        dim: 4,
+        modelKey: JSON.stringify({
+          modelKey: '/models/speaker-embedding',
+          provider: 'cpu',
+          numThreads: 1,
+        }),
+        speakers: [{ name: 'alice', embeddings: [emb] }],
+      })
+    ).resolves.toEqual({ imported: 1, skipped: 0 });
+  });
+
   it('removeSpeaker drops the speaker from native export', async () => {
     const sid = await createSpeakerIdentification({
       modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
