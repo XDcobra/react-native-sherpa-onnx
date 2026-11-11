@@ -6157,7 +6157,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   ) {
     try {
       val normalizedKind = kind.trim().ifEmpty { "speech" }
-      if (normalizedKind != "speech" && normalizedKind != "alignment") {
+      if (
+        normalizedKind != "speech" &&
+          normalizedKind != "alignment" &&
+          normalizedKind != "diarization"
+      ) {
         promise.reject(
           com.sherpaonnx.segment.pipeline.SegmentErrorCodes.INVALID_ARGUMENT,
           "kind must be one of speech, alignment, or diarization"
