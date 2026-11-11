@@ -2186,6 +2186,19 @@ TEST(ModelDetectValidation, SeparationNameOnlySpleeterIsHeuristic) {
         << "Expected heuristic note in error: " << result.error;
 }
 
+TEST(ModelDetectValidation, SeparationNameOnlyLanguagesStayEmpty) {
+    // Spleeter / UVR are language-agnostic; never invent ISO chips from the pack id.
+    auto spleeter = sherpaonnx::DetectSeparationModel(
+        std::nullopt,
+        std::optional<std::string>("sherpa-onnx-spleeter-2stems-fp16"),
+        "auto");
+    EXPECT_TRUE(spleeter.derivedLanguages.empty());
+
+    auto uvr = sherpaonnx::DetectSeparationModel(
+        std::nullopt, std::optional<std::string>("sherpa-onnx-uvr-mdx-net"), "auto");
+    EXPECT_TRUE(uvr.derivedLanguages.empty());
+}
+
 TEST(ModelDetectValidation, EnhancementMissingOnnxRejected) {
     const std::string dir = "test-models/enhancement-empty";
     std::vector<FE> files = {

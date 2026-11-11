@@ -179,6 +179,8 @@ sherpaonnx::SeparationDetectResult DetectSeparationModelFromFiles(
     std::string ignoredSizeTier;
     FillDerivedCatalogMetadataFromBasename(
         result.derivedLanguages, result.quantization, ignoredSizeTier, modelDir);
+    // Music stem separation (Spleeter / UVR) is language-agnostic.
+    result.derivedLanguages.clear();
     std::string refModel = !result.paths.model.empty() ? result.paths.model : result.paths.vocals;
     if ((result.quantization.empty() || result.quantization == "unknown") && !refModel.empty()) {
         std::string fileQuant = sherpaonnx::DeriveQuantization(sherpaonnx::model_detect::BaseName(refModel));
@@ -220,6 +222,7 @@ SeparationDetectResult DetectSeparationModel(
         result = DetectSeparationModelFromFiles({}, syntheticDir, requestedModelType, quantization);
         std::string ignoredSizeTier;
         FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, assetName);
+        result.derivedLanguages.clear();
         return result;
     }
 
@@ -240,6 +243,7 @@ SeparationDetectResult DetectSeparationModel(
     if (has_asset && (result.quantization.empty() || result.quantization == "unknown")) {
         std::string ignoredSizeTier;
         FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, *asset_name_opt);
+        result.derivedLanguages.clear();
     }
     return result;
 }
