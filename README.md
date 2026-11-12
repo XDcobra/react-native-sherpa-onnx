@@ -431,14 +431,15 @@ APIs: [Speaker identification (offline)](./docs/speaker-identification-offline.m
 <details>
 <summary>Speaker Diarization models</summary>
 
-Speaker diarization determines who spoke when in multi-speaker audio recordings (anonymous cluster indices). Supports both offline batch clustering (Pyannote segmentation + speaker embedding) and real-time streaming (NeMo Sortformer). Detect via `detectDiarizationModel`.
+Speaker diarization determines who spoke when in multi-speaker audio recordings (anonymous cluster indices). Supports both offline batch clustering (Pyannote segmentation + speaker embedding) and real-time streaming (NeMo Sortformer, including Nemotron-3 packs). Detect via `detectDiarizationModel`.
 
 | Model Type | `modelType` Value | Runtime Path | Description | Download Links |
 | --- | --- | --- | --- | --- |
 | **Auto Detect** | `'auto'` | Detection only | Detects Pyannote, Reverb, or Sortformer layout from files in the model folder. | n/a |
 | **Pyannote** | `'pyannote'` | Offline | Pyannote segmentation model (e.g. `sherpa-onnx-pyannote-segmentation-3-0`), paired with a speaker embedding model. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
 | **Reverb** | `'reverb'` | Offline | Reverb segmentation model for diarization. | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
-| **Sortformer** | `'sortformer'` | Streaming | Real-time multi-speaker streaming diarization (e.g. `diar_streaming_sortformer_4spk-v2.1`). | [Download](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) |
+| **Sortformer** | `'sortformer'` | Streaming | NeMo Sortformer v2.1 (e.g. `diar_streaming_sortformer_4spk-v2.1`). | [k2-fsa](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-segmentation-models) · [SDK packs](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/diarization-models) |
+| **Nemotron-3 Sortformer** | `'sortformer'` | Streaming (offline via `latencyPreset: 'offline'`) | Same runtime key / streaming API as Sortformer, separate pack family: `diar_streaming_nemotron3_sortformer_8spk*` (FP32 / FP16 / INT8, up to 8 speakers). Pack metadata exposes `latencyPreset` (`offline`, `low_latency`, …). OpenMDW-1.1 (`conditional`). | [SDK packs](https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/diarization-models) · [HF ONNX](https://huggingface.co/XDcobra/Nemotron-3-Diarization-ONNX) |
 
 APIs and guides: [Offline batch diarization](./docs/diarization-offline.md) · [Real-time streaming diarization](./docs/diarization-streaming.md) · [Named speaker timeline (Diarization × SID)](./docs/diarization-named-timeline.md).
 
