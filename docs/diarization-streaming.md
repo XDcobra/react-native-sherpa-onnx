@@ -318,9 +318,9 @@ NeMo Sortformer supports dynamic sequence lengths. Configure `chunkLen`, `rightC
 
 | Profile | `chunkLen` | `rightContext` | `fifoLen` | Latency | Stride (Update Rate) | Use Case |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Low Latency** *(recommended for live mic)* | `6` | `7` | `188` | **1.04s** | **0.48s** (~2 updates/sec) | Interactive real-time mic streaming & live meetings |
+| **High Latency (pack / SDK default)** | `124` | `1` | `124` | **10.00s** | **9.92s** (~1 update / 10s) | Pre-recorded file ingestion & maximum DER accuracy |
+| **Low Latency** *(opt-in for live mic)* | `6` | `7` | `188` | **1.04s** | **0.48s** (~2 updates/sec) | Interactive real-time mic streaming & live meetings |
 | **Ultra-Low Latency** | `3` | `1` | `188` | **0.32s** | **0.24s** (~4 updates/sec) | Ultra-fast speaker change detection |
-| **High Latency (Default)** | `124` | `1` | `124` | **10.00s** | **9.92s** (~1 update / 10s) | Pre-recorded file ingestion & maximum DER accuracy |
 
 ```ts
 const engine = await createStreamingDiarization({
@@ -332,7 +332,7 @@ const engine = await createStreamingDiarization({
 console.log(engine.latencySeconds); // 1.04
 ```
 
-**Nemotron-3** (`diar_streaming_nemotron3_sortformer_8spk*`) uses the same Sortformer streaming API and runner. Pack metadata includes named presets (`offline`, `low_latency`, `very_low_latency`, `ultra_low_latency`). Prefer presets over hard-coded v2.1 numbers:
+**Nemotron-3** (`diar_streaming_nemotron3_sortformer_8spk*`) uses the same Sortformer streaming API and runner. Pack metadata includes named presets (`offline`, `low_latency`, `very_low_latency`, `ultra_low_latency`). The pack default is **`offline`** (`default_latency_preset` in `metadata.json`, ≈30.4s) — pass `latencyPreset: 'low_latency'` (or lower) for live mic. Prefer presets over hard-coded v2.1 numbers:
 
 ```ts
 // File / batch: large buffer (≈30.4s) — still createStreamingDiarization + feed()

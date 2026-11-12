@@ -140,11 +140,13 @@ export function useDiarizationStreamingModelInit(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Match pack/SDK default geometry (Sortformer v2.1 chunkLen=124;
+  // Nemotron-3 metadata default_latency_preset=offline). Low/ultra are live opts.
   const [latencyProfile, setLatencyProfile] =
-    useState<DiarizationStreamingLatencyProfile>('low');
-  const [customChunkLen, setCustomChunkLen] = useState(6);
-  const [customRightContext, setCustomRightContext] = useState(7);
-  const [customFifoLen, setCustomFifoLen] = useState(188);
+    useState<DiarizationStreamingLatencyProfile>('default');
+  const [customChunkLen, setCustomChunkLen] = useState(124);
+  const [customRightContext, setCustomRightContext] = useState(1);
+  const [customFifoLen, setCustomFifoLen] = useState(124);
   const [onset, setOnset] = useState(0.5);
   const [offset, setOffset] = useState(0.5);
   const [minDurationOff, setMinDurationOff] = useState(0.5);
