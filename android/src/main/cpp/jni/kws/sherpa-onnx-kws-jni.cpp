@@ -1,4 +1,5 @@
 #include "sherpa-onnx-kws-engine-wrapper.h"
+#include "jni/jni_utf8.h"
 #include "sherpa-onnx-detect-jni-common.h"
 
 #include <android/log.h>
@@ -217,7 +218,7 @@ Java_com_sherpaonnx_kws_facade_SherpaOnnxKwsHelper_nativeGetResult(
   jobject tokens = NewArrayList(env, &listAdd);
   if (tokens && listAdd) {
     for (const auto& t : result.tokens) {
-      jstring js = env->NewStringUTF(t.c_str());
+      jstring js = sherpaonnx::NewJStringUtf8(env, t);
       env->CallBooleanMethod(tokens, listAdd, js);
       env->DeleteLocalRef(js);
     }

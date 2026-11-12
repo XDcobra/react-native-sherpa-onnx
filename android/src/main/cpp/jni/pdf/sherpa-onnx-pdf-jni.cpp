@@ -1,4 +1,5 @@
 #include <jni.h>
+#include "jni/jni_utf8.h"
 
 #include <cstdint>
 #include <string>
@@ -15,7 +16,7 @@
 namespace {
 
 jstring JString(JNIEnv* env, const std::string& s) {
-  return env->NewStringUTF(s.c_str());
+  return sherpaonnx::NewJStringUtf8(env, s);
 }
 
 jobject NewHashMap(JNIEnv* env, jmethodID* outPut) {
@@ -38,7 +39,7 @@ jobject NewHashMap(JNIEnv* env, jmethodID* outPut) {
 void PutString(JNIEnv* env, jobject map, jmethodID put, const char* key,
                const std::string& value) {
   jstring jkey = env->NewStringUTF(key);
-  jstring jval = env->NewStringUTF(value.c_str());
+  jstring jval = sherpaonnx::NewJStringUtf8(env, value);
   env->CallObjectMethod(map, put, jkey, jval);
   env->DeleteLocalRef(jkey);
   env->DeleteLocalRef(jval);

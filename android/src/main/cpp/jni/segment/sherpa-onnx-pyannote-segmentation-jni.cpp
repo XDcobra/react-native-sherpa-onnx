@@ -1,4 +1,5 @@
 #include "pyannote-segmentation-session.h"
+#include "jni/jni_utf8.h"
 
 #include <android/log.h>
 #include <jni.h>
@@ -98,7 +99,7 @@ bool PutBool(JNIEnv* env, jobject map, jmethodID putId, const char* key,
 bool PutString(JNIEnv* env, jobject map, jmethodID putId, const char* key,
                const std::string& value) {
   jstring jkey = env->NewStringUTF(key);
-  jstring jval = env->NewStringUTF(value.c_str());
+  jstring jval = sherpaonnx::NewJStringUtf8(env, value);
   if (!jkey || !jval) {
     if (jkey) env->DeleteLocalRef(jkey);
     if (jval) env->DeleteLocalRef(jval);

@@ -3,6 +3,7 @@
  * Policy is a JSON object built in Kotlin from the TurboModule ReadableMap.
  */
 #include <android/log.h>
+#include "jni/jni_utf8.h"
 #include <jni.h>
 
 #include "SegEngine.h"
@@ -32,7 +33,7 @@ std::string jstringToUtf8(JNIEnv *env, jstring s) {
   return out;
 }
 
-jstring utf8ToJstring(JNIEnv *env, const std::string &s) { return env->NewStringUTF(s.c_str()); }
+jstring utf8ToJstring(JNIEnv *env, const std::string &s) { return sherpaonnx::NewJStringUtf8(env, s); }
 
 std::string jsonEscape(const std::string &s) {
   std::string out;
@@ -473,11 +474,11 @@ void emitAppended(const std::string &bufferId, const SegRecord &rec, int segment
     if (attached) g_vm->DetachCurrentThread();
     return;
   }
-  jstring jBuffer = env->NewStringUTF(bufferId.c_str());
-  jstring jId = env->NewStringUTF(rec.id.c_str());
-  jstring jKind = env->NewStringUTF(rec.kind.c_str());
-  jstring jSrc = env->NewStringUTF(rec.sourceAudioBufferId.c_str());
-  jstring jPayload = env->NewStringUTF(rec.payloadJson.c_str());
+  jstring jBuffer = sherpaonnx::NewJStringUtf8(env, bufferId);
+  jstring jId = sherpaonnx::NewJStringUtf8(env, rec.id);
+  jstring jKind = sherpaonnx::NewJStringUtf8(env, rec.kind);
+  jstring jSrc = sherpaonnx::NewJStringUtf8(env, rec.sourceAudioBufferId);
+  jstring jPayload = sherpaonnx::NewJStringUtf8(env, rec.payloadJson);
   if (jBuffer && jId && jKind && jSrc && jPayload) {
     env->CallStaticVoidMethod(g_bridge_class, g_emit_from_native, jBuffer, jId, jKind, segmentIndex,
                               totalSegments, jSrc, rec.startSample, rec.endSample, rec.sampleRate,

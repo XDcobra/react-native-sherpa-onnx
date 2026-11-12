@@ -1,4 +1,5 @@
 #include <jni.h>
+#include "jni/jni_utf8.h"
 
 #include "SegJson.h"
 #include "SegmentLinkMapRegistry.h"
@@ -17,7 +18,7 @@ std::string jstringToUtf8(JNIEnv *env, jstring s) {
   return out;
 }
 
-jstring utf8ToJstring(JNIEnv *env, const std::string &s) { return env->NewStringUTF(s.c_str()); }
+jstring utf8ToJstring(JNIEnv *env, const std::string &s) { return sherpaonnx::NewJStringUtf8(env, s); }
 
 }  // namespace
 

@@ -1,4 +1,5 @@
 #include <jni.h>
+#include "jni/jni_utf8.h"
 
 #include <string>
 #include <vector>
@@ -32,7 +33,7 @@ jobject NewHashMap(JNIEnv* env, jmethodID* outPut) {
 void PutString(JNIEnv* env, jobject map, jmethodID put, const char* key,
                const std::string& value) {
   jstring jkey = env->NewStringUTF(key);
-  jstring jval = env->NewStringUTF(value.c_str());
+  jstring jval = sherpaonnx::NewJStringUtf8(env, value);
   env->CallObjectMethod(map, put, jkey, jval);
   env->DeleteLocalRef(jkey);
   env->DeleteLocalRef(jval);
@@ -91,7 +92,7 @@ void BindProgress(JNIEnv* env, jobject listener,
   env->DeleteLocalRef(cls);
   if (!mid) return;
   opt->on_progress = [env, listener, mid](int done, int total, const char* phase) {
-    jstring jphase = env->NewStringUTF(phase ? phase : "");
+    jstring jphase = sherpaonnx::NewJStringUtf8(env, phase ? phase : "");
     env->CallVoidMethod(listener, mid, static_cast<jint>(done),
                         static_cast<jint>(total), jphase);
     env->DeleteLocalRef(jphase);

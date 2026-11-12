@@ -1,4 +1,5 @@
 #include "sherpa-onnx-online-stt-engine-wrapper.h"
+#include "jni/jni_utf8.h"
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-path-fill.h"
 
@@ -280,7 +281,7 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxOnlineSttHelper_nativeGetResult(
   jobject tokens = NewArrayList(env, &listAdd);
   if (tokens && listAdd) {
     for (const auto& t : result.tokens) {
-      jstring js = env->NewStringUTF(t.c_str());
+      jstring js = sherpaonnx::NewJStringUtf8(env, t);
       env->CallBooleanMethod(tokens, listAdd, js);
       env->DeleteLocalRef(js);
     }

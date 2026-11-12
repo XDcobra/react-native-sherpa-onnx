@@ -1,4 +1,5 @@
 #include "OcrCapabilities.h"
+#include "jni/jni_utf8.h"
 #include "OcrDetect.h"
 #include "OcrEngine.h"
 #include "OcrTypes.h"
@@ -45,7 +46,7 @@ jobject NewHashMap(JNIEnv* env, jmethodID* outPut) {
 void PutString(JNIEnv* env, jobject map, jmethodID put, const char* key,
                const std::string& value) {
   jstring jkey = env->NewStringUTF(key);
-  jstring jval = env->NewStringUTF(value.c_str());
+  jstring jval = sherpaonnx::NewJStringUtf8(env, value);
   env->CallObjectMethod(map, put, jkey, jval);
   env->DeleteLocalRef(jkey);
   env->DeleteLocalRef(jval);
@@ -407,7 +408,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeDetect(JNIEnv* env, jclass /*clazz*/,
     jobject sources = env->NewObject(arrayListClass, arrayListCtor);
     if (sources) {
       for (const auto& src : detect.detectionSources) {
-        jstring s = env->NewStringUTF(src.c_str());
+        jstring s = sherpaonnx::NewJStringUtf8(env, src);
         if (s) {
           env->CallBooleanMethod(sources, arrayListAdd, s);
           env->DeleteLocalRef(s);
@@ -530,8 +531,8 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
         if (jvm->AttachCurrentThread(&cbEnv, nullptr) != 0) return;
         attached = true;
       }
-      jstring jop = cbEnv->NewStringUTF(opId.c_str());
-      jstring jphase = cbEnv->NewStringUTF(tick.phase.c_str());
+      jstring jop = sherpaonnx::NewJStringUtf8(cbEnv, opId);
+      jstring jphase = sherpaonnx::NewJStringUtf8(cbEnv, tick.phase);
       cbEnv->CallStaticVoidMethod(static_cast<jclass>(globalClass), progressMethod, jop,
                                   tick.done, tick.total, jphase, tick.frame_index,
                                   tick.frame_count);
@@ -672,7 +673,7 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeGetCapabilities(JNIEnv* env,
       env->GetMethodID(listClass, "add", "(Ljava/lang/Object;)Z");
   jobject tasks = env->NewObject(listClass, listInit);
   for (const auto& task : caps.tasks) {
-    jstring item = env->NewStringUTF(task.c_str());
+    jstring item = sherpaonnx::NewJStringUtf8(env, task);
     env->CallBooleanMethod(tasks, listAdd, item);
     env->DeleteLocalRef(item);
   }
