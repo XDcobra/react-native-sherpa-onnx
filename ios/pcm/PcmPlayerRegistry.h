@@ -55,8 +55,12 @@ struct PcmPlayerSession {
     /**
      * Enqueue audio for playback. Returns false if session is destroyed or generation changed.
      * expectedGeneration < 0 disables generation guard for this enqueue operation.
+     * keepRunning (optional): the calling drain worker's run flag. When it turns false the
+     * backpressure wait exits and the call returns false, so stopping a worker can never
+     * block on a paused engine that no longer consumes buffers.
      */
-    bool enqueueMonoFloat32(const float *samples, int32_t numSamples, int32_t expectedGeneration = -1);
+    bool enqueueMonoFloat32(const float *samples, int32_t numSamples, int32_t expectedGeneration = -1,
+                            const std::atomic<bool> *keepRunning = nullptr);
     void markSourceExhausted();
     void pause();
     void resume();
