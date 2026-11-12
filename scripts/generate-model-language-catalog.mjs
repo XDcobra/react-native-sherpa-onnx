@@ -216,10 +216,11 @@ function validateCatalog(catalog) {
       );
     }
   }
-  // Pack-id curated hints only (same pattern as speakerEmbedding) — for diarization
-  // packs whose names do not encode ISO languages (e.g. Sortformer 4spk → en).
-  // Language-agnostic / multilingual packs (pyannote, reverb, Nemotron-3) simply
-  // omit an entry and keep empty derivedLanguages after detect.
+  // Pack-id curated hints only (same pattern as speakerEmbedding). Diarization
+  // packs are language-agnostic in the Library UI (pyannote, reverb, Sortformer
+  // 4spk, Nemotron-3): omit entries so detect keeps empty derivedLanguages.
+  // Sortformer/Nemotron remain usable on non-English audio even when English is
+  // stronger; do not chip EN-only.
   if (!Array.isArray(catalog.diarization.entries)) {
     throw new Error('diarization.entries must be an array');
   }

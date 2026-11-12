@@ -222,10 +222,6 @@ inline std::string DiarizationPackLanguageStem(const std::string& modelKey) {
 inline const std::vector<PublicLanguageRow>& DiarizationPackRowsForModelKey(
     const std::string& modelKey) {
     static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kById = {
-        {"diar_streaming_sortformer_4spk-v2.1", {PublicLanguageRow{"en", "en"}}},
-        {"diar_streaming_nemotron3_sortformer_8spk", {PublicLanguageRow{"en", "en"}}},
-        {"diar_streaming_nemotron3_sortformer_8spk-fp16", {PublicLanguageRow{"en", "en"}}},
-        {"diar_streaming_nemotron3_sortformer_8spk-int8", {PublicLanguageRow{"en", "en"}}},
     };
     static const std::vector<PublicLanguageRow> kEmpty;
     if (modelKey.empty()) return kEmpty;
