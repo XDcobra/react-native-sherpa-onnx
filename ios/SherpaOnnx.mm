@@ -21,6 +21,7 @@
 #include "AudioRegistry.h"
 #include "TextRegistry.h"
 #include "SegmentRegistry.h"
+#include "SegmentLinkMapRegistry.h"
 #if __has_include("SherpaOnnx-Swift.h")
 #import "SherpaOnnx-Swift.h"
 #endif
@@ -30,8 +31,8 @@ extern void paMicStopQueue(void);
 // ios/punctuation/bridge/SherpaOnnx+OfflinePunctuation.mm
 extern "C" void sherpaonnx_punct_offline_invalidate_all(void);
 extern "C" void sherpaonnx_punct_online_invalidate_all(void);
-// ios/segment/bridge/SherpaOnnx+SegmentLinkMap.mm
-extern "C" void slm_release_all_link_maps(void);
+// ios/textbuffer/bridge/SherpaOnnx+TextBuffer.mm
+extern "C" void txt_set_partial_event_module(SherpaOnnx *module);
 
 @interface SherpaOnnx (JSI)
 - (BOOL)autoInstallJSI;

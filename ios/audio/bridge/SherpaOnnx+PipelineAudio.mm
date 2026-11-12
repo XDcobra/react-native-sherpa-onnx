@@ -140,6 +140,21 @@ static bool pa_parseWavHeader(const std::string &filePath, PaWavHeader &hdr) {
 
 // PaLiveEntry is defined in PaLiveEntry.h (included above).
 
+// omit / null / 0 → keep source rate; >0 force; <0 throws InvalidArgument (Android parity).
+static int pa_resolveEffectiveTargetSampleRateHz(NSDictionary *options, int sourceRate) {
+  if (options == nil) return sourceRate;
+  id raw = options[@"targetSampleRateHz"];
+  if (raw == nil || raw == [NSNull null]) return sourceRate;
+  int requested = [raw intValue];
+  if (requested == 0) return sourceRate;
+  if (requested < 0) {
+    @throw [NSException exceptionWithName:@"InvalidArgument"
+                                   reason:@"targetSampleRateHz must be >= 0"
+                                 userInfo:nil];
+  }
+  return requested;
+}
+
 // ==================== Registry ====================
 
 // g_pa_* registry lives in AudioRegistry.cpp; cancel maps stay bridge-local.
