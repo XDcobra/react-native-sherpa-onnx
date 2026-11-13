@@ -70,6 +70,8 @@ class PcmLiveDrainWorker {
     void stop() {
         running_.store(false);
         cv_.notify_one();
+        // Wake a backpressure wait in enqueueMonoFloat32 (paused engine never drains).
+        if (session_) session_->enqueueCv.notify_all();
         if (workerThread_.joinable()) {
             workerThread_.join();
         }
@@ -82,7 +84,7 @@ class PcmLiveDrainWorker {
         while (running_.load() && session_->drainGeneration.load() == generation_) {
             auto chunk = liveEntry_->drainCursor(cursorId_, kDrainChunkSize);
             if (!chunk.empty()) {
-                if (!session_->enqueueMonoFloat32(chunk.data(), (int32_t)chunk.size(), generation_)) {
+                if (!session_->enqueueMonoFloat32(chunk.data(), (int32_t)chunk.size(), generation_, &running_)) {
                     break;
                 }
                 continue;
@@ -156,6 +158,9 @@ class PcmOfflineDrainWorker {
 
     void stop() {
         running_.store(false);
+        // Wake a backpressure wait in enqueueMonoFloat32 (paused engine never drains),
+        // otherwise join() below blocks forever and stalls the module queue.
+        if (session_) session_->enqueueCv.notify_all();
         if (workerThread_.joinable()) {
             workerThread_.join();
         }
@@ -190,7 +195,7 @@ class PcmOfflineDrainWorker {
                 break;
             }
 
-            if (!session_->enqueueMonoFloat32(chunk.data(), (int32_t)chunk.size(), generation_)) {
+            if (!session_->enqueueMonoFloat32(chunk.data(), (int32_t)chunk.size(), generation_, &running_)) {
                 break;
             }
 

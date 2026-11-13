@@ -637,6 +637,7 @@ internal class SherpaOnnxDiarizationHelper(
     val chunkLen = if (options.hasKey("chunkLen") && !options.isNull("chunkLen")) options.getInt("chunkLen") else -1
     val rightContext = if (options.hasKey("rightContext") && !options.isNull("rightContext")) options.getInt("rightContext") else -1
     val fifoLen = if (options.hasKey("fifoLen") && !options.isNull("fifoLen")) options.getInt("fifoLen") else -1
+    val latencyPreset = options.getString("latencyPreset")?.trim()?.takeIf { it.isNotEmpty() }
 
     executor.execute {
       try {
@@ -657,6 +658,7 @@ internal class SherpaOnnxDiarizationHelper(
           chunkLen,
           rightContext,
           fifoLen,
+          latencyPreset,
         )
         if (result == null) {
           promise.reject(
@@ -939,6 +941,7 @@ internal class SherpaOnnxDiarizationHelper(
       chunkLen: Int,
       rightContext: Int,
       fifoLen: Int,
+      latencyPreset: String?,
     ): HashMap<String, Any>?
 
     @JvmStatic

@@ -137,46 +137,69 @@ export function DiarizationStreamingModelInitPanel({
       <Text style={[streamStyles.paramLabel, streamStyles.marginTop10]}>
         Streaming Latency Profile
       </Text>
-      <View style={streamStyles.latencyRow}>
-        {(
+      {(() => {
+        const modelHint = (
+          s.selectedModelForInit ??
+          s.currentModelFolder ??
+          ''
+        ).toLowerCase();
+        const usesNemotronPresets =
+          modelHint.includes('nemotron') || modelHint.includes('nemotron3');
+        const chips = [
           [
-            ['low', 'Low Latency (~1.0s) [Default]'],
-            ['ultra_low', 'Ultra-Low (~0.3s)'],
-            ['default', 'Standard (~10.0s)'],
-            ['custom', 'Custom'],
-          ] as const
-        ).map(([profile, label]) => (
-          <TouchableOpacity
-            key={profile}
-            style={[
-              streamStyles.latencyChip,
-              s.latencyProfile === profile && streamStyles.latencyChipActive,
-            ]}
-            onPress={() => s.setLatencyProfile(profile)}
-            disabled={disabled}
-          >
-            <Text
-              style={[
-                streamStyles.latencyChipText,
-                s.latencyProfile === profile &&
-                  streamStyles.latencyChipTextActive,
-              ]}
-            >
-              {label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <Text style={streamStyles.latencyHint}>
-        {s.latencyProfile === 'low'
-          ? '⚡ Real-time live mic feedback: updates every ~0.48s with a 1.04s lookahead window (chunkLen=6, rightContext=7).'
-          : s.latencyProfile === 'ultra_low'
-          ? '⚡⚡ Ultra-fast: updates every ~0.24s with a 0.32s lookahead window (chunkLen=3, rightContext=1).'
-          : s.latencyProfile === 'default'
-          ? '📁 High accuracy for audio files: updates every 9.92s with a 10.0s window (chunkLen=124, rightContext=1).'
-          : `Custom window: chunkLen=${s.customChunkLen}, rightContext=${s.customRightContext}, fifoLen=${s.customFifoLen}.`}
-      </Text>
+            'default',
+            usesNemotronPresets
+              ? 'Offline (~30s) [Default]'
+              : 'High Latency (~10s) [Default]',
+          ],
+          ['low', 'Low Latency (~1.0s)'],
+          ['ultra_low', 'Ultra-Low (~0.3s)'],
+          ['custom', 'Custom'],
+        ] as const;
+        const hint =
+          s.latencyProfile === 'low'
+            ? usesNemotronPresets
+              ? '⚡ Live mic: Nemotron preset low_latency (~1.04s). Pack default remains offline.'
+              : '⚡ Real-time live mic feedback: updates every ~0.48s with a 1.04s lookahead window (chunkLen=6, rightContext=7).'
+            : s.latencyProfile === 'ultra_low'
+            ? usesNemotronPresets
+              ? '⚡⚡ Live mic: Nemotron preset ultra_low_latency (~0.32s).'
+              : '⚡⚡ Ultra-fast: updates every ~0.24s with a 0.32s lookahead window (chunkLen=3, rightContext=1).'
+            : s.latencyProfile === 'default'
+            ? usesNemotronPresets
+              ? '📁 Pack default (metadata default_latency_preset=offline, ~30.4s) — best for file / batch feed().'
+              : '📁 Pack/SDK default: updates every 9.92s with a 10.0s window (chunkLen=124, rightContext=1).'
+            : `Custom window: chunkLen=${s.customChunkLen}, rightContext=${s.customRightContext}, fifoLen=${s.customFifoLen}.`;
+        return (
+          <>
+            <View style={streamStyles.latencyRow}>
+              {chips.map(([profile, label]) => (
+                <TouchableOpacity
+                  key={profile}
+                  style={[
+                    streamStyles.latencyChip,
+                    s.latencyProfile === profile &&
+                      streamStyles.latencyChipActive,
+                  ]}
+                  onPress={() => s.setLatencyProfile(profile)}
+                  disabled={disabled}
+                >
+                  <Text
+                    style={[
+                      streamStyles.latencyChipText,
+                      s.latencyProfile === profile &&
+                        streamStyles.latencyChipTextActive,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={streamStyles.latencyHint}>{hint}</Text>
+          </>
+        );
+      })()}
 
       {s.latencyProfile === 'custom' ? (
         <View style={streamStyles.tuningSectionContent}>

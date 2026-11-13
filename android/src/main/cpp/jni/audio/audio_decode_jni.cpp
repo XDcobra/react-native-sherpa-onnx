@@ -6,6 +6,7 @@
  */
 
 #include <jni.h>
+#include "jni/jni_utf8.h"
 #include <android/log.h>
 #include <atomic>
 #include <cerrno>
@@ -324,7 +325,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeDecodeFileToMmapFile(
             env->DeleteLocalRef(jKey);
         };
 
-        jstring jOutPath = env->NewStringUTF(outPathStr.c_str());
+        jstring jOutPath = sherpaonnx::NewJStringUtf8(env, outPathStr);
         putEntry("outputPath", jOutPath);
         env->DeleteLocalRef(jOutPath);
 
@@ -674,7 +675,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeProbeFileContainer(
         jobject map = env->NewObject(hashMapClass, hashMapInit);
         auto putString = [&](const char* key, const std::string& value) {
             jstring jKey = env->NewStringUTF(key);
-            jstring jVal = env->NewStringUTF(value.c_str());
+            jstring jVal = sherpaonnx::NewJStringUtf8(env, value);
             env->CallObjectMethod(map, hashMapPut, jKey, jVal);
             env->DeleteLocalRef(jKey);
             env->DeleteLocalRef(jVal);

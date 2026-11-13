@@ -1,4 +1,5 @@
 #include "VideoFrameAccess.h"
+#include "jni/jni_utf8.h"
 #include "VideoImageBridge.h"
 #include "VideoLog.h"
 #include "VideoRegistry.h"
@@ -79,10 +80,10 @@ void EmitVideoEvent(const std::string& eventName, const std::string& type,
   bool attached = false;
   JNIEnv* env = EnvOrAttach(&attached);
   if (env == nullptr) return;
-  jstring jn = env->NewStringUTF(eventName.c_str());
-  jstring jt = env->NewStringUTF(type.c_str());
-  jstring jb = env->NewStringUTF(bufferId.c_str());
-  jstring jp = env->NewStringUTF(json.c_str());
+  jstring jn = sherpaonnx::NewJStringUtf8(env, eventName);
+  jstring jt = sherpaonnx::NewJStringUtf8(env, type);
+  jstring jb = sherpaonnx::NewJStringUtf8(env, bufferId);
+  jstring jp = sherpaonnx::NewJStringUtf8(env, json);
   env->CallStaticVoidMethod(gVideoServiceClass, gEmitMid, jn, jt, jb, jp);
   env->DeleteLocalRef(jn);
   env->DeleteLocalRef(jt);
@@ -143,7 +144,7 @@ jobject NewHashMap(JNIEnv* env, jmethodID* outPut) {
 void PutString(JNIEnv* env, jobject map, jmethodID put, const char* k,
                const std::string& v) {
   jstring jk = env->NewStringUTF(k);
-  jstring jv = env->NewStringUTF(v.c_str());
+  jstring jv = sherpaonnx::NewJStringUtf8(env, v);
   env->CallObjectMethod(map, put, jk, jv);
   env->DeleteLocalRef(jk);
   env->DeleteLocalRef(jv);
@@ -277,7 +278,7 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeConfigureCodecs(
     DecoderPool::Instance().SetMaxSessions(DecoderClass::Display, hwDisp);
   }
   if (!st.ok) {
-    return env->NewStringUTF(st.errorCode.c_str());
+    return sherpaonnx::NewJStringUtf8(env, st.errorCode);
   }
   return nullptr;
 }
@@ -287,7 +288,7 @@ Java_com_sherpaonnx_video_VideoBufferNative_nativeGetCodecInfo(JNIEnv* env,
                                                                jclass) {
   const std::string json =
       sherpa_onnx::codec::CodecRuntime::Instance().InfoJson();
-  return env->NewStringUTF(json.c_str());
+  return sherpaonnx::NewJStringUtf8(env, json);
 }
 
 JNIEXPORT void JNICALL

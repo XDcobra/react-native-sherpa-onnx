@@ -706,6 +706,24 @@ TEST(ModelDetectTest, DetectDiarizationSortformerWithoutMetadata) {
     EXPECT_TRUE(result.paths.metadata.empty());
 }
 
+TEST(ModelDetectTest, DetectDiarizationNemotronMapsToSortformer) {
+    const std::string modelDir = "m/diar_streaming_nemotron3_sortformer_8spk-int8";
+    auto files = model_detect_test::BuildFileEntriesFromPathLines(
+        modelDir, {
+            modelDir + "/model.onnx",
+            modelDir + "/model.onnx_data",
+            modelDir + "/metadata.json",
+            modelDir + "/LICENSE",
+        });
+
+    auto result = sherpaonnx::DetectDiarizationModelFromFileList(files, modelDir, "auto");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.isStreaming);
+    EXPECT_EQ(result.selectedKind, sherpaonnx::DiarizationModelKind::kSortformer);
+    EXPECT_EQ(result.paths.model, modelDir + "/model.onnx");
+    EXPECT_EQ(result.paths.metadata, modelDir + "/metadata.json");
+}
+
 TEST(ModelDetectTest, DetectPunctuationFromFileListMatchesExpected) {
     std::string dir = GetFixturesDir();
     std::string structurePath = dir + "/punctuation-models-structure.txt";

@@ -2,6 +2,7 @@
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-diarization.h"
 #include "sherpa-onnx-catalog-metadata.h"
+#include "model_language_catalog.h"
 
 #include <algorithm>
 #include <optional>
@@ -53,6 +54,7 @@ bool IsDiarizationPackName(const std::string& lowerBasename) {
     return lowerBasename.find("pyannote") != std::string::npos ||
            lowerBasename.find("reverb") != std::string::npos ||
            lowerBasename.find("sortformer") != std::string::npos ||
+           lowerBasename.find("nemotron") != std::string::npos ||
            lowerBasename.find("diarization") != std::string::npos ||
            lowerBasename.find("segmentation") != std::string::npos;
 }
@@ -75,7 +77,9 @@ std::vector<sherpaonnx::DiarizationModelKind> GetKindsFromDirNameDiarization(
     if (lower.find("reverb") != std::string::npos) {
         add(sherpaonnx::DiarizationModelKind::kReverb);
     }
-    if (lower.find("sortformer") != std::string::npos) {
+    if (lower.find("sortformer") != std::string::npos ||
+        lower.find("nemotron") != std::string::npos) {
+        // Nemotron-3 diarization is Sortformer-family (AOSC/FIFO streaming).
         add(sherpaonnx::DiarizationModelKind::kSortformer);
     }
     return out;
@@ -227,7 +231,8 @@ sherpaonnx::DiarizationDetectResult DetectDiarizationModelFromFiles(
                 AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
             } else {
                 std::string lowerModel = ToLower(modelOnnx);
-                if (lowerModel.find("sortformer") != std::string::npos) {
+                if (lowerModel.find("sortformer") != std::string::npos ||
+                    lowerModel.find("nemotron") != std::string::npos) {
                     selected = sherpaonnx::DiarizationModelKind::kSortformer;
                     AppendUniqueDetectionSource(result.detectionSources, sherpaonnx::DetectionSource::kFileListing);
                 } else if (lowerModel.find("reverb") != std::string::npos) {
@@ -313,6 +318,7 @@ DiarizationDetectResult DetectDiarizationModel(
         result = DetectDiarizationModelFromFiles({}, syntheticDir, requestedModelType, quantization);
         std::string ignoredSizeTier;
         FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, assetName);
+        ApplyCuratedDiarizationLanguageRows(result, assetName);
         return result;
     }
 
@@ -335,6 +341,12 @@ DiarizationDetectResult DetectDiarizationModel(
         std::string ignoredSizeTier;
         FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, *asset_name_opt);
     }
+    if (has_asset) {
+        ApplyCuratedDiarizationLanguageRows(result, *asset_name_opt);
+    } else {
+        ApplyCuratedDiarizationLanguageRows(
+            result, BasenameLastPathComponent(modelDir));
+    }
     return result;
 }
 
@@ -350,7 +362,10 @@ DiarizationDetectResult DetectDiarizationModelFromFileList(
         result.error = "Diarization: model directory is empty";
         return result;
     }
-    return DetectDiarizationModelFromFiles(files, modelDir, modelType, quantization);
+    result = DetectDiarizationModelFromFiles(files, modelDir, modelType, quantization);
+    ApplyCuratedDiarizationLanguageRows(
+        result, BasenameLastPathComponent(modelDir));
+    return result;
 }
 
 } // namespace sherpaonnx

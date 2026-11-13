@@ -1,4 +1,5 @@
 #include "VideoLog.h"
+#include "jni/jni_utf8.h"
 #include "VideoRegistry.h"
 #include "codec/CodecTypes.h"
 #include "preview/PreviewPlayer.h"
@@ -63,7 +64,7 @@ jobject NewHashMap(JNIEnv* env, jmethodID* outPut) {
 void PutString(JNIEnv* env, jobject map, jmethodID put, const char* k,
                const std::string& v) {
   jstring jk = env->NewStringUTF(k);
-  jstring jv = env->NewStringUTF(v.c_str());
+  jstring jv = sherpaonnx::NewJStringUtf8(env, v);
   env->CallObjectMethod(map, put, jk, jv);
   env->DeleteLocalRef(jk);
   env->DeleteLocalRef(jv);
@@ -109,9 +110,9 @@ void EnsureSink(JNIEnv* env) {
         JNIEnv* je = EnvOrAttach(&attached);
         if (je == nullptr) return;
         jstring jn = je->NewStringUTF("SherpaOnnxVideoPreviewEvent");
-        jstring jt = je->NewStringUTF(type.c_str());
-        jstring jb = je->NewStringUTF(playerId.c_str());
-        jstring jp = je->NewStringUTF(json.c_str());
+        jstring jt = sherpaonnx::NewJStringUtf8(je, type);
+        jstring jb = sherpaonnx::NewJStringUtf8(je, playerId);
+        jstring jp = sherpaonnx::NewJStringUtf8(je, json);
         je->CallStaticVoidMethod(gVideoServiceClass, gEmitMid, jn, jt, jb, jp);
         je->DeleteLocalRef(jn);
         je->DeleteLocalRef(jt);
@@ -327,7 +328,7 @@ Java_com_sherpaonnx_video_preview_VideoPreviewNative_nativeSnapshot(
     JNIEnv* env, jclass, jstring jId) {
   auto p = Player(env, jId);
   if (!p) return env->NewStringUTF("{\"errorCode\":\"VIDEO_PREVIEW_NOT_FOUND\"}");
-  return env->NewStringUTF(p->SnapshotJson().c_str());
+  return sherpaonnx::NewJStringUtf8(env, p->SnapshotJson());
 }
 
 JNIEXPORT jboolean JNICALL

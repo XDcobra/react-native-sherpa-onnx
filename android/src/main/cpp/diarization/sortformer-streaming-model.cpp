@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <sstream>
@@ -86,6 +87,92 @@ int32_t ExtractJsonInt(const std::string& json, const std::string& key,
     }
   }
   return fallback;
+}
+
+std::string ExtractJsonObjectSlice(const std::string& json,
+                                   const std::string& key) {
+  std::string needle = "\"" + key + "\"";
+  size_t pos = json.find(needle);
+  if (pos == std::string::npos) return {};
+  pos = json.find('{', pos + needle.size());
+  if (pos == std::string::npos) return {};
+  int depth = 0;
+  for (size_t i = pos; i < json.size(); ++i) {
+    if (json[i] == '{') {
+      depth++;
+    } else if (json[i] == '}') {
+      depth--;
+      if (depth == 0) {
+        return json.substr(pos, i - pos + 1);
+      }
+    }
+  }
+  return {};
+}
+
+bool ApplyLatencyPresetFromJson(const std::string& json,
+                                const std::string& preset_name,
+                                StreamingDiarizerInfo& info) {
+  if (preset_name.empty()) return false;
+  const std::string presets = ExtractJsonObjectSlice(json, "latency_presets");
+  if (presets.empty()) return false;
+  const std::string preset = ExtractJsonObjectSlice(presets, preset_name);
+  if (preset.empty()) return false;
+  info.chunk_len = ExtractJsonInt(preset, "chunk_len", info.chunk_len);
+  info.right_context =
+      ExtractJsonInt(preset, "right_context", info.right_context);
+  info.fifo_len = ExtractJsonInt(preset, "fifo_len", info.fifo_len);
+  info.spkcache_len =
+      ExtractJsonInt(preset, "spkcache_len", info.spkcache_len);
+  return true;
+}
+
+void DownsamplePredsToEncoderRate(const float* highres, int32_t encoder_frames,
+                                  int32_t num_spk, int32_t upsample,
+                                  std::vector<float>& out) {
+  out.resize(static_cast<size_t>(encoder_frames * num_spk));
+  if (upsample <= 1) {
+    std::copy(highres,
+              highres + static_cast<size_t>(encoder_frames * num_spk),
+              out.begin());
+    return;
+  }
+  for (int32_t i = 0; i < encoder_frames; ++i) {
+    for (int32_t s = 0; s < num_spk; ++s) {
+      float sum = 0.0f;
+      for (int32_t u = 0; u < upsample; ++u) {
+        sum += highres[static_cast<size_t>(
+            (i * upsample + u) * num_spk + s)];
+      }
+      out[static_cast<size_t>(i * num_spk + s)] =
+          sum / static_cast<float>(upsample);
+    }
+  }
+}
+
+int32_t DetectPredUpsample(int64_t pred_T, int32_t old_spkcache_len,
+                           int32_t old_fifo_len, int32_t valid_frames,
+                           int32_t current_len, int32_t subsampling) {
+  const int32_t encoder_total =
+      old_spkcache_len + old_fifo_len + valid_frames;
+  const int32_t highres_total =
+      (old_spkcache_len + old_fifo_len) * subsampling + current_len;
+  if (pred_T <= 0) {
+    return 1;
+  }
+  // Prefer high-res when the pred axis matches mel-rate length.
+  if (highres_total > encoder_total + 1 &&
+      std::llabs(pred_T - highres_total) <= 1) {
+    return std::max(1, subsampling);
+  }
+  if (std::llabs(pred_T - encoder_total) <= 1) {
+    return 1;
+  }
+  // Fallback: if preds are clearly denser than encoder frames, use subsampling.
+  if (pred_T >= static_cast<int64_t>(encoder_total) * 2) {
+    return std::max(1, subsampling);
+  }
+  return 1;
 }
 
 } // namespace
@@ -174,6 +261,9 @@ Status SortformerStreamingModel::LoadMetadata(const std::string& model_path,
   info_.embedding_dim = 512;
   info_.subsampling = 8;
   info_.hop_length = 160;
+  info_.pred_upsample = 1;
+
+  std::string json;
 
   // 1. Try reading external metadata.json if provided
   if (!metadata_path.empty()) {
@@ -181,14 +271,35 @@ Status SortformerStreamingModel::LoadMetadata(const std::string& model_path,
     if (f.is_open()) {
       std::stringstream ss;
       ss << f.rdbuf();
-      std::string json = ss.str();
+      json = ss.str();
       info_.chunk_len = ExtractJsonInt(json, "chunk_len", info_.chunk_len);
-      info_.right_context = ExtractJsonInt(json, "right_context", info_.right_context);
+      info_.right_context =
+          ExtractJsonInt(json, "right_context", info_.right_context);
       info_.fifo_len = ExtractJsonInt(json, "fifo_len", info_.fifo_len);
-      info_.spkcache_len = ExtractJsonInt(json, "spkcache_len", info_.spkcache_len);
-      info_.max_speakers = ExtractJsonInt(json, "max_speakers", info_.max_speakers);
-      info_.sample_rate = ExtractJsonInt(json, "sample_rate", info_.sample_rate);
-      info_.feature_dim = ExtractJsonInt(json, "feature_dim", info_.feature_dim);
+      info_.spkcache_len =
+          ExtractJsonInt(json, "spkcache_len", info_.spkcache_len);
+      info_.max_speakers =
+          ExtractJsonInt(json, "max_speakers", info_.max_speakers);
+      info_.sample_rate =
+          ExtractJsonInt(json, "sample_rate", info_.sample_rate);
+      info_.feature_dim =
+          ExtractJsonInt(json, "feature_dim", info_.feature_dim);
+      info_.subsampling =
+          ExtractJsonInt(json, "subsampling", info_.subsampling);
+      info_.pred_upsample =
+          ExtractJsonInt(json, "pred_upsample", info_.pred_upsample);
+      if (info_.pred_upsample <= 0) {
+        info_.pred_upsample = 1;
+      }
+
+      std::string preset = config_.latency_preset;
+      if (preset.empty()) {
+        // Keep flat top-level geometry unless caller asks for a named preset.
+        preset.clear();
+      }
+      if (!preset.empty()) {
+        ApplyLatencyPresetFromJson(json, preset, info_);
+      }
       return Status::Ok();
     }
   }
@@ -206,6 +317,10 @@ Status SortformerStreamingModel::LoadMetadata(const std::string& model_path,
     if (ParseIntFromStr(LookupMeta(meta, alloc, "max_speakers"), &v)) info_.max_speakers = v;
     if (ParseIntFromStr(LookupMeta(meta, alloc, "sample_rate"), &v)) info_.sample_rate = v;
     if (ParseIntFromStr(LookupMeta(meta, alloc, "feature_dim"), &v)) info_.feature_dim = v;
+    if (ParseIntFromStr(LookupMeta(meta, alloc, "subsampling"), &v)) info_.subsampling = v;
+    if (ParseIntFromStr(LookupMeta(meta, alloc, "pred_upsample"), &v)) {
+      info_.pred_upsample = v > 0 ? v : 1;
+    }
   }
 
   return Status::Ok();
@@ -239,7 +354,7 @@ Status SortformerStreamingModel::Initialize(const StreamingDiarizerConfig& confi
       return meta_st;
     }
 
-    // Apply config overrides if provided
+    // Apply config overrides if provided (win over preset / metadata)
     if (config_.chunk_len > 0) {
       info_.chunk_len = config_.chunk_len;
     }
@@ -248,6 +363,12 @@ Status SortformerStreamingModel::Initialize(const StreamingDiarizerConfig& confi
     }
     if (config_.fifo_len > 0) {
       info_.fifo_len = config_.fifo_len;
+    }
+    if (info_.pred_upsample <= 0) {
+      info_.pred_upsample = 1;
+    }
+    if (info_.subsampling <= 0) {
+      info_.subsampling = 8;
     }
 
     // Configure Fbank
@@ -270,13 +391,14 @@ Status SortformerStreamingModel::Initialize(const StreamingDiarizerConfig& confi
     pp_cfg.median_window = config_.median_window;
     pp_cfg.sample_rate = info_.sample_rate;
     pp_cfg.max_speakers = info_.max_speakers;
-    pp_cfg.frame_duration = 0.08f;
+    pp_cfg.frame_duration = info_.PredFrameSeconds();
     post_processor_ = std::make_unique<SortformerPostProcessor>(pp_cfg);
 
     const int32_t feed_frames =
         (info_.chunk_len + info_.right_context) * info_.subsampling;
     mel_scratch_.reserve(static_cast<size_t>(feed_frames * info_.feature_dim));
-    chunk_preds_scratch_.reserve(static_cast<size_t>(info_.chunk_len * info_.max_speakers));
+    chunk_preds_scratch_.reserve(static_cast<size_t>(
+        info_.chunk_len * info_.pred_upsample * info_.max_speakers));
 
     Reset();
     return Status::Ok();
@@ -571,35 +693,62 @@ Status SortformerStreamingModel::StreamingUpdate(const float* chunk_feat,
     float* preds_data = outputs[0].GetTensorMutableData<float>();
     float* embs_data = outputs[1].GetTensorMutableData<float>();
 
-    // Calculate valid frames
+    // Calculate valid encoder frames from mel length
     const int32_t valid_frames = (current_len + subsampling - 1) / subsampling;
     const int32_t keep = std::min(info_.chunk_len, valid_frames);
 
     const int32_t old_spkcache_len = spkcache_len_curr_;
     const int32_t old_fifo_len = fifo_len_curr_;
 
-    // Extract chunk predictions: frames [old_spkcache_len + old_fifo_len .. + keep]
+    const auto pred_shape =
+        outputs[0].GetTensorTypeAndShapeInfo().GetShape();
+    const int64_t pred_T =
+        pred_shape.size() >= 2 ? pred_shape[1] : 0;
+    const int32_t detected_up = DetectPredUpsample(
+        pred_T, old_spkcache_len, old_fifo_len, valid_frames, current_len,
+        subsampling);
+    // Metadata may already set pred_upsample (e.g. 8). Upgrade if the tensor
+    // is clearly high-res; never downgrade a larger configured value blindly.
+    if (detected_up > info_.pred_upsample) {
+      info_.pred_upsample = detected_up;
+      if (post_processor_) {
+        post_processor_->SetFrameDuration(info_.PredFrameSeconds());
+      }
+    }
+    const int32_t pred_up =
+        info_.pred_upsample > 0 ? info_.pred_upsample : 1;
+
+    // Extract chunk predictions at pred resolution for post-processing.
+    const int32_t pred_offset =
+        (old_spkcache_len + old_fifo_len) * pred_up;
+    const int32_t chunk_pred_frames = keep * pred_up;
     const float* chunk_preds_src =
-        preds_data + static_cast<size_t>((old_spkcache_len + old_fifo_len) * num_spk);
-    out_chunk_preds.assign(chunk_preds_src,
-                           chunk_preds_src + static_cast<size_t>(keep * num_spk));
-    out_chunk_len = keep;
+        preds_data + static_cast<size_t>(pred_offset * num_spk);
+    out_chunk_preds.assign(
+        chunk_preds_src,
+        chunk_preds_src + static_cast<size_t>(chunk_pred_frames * num_spk));
+    out_chunk_len = chunk_pred_frames;
+
+    // Encoder-rate preds for FIFO / speaker-cache bookkeeping.
+    std::vector<float> chunk_preds_encoder;
+    DownsamplePredsToEncoderRate(chunk_preds_src, keep, num_spk, pred_up,
+                                 chunk_preds_encoder);
 
     // Append chunk embeddings directly to FIFO
     fifo_.insert(fifo_.end(), embs_data,
                  embs_data + static_cast<size_t>(keep * emb_dim));
     fifo_len_curr_ += keep;
 
-    // Update FIFO predictions
+    // Update FIFO predictions (encoder-rate)
     if (old_fifo_len > 0) {
       const float* updated_fifo_preds_src =
-          preds_data + static_cast<size_t>(old_spkcache_len * num_spk);
-      fifo_preds_.assign(updated_fifo_preds_src,
-                         updated_fifo_preds_src + static_cast<size_t>(old_fifo_len * num_spk));
-      fifo_preds_.insert(fifo_preds_.end(), out_chunk_preds.begin(),
-                         out_chunk_preds.end());
+          preds_data + static_cast<size_t>(old_spkcache_len * pred_up * num_spk);
+      DownsamplePredsToEncoderRate(updated_fifo_preds_src, old_fifo_len,
+                                   num_spk, pred_up, fifo_preds_);
+      fifo_preds_.insert(fifo_preds_.end(), chunk_preds_encoder.begin(),
+                         chunk_preds_encoder.end());
     } else {
-      fifo_preds_ = out_chunk_preds;
+      fifo_preds_ = chunk_preds_encoder;
     }
 
     // Check FIFO overflow

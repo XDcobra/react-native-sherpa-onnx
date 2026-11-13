@@ -1,2 +1,5 @@
 asset_name,license_type,commercial_use,confidence,detection_source,license_file
+diar_streaming_nemotron3_sortformer_8spk-fp16.tar.bz2,openmdw-1.1,conditional,high,manual,https://huggingface.co/nvidia/Nemotron-3.5-Parse/resolve/main/LICENSE
+diar_streaming_nemotron3_sortformer_8spk-int8.tar.bz2,openmdw-1.1,conditional,high,manual,https://huggingface.co/nvidia/Nemotron-3.5-Parse/resolve/main/LICENSE
+diar_streaming_nemotron3_sortformer_8spk.tar.bz2,openmdw-1.1,conditional,high,manual,https://huggingface.co/nvidia/Nemotron-3.5-Parse/resolve/main/LICENSE
 diar_streaming_sortformer_4spk-v2.1.tar.bz2,nvidia-open-model-license,yes,high,manual,https://huggingface.co/nvidia/NV-KERMT-70M-v2/raw/main/LICENSE

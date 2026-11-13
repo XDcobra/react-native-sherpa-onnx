@@ -211,7 +211,7 @@ static NSString *const kOfflineTtsOomMessage =
         sherpaonnx::TtsWrapper::AudioResult result;
         result.sampleRate = 0;
         if (operationId != nil) {
-            __block std::vector<float> collected;
+            std::vector<float> collected;
             collected.reserve(16000);
             __weak SherpaOnnx *weakSelf = self;
             NSString *opIdCopy = [operationId copy];

@@ -5,6 +5,7 @@
  * nativeCancelOperation, nativeComputeFileSha256.
  */
 #include <jni.h>
+#include "jni/jni_utf8.h"
 #include <string>
 #include <algorithm>
 #include "sherpa-onnx-archive-helper.h"
@@ -53,20 +54,20 @@ static void ResolveWithExtractionResult(
                        static_cast<double>(result.bytes_extracted));
 
   env->CallVoidMethod(map, putString, env->NewStringUTF("lastEntryPath"),
-                       env->NewStringUTF(result.last_entry_path.c_str()));
+                       sherpaonnx::NewJStringUtf8(env, result.last_entry_path));
 
   if (result.success) {
     env->CallVoidMethod(map, putString, env->NewStringUTF("path"),
-                         env->NewStringUTF(target_path.c_str()));
+                         sherpaonnx::NewJStringUtf8(env, target_path));
     if (!result.sha256.empty()) {
       env->CallVoidMethod(map, putString, env->NewStringUTF("sha256"),
-                           env->NewStringUTF(result.sha256.c_str()));
+                           sherpaonnx::NewJStringUtf8(env, result.sha256));
     }
   } else if (!result.paused) {
     __android_log_print(ANDROID_LOG_WARN, "SherpaOnnxNative",
                          "[ARCHIVE_ERROR] %s", result.error.c_str());
     env->CallVoidMethod(map, putString, env->NewStringUTF("reason"),
-                         env->NewStringUTF(result.error.c_str()));
+                         sherpaonnx::NewJStringUtf8(env, result.error));
   }
 
   env->CallVoidMethod(j_promise, resolve_method, map);
@@ -284,13 +285,13 @@ Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeComputeFileSha2
   bool success = ArchiveHelper::ComputeFileSha256(file_str, &error_msg, &sha256);
 
   if (success) {
-    env->CallVoidMethod(j_promise, resolve, env->NewStringUTF(sha256.c_str()));
+    env->CallVoidMethod(j_promise, resolve, sherpaonnx::NewJStringUtf8(env, sha256));
   } else {
     __android_log_print(ANDROID_LOG_WARN, "SherpaOnnxNative",
                          "[CHECKSUM_ERROR] %s", error_msg.c_str());
     env->CallVoidMethod(j_promise, reject,
                          env->NewStringUTF("CHECKSUM_ERROR"),
-                         env->NewStringUTF(error_msg.c_str()));
+                         sherpaonnx::NewJStringUtf8(env, error_msg));
   }
 
   env->DeleteLocalRef(promise_class);
@@ -339,16 +340,16 @@ Java_com_sherpaonnx_archive_facade_SherpaOnnxArchiveHelper_nativeProbeArchive(
                       static_cast<jdouble>(probe.file_size));
   if (!probe.format.empty()) {
     env->CallVoidMethod(map, putString, env->NewStringUTF("format"),
-                        env->NewStringUTF(probe.format.c_str()));
+                        sherpaonnx::NewJStringUtf8(env, probe.format));
   }
   if (!probe.ok) {
     if (!probe.error_code.empty()) {
       env->CallVoidMethod(map, putString, env->NewStringUTF("code"),
-                          env->NewStringUTF(probe.error_code.c_str()));
+                          sherpaonnx::NewJStringUtf8(env, probe.error_code));
     }
     if (!probe.error.empty()) {
       env->CallVoidMethod(map, putString, env->NewStringUTF("message"),
-                          env->NewStringUTF(probe.error.c_str()));
+                          sherpaonnx::NewJStringUtf8(env, probe.error));
     }
   }
 

@@ -82,6 +82,7 @@ NSDictionary *FeedResultToDict(const sherpaonnx::StreamingDiarizationFeedResult 
   int chunkLen = options[@"chunkLen"] ? [options[@"chunkLen"] intValue] : -1;
   int rightContext = options[@"rightContext"] ? [options[@"rightContext"] intValue] : -1;
   int fifoLen = options[@"fifoLen"] ? [options[@"fifoLen"] intValue] : -1;
+  NSString *latencyPreset = options[@"latencyPreset"] ?: @"";
 
   dispatch_async(StreamingDiarizationSerialQueue(), ^{
     std::string instId = [instanceId UTF8String];
@@ -102,7 +103,8 @@ NSDictionary *FeedResultToDict(const sherpaonnx::StreamingDiarizationFeedResult 
         medianWindow,
         chunkLen,
         rightContext,
-        fifoLen);
+        fifoLen,
+        [latencyPreset UTF8String]);
 
     if (!res.success) {
       NSString *err = [NSString stringWithUTF8String:res.error.c_str()];

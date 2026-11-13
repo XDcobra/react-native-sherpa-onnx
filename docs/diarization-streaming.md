@@ -163,7 +163,7 @@ console.log(det.modelType);   // 'sortformer'
 
 ### `createStreamingDiarization(options)`
 
-Creates and initializes the native streaming diarization engine. Init modes: **`auto`** (default — `modelSource` + optional `modelType`) or **`custom`** (`initMode: 'custom'` + `customConfig: { model, metadata? }`). Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `numThreads`, `provider`, `debug`.
+Creates and initializes the native streaming diarization engine. Init modes: **`auto`** (default — `modelSource` + optional `modelType`) or **`custom`** (`initMode: 'custom'` + `customConfig: { model, metadata? }`). Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `latencyPreset`, `numThreads`, `provider`, `debug`.
 
 ```ts
 function createStreamingDiarization(
@@ -314,13 +314,13 @@ await pipeline.completed;
 
 ### Streaming latency profiles
 
-NeMo Sortformer supports dynamic sequence lengths. Configure `chunkLen`, `rightContext`, and `fifoLen` to trade off latency vs accuracy:
+NeMo Sortformer supports dynamic sequence lengths. Configure `chunkLen`, `rightContext`, and `fifoLen` to trade off latency vs accuracy — or pass a pack-defined `latencyPreset` when `metadata.json` ships a `latency_presets` map (Nemotron-3).
 
 | Profile | `chunkLen` | `rightContext` | `fifoLen` | Latency | Stride (Update Rate) | Use Case |
 | --- | --- | --- | --- | --- | --- | --- |
-| **Low Latency** *(recommended for live mic)* | `6` | `7` | `188` | **1.04s** | **0.48s** (~2 updates/sec) | Interactive real-time mic streaming & live meetings |
+| **High Latency (pack / SDK default)** | `124` | `1` | `124` | **10.00s** | **9.92s** (~1 update / 10s) | Pre-recorded file ingestion & maximum DER accuracy |
+| **Low Latency** *(opt-in for live mic)* | `6` | `7` | `188` | **1.04s** | **0.48s** (~2 updates/sec) | Interactive real-time mic streaming & live meetings |
 | **Ultra-Low Latency** | `3` | `1` | `188` | **0.32s** | **0.24s** (~4 updates/sec) | Ultra-fast speaker change detection |
-| **High Latency (Default)** | `124` | `1` | `124` | **10.00s** | **9.92s** (~1 update / 10s) | Pre-recorded file ingestion & maximum DER accuracy |
 
 ```ts
 const engine = await createStreamingDiarization({
@@ -331,6 +331,24 @@ const engine = await createStreamingDiarization({
 });
 console.log(engine.latencySeconds); // 1.04
 ```
+
+**Nemotron-3** (`diar_streaming_nemotron3_sortformer_8spk*`) uses the same Sortformer streaming API and runner. Pack metadata includes named presets (`offline`, `low_latency`, `very_low_latency`, `ultra_low_latency`). The pack default is **`offline`** (`default_latency_preset` in `metadata.json`, ≈30.4s) — pass `latencyPreset: 'low_latency'` (or lower) for live mic. Prefer presets over hard-coded v2.1 numbers:
+
+```ts
+// File / batch: large buffer (≈30.4s) — still createStreamingDiarization + feed()
+const offlineEngine = await createStreamingDiarization({
+  modelSource: { kind: 'fs', path: '/path/to/diar_streaming_nemotron3_sortformer_8spk-int8' },
+  latencyPreset: 'offline',
+});
+
+// Live mic
+const liveEngine = await createStreamingDiarization({
+  modelSource: { kind: 'fs', path: '/path/to/diar_streaming_nemotron3_sortformer_8spk-int8' },
+  latencyPreset: 'low_latency',
+});
+```
+
+Explicit `chunkLen` / `rightContext` / `fifoLen` still override a preset when set. This is **not** the pyannote offline path — see [diarization-offline.md](diarization-offline.md).
 
 ---
 
@@ -417,7 +435,7 @@ const segmentOut = await createLiveSegmentBuffer({
 | --- | --- |
 | `StreamingDiarizationConcreteModelType` | `'sortformer'` |
 | `StreamingDiarizationModelType` | `'sortformer' \| 'auto'` |
-| `StreamingDiarizationInitOptionsShared` | Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `numThreads`, `provider`, `debug` |
+| `StreamingDiarizationInitOptionsShared` | Shared tuning: `onset`, `offset`, `padOnset`, `padOffset`, `minDurationOn`, `minDurationOff`, `medianWindow`, `chunkLen`, `rightContext`, `fifoLen`, `latencyPreset`, `numThreads`, `provider`, `debug` |
 | `StreamingDiarizationAutoInitializeOptions` | Auto init: `modelSource`, `quantization?`, `modelType?` + shared tuning |
 | `StreamingDiarizationCustomInitializeOptions` | Custom init: `initMode: 'custom'`, `modelType`, `customConfig: { model, metadata? }` + shared tuning |
 | `StreamingDiarizationInitializeOptions` | Union of auto and custom init options |

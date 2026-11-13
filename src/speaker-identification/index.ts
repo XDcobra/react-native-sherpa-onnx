@@ -118,6 +118,32 @@ function numberArraysToEmbeddings(
   return out;
 }
 
+/**
+ * Enrollment identity is the embedding weights path only.
+ * Engine cache keys also embed provider/numThreads — those must not block
+ * reloading the same gallery after a threads/provider change.
+ */
+export function enrollmentModelIdentityFromKey(
+  modelKey: string | undefined
+): string {
+  if (typeof modelKey !== 'string') {
+    return '';
+  }
+  const trimmed = modelKey.trim();
+  if (!trimmed) {
+    return '';
+  }
+  try {
+    const parsed = JSON.parse(trimmed) as { modelKey?: unknown };
+    if (typeof parsed?.modelKey === 'string' && parsed.modelKey.trim()) {
+      return parsed.modelKey.trim();
+    }
+  } catch {
+    // Legacy / plain path fingerprints.
+  }
+  return trimmed;
+}
+
 function assertEnrollmentBundle(
   bundle: SpeakerEnrollmentBundle,
   expectedDim: number,
@@ -143,12 +169,12 @@ function assertEnrollmentBundle(
       `SID_ENROLLMENT_DIM_MISMATCH: bundle dim ${bundle.dim} does not match manager dim ${expectedDim}`
     );
   }
+  const bundleIdentity = enrollmentModelIdentityFromKey(bundle.modelKey);
+  const expectedIdentity = enrollmentModelIdentityFromKey(expectedModelKey);
   if (
-    typeof bundle.modelKey === 'string' &&
-    bundle.modelKey.length > 0 &&
-    typeof expectedModelKey === 'string' &&
-    expectedModelKey.length > 0 &&
-    bundle.modelKey !== expectedModelKey
+    bundleIdentity.length > 0 &&
+    expectedIdentity.length > 0 &&
+    bundleIdentity !== expectedIdentity
   ) {
     throw new Error(
       'SID_ENROLLMENT_MODEL_MISMATCH: bundle modelKey does not match this SID instance'

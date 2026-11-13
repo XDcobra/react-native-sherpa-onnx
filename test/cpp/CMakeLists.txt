@@ -109,6 +109,17 @@ else()
   target_include_directories(model_detect_test PRIVATE ${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
 endif()
 
+# Lenient UTF-8 -> UTF-16 behind sherpaonnx::NewJStringUtf8 (JNI string safety)
+add_executable(utf8_lenient_test "${CMAKE_CURRENT_SOURCE_DIR}/jni_utf8/utf8_lenient_test.cpp")
+target_include_directories(utf8_lenient_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp")
+if(GTest_FOUND)
+  target_link_libraries(utf8_lenient_test PRIVATE GTest::gtest_main)
+else()
+  target_link_libraries(utf8_lenient_test PRIVATE gtest_main)
+  target_include_directories(utf8_lenient_test PRIVATE ${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
+endif()
+add_test(NAME utf8_lenient_test COMMAND $<TARGET_FILE:utf8_lenient_test>)
+
 # --- Host audio tests (same android/src/.../jni/audio/*.cpp as Android; Linux + system libav) ---
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
@@ -231,12 +242,14 @@ add_executable(diarization_core_test
   "${DIARIZATION_TEST_DIR}/sortformer_fbank_test.cpp"
   "${DIARIZATION_TEST_DIR}/sortformer_post_processing_test.cpp"
   "${DIARIZATION_TEST_DIR}/sortformer_cache_test.cpp"
+  "${DIARIZATION_TEST_DIR}/sortformer_pred_upsample_test.cpp"
   "${DIARIZATION_CORE_DIR}/powerset.cpp"
   "${DIARIZATION_CORE_DIR}/agglomerative-clustering.cpp"
   "${DIARIZATION_CORE_DIR}/speaker-timeline.cpp"
   "${DIARIZATION_CORE_DIR}/sortformer-fbank.cpp"
   "${DIARIZATION_CORE_DIR}/sortformer-post-processor.cpp"
   "${DIARIZATION_CORE_DIR}/sortformer-streaming-model.cpp"
+  "${DIARIZATION_CORE_DIR}/streaming-diarizer-factory.cpp"
   "${DIARIZATION_CORE_DIR}/sherpa-onnx-streaming-diarization-wrapper.cpp"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/ort/ApplyOrtProvider.cpp"
 )

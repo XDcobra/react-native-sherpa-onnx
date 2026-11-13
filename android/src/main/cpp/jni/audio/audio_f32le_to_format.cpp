@@ -3,6 +3,7 @@
  * sharing the same transcode pipeline as file-based convert (see body include).
  */
 #include <android/log.h>
+#include "jni/jni_utf8.h"
 #include <jni.h>
 #include <cstdio>
 #include <string>
@@ -53,7 +54,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeConvertFloat32MonoFileToFormat(
     env->ReleaseStringUTFChars(rawPath, raw);
     env->ReleaseStringUTFChars(outputPath, out);
     env->ReleaseStringUTFChars(formatHint, fmt);
-    return env->NewStringUTF(err.c_str());
+    return sherpaonnx::NewJStringUtf8(env, err);
 }
 
 }  // extern "C"

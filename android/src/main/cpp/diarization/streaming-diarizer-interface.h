@@ -31,6 +31,13 @@ struct StreamingDiarizerConfig {
   int32_t chunk_len = -1;
   int32_t right_context = -1;
   int32_t fifo_len = -1;
+
+  /**
+   * Optional named latency preset from metadata.json `latency_presets`.
+   * When set, applies that preset's chunk_len / right_context / fifo_len /
+   * spkcache_len before the explicit overrides above.
+   */
+  std::string latency_preset;
 };
 
 struct StreamingDiarizerInfo {
@@ -45,6 +52,12 @@ struct StreamingDiarizerInfo {
   int32_t embedding_dim = 512;
   int32_t subsampling = 8;        // Subsampling ratio (audio frames -> model frames)
   int32_t hop_length = 160;       // Audio hop length (10ms at 16kHz)
+  /**
+   * Pred tensor time resolution relative to encoder frames.
+   * 1 = encoder-rate preds (classic Sortformer, 80 ms/frame at defaults).
+   * subsampling (e.g. 8) = high-res mel-rate preds (10 ms/frame).
+   */
+  int32_t pred_upsample = 1;
 
   int32_t FeedSamples() const {
     return (chunk_len + right_context) * subsampling * hop_length;
@@ -54,8 +67,21 @@ struct StreamingDiarizerInfo {
     return chunk_len * subsampling * hop_length;
   }
 
+  float ModelFrameSeconds() const {
+    if (sample_rate <= 0) {
+      return 0.08f;
+    }
+    return static_cast<float>(subsampling * hop_length) /
+           static_cast<float>(sample_rate);
+  }
+
+  float PredFrameSeconds() const {
+    const int32_t up = pred_upsample > 0 ? pred_upsample : 1;
+    return ModelFrameSeconds() / static_cast<float>(up);
+  }
+
   float LatencySeconds() const {
-    return static_cast<float>(chunk_len + right_context) * 0.08f;
+    return static_cast<float>(chunk_len + right_context) * ModelFrameSeconds();
   }
 };
 

@@ -124,7 +124,11 @@ export type SpeakerEnrollmentEntry = {
 export type SpeakerEnrollmentBundle = {
   version: 1;
   dim: number;
-  /** Optional engine cache key fingerprint from SID init (safer reload). */
+  /**
+   * Optional embedding-weights fingerprint from SID init (safer reload).
+   * Prefer the engine cache-key JSON; import compares the weights path only
+   * (provider / numThreads changes must not block gallery reload).
+   */
   modelKey?: string;
   speakers: SpeakerEnrollmentEntry[];
 };

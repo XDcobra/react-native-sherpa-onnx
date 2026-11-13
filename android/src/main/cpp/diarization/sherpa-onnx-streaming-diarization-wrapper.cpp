@@ -1,5 +1,5 @@
 #include "sherpa-onnx-streaming-diarization-wrapper.h"
-#include "sortformer-streaming-model.h"
+#include "streaming-diarizer-factory.h"
 
 #include <algorithm>
 
@@ -67,7 +67,8 @@ StreamingDiarizationInitResult StreamingDiarizationWrapper::initialize(
     int32_t medianWindow,
     int32_t chunkLen,
     int32_t rightContext,
-    int32_t fifoLen) {
+    int32_t fifoLen,
+    const std::string& latencyPreset) {
   std::lock_guard<std::mutex> lock(mutex_);
 
   StreamingDiarizationInitResult result;
@@ -94,8 +95,9 @@ StreamingDiarizationInitResult StreamingDiarizationWrapper::initialize(
   config.chunk_len = chunkLen;
   config.right_context = rightContext;
   config.fifo_len = fifoLen;
+  config.latency_preset = latencyPreset;
 
-  auto model = std::make_unique<sherpaonnx::diarization::SortformerStreamingModel>();
+  auto model = sherpaonnx::diarization::CreateStreamingDiarizer("sortformer");
   auto st = model->Initialize(config);
   if (!st.ok) {
     result.success = false;

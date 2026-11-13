@@ -5,6 +5,7 @@
  * SherpaOnnxModule.kt companion object.
  */
 #include <jni.h>
+#include "jni/jni_utf8.h"
 #include <string>
 #include <atomic>
 
@@ -91,7 +92,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeEncodeSessionLastCreateError(
     JNIEnv* env,
     jclass /* clazz */)
 {
-    return env->NewStringUTF(g_lastEncodeSessionCreateError.c_str());
+    return sherpaonnx::NewJStringUtf8(env, g_lastEncodeSessionCreateError);
 }
 
 /**
@@ -118,7 +119,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeEncodeSessionFeedChunk(
     std::string err = session->feedChunk(ptr, (int)frameCount);
 
     env->ReleaseFloatArrayElements(samples, ptr, JNI_ABORT);
-    return env->NewStringUTF(err.c_str());
+    return sherpaonnx::NewJStringUtf8(env, err);
 }
 
 /**
@@ -136,7 +137,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeEncodeSessionFinish(
 
     auto* session = reinterpret_cast<sherpa::AudioEncodeSession*>(sessionPtr);
     std::string err = session->finish();
-    return env->NewStringUTF(err.c_str());
+    return sherpaonnx::NewJStringUtf8(env, err);
 }
 
 /**

@@ -193,10 +193,11 @@ function validateCatalog(catalog) {
     !catalog.stt ||
     !catalog.alignment ||
     !catalog.ocr ||
-    !catalog.speakerEmbedding
+    !catalog.speakerEmbedding ||
+    !catalog.diarization
   ) {
     throw new Error(
-      'Catalog must have tts, stt, alignment, ocr, and speakerEmbedding domains'
+      'Catalog must have tts, stt, alignment, ocr, speakerEmbedding, and diarization domains'
     );
   }
   if (
@@ -212,6 +213,24 @@ function validateCatalog(catalog) {
     if (!Array.isArray(entry.hints) || entry.hints.length === 0) {
       throw new Error(
         `speakerEmbedding entry ${JSON.stringify(entry.id)} requires non-empty hints`
+      );
+    }
+  }
+  // Pack-id curated hints only (same pattern as speakerEmbedding). Diarization
+  // packs are language-agnostic in the Library UI (pyannote, reverb, Sortformer
+  // 4spk, Nemotron-3): omit entries so detect keeps empty derivedLanguages.
+  // Sortformer/Nemotron remain usable on non-English audio even when English is
+  // stronger; do not chip EN-only.
+  if (!Array.isArray(catalog.diarization.entries)) {
+    throw new Error('diarization.entries must be an array');
+  }
+  for (const entry of catalog.diarization.entries) {
+    if (typeof entry?.id !== 'string' || !entry.id.trim()) {
+      throw new Error('diarization.entries require a non-empty id');
+    }
+    if (!Array.isArray(entry.hints) || entry.hints.length === 0) {
+      throw new Error(
+        `diarization entry ${JSON.stringify(entry.id)} requires non-empty hints`
       );
     }
   }
@@ -520,6 +539,33 @@ function emitCpp(catalog, sttRowsByType, ocrPackLangs) {
   lines.push('    static const std::vector<PublicLanguageRow> kEmpty;');
   lines.push('    if (modelKey.empty()) return kEmpty;');
   lines.push('    const std::string stem = SpeakerEmbeddingPackLanguageStem(modelKey);');
+  lines.push('    const auto byId = kById.find(stem);');
+  lines.push('    if (byId != kById.end()) return byId->second;');
+  lines.push('    const auto byRaw = kById.find(modelKey);');
+  lines.push('    if (byRaw != kById.end()) return byRaw->second;');
+  lines.push('    return kEmpty;');
+  lines.push('}');
+  lines.push('');
+
+  // Diarization pack rows (curated per asset id — same shape as speaker embedding)
+  const diarizationEntries = catalog.diarization?.entries ?? [];
+  lines.push('inline std::string DiarizationPackLanguageStem(const std::string& modelKey) {');
+  lines.push('    return SpeakerEmbeddingPackLanguageStem(modelKey);');
+  lines.push('}');
+  lines.push('');
+  lines.push('inline const std::vector<PublicLanguageRow>& DiarizationPackRowsForModelKey(');
+  lines.push('    const std::string& modelKey) {');
+  lines.push('    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kById = {');
+  for (const entry of diarizationEntries) {
+    const id = String(entry.id).toLowerCase();
+    lines.push(
+      `        {${cppString(id)}, ${cppRowArray(rowsFromTtsHints(entry.hints))}},`
+    );
+  }
+  lines.push('    };');
+  lines.push('    static const std::vector<PublicLanguageRow> kEmpty;');
+  lines.push('    if (modelKey.empty()) return kEmpty;');
+  lines.push('    const std::string stem = DiarizationPackLanguageStem(modelKey);');
   lines.push('    const auto byId = kById.find(stem);');
   lines.push('    if (byId != kById.end()) return byId->second;');
   lines.push('    const auto byRaw = kById.find(modelKey);');

@@ -1,4 +1,5 @@
 #include "ImageFrameEncoder.h"
+#include "jni/jni_utf8.h"
 #include "ImageRegistry.h"
 #include "decode/ImageDecoder.h"
 #include "platform/android/AImageDecoderBackend.h"
@@ -45,7 +46,7 @@ jobject NewHashMap(JNIEnv* env, jmethodID* outPut) {
 void PutString(JNIEnv* env, jobject map, jmethodID put, const char* key,
                const std::string& value) {
   jstring jkey = env->NewStringUTF(key);
-  jstring jval = env->NewStringUTF(value.c_str());
+  jstring jval = sherpaonnx::NewJStringUtf8(env, value);
   env->CallObjectMethod(map, put, jkey, jval);
   env->DeleteLocalRef(jkey);
   env->DeleteLocalRef(jval);
@@ -340,7 +341,7 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateEmpty(JNIEnv* env,
                                                               jclass) {
   const std::string id =
       sherpa_onnx::image::ImageRegistry::Instance().CreateEmpty();
-  return env->NewStringUTF(id.c_str());
+  return sherpaonnx::NewJStringUtf8(env, id);
 }
 
 JNIEXPORT jobject JNICALL

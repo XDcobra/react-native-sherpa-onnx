@@ -25,6 +25,9 @@ const PAD_PACK_NAME = 'sherpa_models';
 
 export const RECOMMENDED_DIARIZATION_STREAMING_IDS = [
   'diar_streaming_sortformer_4spk-v2.1',
+  'diar_streaming_nemotron3_sortformer_8spk-int8',
+  'diar_streaming_nemotron3_sortformer_8spk-fp16',
+  'diar_streaming_nemotron3_sortformer_8spk',
 ];
 
 export type DiarizationStreamingModelEntry = {
@@ -51,7 +54,9 @@ export function isDiarizationStreamingFolder(
   }
   const normalized = folder.toLowerCase();
   return (
-    normalized.includes('sortformer') || normalized.includes('diar_streaming')
+    normalized.includes('sortformer') ||
+    normalized.includes('diar_streaming') ||
+    normalized.includes('nemotron')
   );
 }
 

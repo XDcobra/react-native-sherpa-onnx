@@ -1,0 +1,24 @@
+# NeMo Sortformer export + ORT quant/parity (Python 3.12 recommended).
+# Install torch for your platform first, then:
+#   pip install -r scripts/diarization-models/nemotron-3/requirements.txt
+#
+# On Apple Silicon, onnxruntime-coreml enables --prefer-coreml for local speed.
+# Parity gates (--gates) always force CPU so CoreML cannot change HF-card numbers.
+
+# Nemotron-3 needs RoPE in the Sortformer encoder. PyPI nemo-toolkit 3.0.x
+# does not support self_attention_model='rope'. Install NeMo Speech from git:
+#   git clone --depth 1 https://github.com/NVIDIA-NeMo/Speech.git build/.../Speech
+#   pip install -e 'build/.../Speech[asr]' --no-deps
+# after installing the rest of this file (+ torch).
+nemo-toolkit[asr]>=2.3.0
+onnx>=1.17
+# Official macOS wheels already expose CoreMLExecutionProvider when available.
+# There is no separate onnxruntime-coreml PyPI package for current ORT.
+onnxruntime>=1.20
+onnxscript
+huggingface-hub>=0.24
+numpy
+matplotlib
+soundfile
+librosa
+transformers>=5.14

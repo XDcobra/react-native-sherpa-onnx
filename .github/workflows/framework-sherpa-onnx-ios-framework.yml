@@ -133,7 +133,7 @@ jobs:
       - name: Create version info file
         run: |
           ORT_VER='${{ github.event.inputs.onnxruntime_version }}'
-          [ -z "$ORT_VER" ] && ORT_VER='1.28.1'
+          [ -z "$ORT_VER" ] && ORT_VER='1.28.2'
           cat > ios/Frameworks/sherpa_onnx.xcframework/VERSION.txt << EOF
           sherpa-onnx version: ${{ steps.version.outputs.release_tag }}
           ONNX Runtime version (build-ios): ${ORT_VER}
@@ -175,7 +175,7 @@ jobs:
             This release contains the prebuilt sherpa-onnx XCFramework for iOS development with ONNX Runtime support.
 
             ## What's New
-            - TODO
+            - Changelog will be added soon.
 
             ## Automatic Installation
 

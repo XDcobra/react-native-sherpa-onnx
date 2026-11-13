@@ -1,4 +1,5 @@
 #include <jni.h>
+#include "jni/jni_utf8.h"
 
 #include "TextRegistry.h"
 #include "TxtSpatialSpanJson.h"
@@ -20,7 +21,7 @@ std::string jstringToUtf8(JNIEnv *env, jstring s) {
   return out;
 }
 
-jstring utf8ToJstring(JNIEnv *env, const std::string &s) { return env->NewStringUTF(s.c_str()); }
+jstring utf8ToJstring(JNIEnv *env, const std::string &s) { return sherpaonnx::NewJStringUtf8(env, s); }
 
 /** Text content — UTF-16 jchar hop without modified UTF-8. */
 std::string jstringToContentUtf8(JNIEnv *env, jstring s) {

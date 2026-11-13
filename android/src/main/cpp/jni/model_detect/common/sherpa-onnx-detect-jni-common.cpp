@@ -6,6 +6,7 @@
  * sherpa-onnx-tts-wrapper.
  */
 #include "sherpa-onnx-detect-jni-common.h"
+#include "jni/jni_utf8.h"
 #include "sherpa-onnx-model-detect-helper.h"
 
 namespace sherpaonnx {
@@ -13,7 +14,7 @@ namespace sherpaonnx {
 bool PutString(JNIEnv* env, jobject map, jmethodID putId, const char* key, const std::string& value) {
   jstring jkey = env->NewStringUTF(key);
   if (!jkey) return false;
-  jstring jval = value.empty() ? nullptr : env->NewStringUTF(value.c_str());
+  jstring jval = value.empty() ? nullptr : sherpaonnx::NewJStringUtf8(env, value);
   if (!value.empty() && !jval) {
     env->DeleteLocalRef(jkey);
     return false;
@@ -97,7 +98,7 @@ jobject BuildStringList(JNIEnv* env, const std::vector<std::string>& strings) {
   env->DeleteLocalRef(listClass);
   if (!list) return nullptr;
   for (const auto& s : strings) {
-    jstring jval = env->NewStringUTF(s.c_str());
+    jstring jval = sherpaonnx::NewJStringUtf8(env, s);
     if (jval) {
       env->CallBooleanMethod(list, listAdd, jval);
       env->DeleteLocalRef(jval);

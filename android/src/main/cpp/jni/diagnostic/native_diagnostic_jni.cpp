@@ -1,4 +1,5 @@
 #include "NativeDiagnostic.h"
+#include "jni/jni_utf8.h"
 
 #include <jni.h>
 
@@ -18,7 +19,7 @@ Java_com_sherpaonnx_SherpaOnnxModule_nativeInitDiagnostics(
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_SherpaOnnxModule_nativeGetDiagnosticSnapshot(JNIEnv* env, jobject /*thiz*/) {
   const std::string json = sherpa::diag::GetSnapshotJson();
-  return env->NewStringUTF(json.c_str());
+  return sherpaonnx::NewJStringUtf8(env, json);
 }
 
 } // extern "C"

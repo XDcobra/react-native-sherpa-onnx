@@ -18,13 +18,15 @@ extern void pcmPlayerStopAllDrainWorkers(void);
 std::unordered_map<std::string, std::shared_ptr<PcmPlayerSession>> g_pcm_players;
 std::mutex g_pcm_player_mutex;
 
-bool PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSamples, int32_t expectedGeneration) {
+bool PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSamples, int32_t expectedGeneration,
+                                          const std::atomic<bool> *keepRunning) {
     if (destroyed || playerNode == nil || audioFormat == nil || numSamples <= 0 || terminalOom.load()) return false;
 
     {
         std::unique_lock<std::mutex> lock(enqueueMutex);
           while (!destroyed &&
               !terminalOom.load() &&
+                (keepRunning == nullptr || keepRunning->load()) &&
                 (expectedGeneration < 0 || drainGeneration.load() == expectedGeneration) &&
                 maxBufferedFrames > 0 &&
                 (bufferedFrames + numSamples) > maxBufferedFrames) {
@@ -34,7 +36,8 @@ bool PcmPlayerSession::enqueueMonoFloat32(const float *samples, int32_t numSampl
             enqueueCv.wait_for(lock, std::chrono::milliseconds(10));
         }
 
-        if (destroyed || terminalOom.load() || (expectedGeneration >= 0 && drainGeneration.load() != expectedGeneration)) {
+        if (destroyed || terminalOom.load() || (expectedGeneration >= 0 && drainGeneration.load() != expectedGeneration) ||
+            (keepRunning != nullptr && !keepRunning->load())) {
             return false;
         }
         bufferedFrames += numSamples;

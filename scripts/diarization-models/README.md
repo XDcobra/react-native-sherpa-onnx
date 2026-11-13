@@ -2,6 +2,12 @@
 
 This folder contains a CSV-driven pipeline that builds one `.tar.bz2` archive per model ID and uploads missing archives to the GitHub release tag `diarization-models`.
 
+For **Nemotron-3** Sortformer export / quant / CPU parity (Parse-style HF card),
+see [`nemotron-3/README.md`](nemotron-3/README.md). Hub packs live at
+[XDcobra/Nemotron-3-Diarization-ONNX](https://huggingface.co/XDcobra/Nemotron-3-Diarization-ONNX);
+`sources.csv` ships FP32 + FP16 + INT8 as separate release archives
+(FP16/INT8 include `model.onnx_data`; FP32 is a single embedded graph).
+
 Release page:
 https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/diarization-models
 
@@ -10,23 +16,27 @@ https://github.com/XDcobra/react-native-sherpa-onnx/releases/tag/diarization-mod
 File: `scripts/diarization-models/sources.csv`
 
 - Delimiter: semicolon (`;`)
-- Required header: `id;onnx_url;license;license_type;commercial_use` or `id;onnx_url;license;license_type;commercial_use;metadata`
+- Required header columns: `id;onnx_url;license;license_type;commercial_use`
+- Optional columns (any order after the required set): `metadata`, `onnx_data_url`
 
 Columns:
 
 | Column | Required | Description |
 | --- | --- | --- |
 | `id` | yes | Directory name inside archive and archive base name (`<id>.tar.bz2`) |
-| `onnx_url` | yes | Direct URL to the ONNX model file |
+| `onnx_url` | yes | Direct URL to the ONNX model file (saved as `<id>/model.onnx`) |
 | `license` | no | Optional URL for license text; downloaded as `<id>/LICENSE`; also written to `license_file` in `diarization-models-license-status.csv` |
-| `license_type` | yes | SPDX/license label (e.g. `nvidia-open-model-license`) for app license screens |
-| `commercial_use` | yes | `yes` or `no`, same convention as other `*-models-license-status.csv` files |
+| `license_type` | yes | SPDX/license label (e.g. `nvidia-open-model-license`, `openmdw-1.1`) for app license screens |
+| `commercial_use` | yes | `yes`, `no`, or `conditional` (OpenMDW), same convention as other `*-models-license-status.csv` files |
 | `metadata` | no | Optional URL or relative path to model metadata JSON (e.g. `metadata/<id>.json`); copied as `<id>/metadata.json`. If omitted, automatically checks `scripts/diarization-models/metadata/<id>.json`. |
+| `onnx_data_url` | no | Optional URL for ONNX external data; saved as `<id>/model.onnx_data` next to the graph (required for Nemotron FP16/INT8 Hub packs). |
 
-Example row:
+Example rows:
 
 ```text
-diar_streaming_sortformer_4spk-v2.1;https://huggingface.co/…/diar_streaming_sortformer_4spk-v2.1.onnx;https://huggingface.co/…/LICENSE;nvidia-open-model-license;yes;metadata/diar_streaming_sortformer_4spk-v2.1.json
+diar_streaming_sortformer_4spk-v2.1;https://huggingface.co/…/diar_streaming_sortformer_4spk-v2.1.onnx;https://huggingface.co/…/LICENSE;nvidia-open-model-license;yes;metadata/diar_streaming_sortformer_4spk-v2.1.json;
+diar_streaming_nemotron3_sortformer_8spk;https://huggingface.co/…/onnx/fp32/model.onnx;https://huggingface.co/…/LICENSE;openmdw-1.1;conditional;metadata/diar_streaming_nemotron3_sortformer_8spk.json;
+diar_streaming_nemotron3_sortformer_8spk-fp16;https://huggingface.co/…/onnx/fp16/model.onnx;https://huggingface.co/…/LICENSE;openmdw-1.1;conditional;metadata/diar_streaming_nemotron3_sortformer_8spk-fp16.json;https://huggingface.co/…/onnx/fp16/model.onnx_data
 ```
 
 ### `checksum.txt`
@@ -49,8 +59,9 @@ Each generated archive contains exactly one model directory:
 ```text
 <id>/
   model.onnx
-  LICENSE        # only if license column is non-empty
-  metadata.json  # streaming parameters, chunk sizes, and model contract
+  model.onnx_data  # only if onnx_data_url is set (external weights)
+  LICENSE          # only if license column is non-empty
+  metadata.json    # streaming parameters, chunk sizes, and model contract
 ```
 
 ## Script usage

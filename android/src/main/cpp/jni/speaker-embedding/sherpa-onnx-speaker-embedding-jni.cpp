@@ -1,4 +1,5 @@
 #include "sherpa-onnx-detect-jni-common.h"
+#include "jni/jni_utf8.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-speaker-embedding-wrapper.h"
 #include "jni/offline_pcm_view.h"
@@ -495,7 +496,7 @@ Java_com_sherpaonnx_speakerembedding_facade_SherpaOnnxSpeakerEmbeddingHelper_nat
   jobject arr = env->NewObject(listClass, listInit);
   if (arr && listAdd) {
     for (const auto& n : names) {
-      jstring js = env->NewStringUTF(n.c_str());
+      jstring js = sherpaonnx::NewJStringUtf8(env, n);
       if (js) {
         env->CallBooleanMethod(arr, listAdd, js);
         env->DeleteLocalRef(js);

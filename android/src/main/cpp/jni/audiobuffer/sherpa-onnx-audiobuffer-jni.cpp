@@ -1,4 +1,5 @@
 #include <jni.h>
+#include "jni/jni_utf8.h"
 
 #include "AudioRegistry.h"
 
@@ -16,7 +17,7 @@ std::string jstringToUtf8(JNIEnv *env, jstring s) {
 }
 
 jstring utf8ToJstring(JNIEnv *env, const std::string &s) {
-  return env->NewStringUTF(s.c_str());
+  return sherpaonnx::NewJStringUtf8(env, s);
 }
 
 jfloatArray vectorToJfloatArray(JNIEnv *env, const std::vector<float> &v) {

@@ -1951,5 +1951,8 @@
         "hints": ["zh"]
       }
     ]
+  },
+  "diarization": {
+    "entries": []
   }
 }

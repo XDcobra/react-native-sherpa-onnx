@@ -111,6 +111,7 @@ export async function createStreamingDiarization(
       chunkLen: options.chunkLen,
       rightContext: options.rightContext,
       fifoLen: options.fifoLen,
+      latencyPreset: options.latencyPreset,
     }
   );
 

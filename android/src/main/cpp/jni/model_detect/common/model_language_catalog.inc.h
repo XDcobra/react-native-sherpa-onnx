@@ -215,6 +215,24 @@ inline const std::vector<PublicLanguageRow>& SpeakerEmbeddingPackRowsForModelKey
     return kEmpty;
 }
 
+inline std::string DiarizationPackLanguageStem(const std::string& modelKey) {
+    return SpeakerEmbeddingPackLanguageStem(modelKey);
+}
+
+inline const std::vector<PublicLanguageRow>& DiarizationPackRowsForModelKey(
+    const std::string& modelKey) {
+    static const std::unordered_map<std::string, std::vector<PublicLanguageRow>> kById = {
+    };
+    static const std::vector<PublicLanguageRow> kEmpty;
+    if (modelKey.empty()) return kEmpty;
+    const std::string stem = DiarizationPackLanguageStem(modelKey);
+    const auto byId = kById.find(stem);
+    if (byId != kById.end()) return byId->second;
+    const auto byRaw = kById.find(modelKey);
+    if (byRaw != kById.end()) return byRaw->second;
+    return kEmpty;
+}
+
 inline std::string ModelOptionIdForHint(
     const std::string& modelType,
     const std::string& hint) {

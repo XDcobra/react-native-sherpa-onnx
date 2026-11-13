@@ -67,7 +67,7 @@ jobs:
           node scripts/ocr-models/build_and_upload.js "${args[@]}"
 
       - name: Sync OCR model license status CSVs
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
           CSV_PATH="${{ inputs.csv_path }}"
@@ -75,7 +75,7 @@ jobs:
           node scripts/ocr-models/sync_ocr_license_status.js "$CSV_PATH"
 
       - name: Commit license status updates
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"

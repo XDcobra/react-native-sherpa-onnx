@@ -1,4 +1,5 @@
 #include <jni.h>
+#include "jni/jni_utf8.h"
 
 #include <algorithm>
 #include <atomic>
@@ -249,7 +250,7 @@ jobject profileToHashMap(
     std::string transferId =
         sherpa::storeVisualizationFramesForTransfer(std::move(profile.frames));
     if (!transferId.empty()) {
-      jstring jTransferId = env->NewStringUTF(transferId.c_str());
+      jstring jTransferId = sherpaonnx::NewJStringUtf8(env, transferId);
       putEntry("framesTransferId", jTransferId);
       env->DeleteLocalRef(jTransferId);
     }

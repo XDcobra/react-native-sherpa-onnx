@@ -23,6 +23,8 @@ concurrency:
 # under Xcode 26.4+; 0.83.5+ bumps fmt to 12.1.0.
 env:
   RN_VERSION: '0.83.10'
+  # Gradle wrapper shipped by the RN_VERSION template (verified before the Android build).
+  EXPECTED_TEMPLATE_GRADLE_VERSION: '9.0.0'
   RN_CLI_VERSION: '20.0.0'
 
 jobs:
@@ -141,8 +143,16 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: |
-          # Use the RN template Gradle wrapper (0.83.x → Gradle 9.0). Do not
-          # force an older wrapper — that breaks AGP from the template.
+          # Use the RN template Gradle wrapper as-is (0.83.x → Gradle 9).
+          # Do not re-pin — an older wrapper breaks the template AGP line.
+          # Fail fast if the template's wrapper changes (bump with RN_VERSION).
+          EXPECTED_GRADLE="${EXPECTED_TEMPLATE_GRADLE_VERSION}"
+          WRAPPER_URL="$(grep '^distributionUrl=' gradle/wrapper/gradle-wrapper.properties | cut -d= -f2-)"
+          echo "Template Gradle wrapper: ${WRAPPER_URL}"
+          if [[ "$WRAPPER_URL" != *"/gradle-${EXPECTED_GRADLE}-"* ]]; then
+            echo "::error::RN ${RN_VERSION} template ships an unexpected Gradle wrapper (${WRAPPER_URL}); expected ${EXPECTED_GRADLE}. Verify compatibility and update EXPECTED_TEMPLATE_GRADLE_VERSION."
+            exit 1
+          fi
           chmod +x gradlew
           ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/testproject-build-android.log
           GRADLE_EXIT=${PIPESTATUS[0]}
@@ -284,8 +294,8 @@ jobs:
           ANDROID_NDK_HOME: ${{ steps.setup-ndk-expo.outputs.ndk-path }}
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk-expo.outputs.ndk-path }}
         run: |
+          # Use the Expo prebuild Gradle wrapper as-is (no version re-pin).
           chmod +x gradlew
-          ./gradlew wrapper --gradle-version 8.13
           ./gradlew assembleRelease --no-daemon --stacktrace 2>&1 | tee /tmp/testexpo-build-android.log
           GRADLE_EXIT=${PIPESTATUS[0]}
           if [ "$GRADLE_EXIT" -ne 0 ]; then

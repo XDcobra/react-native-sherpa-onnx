@@ -43,8 +43,37 @@ export const CHUNK_SIZE_OPTIONS = [1024, 2048, 4096, 8192] as const;
 
 function buildLatencyConfig(
   latencyProfile: DiarizationStreamingLatencyProfile,
-  custom: { chunkLen: number; rightContext: number; fifoLen: number }
-): { chunkLen: number; rightContext: number; fifoLen: number } {
+  custom: { chunkLen: number; rightContext: number; fifoLen: number },
+  modelHint?: string | null
+): {
+  chunkLen?: number;
+  rightContext?: number;
+  fifoLen?: number;
+  latencyPreset?: string;
+} {
+  const hint = (modelHint ?? '').toLowerCase();
+  const usesNamedPresets =
+    hint.includes('nemotron') || hint.includes('nemotron3');
+
+  // Packs that ship metadata.latency_presets (Nemotron-3): prefer named presets
+  // so geometry stays pack-correct. Classic Sortformer keeps numeric overrides.
+  if (usesNamedPresets) {
+    if (latencyProfile === 'low') {
+      return { latencyPreset: 'low_latency' };
+    }
+    if (latencyProfile === 'ultra_low') {
+      return { latencyPreset: 'ultra_low_latency' };
+    }
+    if (latencyProfile === 'default') {
+      return { latencyPreset: 'offline' };
+    }
+    return {
+      chunkLen: custom.chunkLen,
+      rightContext: custom.rightContext,
+      fifoLen: custom.fifoLen,
+    };
+  }
+
   if (latencyProfile === 'low') {
     return { chunkLen: 6, rightContext: 7, fifoLen: 188 };
   }
@@ -111,11 +140,13 @@ export function useDiarizationStreamingModelInit(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Match pack/SDK default geometry (Sortformer v2.1 chunkLen=124;
+  // Nemotron-3 metadata default_latency_preset=offline). Low/ultra are live opts.
   const [latencyProfile, setLatencyProfile] =
-    useState<DiarizationStreamingLatencyProfile>('low');
-  const [customChunkLen, setCustomChunkLen] = useState(6);
-  const [customRightContext, setCustomRightContext] = useState(7);
-  const [customFifoLen, setCustomFifoLen] = useState(188);
+    useState<DiarizationStreamingLatencyProfile>('default');
+  const [customChunkLen, setCustomChunkLen] = useState(124);
+  const [customRightContext, setCustomRightContext] = useState(1);
+  const [customFifoLen, setCustomFifoLen] = useState(124);
   const [onset, setOnset] = useState(0.5);
   const [offset, setOffset] = useState(0.5);
   const [minDurationOff, setMinDurationOff] = useState(0.5);
@@ -166,30 +197,37 @@ export function useDiarizationStreamingModelInit(
     clearDiarizationStreamingCache();
   }, []);
 
-  const buildCreateOptions = useCallback(() => {
-    const latencyConfig = buildLatencyConfig(latencyProfile, {
-      chunkLen: customChunkLen,
-      rightContext: customRightContext,
-      fifoLen: customFifoLen,
-    });
-    return {
-      modelType: 'sortformer' as const,
-      onset,
-      offset,
+  const buildCreateOptions = useCallback(
+    (modelHint?: string | null) => {
+      const latencyConfig = buildLatencyConfig(
+        latencyProfile,
+        {
+          chunkLen: customChunkLen,
+          rightContext: customRightContext,
+          fifoLen: customFifoLen,
+        },
+        modelHint
+      );
+      return {
+        modelType: 'sortformer' as const,
+        onset,
+        offset,
+        minDurationOff,
+        minDurationOn,
+        ...latencyConfig,
+      };
+    },
+    [
+      customChunkLen,
+      customFifoLen,
+      customRightContext,
+      latencyProfile,
       minDurationOff,
       minDurationOn,
-      ...latencyConfig,
-    };
-  }, [
-    customChunkLen,
-    customFifoLen,
-    customRightContext,
-    latencyProfile,
-    minDurationOff,
-    minDurationOn,
-    offset,
-    onset,
-  ]);
+      offset,
+      onset,
+    ]
+  );
 
   const initializeAuto = useCallback(
     async (modelFolder: string) => {
@@ -218,7 +256,7 @@ export function useDiarizationStreamingModelInit(
 
         const engine = await createStreamingDiarization({
           modelSource: modelPath,
-          ...buildCreateOptions(),
+          ...buildCreateOptions(modelFolder),
         });
         engineRef.current = engine;
         const info = engineInfoFromInstance(engine);
