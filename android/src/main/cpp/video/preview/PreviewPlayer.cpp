@@ -452,7 +452,11 @@ void PreviewPlayer::PumpOnce() {
   std::lock_guard<std::recursive_mutex> lock(mu_);
   int64_t clockUs = state_.positionUs;
   if (clock_) clockUs = clock_->NowMediaUs();
-  if (audio_ && state_.audioPlayable && !state_.audioEos &&
+  // An audio-mastered clock (iOS synchronizer) already is the audio time. The
+  // AudioTrack-style estimate needs head/timestamp reports that only the
+  // Android renderer provides; on iOS it stayed at 0 while audio was queued.
+  const bool clockIsAudio = clock_ && clock_->audioMastered();
+  if (!clockIsAudio && audio_ && state_.audioPlayable && !state_.audioEos &&
       state_.state == PreviewState::Playing) {
     int64_t fp = 0, nt = 0;
     if (audio_->Timestamp(&fp, &nt)) {

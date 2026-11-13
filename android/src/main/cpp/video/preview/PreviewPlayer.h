@@ -57,13 +57,23 @@ class PreviewPlayer {
   void SetClock(std::unique_ptr<IPlaybackClock> clock) {
     clock_ = std::move(clock);
   }
-  void SetVideoRenderer(IVideoRenderer* r) { video_ = r; }
+  // Renderer swaps drop the video feeder: it holds a raw pointer to the old
+  // renderer, and the next FlushAll (e.g. from SurfaceAttached) would use it
+  // after the old renderer was destroyed. StartFeed recreates the feeder with
+  // the new renderer. Locked against the pump thread.
+  void SetVideoRenderer(IVideoRenderer* r) {
+    std::lock_guard<std::recursive_mutex> lock(mu_);
+    vfeed_.reset();
+    video_ = r;
+  }
   void SetAudioRenderer(IAudioRenderer* r) { audio_ = r; }
   void TakeAudioRenderer(std::unique_ptr<IAudioRenderer> r) {
     ownedAudio_ = std::move(r);
     audio_ = ownedAudio_.get();
   }
   void TakeVideoRenderer(std::unique_ptr<IVideoRenderer> r) {
+    std::lock_guard<std::recursive_mutex> lock(mu_);
+    vfeed_.reset();
     ownedVideo_ = std::move(r);
     video_ = ownedVideo_.get();
   }

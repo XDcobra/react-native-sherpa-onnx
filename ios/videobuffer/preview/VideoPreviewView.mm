@@ -3,6 +3,7 @@
 #import <AVFoundation/AVFoundation.h>
 
 #include "DecodedSampleBufferRenderer.h"
+#include "SampleBufferAudioRenderer.h"
 #include "SampleBufferVideoRenderer.h"
 #include "VideoRegistry.h"
 #include "codec/CodecCatalog.h"
@@ -19,8 +20,12 @@ using sherpa_onnx::video::preview::PreviewInput;
 using sherpa_onnx::video::preview::PreviewInputKind;
 using sherpa_onnx::video::preview::PreviewRegistry;
 using sherpa_onnx::video::preview::SampleBufferVideoRenderer;
+using sherpa_onnx::video::preview::SampleBufferAudioRenderer;
 
-@implementation VideoPreviewView
+@implementation VideoPreviewView {
+  /** Player the renderer was created for (attach once per player). */
+  NSString *_attachedPlayerId;
+}
 
 + (Class)layerClass {
   return [AVSampleBufferDisplayLayer class];
@@ -41,6 +46,7 @@ using sherpa_onnx::video::preview::SampleBufferVideoRenderer;
       old->SetVideoRenderer(nullptr);
     }
   }
+  _attachedPlayerId = nil;
   _playerId = [playerId copy];
   [self attachIfPossible];
 }
@@ -64,8 +70,13 @@ using sherpa_onnx::video::preview::SampleBufferVideoRenderer;
 
 - (void)attachIfPossible {
   if (self.playerId.length == 0) return;
+  // setPlayerId and didMoveToWindow both land here; attach once, and only on
+  // screen. Re-attaching built a second renderer and decoder for nothing.
+  if (self.window == nil) return;
+  if ([_attachedPlayerId isEqualToString:self.playerId]) return;
   auto p = PreviewRegistry::Instance().Get([self.playerId UTF8String]);
   if (!p) return;
+  _attachedPlayerId = [self.playerId copy];
 
   bool software = false;
   std::string providerName;
@@ -111,6 +122,11 @@ using sherpa_onnx::video::preview::SampleBufferVideoRenderer;
       (void)r->Configure(p->entry()->packets()->track());
     }
     p->TakeVideoRenderer(std::move(r));
+  }
+  // Pace the display layer by the audio clock (no-op for silent clips).
+  if (auto* audio =
+          dynamic_cast<SampleBufferAudioRenderer*>(p->audioRenderer())) {
+    audio->AttachVideoLayer((__bridge void *)self.displayLayer);
   }
   PreviewInput in;
   in.kind = PreviewInputKind::SurfaceAttached;

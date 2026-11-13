@@ -101,6 +101,7 @@ Status DecodedSampleBufferRenderer::EnqueueFrame(const DecodedRawFrame& fr) {
       (__bridge AVSampleBufferDisplayLayer*)layer_;
   [layer enqueueSampleBuffer:sample];
   CFRelease(sample);
+  if (fr.ptsUs > lastQueuedPtsUs_) lastQueuedPtsUs_ = fr.ptsUs;
   ++stats_.rendered;
   if (!firstShown_) {
     firstShown_ = true;
@@ -128,11 +129,22 @@ Status DecodedSampleBufferRenderer::Submit(const EncodedPacket& pkt,
   return Status::Ok();
 }
 
-bool DecodedSampleBufferRenderer::ReadyForMore() const { return true; }
+// Backpressure from the layer: it presents by its (audio) timebase, so feeding
+// everything at once raced ahead of playback.
+bool DecodedSampleBufferRenderer::ReadyForMore() const {
+  auto* layer = (__bridge AVSampleBufferDisplayLayer*)layer_;
+  if (layer == nil) return false;
+  if (@available(iOS 17.0, macOS 14.0, *)) {
+    return layer.sampleBufferRenderer.isReadyForMoreMediaData;
+  }
+  return layer.readyForMoreMediaData;
+}
 
 void DecodedSampleBufferRenderer::Flush(uint64_t gen) {
   gen_ = gen;
   firstShown_ = false;
+  lastQueuedPtsUs_ = 0;
+  eosPending_ = false;
   if (decoder_) decoder_->Flush();
   AVSampleBufferDisplayLayer* layer =
       (__bridge AVSampleBufferDisplayLayer*)layer_;
@@ -140,7 +152,19 @@ void DecodedSampleBufferRenderer::Flush(uint64_t gen) {
 }
 
 void DecodedSampleBufferRenderer::SignalEos(uint64_t gen) {
-  if (onEos) onEos(gen);
+  eosPending_ = true;
+  eosGen_ = gen;
+}
+
+void DecodedSampleBufferRenderer::Drain(int64_t clockUs, int64_t nowNs, int64_t vsyncNs) {
+  (void)nowNs;
+  (void)vsyncNs;
+  // The layer shows frames by its timebase; "ended" waits until the clock
+  // reaches the last queued frame instead of firing when feeding stops.
+  if (eosPending_ && clockUs >= lastQueuedPtsUs_) {
+    eosPending_ = false;
+    if (onEos) onEos(eosGen_);
+  }
 }
 
 void DecodedSampleBufferRenderer::Close() {

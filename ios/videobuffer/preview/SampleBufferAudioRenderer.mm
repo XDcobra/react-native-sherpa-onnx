@@ -15,8 +15,28 @@ namespace preview {
 SampleBufferAudioRenderer::SampleBufferAudioRenderer() = default;
 SampleBufferAudioRenderer::~SampleBufferAudioRenderer() { Close(); }
 
+// Open() runs again on every seek (AudioFeeder::Start). It only swaps the
+// audio renderer and its format. The synchronizer lives for the renderer's
+// whole lifetime: the player's SynchronizerClock and the attached video layer
+// both reference it, and a fresh synchronizer per seek left the video layer on
+// a dead timebase (picture frozen while the clock ran).
 Status SampleBufferAudioRenderer::Open(int sampleRate, int channels) {
-  Close();
+  if (synchronizer_ == nullptr) {
+    AVSampleBufferRenderSynchronizer* created =
+        [[AVSampleBufferRenderSynchronizer alloc] init];
+    synchronizer_ = (__bridge_retained void*)created;
+  }
+  auto* sync = (__bridge AVSampleBufferRenderSynchronizer*)synchronizer_;
+  if (renderer_) {
+    auto* old = (__bridge AVSampleBufferAudioRenderer*)renderer_;
+    [sync removeRenderer:old atTime:sync.currentTime completionHandler:nil];
+    CFRelease(renderer_);
+    renderer_ = nullptr;
+  }
+  if (formatDesc_) {
+    CFRelease((CMFormatDescriptionRef)formatDesc_);
+    formatDesc_ = nullptr;
+  }
   sampleRate_ = sampleRate;
   channels_ = channels;
   AudioStreamBasicDescription asbd{};
@@ -36,11 +56,8 @@ Status SampleBufferAudioRenderer::Open(int sampleRate, int channels) {
   }
   formatDesc_ = fmt;
   AVSampleBufferAudioRenderer* ar = [[AVSampleBufferAudioRenderer alloc] init];
-  AVSampleBufferRenderSynchronizer* sync =
-      [[AVSampleBufferRenderSynchronizer alloc] init];
   [sync addRenderer:ar];
   renderer_ = (__bridge_retained void*)ar;
-  synchronizer_ = (__bridge_retained void*)sync;
   queued_ = 0;
   written_ = 0;
   VIDEO_LOGI("video.preview.audio ios open sr=%d ch=%d", sampleRate, channels);
@@ -52,7 +69,16 @@ void SampleBufferAudioRenderer::AttachVideoLayer(void* layer) {
   auto* display = (__bridge AVSampleBufferDisplayLayer*)layer;
   if (sync == nil || display == nil) return;
   if (@available(iOS 17.0, macOS 14.0, *)) {
-    [sync addRenderer:display.sampleBufferRenderer];
+    AVSampleBufferVideoRenderer* next = display.sampleBufferRenderer;
+    auto* prev = (__bridge AVSampleBufferVideoRenderer*)attachedVideoRenderer_;
+    if (prev == next) return;
+    if (prev != nil) {
+      [sync removeRenderer:prev atTime:sync.currentTime completionHandler:nil];
+      CFRelease(attachedVideoRenderer_);
+      attachedVideoRenderer_ = nullptr;
+    }
+    [sync addRenderer:next];
+    attachedVideoRenderer_ = (__bridge_retained void*)next;
   }
 }
 
@@ -81,6 +107,9 @@ int SampleBufferAudioRenderer::Write(const float* data, int frames, int64_t ptsU
   auto* ar = (__bridge AVSampleBufferAudioRenderer*)renderer_;
   CMAudioFormatDescriptionRef fmt = (CMAudioFormatDescriptionRef)formatDesc_;
   if (ar == nil || fmt == nullptr || frames <= 0) return 0;
+  // Backpressure: the feeder retries a refused chunk. Accepting everything
+  // queued the whole decoded track up front (memory grows with the duration).
+  if (!ar.isReadyForMoreMediaData) return 0;
   const size_t bytes = static_cast<size_t>(frames * channels_) * sizeof(float);
   void* copy = malloc(bytes);
   if (!copy) return 0;
@@ -111,6 +140,15 @@ int SampleBufferAudioRenderer::Write(const float* data, int frames, int64_t ptsU
 }
 
 void SampleBufferAudioRenderer::Close() {
+  if (attachedVideoRenderer_) {
+    auto* sync = (__bridge AVSampleBufferRenderSynchronizer*)synchronizer_;
+    auto* prev = (__bridge AVSampleBufferVideoRenderer*)attachedVideoRenderer_;
+    if (sync != nil) {
+      [sync removeRenderer:prev atTime:sync.currentTime completionHandler:nil];
+    }
+    CFRelease(attachedVideoRenderer_);
+    attachedVideoRenderer_ = nullptr;
+  }
   if (synchronizer_) {
     CFRelease(synchronizer_);
     synchronizer_ = nullptr;
@@ -125,8 +163,21 @@ void SampleBufferAudioRenderer::Close() {
   }
 }
 
+// The clock keeps its own reference: the pump thread may still read it after
+// SampleBufferAudioRenderer::Close() released the renderer's reference (e.g. a
+// preview view detaching while playback runs) — a borrowed pointer crashed in
+// objc_retain from NowMediaUs().
 SynchronizerClock::SynchronizerClock(void* synchronizer)
-    : synchronizer_(synchronizer) {}
+    : synchronizer_(synchronizer) {
+  if (synchronizer_) CFRetain(synchronizer_);
+}
+
+SynchronizerClock::~SynchronizerClock() {
+  if (synchronizer_) {
+    CFRelease(synchronizer_);
+    synchronizer_ = nullptr;
+  }
+}
 
 int64_t SynchronizerClock::NowMediaUs() {
   auto* sync = (__bridge AVSampleBufferRenderSynchronizer*)synchronizer_;

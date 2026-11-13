@@ -112,6 +112,7 @@ Status SampleBufferVideoRenderer::Submit(const EncodedPacket& pkt, bool displayF
     [layer enqueueSampleBuffer:sample];
   }
   CFRelease(sample);
+  if (displayFlag && pkt.ptsUs > lastQueuedPtsUs_) lastQueuedPtsUs_ = pkt.ptsUs;
   if (displayFlag) {
     ++stats_.rendered;
     if (!firstShown_) {
@@ -135,6 +136,8 @@ bool SampleBufferVideoRenderer::ReadyForMore() const {
 void SampleBufferVideoRenderer::Flush(uint64_t gen) {
   gen_ = gen;
   firstShown_ = false;
+  lastQueuedPtsUs_ = 0;
+  eosPending_ = false;
   auto* layer = (__bridge AVSampleBufferDisplayLayer*)layer_;
   if (layer == nil) return;
   if (@available(iOS 17.0, macOS 14.0, *)) {
@@ -146,7 +149,19 @@ void SampleBufferVideoRenderer::Flush(uint64_t gen) {
 
 void SampleBufferVideoRenderer::SignalEos(uint64_t gen) {
   gen_ = gen;
-  if (onEos) onEos(gen_);
+  eosPending_ = true;
+  eosGen_ = gen;
+}
+
+void SampleBufferVideoRenderer::Drain(int64_t clockUs, int64_t nowNs, int64_t vsyncNs) {
+  (void)nowNs;
+  (void)vsyncNs;
+  // The layer shows frames by its timebase; "ended" waits until the clock
+  // reaches the last queued frame instead of firing when feeding stops.
+  if (eosPending_ && clockUs >= lastQueuedPtsUs_) {
+    eosPending_ = false;
+    if (onEos) onEos(eosGen_);
+  }
 }
 
 void SampleBufferVideoRenderer::Close() {
