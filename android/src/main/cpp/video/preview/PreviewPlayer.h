@@ -77,6 +77,13 @@ class PreviewPlayer {
     ownedVideo_ = std::move(r);
     video_ = ownedVideo_.get();
   }
+  /**
+   * The view's surface/layer is going away (unmount, off screen, other
+   * player). Renderers draw into it without owning it, so the renderer and
+   * the feeder that points at it are dropped before the surface dies; the pump
+   * thread kept calling into a freed display layer otherwise.
+   */
+  void DetachVideoRenderer();
   IPlaybackClock* clock() { return clock_.get(); }
   IAudioRenderer* audioRenderer() { return audio_; }
 

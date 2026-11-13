@@ -35,18 +35,24 @@ using sherpa_onnx::video::preview::SampleBufferAudioRenderer;
   return (AVSampleBufferDisplayLayer *)self.layer;
 }
 
-- (void)setPlayerId:(NSString *)playerId {
-  if ([_playerId isEqualToString:playerId]) return;
-  if (_playerId.length > 0) {
-    auto old = PreviewRegistry::Instance().Get([_playerId UTF8String]);
-    if (old) {
-      PreviewInput in;
-      in.kind = PreviewInputKind::SurfaceDetached;
-      old->Post(in, old->state().positionUs);
-      old->SetVideoRenderer(nullptr);
-    }
+- (void)dealloc {
+  [self detachFromPlayer];
+}
+
+// The player's renderer draws into this view's layer without owning it: drop
+// the renderer before the layer can go away (the pump thread otherwise calls
+// into a freed AVSampleBufferDisplayLayer).
+- (void)detachFromPlayer {
+  if (_attachedPlayerId.length > 0) {
+    auto p = PreviewRegistry::Instance().Get([_attachedPlayerId UTF8String]);
+    if (p) p->DetachVideoRenderer();
   }
   _attachedPlayerId = nil;
+}
+
+- (void)setPlayerId:(NSString *)playerId {
+  if ([_playerId isEqualToString:playerId]) return;
+  [self detachFromPlayer];
   _playerId = [playerId copy];
   [self attachIfPossible];
 }
@@ -65,6 +71,11 @@ using sherpa_onnx::video::preview::SampleBufferAudioRenderer;
 
 - (void)didMoveToWindow {
   [super didMoveToWindow];
+  if (self.window == nil) {
+    // Unmounted, recycled or off screen; reattached when it comes back.
+    [self detachFromPlayer];
+    return;
+  }
   [self attachIfPossible];
 }
 

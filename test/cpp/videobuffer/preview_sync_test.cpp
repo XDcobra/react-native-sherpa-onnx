@@ -3,6 +3,14 @@
 #include "preview/PlaybackController.h"
 #include "preview/PcmRing.h"
 #include "preview/Renderers.h"
+#include "preview/PreviewPlayer.h"
+#include "VideoRegistry.h"
+#include "synth.h"
+
+#include <atomic>
+#include <chrono>
+#include <memory>
+#include <thread>
 
 #include <gtest/gtest.h>
 
@@ -97,4 +105,77 @@ TEST(PreviewSync, PadOnLateAudioTrimOverlap) {
   int64_t pts = 0;
   ring.Read(b, 5, &pts);
   EXPECT_EQ(pts, 0);
+}
+
+namespace {
+
+// Calls into a renderer after its view went away would touch a freed surface
+// or layer: count them, and note when the player destroyed the renderer.
+struct RendererProbe {
+  std::atomic<int> callsAfterDetach{0};
+  std::atomic<bool> detached{false};
+  std::atomic<bool> destroyed{false};
+  std::atomic<int> submits{0};
+};
+
+class ProbeVideo : public IVideoRenderer {
+ public:
+  explicit ProbeVideo(std::shared_ptr<RendererProbe> probe)
+      : probe_(std::move(probe)) {}
+  ~ProbeVideo() override { probe_->destroyed = true; }
+  Status Configure(const VideoTrackInfo&) override { return Status::Ok(); }
+  Status Submit(const EncodedPacket&, bool, uint64_t) override {
+    Touch();
+    ++probe_->submits;
+    return Status::Ok();
+  }
+  bool ReadyForMore() const override {
+    Touch();
+    return true;
+  }
+  void Flush(uint64_t) override { Touch(); }
+  void SignalEos(uint64_t) override { Touch(); }
+  void Drain(int64_t, int64_t, int64_t) override { Touch(); }
+  VideoRenderStats stats() const override { return {}; }
+  void Close() override {}
+
+ private:
+  void Touch() const {
+    if (probe_->detached) ++probe_->callsAfterDetach;
+  }
+  std::shared_ptr<RendererProbe> probe_;
+};
+
+}  // namespace
+
+TEST(PreviewPlayerSurface, DetachDropsRendererAndFeeder) {
+  auto src = std::make_unique<MemoryPacketSource>();
+  test::FillIpp(src.get(), 30, 15, false);
+  auto entry = VideoRegistry::Instance().CreateOfflineFromPackets(std::move(src));
+  ASSERT_TRUE(entry);
+  PreviewPlayerOptions opts;
+  opts.audioDecision = AudioDecision::Absent;
+  auto player = std::make_shared<PreviewPlayer>("vprev_test", entry, opts);
+  ASSERT_TRUE(player->Post({PreviewInputKind::Prepare}, 0).status.ok);
+  ASSERT_TRUE(player->Post({PreviewInputKind::Prepared}, 0).status.ok);
+
+  auto probe = std::make_shared<RendererProbe>();
+  player->TakeVideoRenderer(std::make_unique<ProbeVideo>(probe));
+  PreviewInput attached;
+  attached.kind = PreviewInputKind::SurfaceAttached;
+  player->Post(attached, 0);
+  for (int i = 0; i < 20 && probe->submits == 0; ++i) player->PumpOnce();
+  ASSERT_GT(probe->submits.load(), 0) << "feeder never fed the renderer";
+
+  // The view's layer is about to go away.
+  player->DetachVideoRenderer();
+  probe->detached = true;
+  EXPECT_TRUE(probe->destroyed.load());
+  for (int i = 0; i < 20; ++i) player->PumpOnce();
+  std::this_thread::sleep_for(std::chrono::milliseconds(30));
+  EXPECT_EQ(probe->callsAfterDetach.load(), 0);
+
+  player->Post({PreviewInputKind::Release}, 0);
+  player.reset();
+  VideoRegistry::Instance().Release(entry->id());
 }

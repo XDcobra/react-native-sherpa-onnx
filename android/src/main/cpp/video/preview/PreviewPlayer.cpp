@@ -504,6 +504,17 @@ void PreviewPlayer::StopPump() {
   if (pump_.joinable()) pump_.join();
 }
 
+void PreviewPlayer::DetachVideoRenderer() {
+  std::lock_guard<std::recursive_mutex> lock(mu_);
+  if (video_ == nullptr && !ownedVideo_ && !vfeed_) return;
+  PreviewInput in;
+  in.kind = PreviewInputKind::SurfaceDetached;
+  Post(in, state_.positionUs, NowNs());
+  vfeed_.reset();
+  video_ = nullptr;
+  ownedVideo_.reset();
+}
+
 #ifdef __ANDROID__
 Status PreviewPlayer::AttachSurface(ANativeWindow* window, double refreshHz) {
   std::lock_guard<std::recursive_mutex> lock(mu_);
@@ -549,14 +560,7 @@ Status PreviewPlayer::AttachSurface(ANativeWindow* window, double refreshHz) {
   return Status::Ok();
 }
 
-void PreviewPlayer::DetachSurface() {
-  std::lock_guard<std::recursive_mutex> lock(mu_);
-  PreviewInput in;
-  in.kind = PreviewInputKind::SurfaceDetached;
-  Post(in, state_.positionUs, NowNs());
-  video_ = nullptr;
-  ownedVideo_.reset();
-}
+void PreviewPlayer::DetachSurface() { DetachVideoRenderer(); }
 
 void PreviewPlayer::SetRefreshHz(double hz) {
   refreshHz_ = hz > 1 ? hz : 60.0;
