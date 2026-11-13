@@ -84,14 +84,14 @@ void SherpaOnnxPdfReleaseLazyHandle(NSString *bufferId) {
 @implementation SherpaOnnx (PDF)
 
 RCT_EXPORT_METHOD(isPdfiumEnabled : (RCTPromiseResolveBlock)
-                      resolve rejecter : (RCTPromiseRejectBlock)reject) {
+                      resolve reject : (RCTPromiseRejectBlock)reject) {
   resolve(@(sherpa_onnx::pdf::IsPdfiumCompiledIn() ? YES : NO));
 }
 
 RCT_EXPORT_METHOD(extractPdfTextLayer : (NSDictionary *)source textOutBufferId : (
                       NSString *)textOutBufferId options : (NSDictionary *)
-                      options resolver : (RCTPromiseResolveBlock)
-                          resolve rejecter : (RCTPromiseRejectBlock)reject) {
+                      options resolve : (RCTPromiseResolveBlock)
+                          resolve reject : (RCTPromiseRejectBlock)reject) {
   if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) {
     reject(@"ERR_PDF_PDFIUM_DISABLED",
            @"PDFium is not linked. Rebuild with SHERPA_ONNX_ENABLE_PDFIUM=1 "
@@ -207,8 +207,8 @@ RCT_EXPORT_METHOD(extractPdfTextLayer : (NSDictionary *)source textOutBufferId :
 }
 
 RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (
-                      NSDictionary *)options resolver : (RCTPromiseResolveBlock)
-                          resolve rejecter : (RCTPromiseRejectBlock)reject) {
+                      NSDictionary *)options resolve : (RCTPromiseResolveBlock)
+                          resolve reject : (RCTPromiseRejectBlock)reject) {
   if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) {
     reject(@"ERR_PDF_PDFIUM_DISABLED",
            @"PDFium is not linked. Rebuild with SHERPA_ONNX_ENABLE_PDFIUM=1 "

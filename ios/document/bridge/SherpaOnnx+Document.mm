@@ -47,8 +47,8 @@ dispatch_queue_t DocQueue() {
 
 RCT_EXPORT_METHOD(extractDocumentText : (NSDictionary *)source textOutBufferId : (
                       NSString *)textOutBufferId options : (NSDictionary *)
-                      options resolver : (RCTPromiseResolveBlock)
-                          resolve rejecter : (RCTPromiseRejectBlock)reject) {
+                      options resolve : (RCTPromiseResolveBlock)
+                          resolve reject : (RCTPromiseRejectBlock)reject) {
   if (textOutBufferId.length == 0) {
     reject(@"ERR_DOC_INVALID_ARGUMENT", @"textOutBufferId required", nil);
     return;
@@ -170,8 +170,8 @@ RCT_EXPORT_METHOD(extractDocumentText : (NSDictionary *)source textOutBufferId :
 }
 
 RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
-                      NSDictionary *)options resolver : (RCTPromiseResolveBlock)
-                          resolve rejecter : (RCTPromiseRejectBlock)reject) {
+                      NSDictionary *)options resolve : (RCTPromiseResolveBlock)
+                          resolve reject : (RCTPromiseRejectBlock)reject) {
   __weak SherpaOnnx *weakSelf = self;
   dispatch_async(DocQueue(), ^{
     SherpaOnnx *strongSelf = weakSelf;
