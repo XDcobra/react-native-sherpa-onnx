@@ -1628,14 +1628,14 @@ AudioFileProbeResult probeFileDurationFFmpeg(const char* path, int inputFd) {
   }
   logInputIoState(fmtCtx, ownedFd, inputFd, "probe_duration_after_open");
 
-  AVDictionary* opts = nullptr;
-  av_dict_set(&opts, "analyzeduration", "2000000", 0);
-  av_dict_set(&opts, "probesize", "32768", 0);
-  if (avformat_find_stream_info(fmtCtx, &opts) < 0) {
-    av_dict_free(&opts);
+  // `options` of avformat_find_stream_info is an array of nb_streams per-stream
+  // *codec* option dictionaries, not a single dictionary: passing `&opts` made
+  // FFmpeg read opts[1..] from the stack and crash on any file with 2+ streams
+  // (e.g. every video). The analyzeduration/probesize entries never applied to
+  // the format either, so FFmpeg's defaults stay in effect.
+  if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
     throw std::runtime_error("PROBE_STREAM_INFO_FAILED: Cannot read stream info");
   }
-  av_dict_free(&opts);
   logInputIoState(fmtCtx, ownedFd, inputFd, "probe_duration_after_find_stream_info");
   logFormatContextSummary(fmtCtx, -1, "probe_duration_after_find_stream_info");
 
@@ -1794,14 +1794,14 @@ AudioContainerProbeResult probeFileContainerFFmpeg(const char* path, int inputFd
   }
   logInputIoState(fmtCtx, ownedFd, inputFd, "probe_container_after_open");
 
-  AVDictionary* opts = nullptr;
-  av_dict_set(&opts, "analyzeduration", "2000000", 0);
-  av_dict_set(&opts, "probesize", "32768", 0);
-  if (avformat_find_stream_info(fmtCtx, &opts) < 0) {
-    av_dict_free(&opts);
+  // `options` of avformat_find_stream_info is an array of nb_streams per-stream
+  // *codec* option dictionaries, not a single dictionary: passing `&opts` made
+  // FFmpeg read opts[1..] from the stack and crash on any file with 2+ streams
+  // (e.g. every video). The analyzeduration/probesize entries never applied to
+  // the format either, so FFmpeg's defaults stay in effect.
+  if (avformat_find_stream_info(fmtCtx, nullptr) < 0) {
     throw std::runtime_error("PROBE_STREAM_INFO_FAILED: Cannot read stream info");
   }
-  av_dict_free(&opts);
   logInputIoState(fmtCtx, ownedFd, inputFd, "probe_container_after_find_stream_info");
   logFormatContextSummary(fmtCtx, -1, "probe_container_after_find_stream_info");
 
