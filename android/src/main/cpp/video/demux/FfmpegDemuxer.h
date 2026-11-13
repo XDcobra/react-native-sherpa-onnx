@@ -41,6 +41,9 @@ class FfmpegDemuxer : public PacketSource {
 
  private:
   Status BuildIndex();
+  /** MOV: index entries are DTS; set each sample's PTS from the ctts box. */
+  Status ApplyMovPresentationTimes(const std::vector<int64_t>& dtsTb,
+                                   std::vector<SampleEntry>* samples);
   Status BuildAudioIndex();
   Status EnsurePacketIndex();
   Status ScanContainerPackets(std::vector<SampleEntry>* video,

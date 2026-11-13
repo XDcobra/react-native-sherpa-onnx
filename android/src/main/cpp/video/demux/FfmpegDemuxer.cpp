@@ -151,6 +151,183 @@ int DisplayRotationDegrees(AVStream* st) {
   return r;
 }
 
+// --- MOV composition offsets ------------------------------------------------
+// FFmpeg's MOV index entries carry the DTS only. The PTS is DTS + ctts offset
+// (+ a per-stream shift) and FFmpeg computes it on packet read from private
+// state. Reading every packet would pull the whole file at open, so the ctts
+// box is read from moov instead (the sample table is already there).
+
+uint32_t Be32(const uint8_t* p) {
+  return (static_cast<uint32_t>(p[0]) << 24) |
+         (static_cast<uint32_t>(p[1]) << 16) |
+         (static_cast<uint32_t>(p[2]) << 8) | static_cast<uint32_t>(p[3]);
+}
+
+uint64_t Be64(const uint8_t* p) {
+  return (static_cast<uint64_t>(Be32(p)) << 32) | Be32(p + 4);
+}
+
+constexpr uint32_t BoxType(const char (&t)[5]) {
+  return (static_cast<uint32_t>(static_cast<uint8_t>(t[0])) << 24) |
+         (static_cast<uint32_t>(static_cast<uint8_t>(t[1])) << 16) |
+         (static_cast<uint32_t>(static_cast<uint8_t>(t[2])) << 8) |
+         static_cast<uint32_t>(static_cast<uint8_t>(t[3]));
+}
+
+struct Box {
+  uint32_t type = 0;
+  const uint8_t* payload = nullptr;
+  size_t size = 0;
+};
+
+// Next box in [*p, end). False at the end or on a malformed header.
+bool NextBox(const uint8_t** p, const uint8_t* end, Box* out) {
+  const size_t avail = static_cast<size_t>(end - *p);
+  if (avail < 8) {
+    return false;
+  }
+  uint64_t size = Be32(*p);
+  size_t header = 8;
+  if (size == 1) {
+    if (avail < 16) {
+      return false;
+    }
+    size = Be64(*p + 8);
+    header = 16;
+  } else if (size == 0) {
+    size = avail;
+  }
+  if (size < header || size > avail) {
+    return false;
+  }
+  out->type = Be32(*p + 4);
+  out->payload = *p + header;
+  out->size = static_cast<size_t>(size) - header;
+  *p += size;
+  return true;
+}
+
+bool FindChild(const Box& parent, uint32_t type, Box* out) {
+  const uint8_t* p = parent.payload;
+  const uint8_t* end = parent.payload + parent.size;
+  Box b;
+  while (NextBox(&p, end, &b)) {
+    if (b.type == type) {
+      *out = b;
+      return true;
+    }
+  }
+  return false;
+}
+
+// Reads the top-level moov box payload. Counts the bytes like other open reads.
+bool ReadMoov(FfmpegDemuxer::Impl* impl, std::vector<uint8_t>* out) {
+  constexpr uint64_t kMaxMoov = 64ull << 20;
+  int64_t off = 0;
+  uint8_t hdr[16];
+  while (off + 8 <= impl->size) {
+    const int64_t n = DefaultFileIo().Pread(impl->fd, hdr, sizeof(hdr), off);
+    if (n < 8) {
+      return false;
+    }
+    if (impl->counting) {
+      impl->bytes += n;
+    }
+    uint64_t size = Be32(hdr);
+    uint64_t header = 8;
+    if (size == 1) {
+      if (n < 16) {
+        return false;
+      }
+      size = Be64(hdr + 8);
+      header = 16;
+    } else if (size == 0) {
+      size = static_cast<uint64_t>(impl->size - off);
+    }
+    if (size < header ||
+        size > static_cast<uint64_t>(impl->size - off)) {
+      return false;
+    }
+    if (Be32(hdr + 4) == BoxType("moov")) {
+      const uint64_t payload = size - header;
+      if (payload > kMaxMoov) {
+        return false;
+      }
+      out->resize(static_cast<size_t>(payload));
+      const int64_t got = DefaultFileIo().Pread(
+          impl->fd, out->data(), out->size(),
+          off + static_cast<int64_t>(header));
+      if (got != static_cast<int64_t>(out->size())) {
+        return false;
+      }
+      if (impl->counting) {
+        impl->bytes += got;
+      }
+      return true;
+    }
+    off += static_cast<int64_t>(size);
+  }
+  return false;
+}
+
+enum class CttsResult { Found, Absent, Unusable };
+
+// Per-sample composition offsets (decode order, track timescale) of the trak
+// with `trackId`. Absent: the track has no ctts (PTS == DTS + shift).
+CttsResult ReadMovCompositionOffsets(const std::vector<uint8_t>& moovPayload,
+                                     int trackId, size_t expectedSamples,
+                                     std::vector<int64_t>* offsets) {
+  Box moov{BoxType("moov"), moovPayload.data(), moovPayload.size()};
+  const uint8_t* p = moov.payload;
+  const uint8_t* end = moov.payload + moov.size;
+  Box trak;
+  while (NextBox(&p, end, &trak)) {
+    if (trak.type != BoxType("trak")) {
+      continue;
+    }
+    Box tkhd;
+    if (!FindChild(trak, BoxType("tkhd"), &tkhd) || tkhd.size < 24) {
+      continue;
+    }
+    const size_t idOffset = tkhd.payload[0] == 1 ? 20 : 12;
+    if (tkhd.size < idOffset + 4 ||
+        static_cast<int>(Be32(tkhd.payload + idOffset)) != trackId) {
+      continue;
+    }
+    Box mdia, minf, stbl, ctts;
+    if (!FindChild(trak, BoxType("mdia"), &mdia) ||
+        !FindChild(mdia, BoxType("minf"), &minf) ||
+        !FindChild(minf, BoxType("stbl"), &stbl)) {
+      return CttsResult::Unusable;
+    }
+    if (!FindChild(stbl, BoxType("ctts"), &ctts)) {
+      return CttsResult::Absent;
+    }
+    if (ctts.size < 8) {
+      return CttsResult::Unusable;
+    }
+    const uint32_t entries = Be32(ctts.payload + 4);
+    if (ctts.size < 8 + static_cast<size_t>(entries) * 8) {
+      return CttsResult::Unusable;
+    }
+    offsets->clear();
+    offsets->reserve(expectedSamples);
+    const uint8_t* e = ctts.payload + 8;
+    for (uint32_t i = 0; i < entries; ++i, e += 8) {
+      const uint32_t count = Be32(e);
+      // Signed like FFmpeg reads it, for version 0 and 1 alike.
+      const int64_t offset = static_cast<int32_t>(Be32(e + 4));
+      if (count > expectedSamples - offsets->size()) {
+        return CttsResult::Unusable;
+      }
+      offsets->insert(offsets->end(), count, offset);
+    }
+    return offsets->size() == expectedSamples ? CttsResult::Found
+                                              : CttsResult::Unusable;
+  }
+  return CttsResult::Unusable;
+}
+
 }  // namespace
 #endif  // HAVE_FFMPEG
 
@@ -339,12 +516,15 @@ Status FfmpegDemuxer::BuildIndex() {
   std::vector<SampleEntry> samples;
   if (n > 0) {
     samples.reserve(static_cast<size_t>(n));
+    std::vector<int64_t> dtsTb;
+    dtsTb.reserve(static_cast<size_t>(n));
     for (int i = 0; i < n; ++i) {
       const AVIndexEntry* e = avformat_index_get_entry(st, i);
       if (!e) {
         continue;
       }
       SampleEntry s;
+      // MOV index timestamps are DTS; Matroska cues carry the PTS.
       s.ptsUs = TbToUs(st->time_base, e->timestamp);
       s.dtsUs = s.ptsUs;
       s.fileOffset = e->pos;
@@ -353,6 +533,25 @@ Status FfmpegDemuxer::BuildIndex() {
         s.flags |= kSampleKey;
       }
       samples.push_back(s);
+      dtsTb.push_back(e->timestamp);
+    }
+    if (impl_->isMov) {
+      auto pres = ApplyMovPresentationTimes(dtsTb, &samples);
+      if (!pres.ok) {
+        // Fragmented MP4 (offsets in moof/trun), compressed moov, edit lists
+        // that re-map samples: take FFmpeg's packet times (reads the file).
+        VIDEO_LOGW("video.demux mov pts from index unusable (%s), scanning",
+                   pres.errorMessage.c_str());
+        std::vector<SampleEntry> scanned;
+        auto sc = ScanContainerPackets(&scanned, nullptr);
+        if (!sc.ok) {
+          return sc;
+        }
+        if (scanned.empty()) {
+          return Status::Fail(kErrFileCorrupt, "no video samples");
+        }
+        samples = std::move(scanned);
+      }
     }
     std::sort(samples.begin(), samples.end(),
               [](const SampleEntry& a, const SampleEntry& b) {
@@ -382,6 +581,92 @@ Status FfmpegDemuxer::BuildIndex() {
     indexState_ = IndexState::Building;
   }
   timeline_.AssignImmutable(std::move(samples));
+  return Status::Ok();
+#endif
+}
+
+Status FfmpegDemuxer::ApplyMovPresentationTimes(
+    const std::vector<int64_t>& dtsTb, std::vector<SampleEntry>* samples) {
+#ifndef HAVE_FFMPEG
+  (void)dtsTb;
+  (void)samples;
+  return Status::Fail(kErrFfmpegDisabled, "FFmpeg disabled");
+#else
+  if (samples->empty() || dtsTb.size() != samples->size()) {
+    return Status::Fail(kErrFileCorrupt, "index");
+  }
+  AVStream* st = impl_->fmt->streams[impl_->videoStream];
+  std::vector<uint8_t> moov;
+  if (!ReadMoov(impl_.get(), &moov)) {
+    return Status::Fail(kErrFileCorrupt, "moov");
+  }
+  std::vector<int64_t> offsets;
+  switch (ReadMovCompositionOffsets(moov, st->id, samples->size(), &offsets)) {
+    case CttsResult::Found:
+      break;
+    case CttsResult::Absent:
+      offsets.assign(samples->size(), 0);
+      break;
+    case CttsResult::Unusable:
+      return Status::Fail(kErrFileCorrupt, "ctts");
+  }
+
+  // The per-stream shift (negative ctts, edit list) is FFmpeg-internal: take
+  // it from the first packets FFmpeg reads and check the mapping on them.
+  constexpr int kVerifyPackets = 8;
+  constexpr int kMaxReads = 64;
+  int64_t shift = 0;
+  int verified = 0;
+  Status result = Status::Ok();
+  AVPacket* pkt = av_packet_alloc();
+  if (pkt == nullptr) {
+    return Status::Fail(kErrFileCorrupt, "packet alloc");
+  }
+  for (int reads = 0; reads < kMaxReads && verified < kVerifyPackets;
+       ++reads) {
+    if (av_read_frame(impl_->fmt, pkt) < 0) {
+      break;
+    }
+    if (pkt->stream_index != impl_->videoStream) {
+      av_packet_unref(pkt);
+      continue;
+    }
+    const int64_t pos = pkt->pos;
+    const int64_t dts = pkt->dts;
+    const int64_t pts = pkt->pts;
+    av_packet_unref(pkt);
+    size_t k = 0;
+    while (k < samples->size() &&
+           ((*samples)[k].fileOffset != pos || dtsTb[k] != dts)) {
+      ++k;
+    }
+    if (k == samples->size() || pts == AV_NOPTS_VALUE) {
+      result = Status::Fail(kErrFileCorrupt, "packet not in index");
+      break;
+    }
+    const int64_t s = pts - (dtsTb[k] + offsets[k]);
+    if (verified == 0) {
+      shift = s;
+    } else if (s != shift) {
+      result = Status::Fail(kErrFileCorrupt, "ctts mismatch");
+      break;
+    }
+    ++verified;
+  }
+  av_packet_free(&pkt);
+  // Packets are read by pread from here on; leave FFmpeg at the start anyway.
+  (void)av_seek_frame(impl_->fmt, impl_->videoStream, INT64_MIN,
+                      AVSEEK_FLAG_BACKWARD);
+  if (!result.ok) {
+    return result;
+  }
+  if (verified == 0) {
+    return Status::Fail(kErrFileCorrupt, "no video packet");
+  }
+  for (size_t i = 0; i < samples->size(); ++i) {
+    (*samples)[i].dtsUs = TbToUs(st->time_base, dtsTb[i]);
+    (*samples)[i].ptsUs = TbToUs(st->time_base, dtsTb[i] + offsets[i] + shift);
+  }
   return Status::Ok();
 #endif
 }
