@@ -1,0 +1,7 @@
+# mobi structure v1, textHash v1: id type level textHash imageHref frame
+# title=An AZW3 Structure Book creator= language=
+s0.b0 heading 1 7b75e3ef68b7f65c
+s0.b1 paragraph 0 2384902e2057d4ad
+s0.b2 paragraph 0 af4f033bf959f9df
+s0.b3 image 0 84127b4f2bfc1768 recindex:2 0
+s1.b0 image 0 069c66d0ce718a0e recindex:1 1

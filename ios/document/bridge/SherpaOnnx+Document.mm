@@ -71,6 +71,7 @@ static NSDictionary *SherpaDocStructureSummary(const TxtStructure &st) {
   if (!st.creator.empty()) metadata[@"creator"] = SherpaDocNS(st.creator);
   if (!st.language.empty()) metadata[@"language"] = SherpaDocNS(st.language);
   return @{
+    @"format" : SherpaDocNS(st.format),
     @"version" : @(st.version),
     @"blockCount" : @((NSInteger)st.blocks.size()),
     @"sections" : sections,

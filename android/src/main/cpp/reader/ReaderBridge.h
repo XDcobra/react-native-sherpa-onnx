@@ -44,6 +44,9 @@ bool BridgeFindBlockByHash(const std::string& documentId, const std::string& tex
 bool BridgeMapTextRanges(const std::string& documentId, const std::vector<int>& starts,
                          const std::vector<int>& ends, std::string* json, ReaderError* err);
 
+/** Contents JSON (see TocJson). */
+bool BridgeGetToc(const std::string& documentId, std::string* json, ReaderError* err);
+
 bool BridgeReleaseDocument(const std::string& documentId);
 
 }  // namespace reader

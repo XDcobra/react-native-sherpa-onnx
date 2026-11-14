@@ -4087,6 +4087,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise,
   ) = readerHelper.mapReaderTextRanges(documentId, starts, ends, promise)
 
+  override fun getReaderToc(documentId: String, promise: Promise) =
+    readerHelper.getReaderToc(documentId, promise)
+
   override fun releaseReaderDocument(documentId: String, promise: Promise) =
     readerHelper.releaseReaderDocument(documentId, promise)
 

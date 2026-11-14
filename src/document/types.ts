@@ -43,7 +43,7 @@ export type ExtractDocumentTextOptions = {
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };
 
-/** One section of the reading structure (reader structure v1, docs/reader.md). */
+/** One section of the reading structure (docs/reader.md). */
 export type DocumentStructureSection = {
   sectionIndex: number;
   href: string;
@@ -60,10 +60,13 @@ export type DocumentStructureSection = {
 };
 
 /**
- * Reading structure attached to the text buffer (EPUB). Blocks stay in native
- * memory; read them through the reader API (`react-native-sherpa-onnx/reader`).
+ * Reading structure attached to the text buffer (EPUB, FB2, MOBI / AZW3).
+ * Blocks stay in native memory; read them through the reader API
+ * (`react-native-sherpa-onnx/reader`).
  */
 export type DocumentStructure = {
+  /** Source format; its structure rules are versioned on their own. */
+  format: DocumentTextFormat;
   version: number;
   blockCount: number;
   sections: DocumentStructureSection[];

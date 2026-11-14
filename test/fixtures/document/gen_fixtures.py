@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import io
+import struct
 import zipfile
 from pathlib import Path
 
@@ -370,7 +371,13 @@ def make_mobi(
     dictionary_exth: bool = False,
     extra_records: list[bytes] | None = None,
     extra_resource: bytes | None = None,
+    extra_resources: list[bytes] | None = None,
+    exth: list[tuple[int, bytes]] | None = None,
+    full_name: bytes | None = None,
 ) -> bytes:
+    resources = list(extra_resources or [])
+    if extra_resource is not None:
+        resources.insert(0, extra_resource)
     text = html.encode("utf-8")
     rec_size = 4096
     chunks = [text[i : i + rec_size] for i in range(0, max(len(text), 1), rec_size)] or [b""]
@@ -388,7 +395,7 @@ def make_mobi(
         poke32(rec0, 28, encoding)
         poke32(rec0, 36, version)
         extras = extra_records or []
-        res_start = 0xFFFFFFFF if extra_resource is None else 1 + ntext + len(extras)
+        res_start = 0xFFFFFFFF if not resources else 1 + ntext + len(extras)
         poke32(rec0, 108, res_start)
         poke32(rec0, 112, 0xFFFFFFFF)
         poke32(rec0, 192, fdst)
@@ -406,11 +413,22 @@ def make_mobi(
             poke32(rec0, exth + 12, 403)
             poke32(rec0, exth + 16, 12)
             poke32(rec0, exth + 20, 0)
+        elif exth:
+            # EXTH records (metadata) right after the 240-byte MOBI header.
+            body = b"".join(
+                struct.pack(">II", t, 8 + len(v)) + v for t, v in exth
+            )
+            block = b"EXTH" + struct.pack(">II", 12 + len(body), len(exth)) + body
+            poke32(rec0, 128, 0x40)
+            rec0.extend(block)
+        if full_name:
+            poke32(rec0, 0x54, len(rec0))
+            poke32(rec0, 0x58, len(full_name))
+            rec0.extend(full_name + b"\x00\x00")
     recs: list[bytes] = [bytes(rec0)] + chunks
     if extra_records:
         recs.extend(extra_records)
-    if extra_resource is not None:
-        recs.append(extra_resource)
+    recs.extend(resources)
     nrec = len(recs)
     list_off = 78
     rec0_off = list_off + nrec * 8
@@ -603,7 +621,88 @@ def long_files(chapters: int = 40, paragraphs: int = 150) -> list[tuple[str, byt
     ] + files
 
 
+MOBI_STRUCTURE_HTML = """<html><head><title>ignored</title></head><body>
+<h1>The Lighthouse</h1>
+<p>The keeper counted the ships every evening.</p>
+<hr/>
+<p>A map of the bay hung by the door.<img recindex="00002" alt="map of the bay"/></p>
+<mbp:pagebreak/>
+<h2>The Storm</h2>
+<p>On the third night a small boat drifted into the harbour.</p>
+<mbp:pagebreak/>
+<img recindex="00001"/>
+</body></html>
+"""
+
+AZW3_STRUCTURE_HTML = """<html><body>
+<h1>The Lighthouse</h1>
+<p>The keeper counted the ships every evening.</p>
+<p>A map of the bay hung by the door.<img src="kindle:embed:0002?mime=image/png" alt="map of the bay"/></p>
+<mbp:pagebreak/>
+<img src="kindle:embed:0001?mime=image/png"/>
+</body></html>
+"""
+
+MOBI_META = [
+    (100, "Ada Example".encode()),
+    (503, "A Mobi Structure Book".encode()),
+    (524, b"en"),
+]
+
+
+def structure_fb2() -> str:
+    b64 = base64.b64encode(PNG).decode("ascii")
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>The Lighthouse Keeper</book-title>
+      <author><first-name>Ada</first-name><middle-name>B.</middle-name><last-name>Example</last-name></author>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <title><p>The Lighthouse Keeper</p><p>A Story</p></title>
+    <epigraph><p>Every light is a promise.</p><text-author>Harbour saying</text-author></epigraph>
+    <section id="ch1">
+      <title><p>Chapter One</p><p>The Bay</p></title>
+      <subtitle>Evening</subtitle>
+      <p>The keeper   counted the
+         ships every evening.</p>
+      <p>A map of the bay <style name="italic">hung</style> by the door.<image l:href="#map" alt="map of the bay"/></p>
+      <empty-line/>
+      <section id="ch1-1">
+        <title><p>The Boat</p></title>
+        <p>On the third night a small boat drifted in.</p>
+        <poem>
+          <title><p>Harbour Song</p></title>
+          <stanza><v>The tide comes in,</v><v>the tide goes out.</v></stanza>
+        </poem>
+      </section>
+      <table><tr><td>Ships</td><td>12</td></tr></table>
+      <empty-line/>
+    </section>
+    <section id="plate"><image l:href="#plate"/></section>
+  </body>
+  <body name="notes">
+    <section id="n1"><title><p>1</p></title><p>A note about the bay.</p></section>
+  </body>
+  <binary id="map" content-type="image/png">{b64}</binary>
+  <binary id="plate" content-type="image/png">{b64}</binary>
+</FictionBook>
+"""
+
+
 def write_reader_fixtures() -> None:
+    (HERE / "structure.fb2").write_text(structure_fb2(), encoding="utf-8")
+    (HERE / "structure.mobi").write_bytes(
+        make_mobi(MOBI_STRUCTURE_HTML, extra_resources=[PNG, PNG], exth=MOBI_META,
+                  full_name=b"Full Name Fallback")
+    )
+    (HERE / "structure.azw3").write_bytes(
+        make_mobi(AZW3_STRUCTURE_HTML, version=8, extra_resources=[PNG, PNG],
+                  full_name=b"An AZW3 Structure Book")
+    )
     write_epub_fixed(HERE / "structure.epub", structure_files())
     write_epub_fixed(HERE / "structure-ncx.epub", ncx_files())
     write_epub_fixed(HERE / "long.epub", long_files())

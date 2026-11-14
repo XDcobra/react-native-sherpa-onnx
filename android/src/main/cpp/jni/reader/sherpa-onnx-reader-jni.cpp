@@ -144,6 +144,14 @@ Java_com_sherpaonnx_reader_ReaderNative_nativeMapTextRanges(JNIEnv* env, jclass,
   return Result(env, ok, json, err);
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeGetToc(JNIEnv* env, jclass, jstring docId) {
+  std::string json;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeGetToc(Std(env, docId), &json, &err);
+  return Result(env, ok, json, err);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_reader_ReaderNative_nativeReleaseDocument(JNIEnv* env, jclass,
                                                               jstring docId) {

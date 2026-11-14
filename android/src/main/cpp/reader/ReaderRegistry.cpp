@@ -218,7 +218,8 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
   std::shared_ptr<const TxtStructure> st = text->getStructure();
   if (!st) {
     SetErr(err, kErrReaderNoStructure,
-           "Text buffer has no reading structure (extract an EPUB with extractDocumentText)");
+           "Text buffer has no reading structure (extract an EPUB, FB2 or MOBI book with "
+           "extractDocumentText)");
     return {};
   }
   const std::string format = st->format.empty() ? "epub" : st->format;
@@ -298,6 +299,13 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
     }
   }
   ReindexSnapshot(snap.get());
+  for (const TxtTocEntry& e : st->toc) {
+    const int s = snap->SectionIndex("s" + std::to_string(e.sectionIndex));
+    if (s < 0 || snap->sections[s].blockCount == 0) continue;
+    const ReaderSection& sec = snap->sections[s];
+    const int k = e.blockIndex < 0 ? 0 : std::min(e.blockIndex, sec.blockCount - 1);
+    snap->toc.push_back({e.title, std::max(1, e.level), snap->blocks[sec.firstBlock + k].id});
+  }
 
   std::lock_guard<std::mutex> lock(mutex_);
   snap->documentId = "rdr_" + std::to_string(nextId_++);

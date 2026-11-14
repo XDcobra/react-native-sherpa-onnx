@@ -1432,6 +1432,8 @@ export interface Spec extends TurboModule {
     starts: number[],
     ends: number[]
   ): Promise<string>;
+  /** JSON array of `{ title, level, sectionId, blockId }` (reader contents). */
+  getReaderToc(documentId: string): Promise<string>;
 
   releaseReaderDocument(documentId: string): Promise<boolean>;
 

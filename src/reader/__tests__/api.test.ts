@@ -6,6 +6,7 @@ const mockNative = {
   getReaderBlocks: jest.fn(),
   findReaderBlockByHash: jest.fn(),
   mapReaderTextRanges: jest.fn(),
+  getReaderToc: jest.fn(),
   releaseReaderDocument: jest.fn(),
 };
 
@@ -53,6 +54,7 @@ import {
   createReaderDocument,
   formatBlockId,
   getReaderBlocks,
+  getReaderToc,
   insertSection,
   loadReaderDocument,
   locatorAtTextOffset,
@@ -260,6 +262,34 @@ describe('reader api', () => {
       '',
       'feed'
     );
+  });
+
+  it('reads the contents with levels and locators', async () => {
+    mockNative.getReaderToc.mockResolvedValue(
+      JSON.stringify([
+        { title: 'Part One', level: 1, sectionId: 's1', blockId: 's1.b0' },
+        { title: 'The Boat', level: 2, sectionId: 's1', blockId: 's1.b6' },
+        { title: 'Odd', level: 0, sectionId: 's2', blockId: 's2.b0' },
+      ])
+    );
+    await expect(getReaderToc(SUMMARY as never)).resolves.toEqual([
+      {
+        title: 'Part One',
+        level: 1,
+        locator: { sectionId: 's1', blockId: 's1.b0' },
+      },
+      {
+        title: 'The Boat',
+        level: 2,
+        locator: { sectionId: 's1', blockId: 's1.b6' },
+      },
+      {
+        title: 'Odd',
+        level: 1,
+        locator: { sectionId: 's2', blockId: 's2.b0' },
+      },
+    ]);
+    expect(mockNative.getReaderToc).toHaveBeenCalledWith('rdr_1');
   });
 
   it('maps text-buffer ranges to reader ranges in one call', async () => {

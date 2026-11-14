@@ -130,6 +130,13 @@ bool BridgeMapTextRanges(const std::string& documentId, const std::vector<int>& 
   return true;
 }
 
+bool BridgeGetToc(const std::string& documentId, std::string* json, ReaderError* err) {
+  std::shared_ptr<const ReaderSnapshot> snap;
+  if (!SnapshotOrError(documentId, &snap, err)) return false;
+  *json = TocJson(*snap);
+  return true;
+}
+
 bool BridgeReleaseDocument(const std::string& documentId) {
   return ReaderRegistry::Instance().Release(documentId);
 }

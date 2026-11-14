@@ -93,6 +93,14 @@ export type ReaderBlock = {
   textRange?: { start: number; end: number };
 };
 
+/** One entry of the book's contents (`getReaderToc`). */
+export type ReaderTocEntry = {
+  title: string;
+  /** Nesting depth, starting at 1. */
+  level: number;
+  locator: ReaderLocator;
+};
+
 /** A range in the reading flow: `from` inclusive, `to` exclusive. */
 export type ReaderRange = { from: ReaderLocator; to: ReaderLocator };
 

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>The Lighthouse Keeper</book-title>
+      <author><first-name>Ada</first-name><middle-name>B.</middle-name><last-name>Example</last-name></author>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <title><p>The Lighthouse Keeper</p><p>A Story</p></title>
+    <epigraph><p>Every light is a promise.</p><text-author>Harbour saying</text-author></epigraph>
+    <section id="ch1">
+      <title><p>Chapter One</p><p>The Bay</p></title>
+      <subtitle>Evening</subtitle>
+      <p>The keeper   counted the
+         ships every evening.</p>
+      <p>A map of the bay <style name="italic">hung</style> by the door.<image l:href="#map" alt="map of the bay"/></p>
+      <empty-line/>
+      <section id="ch1-1">
+        <title><p>The Boat</p></title>
+        <p>On the third night a small boat drifted in.</p>
+        <poem>
+          <title><p>Harbour Song</p></title>
+          <stanza><v>The tide comes in,</v><v>the tide goes out.</v></stanza>
+        </poem>
+      </section>
+      <table><tr><td>Ships</td><td>12</td></tr></table>
+      <empty-line/>
+    </section>
+    <section id="plate"><image l:href="#plate"/></section>
+  </body>
+  <body name="notes">
+    <section id="n1"><title><p>1</p></title><p>A note about the bay.</p></section>
+  </body>
+  <binary id="map" content-type="image/png">iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4z8AAAAADAAEY3Y20AAAAAElFTkSuQmCC</binary>
+  <binary id="plate" content-type="image/png">iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4z8AAAAADAAEY3Y20AAAAAElFTkSuQmCC</binary>
+</FictionBook>

@@ -122,6 +122,8 @@ function mapStructure(raw: unknown): DocumentStructure | undefined {
   if (str(meta.creator)) metadata.creator = str(meta.creator);
   if (str(meta.language)) metadata.language = str(meta.language);
   return {
+    format:
+      r.format === 'fb2' || r.format === 'mobi' ? r.format : ('epub' as const),
     version: Number(r.version ?? 1),
     blockCount: Number(r.blockCount ?? 0),
     sections: sections.map((item) => {

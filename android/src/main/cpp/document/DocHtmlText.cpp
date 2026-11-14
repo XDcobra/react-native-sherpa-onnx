@@ -146,6 +146,11 @@ HtmlBlock ImageItem(lxb_dom_element_t* el, bool svg) {
   } else {
     b.image_src = AttrVal(el, "src");
     if (b.image_src.empty()) b.image_src = AttrVal(el, "href");
+    if (b.image_src.empty()) {
+      // MOBI7: <img recindex="00001"> points at the first image record.
+      const std::string rec = AttrVal(el, "recindex");
+      if (!rec.empty()) b.image_src = "recindex:" + rec;
+    }
     const lxb_char_t* alt = lxb_dom_element_get_attribute(
         el, reinterpret_cast<const lxb_char_t*>("alt"), 3, nullptr);
     if (alt) {

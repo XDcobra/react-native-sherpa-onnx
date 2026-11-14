@@ -1,0 +1,20 @@
+# fb2 structure v1, textHash v1: id type level textHash imageHref frame
+# title=The Lighthouse Keeper creator=Ada B. Example language=en
+s0.b0 heading 1 4cc03e98a93ee81a
+s0.b1 paragraph 0 a6cb25b7b6942106
+s0.b2 paragraph 0 5f5e67a3890b6b1b
+s1.b0 heading 1 ffac8ab6b5fb07f9
+s1.b1 heading 2 458c1fed57435404
+s1.b2 paragraph 0 2384902e2057d4ad
+s1.b3 paragraph 0 af4f033bf959f9df
+s1.b4 image 0 2d3de79b332c5112 map 0
+s1.b5 separator 0 33bb972d8af6c11a
+s1.b6 heading 2 32aa773868fef7c1
+s1.b7 paragraph 0 ac5487330f90231b
+s1.b8 heading 3 e33c480a3619f313
+s1.b9 paragraph 0 5ba6a43eeb378d2f
+s1.b10 paragraph 0 cf7c1e56a457ebcb
+s1.b11 paragraph 0 6b51d431df5d7f14
+s2.b0 image 0 eb21b69de758e6c6 plate 1
+s3.b0 heading 1 6b86b273ff34fce1
+s3.b1 paragraph 0 a406becfaf42f2d1

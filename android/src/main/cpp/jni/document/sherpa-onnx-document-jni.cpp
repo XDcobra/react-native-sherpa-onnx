@@ -76,6 +76,7 @@ void PutObject(JNIEnv* env, jobject map, jmethodID put, const char* key,
 jobject StructureSummary(JNIEnv* env, const TxtStructure& st) {
   jmethodID put = nullptr;
   jobject out = NewHashMap(env, &put);
+  PutString(env, out, put, "format", st.format);
   PutInt(env, out, put, "version", st.version);
   PutInt(env, out, put, "blockCount", static_cast<jint>(st.blocks.size()));
   jclass listCls = env->FindClass("java/util/ArrayList");

@@ -1,0 +1,10 @@
+# mobi structure v1, textHash v1: id type level textHash imageHref frame
+# title=A Mobi Structure Book creator=Ada Example language=en
+s0.b0 heading 1 7b75e3ef68b7f65c
+s0.b1 paragraph 0 2384902e2057d4ad
+s0.b2 separator 0 33bb972d8af6c11a
+s0.b3 paragraph 0 af4f033bf959f9df
+s0.b4 image 0 84127b4f2bfc1768 recindex:2 0
+s1.b0 heading 2 4ffd8de6a4dba3e5
+s1.b1 paragraph 0 f7f25ef112ebcc6d
+s2.b0 image 0 069c66d0ce718a0e recindex:1 1

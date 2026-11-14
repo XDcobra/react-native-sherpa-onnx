@@ -95,6 +95,9 @@ internal class SherpaOnnxReaderHelper(reactContext: ReactApplicationContext) {
     run(promise) { ReaderNative.nativeMapTextRanges(documentId, s, e) }
   }
 
+  fun getReaderToc(documentId: String, promise: Promise) =
+    run(promise) { ReaderNative.nativeGetToc(documentId) }
+
   fun releaseReaderDocument(documentId: String, promise: Promise) {
     promise.resolve(ReaderNative.nativeReleaseDocument(documentId))
   }

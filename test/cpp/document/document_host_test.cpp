@@ -2,6 +2,7 @@
 #include "DocHtmlText.h"
 #include "DocPath.h"
 #include "DocSniff.h"
+#include "../textbuffer/TxtUtf16.h"
 
 #include <cstdint>
 #include <cstring>
@@ -352,12 +353,131 @@ TEST(DocumentStructure, AllImagesScopeCollectsInlineImagesOncePerPath) {
   EXPECT_EQ(def.frames[0].href, "OEBPS/images/plate.png");
 }
 
-TEST(DocumentStructure, OnlyEpubCarriesStructure) {
-  const auto path = FixturePath("north-wind.fb2");
+TEST(DocumentStructure, MobiCarriesStructureMetadataAndImages) {
+  const auto path = FixturePath("structure.mobi");
   RequireFixture(path);
   auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
-  ASSERT_TRUE(r.ok) << r.error_code;
-  EXPECT_FALSE(r.structure);
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  const auto& st = *r.structure;
+  EXPECT_EQ(st.format, "mobi");
+  EXPECT_EQ(st.title, "A Mobi Structure Book");  // EXTH 503 wins over the full name
+  EXPECT_EQ(st.creator, "Ada Example");
+  EXPECT_EQ(st.language, "en");
+  ASSERT_EQ(st.sections.size(), 3u);
+  EXPECT_EQ(st.sections[0].title, "The Lighthouse");
+  EXPECT_EQ(st.sections[0].titleSource, "heading");
+  EXPECT_EQ(st.sections[2].kind, "image");
+  // Section 0: heading, paragraph, separator, paragraph, image (after its paragraph).
+  std::vector<TxtBlockType> types;
+  for (int k = 0; k < st.sections[0].blockCount; ++k) {
+    types.push_back(st.blocks[st.sections[0].firstBlock + k].type);
+  }
+  EXPECT_EQ(types, (std::vector<TxtBlockType>{TxtBlockType::Heading, TxtBlockType::Paragraph,
+                                              TxtBlockType::Separator, TxtBlockType::Paragraph,
+                                              TxtBlockType::Image}));
+  const auto& inline_img = st.blocks[st.sections[0].firstBlock + 4];
+  EXPECT_EQ(inline_img.imageHref, "recindex:2");
+  EXPECT_EQ(inline_img.alt, "map of the bay");
+  const auto& plate = st.blocks[st.sections[2].firstBlock];
+  EXPECT_EQ(plate.imageHref, "recindex:1");
+
+  // scope 'all': every referenced image once, in reading order.
+  sherpa_onnx::document::ExtractOptions all;
+  all.all_images = true;
+  auto images = sherpa_onnx::document::ExtractDocumentImages(Src(path), all);
+  ASSERT_TRUE(images.ok) << images.error_code << " " << images.error_message;
+  ASSERT_EQ(images.frames.size(), 2u);
+  EXPECT_EQ(images.frames[0].href, "recindex:2");
+  EXPECT_EQ(images.frames[0].section_index, 0);
+  EXPECT_EQ(images.frames[1].href, "recindex:1");
+  EXPECT_EQ(images.frames[1].section_index, 2);
+  // Default scope: only the image-only part.
+  auto def = sherpa_onnx::document::ExtractDocumentImages(Src(path));
+  ASSERT_TRUE(def.ok);
+  ASSERT_EQ(def.frames.size(), 1u);
+  EXPECT_EQ(def.frames[0].href, "recindex:1");
+}
+
+TEST(DocumentStructure, Azw3KindleEmbedImagesAndFullNameTitle) {
+  const auto path = FixturePath("structure.azw3");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  EXPECT_EQ(r.structure->title, "An AZW3 Structure Book");
+  bool saw_inline = false;
+  for (const auto& b : r.structure->blocks) {
+    if (b.type == TxtBlockType::Image && b.imageHref == "recindex:2") saw_inline = true;
+  }
+  EXPECT_TRUE(saw_inline) << "kindle:embed:0002 resolves to image record 2";
+  // The image-only part decodes its own record (not always record 1).
+  auto def = sherpa_onnx::document::ExtractDocumentImages(Src(path));
+  ASSERT_TRUE(def.ok) << def.error_code << " " << def.error_message;
+  ASSERT_EQ(def.frames.size(), 1u);
+  EXPECT_EQ(def.frames[0].href, "recindex:1");
+}
+
+TEST(DocumentStructure, Fb2TitlesSectionsImagesAndMetadata) {
+  const auto path = FixturePath("structure.fb2");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  const auto& st = *r.structure;
+  EXPECT_EQ(st.format, "fb2");
+  EXPECT_EQ(st.title, "The Lighthouse Keeper");
+  EXPECT_EQ(st.creator, "Ada B. Example");
+  EXPECT_EQ(st.language, "en");
+  // Body lead-in, ch1 (with nested ch1-1), plate, notes section.
+  ASSERT_EQ(st.sections.size(), 4u);
+  EXPECT_EQ(st.sections[0].href, "body-0");
+  EXPECT_EQ(st.sections[0].title, "The Lighthouse Keeper A Story");
+  EXPECT_EQ(st.sections[1].href, "ch1");
+  EXPECT_EQ(st.sections[1].title, "Chapter One The Bay");
+  EXPECT_EQ(st.sections[1].titleSource, "toc");
+  EXPECT_EQ(st.sections[2].kind, "image");
+  EXPECT_EQ(st.sections[3].href, "n1");
+
+  auto text_of = [&](const TxtStructBlock& b) {
+    return txt_utf16_slice(r.text, b.utf16Start, b.utf16End - b.utf16Start);
+  };
+  std::vector<std::string> got;
+  for (int k = 0; k < st.sections[1].blockCount; ++k) {
+    const auto& b = st.blocks[st.sections[1].firstBlock + k];
+    std::string line = txt_block_type_name(b.type);
+    if (b.type == TxtBlockType::Heading) line += std::to_string(b.headingLevel);
+    if (b.type == TxtBlockType::Image) line += " " + b.imageHref;
+    if (b.utf16End > b.utf16Start) line += " " + text_of(b);
+    got.push_back(line);
+  }
+  EXPECT_EQ(got, (std::vector<std::string>{
+                     "heading1 Chapter One\nThe Bay",
+                     "heading2 Evening",
+                     "paragraph The keeper counted the ships every evening.",
+                     "paragraph A map of the bay hung by the door.",
+                     "image map",
+                     "separator",
+                     "heading2 The Boat",
+                     "paragraph On the third night a small boat drifted in.",
+                     "heading3 Harbour Song",
+                     "paragraph The tide comes in,\nthe tide goes out.",
+                     "paragraph Ships",
+                     "paragraph 12",
+                 }));
+
+  sherpa_onnx::document::ExtractOptions all;
+  all.all_images = true;
+  auto images = sherpa_onnx::document::ExtractDocumentImages(Src(path), all);
+  ASSERT_TRUE(images.ok) << images.error_code;
+  ASSERT_EQ(images.frames.size(), 2u);
+  EXPECT_EQ(images.frames[0].href, "map");
+  EXPECT_EQ(images.frames[0].section_index, 1);
+  EXPECT_EQ(images.frames[1].href, "plate");
+  auto def = sherpa_onnx::document::ExtractDocumentImages(Src(path));
+  ASSERT_TRUE(def.ok);
+  ASSERT_EQ(def.frames.size(), 1u);
+  EXPECT_EQ(def.frames[0].href, "plate");
 }
 #endif
 

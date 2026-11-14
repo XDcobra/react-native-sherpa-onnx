@@ -64,6 +64,14 @@ struct TxtStructSection {
   int blockCount = 0;
 };
 
+/** One entry of the book's contents. */
+struct TxtTocEntry {
+  std::string title;
+  int level = 1;          // nesting depth, from 1
+  int sectionIndex = 0;   // TxtStructSection::sectionIndex
+  int blockIndex = -1;    // block within the section; -1 = section start
+};
+
 struct TxtStructure {
   /** "epub" | "fb2" | "mobi" | "pdf" | "pages"; each format versions its rules. */
   std::string format = "epub";
@@ -73,4 +81,6 @@ struct TxtStructure {
   std::string title;
   std::string creator;
   std::string language;
+  /** Contents in reading order (nav / NCX, FB2 titles, PDF outline); may be empty. */
+  std::vector<TxtTocEntry> toc;
 };

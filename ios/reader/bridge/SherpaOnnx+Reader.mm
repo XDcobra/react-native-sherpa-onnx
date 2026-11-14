@@ -157,6 +157,16 @@ RCT_EXPORT_METHOD(mapReaderTextRanges : (NSString *)documentId starts : (NSArray
   });
 }
 
+RCT_EXPORT_METHOD(getReaderToc : (NSString *)documentId resolve : (RCTPromiseResolveBlock)
+                      resolve reject : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(ReaderQueue(), ^{
+    std::string json;
+    sherpa_onnx::reader::ReaderError err;
+    const bool ok = sherpa_onnx::reader::BridgeGetToc(Std(documentId), &json, &err);
+    Finish(ok, json, err, resolve, reject);
+  });
+}
+
 RCT_EXPORT_METHOD(releaseReaderDocument : (NSString *)documentId resolve : (
                       RCTPromiseResolveBlock)resolve reject : (RCTPromiseRejectBlock)reject) {
   resolve(@(sherpa_onnx::reader::BridgeReleaseDocument(Std(documentId))));

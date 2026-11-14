@@ -19,6 +19,12 @@ std::string BlocksJson(const ReaderSnapshot& snap, int start, int max, bool incl
 
 std::string JsonEscape(const std::string& s);
 
+/**
+ * Contents as `[{title, level, sectionId, blockId}]`: the source's contents,
+ * else every titled section (level 1). Entries whose block is gone are skipped.
+ */
+std::string TocJson(const ReaderSnapshot& snap);
+
 /** `[{"from":locator,"to":locator} | null, ...]` for text-buffer UTF-16 ranges (see MapTextRange). */
 std::string TextRangesJson(const ReaderSnapshot& snap, const std::vector<int>& starts,
                            const std::vector<int>& ends);

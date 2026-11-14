@@ -146,6 +146,31 @@ std::string BlocksJson(const ReaderSnapshot& snap, int start, int max, bool incl
   return out;
 }
 
+std::string TocJson(const ReaderSnapshot& snap) {
+  std::string out = "[";
+  bool any = false;
+  auto entry = [&](const std::string& title, int level, int block) {
+    if (any) out.push_back(',');
+    any = true;
+    out += "{\"title\":" + JsonEscape(title) + ",\"level\":" + std::to_string(level) +
+           ",\"sectionId\":" + JsonEscape(snap.sections[snap.blocks[block].section].id) +
+           ",\"blockId\":" + JsonEscape(snap.blocks[block].id) + "}";
+  };
+  if (!snap.toc.empty()) {
+    for (const auto& e : snap.toc) {
+      const int b = snap.BlockIndex(e.blockId);
+      if (b >= 0) entry(e.title, e.level, b);
+    }
+  } else {
+    for (const auto& sec : snap.sections) {
+      if (sec.title.empty() || sec.blockCount == 0) continue;
+      entry(sec.title, 1, sec.firstBlock);
+    }
+  }
+  out.push_back(']');
+  return out;
+}
+
 std::string TextRangesJson(const ReaderSnapshot& snap, const std::vector<int>& starts,
                            const std::vector<int>& ends) {
   auto locator = [&](int block, int offset) {

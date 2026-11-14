@@ -1,6 +1,7 @@
 #include "DocMobi.h"
 
 #include "DocHtmlText.h"
+#include "DocStructureBuild.h"
 #include "DocUtf16.h"
 #include "decode/ImageDecoder.h"
 
@@ -8,9 +9,11 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <fcntl.h>
 #include <map>
+#include <set>
 #include <string>
 #include <unistd.h>
 #include <utility>
@@ -495,6 +498,11 @@ struct MobiHeaders {
   bool has_mobi = false;
   bool kf8 = false;
   bool is_dictionary = false;
+  // Metadata (raw bytes in the book's text encoding).
+  std::string full_name;   // record 0 full name
+  std::string exth_title;  // EXTH 503
+  std::vector<std::string> exth_authors;  // EXTH 100
+  std::string exth_language;  // EXTH 524
 };
 
 bool ParseHeaders(const std::vector<uint8_t>& rec0, MobiHeaders* h,
@@ -524,6 +532,13 @@ bool ParseHeaders(const std::vector<uint8_t>& rec0, MobiHeaders* h,
     h->frag = At32(rec0, 248);
     h->skel = At32(rec0, 252);
     h->kf8 = h->version >= 8;
+    if (rec0.size() >= 0x5c) {
+      const uint32_t name_off = At32(rec0, 0x54);
+      const uint32_t name_len = At32(rec0, 0x58);
+      if (name_len > 0 && name_len < 4096 && Have(rec0, name_off, name_len)) {
+        h->full_name = AtStr(rec0, name_off, name_len);
+      }
+    }
     if ((exth_flag & 0x40) && mobi_len + 16 <= rec0.size()) {
       const size_t exth_off = mobi_len + 16;
       if (Have(rec0, exth_off, 12) && AtStr(rec0, exth_off, 4) == "EXTH") {
@@ -537,6 +552,9 @@ bool ParseHeaders(const std::vector<uint8_t>& rec0, MobiHeaders* h,
             h->boundary = At32(rec0, off + 8);
           }
           if (type == 403) h->is_dictionary = true;
+          if (type == 100 && length > 8) h->exth_authors.push_back(AtStr(rec0, off + 8, length - 8));
+          if (type == 503 && length > 8) h->exth_title = AtStr(rec0, off + 8, length - 8);
+          if (type == 524 && length > 8) h->exth_language = AtStr(rec0, off + 8, length - 8);
           if (type == 501 && length > 8) {
             std::string cde = AtStr(rec0, off + 8, length - 8);
             if (IContains(cde, "dict")) h->is_dictionary = true;
@@ -572,27 +590,6 @@ void StripTrailing(std::vector<uint8_t>* rec, uint32_t trailing_flags) {
   if (multibyte && !rec->empty()) {
     const uint32_t len = (rec->back() & 3u) + 1u;
     if (len <= rec->size()) rec->resize(rec->size() - len);
-  }
-}
-
-void AppendBlocks(ExtractTextResult* r, const HtmlExtract& hx, int section_index,
-                  const std::string& href, int* utf16_off) {
-  for (const auto& block : hx.blocks) {
-    if (*utf16_off > 0) {
-      r->text += "\n\n";
-      *utf16_off += 2;
-    }
-    const int start = *utf16_off;
-    r->text += block;
-    const int len = Utf16LengthOfUtf8(block);
-    *utf16_off += len;
-    DocTextSpan span;
-    span.utf16_start = start;
-    span.utf16_end = start + len;
-    span.level = "block";
-    span.section_index = section_index;
-    span.href = href;
-    r->spans.push_back(std::move(span));
   }
 }
 
@@ -1055,6 +1052,58 @@ ExtractImagesResult FailI(const char* code, const std::string& msg) {
   return r;
 }
 
+/**
+ * Frame href of an image reference: "recindex:N" for MOBI7 `recindex` and KF8
+ * `kindle:embed:XXXX` (base 32) links, both 1-based image record numbers;
+ * "" for anything else (MOBI books have no external images).
+ */
+std::string MobiImageHref(const std::string& src) {
+  if (src.rfind("recindex:", 0) == 0) {
+    const int n = ParseRecindex(src.substr(9));
+    return n > 0 ? "recindex:" + std::to_string(n) : std::string();
+  }
+  static const std::string kEmbed = "kindle:embed:";
+  if (src.rfind(kEmbed, 0) == 0) {
+    int v = 0;
+    bool any = false;
+    for (size_t i = kEmbed.size(); i < src.size(); ++i) {
+      const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(src[i])));
+      int d = -1;
+      if (c >= '0' && c <= '9') d = c - '0';
+      if (c >= 'A' && c <= 'V') d = c - 'A' + 10;
+      if (d < 0) break;
+      v = v * 32 + d;
+      any = true;
+      if (v > 1000000) return {};
+    }
+    return any && v > 0 ? "recindex:" + std::to_string(v) : std::string();
+  }
+  return {};
+}
+
+std::string MetaText(const std::string& raw, uint32_t encoding) {
+  if (raw.empty()) return {};
+  std::vector<uint8_t> bytes(raw.begin(), raw.end());
+  while (!bytes.empty() && bytes.back() == 0) bytes.pop_back();
+  return TrimWs(ToUtf8(bytes, encoding));
+}
+
+/** Image record numbers referenced by a part, in reading order. */
+std::vector<int> PartImageRecords(const HtmlExtract& hx, const std::string& html) {
+  std::vector<int> out;
+  for (const HtmlBlock& item : hx.items) {
+    if (item.kind != HtmlBlockKind::Image) continue;
+    const std::string href = MobiImageHref(item.image_src);
+    if (!href.empty()) out.push_back(ParseRecindex(href.substr(9)));
+  }
+  if (out.empty() && HtmlIsImageOnly(hx)) {
+    const int rec = ParseRecindex(FirstImageRecindex(
+        reinterpret_cast<const uint8_t*>(html.data()), html.size()));
+    if (rec > 0) out.push_back(rec);
+  }
+  return out;
+}
+
 }  // namespace
 
 ExtractTextResult ExtractMobiText(const DocumentSource& src,
@@ -1080,6 +1129,18 @@ ExtractTextResult ExtractMobiText(const DocumentSource& src,
   DOC_LOGI("mobi open records=%zu textRec=%u kf8=%d raw=%zu parts=%zu",
            book.pdb.NumRecords(), book.hdr.num_text_records, book.hdr.kf8 ? 1 : 0,
            book.raw_text.size(), book.html_parts.size());
+  auto structure = std::make_shared<TxtStructure>();
+  structure->format = "mobi";
+  structure->version = 1;
+  structure->title = MetaText(book.hdr.exth_title, book.hdr.encoding);
+  if (structure->title.empty()) {
+    structure->title = MetaText(book.hdr.full_name, book.hdr.encoding);
+  }
+  if (!book.hdr.exth_authors.empty()) {
+    structure->creator = MetaText(book.hdr.exth_authors.front(), book.hdr.encoding);
+  }
+  structure->language = MetaText(book.hdr.exth_language, book.hdr.encoding);
+
   int utf16 = 0;
   int section_index = 0;
   const int total = static_cast<int>(book.html_parts.size());
@@ -1098,16 +1159,20 @@ ExtractTextResult ExtractMobiText(const DocumentSource& src,
     DocSection sec;
     sec.section_index = section_index;
     sec.href = href;
-    if (HtmlIsImageOnly(hx)) {
-      sec.kind = "image";
-      r.sections.push_back(sec);
+    const bool image_only = HtmlIsImageOnly(hx);
+    sec.kind = image_only ? "image" : "text";
+    r.sections.push_back(sec);
+    if (image_only) {
       r.image_only_sections.push_back(sec);
       DOC_LOGI("mobi image-only section=%d", section_index);
-    } else {
-      sec.kind = "text";
-      r.sections.push_back(sec);
-      AppendBlocks(&r, hx, section_index, href, &utf16);
     }
+    StructureSectionInput in;
+    in.section_index = section_index;
+    in.href = href;
+    in.kind = sec.kind;
+    in.items = &hx.items;
+    in.resolve_image = MobiImageHref;
+    AppendStructureSection(&r, structure.get(), in, &utf16);
     ++section_index;
   }
   Progress(opt, total, total, "done");
@@ -1116,6 +1181,7 @@ ExtractTextResult ExtractMobiText(const DocumentSource& src,
     r.error_message = "No extractable markup text";
     return r;
   }
+  r.structure = std::move(structure);
   r.ok = true;
   return r;
 }
@@ -1135,11 +1201,12 @@ ExtractImagesResult ExtractMobiImages(const DocumentSource& src,
   }
   sherpa_onnx::image::DecodeOptions dec;
   dec.maxSide = opt.max_side;
-  int section_index = 0;
+  std::set<int> seen;
   const int total = static_cast<int>(book.html_parts.size());
   for (size_t i = 0; i < book.html_parts.size(); ++i) {
     if (Cancelled(opt)) return FailI(kErrCancelled, "cancelled");
     Progress(opt, static_cast<int>(i), total, "section");
+    const int section_index = static_cast<int>(i);
     const std::string& html = book.html_parts[i];
     const HtmlExtract hx = ExtractHtmlText(
         reinterpret_cast<const uint8_t*>(html.data()), html.size());
@@ -1148,41 +1215,37 @@ ExtractImagesResult ExtractMobiImages(const DocumentSource& src,
       r.error_message = hx.error_message;
       return r;
     }
-    if (!HtmlIsImageOnly(hx)) {
-      ++section_index;
-      continue;
+    // Default scope: the image of each image-only part. `all_images`: every
+    // image the book references, once per record, in reading order.
+    if (!opt.all_images && !HtmlIsImageOnly(hx)) continue;
+    std::vector<int> records = PartImageRecords(hx, html);
+    if (!opt.all_images && records.size() > 1) records.resize(1);
+    for (int recindex : records) {
+      if (recindex <= 0 || !seen.insert(recindex).second) continue;
+      std::vector<uint8_t> bytes;
+      if (!LoadResource(&book, static_cast<uint32_t>(recindex - 1), &bytes,
+                        &err_code, &err_msg)) {
+        DOC_LOGI("mobi recindex %d missing", recindex);
+        continue;
+      }
+      auto decoded = sherpa_onnx::image::ImageDecoder::DecodeBytes(
+          bytes.data(), bytes.size(), dec);
+      if (!decoded.ok) {
+        DOC_LOGI("mobi decode skip recindex=%d %s", recindex,
+                 decoded.errorCode.c_str());
+        continue;
+      }
+      DocImageFrame fr;
+      fr.rgb = std::move(decoded.frame);
+      fr.section_index = section_index;
+      fr.href = "recindex:" + std::to_string(recindex);
+      r.frames.push_back(std::move(fr));
     }
-    const std::string rec =
-        FirstImageRecindex(reinterpret_cast<const uint8_t*>(html.data()),
-                           html.size());
-    int recindex = ParseRecindex(rec);
-    if (recindex <= 0) recindex = 1;
-    std::vector<uint8_t> bytes;
-    if (!LoadResource(&book, static_cast<uint32_t>(recindex - 1), &bytes,
-                      &err_code, &err_msg)) {
-      DOC_LOGI("mobi recindex %d missing", recindex);
-      ++section_index;
-      continue;
-    }
-    auto decoded = sherpa_onnx::image::ImageDecoder::DecodeBytes(
-        bytes.data(), bytes.size(), dec);
-    if (!decoded.ok) {
-      DOC_LOGI("mobi decode skip recindex=%d %s", recindex,
-               decoded.errorCode.c_str());
-      ++section_index;
-      continue;
-    }
-    DocImageFrame fr;
-    fr.rgb = std::move(decoded.frame);
-    fr.section_index = section_index;
-    fr.href = "recindex:" + std::to_string(recindex);
-    r.frames.push_back(std::move(fr));
-    ++section_index;
   }
   Progress(opt, total, total, "done");
   if (r.frames.empty()) {
     r.error_code = kErrNoImages;
-    r.error_message = "No image-only sections";
+    r.error_message = opt.all_images ? "No decodable images" : "No image-only sections";
     return r;
   }
   r.ok = true;

@@ -185,6 +185,50 @@ TEST(ReaderDocument, StructureV1Golden) {
   EXPECT_EQ(got.str(), want.str());
 }
 
+namespace {
+
+/** Golden lines for a fixture: id type level textHash imageHref (per format, versioned). */
+void ExpectGolden(const char* fixture, const char* golden, const std::vector<std::string>& frames) {
+  const std::string id = CreateDoc(fixture, frames);
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  ASSERT_TRUE(snap);
+  std::ostringstream got;
+  got << "# " << snap->format << " structure v" << snap->structureVersion << ", textHash v"
+      << kTextHashVersion << ": id type level textHash imageHref frame\n";
+  got << "# title=" << snap->title << " creator=" << snap->creator
+      << " language=" << snap->language << "\n";
+  for (const auto& b : snap->blocks) {
+    got << b.id << ' ' << ReaderBlockTypeName(b.type) << ' ' << b.headingLevel << ' '
+        << b.textHash;
+    if (!b.imageHref.empty()) got << ' ' << b.imageHref << ' ' << b.imageFrame;
+    got << '\n';
+  }
+  ReaderRegistry::Instance().Release(id);
+  const std::string path = RepoPath(std::string("test/fixtures/reader/") + golden);
+  if (std::getenv("SHERPA_UPDATE_GOLDEN")) {
+    std::ofstream(path) << got.str();
+  }
+  std::ifstream f(path);
+  ASSERT_TRUE(f.good()) << "missing golden " << path << " (run with SHERPA_UPDATE_GOLDEN=1)";
+  std::stringstream want;
+  want << f.rdbuf();
+  EXPECT_EQ(got.str(), want.str());
+}
+
+}  // namespace
+
+TEST(ReaderDocument, MobiStructureGolden) {
+  ExpectGolden("structure.mobi", "structure.mobi.reader-v1.txt", {"recindex:2", "recindex:1"});
+}
+
+TEST(ReaderDocument, Fb2StructureGolden) {
+  ExpectGolden("structure.fb2", "structure.fb2.reader-v1.txt", {"map", "plate"});
+}
+
+TEST(ReaderDocument, Azw3StructureGolden) {
+  ExpectGolden("structure.azw3", "structure.azw3.reader-v1.txt", {"recindex:2", "recindex:1"});
+}
+
 // ---- Tracker ------------------------------------------------------------
 
 namespace {
@@ -564,4 +608,52 @@ TEST(ReaderBlockText, PerFormatVersionGate) {
   EXPECT_EQ(SupportedStructureVersion("epub"), kStructureVersion);
   EXPECT_EQ(SupportedStructureVersion("fb2"), 1);
   EXPECT_EQ(SupportedStructureVersion(""), 0);
+}
+
+// ---- Contents ------------------------------------------------------------
+
+TEST(ReaderToc, EpubNavAtSectionGranularity) {
+  const std::string id = CreateDoc("structure.epub");
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  const std::string json = TocJson(*snap);
+  // First entry per file; the second ch1 entry and the landmarks nav are ignored.
+  EXPECT_NE(json.find("{\"title\":\"Chapter One\",\"level\":1,\"sectionId\":\"s0\",\"blockId\":\"s0.b0\"}"),
+            std::string::npos)
+      << json;
+  EXPECT_EQ(json.find("Ignored second entry"), std::string::npos) << json;
+  EXPECT_EQ(json.find("Landmark"), std::string::npos) << json;
+  EXPECT_NE(json.find("\"title\":\"The Plate\""), std::string::npos) << json;
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderToc, Fb2NestedTitlesPointAtTheirHeadings) {
+  const std::string id = CreateDoc("structure.fb2", {"map", "plate"});
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  ASSERT_EQ(snap->toc.size(), 2u) << TocJson(*snap);
+  EXPECT_EQ(snap->toc[0].title, "Chapter One The Bay");
+  EXPECT_EQ(snap->toc[0].level, 1);
+  EXPECT_EQ(snap->toc[0].blockId, "s1.b0");
+  EXPECT_EQ(snap->toc[1].title, "The Boat");
+  EXPECT_EQ(snap->toc[1].level, 2);
+  EXPECT_EQ(snap->toc[1].blockId, "s1.b6");
+  // An app section shifts flat indices; entries keep their block IDs.
+  ReaderAppSectionInput in;
+  in.after = "s0";
+  in.id = "app:guide";
+  in.blocks = {{"p", ReaderBlockType::Paragraph, "Guide", 0}};
+  ReaderError err;
+  ASSERT_TRUE(ReaderRegistry::Instance().InsertSection(id, in, &err)) << err.message;
+  snap = ReaderRegistry::Instance().Snapshot(id);
+  EXPECT_NE(TocJson(*snap).find("\"blockId\":\"s1.b6\""), std::string::npos);
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderToc, FallsBackToSectionTitles) {
+  const std::string id = CreateDoc("structure.mobi", {"recindex:2", "recindex:1"});
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  EXPECT_TRUE(snap->toc.empty());
+  EXPECT_EQ(TocJson(*snap),
+            "[{\"title\":\"The Lighthouse\",\"level\":1,\"sectionId\":\"s0\",\"blockId\":\"s0.b0\"},"
+            "{\"title\":\"The Storm\",\"level\":1,\"sectionId\":\"s1\",\"blockId\":\"s1.b0\"}]");
+  ReaderRegistry::Instance().Release(id);
 }

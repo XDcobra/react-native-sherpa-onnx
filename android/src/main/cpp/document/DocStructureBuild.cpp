@@ -79,6 +79,15 @@ void AppendStructureSection(ExtractTextResult* r, TxtStructure* st,
       if (first_heading.empty() && b.type == TxtBlockType::Heading) {
         first_heading = item.text;
       }
+      if (item.toc_level > 0) {
+        TxtTocEntry e;
+        e.title = item.text;
+        std::replace(e.title.begin(), e.title.end(), '\n', ' ');
+        e.level = item.toc_level;
+        e.sectionIndex = in.section_index;
+        e.blockIndex = static_cast<int>(st->blocks.size()) - sec.firstBlock;
+        st->toc.push_back(std::move(e));
+      }
       push_block(std::move(b));
     }
   }

@@ -77,6 +77,13 @@ struct ReaderSection {
   int blockCount = 0;
 };
 
+/** A contents entry, addressed by block ID (flat indices shift with app sections). */
+struct ReaderTocEntry {
+  std::string title;
+  int level = 1;
+  std::string blockId;
+};
+
 /** Immutable view of a reader document at one revision. */
 struct ReaderSnapshot {
   std::string documentId;
@@ -94,6 +101,8 @@ struct ReaderSnapshot {
   std::string title;
   std::string creator;
   std::string language;
+  /** Contents from the source (may be empty; TocJson falls back to section titles). */
+  std::vector<ReaderTocEntry> toc;
   /** File text blocks (non-empty buffer range) in buffer order, for offset lookups. */
   std::vector<int> textBlocks;
 

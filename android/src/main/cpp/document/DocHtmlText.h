@@ -19,6 +19,8 @@ struct HtmlBlock {
   std::string image_src;  // images: src / href / xlink:href as written
   std::string alt;
   bool has_alt = false;
+  /** > 0: this heading is an entry of the book's contents at that level (FB2 titles). */
+  int toc_level = 0;
 };
 
 struct HtmlExtract {

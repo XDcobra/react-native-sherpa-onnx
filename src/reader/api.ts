@@ -25,6 +25,7 @@ import type {
   ReaderDocumentFormat,
   ReaderLocator,
   ReaderRange,
+  ReaderTocEntry,
   ReaderSectionInfo,
 } from './types';
 
@@ -279,6 +280,28 @@ export async function getReaderBlocks(
     pos += n;
   }
   return out;
+}
+
+/**
+ * The book's contents in reading order: from the EPUB nav / NCX, FB2 section
+ * titles or the PDF outline. Books without contents fall back to their titled
+ * sections. `level` starts at 1.
+ */
+export async function getReaderToc(
+  doc: ReaderDocument
+): Promise<ReaderTocEntry[]> {
+  const json = await callNative(() => getNative().getReaderToc(doc.id));
+  const raw = JSON.parse(json) as Array<{
+    title: string;
+    level: number;
+    sectionId: string;
+    blockId: string;
+  }>;
+  return raw.map((e) => ({
+    title: e.title,
+    level: Math.max(1, Number(e.level) || 1),
+    locator: { sectionId: e.sectionId, blockId: e.blockId },
+  }));
 }
 
 /**

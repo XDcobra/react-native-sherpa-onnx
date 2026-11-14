@@ -222,15 +222,38 @@ bool HasProperty(const std::string& props, const char* name) {
  * (nav[epub:type~=toc], else the first nav) or the EPUB 2 NCX. Keyed by archive
  * path without fragment; the first entry per file wins.
  */
+/** A contents entry: archive path of its file, label and nesting depth (from 1). */
+struct TocItem {
+  std::string path;
+  std::string label;
+  int level = 1;
+};
+
+/** Nesting depth of a node below `root`, counting ancestors named `local`. */
+int DepthBelow(pugi::xml_node n, pugi::xml_node root, const char* local) {
+  int depth = 0;
+  for (pugi::xml_node p = n.parent(); p && p != root; p = p.parent()) {
+    if (XmlNameIs(p, local)) ++depth;
+  }
+  return depth;
+}
+
+/**
+ * Titles per file (the first contents entry of each file) and, in `items`,
+ * the contents in order with their depth. EPUB 3 nav first, then the NCX.
+ */
 std::map<std::string, std::string> LoadTocTitles(
     ArchiveReader& ar, const std::string& opf_dir,
-    const std::map<std::string, ManifestItem>& manifest, const PackageMeta& meta) {
+    const std::map<std::string, ManifestItem>& manifest, const PackageMeta& meta,
+    std::vector<TocItem>* items) {
   std::map<std::string, std::string> titles;
   auto add = [&](const std::string& base_dir, const std::string& href,
-                 const std::string& label) {
+                 const std::string& label, int level) {
     if (label.empty()) return;
     const std::string path = JoinHref(base_dir, href);
-    if (!path.empty() && titles.find(path) == titles.end()) titles[path] = label;
+    if (path.empty() || titles.find(path) != titles.end()) return;
+    titles[path] = label;
+    if (items) items->push_back({path, label, std::max(1, level)});
   };
   std::string err_code;
   std::string err_msg;
@@ -253,7 +276,8 @@ std::map<std::string, std::string> LoadTocTitles(
     if (toc_nav) {
       const std::string nav_dir = DirnameOf(nav_path);
       for (pugi::xpath_node xa : toc_nav.select_nodes(".//*[local-name()='a']")) {
-        add(nav_dir, XmlAttr(xa.node(), "href"), CollapsedText(xa.node()));
+        add(nav_dir, XmlAttr(xa.node(), "href"), CollapsedText(xa.node()),
+            DepthBelow(xa.node(), toc_nav, "li"));
       }
     }
     break;
@@ -278,7 +302,8 @@ std::map<std::string, std::string> LoadTocTitles(
   for (pugi::xpath_node xn : doc.select_nodes("//*[local-name()='navPoint']")) {
     pugi::xml_node label = XmlSelect(XmlChild(xn.node(), "navLabel"), "text");
     pugi::xml_node content = XmlChild(xn.node(), "content");
-    add(ncx_dir, XmlAttr(content, "src"), CollapsedText(label));
+    add(ncx_dir, XmlAttr(content, "src"), CollapsedText(label),
+        DepthBelow(xn.node(), doc, "navPoint") + 1);
   }
   return titles;
 }
@@ -331,8 +356,9 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
   }
   const std::string opf_dir = DirnameOf(opf_path);
   DOC_LOGI("epub spine=%zu opf=%s", spine.size(), opf_path.c_str());
+  std::vector<TocItem> toc_items;
   const std::map<std::string, std::string> toc =
-      LoadTocTitles(ar, opf_dir, manifest, meta);
+      LoadTocTitles(ar, opf_dir, manifest, meta, &toc_items);
   auto structure = std::make_shared<TxtStructure>();
   structure->title = meta.title;
   structure->creator = meta.creator;
@@ -410,6 +436,22 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
       r.ok = false;
       return r;
     }
+  }
+  // Contents: entries whose file is a reader section (section granularity).
+  std::map<std::string, int> section_of;
+  for (const auto& sec : structure->sections) section_of.emplace(sec.href, sec.sectionIndex);
+  int min_level = 1000;
+  for (const auto& item : toc_items) {
+    if (section_of.count(item.path)) min_level = std::min(min_level, item.level);
+  }
+  for (const auto& item : toc_items) {
+    auto it = section_of.find(item.path);
+    if (it == section_of.end()) continue;
+    TxtTocEntry e;
+    e.title = item.label;
+    e.level = item.level - min_level + 1;
+    e.sectionIndex = it->second;
+    structure->toc.push_back(std::move(e));
   }
   r.structure = std::move(structure);
   r.ok = true;
