@@ -283,6 +283,11 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
       if (cropped) {
         cropped->TranslateResult(frame_result);
       }
+      // Line detectors: reading order + paragraphs from the line boxes.
+      if (frame_result.elements.empty() &&
+          (out.family == "ppocr" || out.family == "doctr" || out.family == "paddleocr_vl")) {
+        ArrangeLinesIntoParagraphs(&frame_result, options.reading_direction);
+      }
     } catch (const OcrCancelled&) {
       out.cancelled = true;
       out.errorCode = "OCR_CANCELLED";
@@ -301,10 +306,16 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
       return out;
     }
 
+    // Frames (pages) are separated by a blank line, like paragraphs.
     if (!merged.text_utf8.empty() && !frame_result.text_utf8.empty()) {
-      merged.text_utf8.push_back('\n');
-      utf16_cursor += 1;
+      merged.text_utf8 += "\n\n";
+      utf16_cursor += 2;
     }
+    OcrFrameText frame_text;
+    frame_text.frame_index = frame_index;
+    frame_text.utf16_start = utf16_cursor;
+    frame_text.width = width;
+    frame_text.height = height;
 
     for (auto span : frame_result.spans) {
       span.utf16_start += utf16_cursor;
@@ -322,6 +333,8 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
     }
     merged.text_utf8 += frame_result.text_utf8;
     utf16_cursor += Utf8ToUtf16Length(frame_result.text_utf8);
+    frame_text.utf16_end = utf16_cursor;
+    merged.frames.push_back(frame_text);
     appendField(merged.raw_utf8, frame_result.raw_utf8);
     if (frame_result.has_content) {
       if (!merged.has_content) {

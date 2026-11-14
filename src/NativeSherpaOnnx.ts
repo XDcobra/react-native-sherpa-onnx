@@ -349,6 +349,8 @@ export type OcrRecognizeBridgeOptions = {
   progressMinIntervalMs?: number;
   /** Wire spec from `encodeOcrRecognizeSpec`. Kotlin/ObjC forward unchanged. */
   recognizeSpec?: string;
+  /** `'ltr'` (default) | `'rtl'`: reading order of line-level families. */
+  readingDirection?: string;
 };
 
 /** Native result from `detectOcrModel`. */

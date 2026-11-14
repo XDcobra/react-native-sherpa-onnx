@@ -120,8 +120,12 @@ std::vector<DetBox> DbPostprocess(
     float max_y = static_cast<float>(c.max_y);
     const float bw = std::max(1.f, max_x - min_x + 1.f);
     const float bh = std::max(1.f, max_y - min_y + 1.f);
-    const float ex = bw * (expand - 1.f) * 0.5f;
-    const float ey = bh * (expand - 1.f) * 0.5f;
+    // DB unclip: grow the shrunk text kernel by a fixed distance
+    // d = area * ratio / perimeter on every side (not a share of its width,
+    // which merged long lines with neighbouring columns).
+    const float d = bw * bh * expand / (2.f * (bw + bh));
+    const float ex = d;
+    const float ey = d;
     min_x = std::max(0.f, min_x - ex);
     min_y = std::max(0.f, min_y - ey);
     max_x = std::min(static_cast<float>(pred_w - 1), max_x + ex);

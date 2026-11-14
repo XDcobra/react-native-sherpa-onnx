@@ -70,3 +70,44 @@ TEST(OcrElementKind, TotalMaps) {
   ASSERT_TRUE(toc.ok);
   EXPECT_EQ(toc.kind, OcrElementKind::kToc);
 }
+
+// ---- Markdown → reading text (paddleocr_vl, nemotron_parse) ----
+
+#include "markup/OcrMarkdownText.h"
+
+TEST(OcrMarkdownText, ParagraphsHeadingsListsAndTables) {
+  const auto r = sherpa_onnx::ocr::MarkdownToReadingText(
+      "# The Bay\n\nThe keeper **counted** the\nships every evening.\n\n"
+      "## Notes\n- one\n- two\n\n| Ship | Count |\n| --- | --- |\n| Ada | 2 |\n"
+      "<p>Done.</p>",
+      /*soft_wrap=*/true, 3);
+  EXPECT_EQ(r.text_utf8,
+            "The Bay\n\nThe keeper counted the ships every evening.\n\nNotes\n\none\n\ntwo\n\n"
+            "Ship | Count\nAda | 2\n\nDone.");
+  ASSERT_EQ(r.elements.size(), 5u);
+  EXPECT_EQ(r.elements[0].kind, sherpa_onnx::ocr::OcrElementKind::kTitle);
+  EXPECT_EQ(*r.elements[0].heading_level, 1);
+  EXPECT_EQ(r.elements[0].utf16_start, 0);
+  EXPECT_EQ(r.elements[0].utf16_end, 7);
+  EXPECT_EQ(r.elements[0].frame_index, 3);
+  EXPECT_EQ(r.elements[1].kind, sherpa_onnx::ocr::OcrElementKind::kSectionHeader);
+  EXPECT_EQ(*r.elements[1].heading_level, 2);
+  EXPECT_EQ(r.elements[2].kind, sherpa_onnx::ocr::OcrElementKind::kListItem);
+  EXPECT_EQ(r.elements[3].kind, sherpa_onnx::ocr::OcrElementKind::kListItem);
+  EXPECT_EQ(r.elements[4].kind, sherpa_onnx::ocr::OcrElementKind::kTable);
+  EXPECT_FALSE(r.elements[4].has_quad);
+}
+
+TEST(OcrMarkdownText, HardLinesKeepEveryLineAsABlock) {
+  const auto r = sherpa_onnx::ocr::MarkdownToReadingText(
+      "# Invoice\nItem Qty Price\nWidget 2 10", /*soft_wrap=*/false, 0);
+  EXPECT_EQ(r.text_utf8, "Invoice\n\nItem Qty Price\n\nWidget 2 10");
+  ASSERT_EQ(r.elements.size(), 1u);
+  EXPECT_EQ(r.elements[0].kind, sherpa_onnx::ocr::OcrElementKind::kTitle);
+}
+
+TEST(OcrMarkdownText, EmptyAndUnderscoresInWords) {
+  EXPECT_TRUE(sherpa_onnx::ocr::MarkdownToReadingText("\n \n", true, 0).text_utf8.empty());
+  EXPECT_EQ(sherpa_onnx::ocr::MarkdownToReadingText("snake_case and __bold__", true, 0).text_utf8,
+            "snake_case and bold");
+}

@@ -205,7 +205,10 @@ TEST(PaddleocrVlMarkup, HelloWorld) {
 TEST(PaddleocrVlMarkup, StripsHtmlAndMarkdownTicks) {
   const PaddleocrVlMarkup parsed =
       ParsePaddleocrVlMarkup("# Title\n<p>Hello</p> **World**");
-  EXPECT_EQ(parsed.text_utf8, "Title Hello World");
+  // The heading stays its own block (and becomes a title element).
+  EXPECT_EQ(parsed.text_utf8, "Title\n\nHello World");
+  ASSERT_EQ(parsed.elements.size(), 1u);
+  EXPECT_EQ(parsed.elements[0].kind, sherpa_onnx::ocr::OcrElementKind::kTitle);
   EXPECT_TRUE(parsed.spans.empty());
 }
 

@@ -5,6 +5,7 @@
  */
 
 #include "TxtLiveEntry.h"  // TxtSpatialSpan
+#include "TxtOcrLayout.h"
 #include "TxtStructure.h"
 #include "TxtUtf16.h"
 
@@ -26,6 +27,8 @@ struct TxtOfflineEntry {
   bool populated = false;
   /** Reading structure (sections / blocks), set once after populate. */
   std::shared_ptr<const TxtStructure> structure;
+  /** OCR layout (frames, elements), set once after an OCR populate. */
+  std::shared_ptr<const TxtOcrLayout> ocrLayout;
   /** Serialize tryPopulate so work can run outside g_txt_mutex.
    * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C5). */
   std::mutex populateMutex;
@@ -58,6 +61,19 @@ struct TxtOfflineEntry {
   std::shared_ptr<const TxtStructure> getStructure() {
     std::lock_guard<std::mutex> lock(populateMutex);
     return structure;
+  }
+
+  /** @return false unless populated and without an OCR layout yet. */
+  bool trySetOcrLayout(std::shared_ptr<const TxtOcrLayout> l) {
+    std::lock_guard<std::mutex> lock(populateMutex);
+    if (!populated || ocrLayout || !l) return false;
+    ocrLayout = std::move(l);
+    return true;
+  }
+
+  std::shared_ptr<const TxtOcrLayout> getOcrLayout() {
+    std::lock_guard<std::mutex> lock(populateMutex);
+    return ocrLayout;
   }
 
   /** @return false if already populated (concurrent second caller). */

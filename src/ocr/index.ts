@@ -163,6 +163,9 @@ function beginRecognizeProgressCancel(options?: OcrRecognizeOptions): {
   if (options?.granularity !== undefined) {
     nativeOptions.granularity = options.granularity;
   }
+  if (options?.readingDirection !== undefined) {
+    nativeOptions.readingDirection = options.readingDirection;
+  }
 
   let progressSubscription: NativeSubscription | null = null;
   let abortHandler: (() => void) | null = null;

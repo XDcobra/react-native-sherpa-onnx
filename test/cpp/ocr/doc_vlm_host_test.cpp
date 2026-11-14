@@ -841,7 +841,8 @@ TEST(DocTags, OtslCaptionBeforeTable) {
   const DocTagsParse parsed = ParseDocTags(
       "<otsl><caption>Notes</caption><fcel>A<fcel>B<nl><fcel>C<fcel>D</otsl>",
       1000, 240, 0);
-  EXPECT_EQ(parsed.text_utf8, "Notes\nA | B\nC | D");
+  // Caption and table are separate blocks; rows stay on their own lines.
+  EXPECT_EQ(parsed.text_utf8, "Notes\n\nA | B\nC | D");
   EXPECT_EQ(parsed.markdown_utf8,
             "Notes\n| A | B |\n| --- | --- |\n| C | D |");
 }
@@ -1021,4 +1022,28 @@ TEST(DocVlmStrict, EnHello) {
   EXPECT_EQ(result.raw_utf8, JsonStringField(golden, "doctags"));
   EXPECT_EQ(result.text_utf8, JsonStringField(golden, "text"));
   EXPECT_EQ(result.content.value, JsonStringField(golden, "markdown"));
+}
+
+TEST(DocTags, ListsAndGroupsAreParsedThrough) {
+  // Granite emits lists inside <ordered_list>/<unordered_list> and may group
+  // items; a page with a list used to fail as an unknown tag.
+  const DocTagsParse parsed = ParseDocTags(
+      "<doctag><section_header_level_1><loc_0><loc_0><loc_500><loc_50>Steps"
+      "</section_header_level_1><ordered_list><list_item><loc_0><loc_60><loc_500><loc_90>"
+      "Open the box</list_item><list_item><loc_0><loc_100><loc_500><loc_130>Read the note"
+      "</list_item></ordered_list><group><text><loc_0><loc_140><loc_500><loc_170>Done."
+      "</text></group><page_break></doctag>",
+      1000, 1000, 2);
+  EXPECT_EQ(parsed.text_utf8, "Steps\n\nOpen the box\n\nRead the note\n\nDone.");
+  ASSERT_EQ(parsed.elements.size(), 4u);
+  EXPECT_EQ(parsed.elements[0].kind, OcrElementKind::kSectionHeader);
+  ASSERT_TRUE(parsed.elements[0].heading_level.has_value());
+  EXPECT_EQ(*parsed.elements[0].heading_level, 1);
+  EXPECT_EQ(parsed.elements[1].kind, OcrElementKind::kListItem);
+  EXPECT_EQ(parsed.elements[2].kind, OcrElementKind::kListItem);
+  EXPECT_EQ(parsed.elements[3].kind, OcrElementKind::kText);
+  // Element ranges follow the blank-line layout.
+  EXPECT_EQ(parsed.elements[1].utf16_start, 7);
+  EXPECT_EQ(parsed.elements[1].utf16_end, 19);
+  EXPECT_EQ(parsed.elements[3].frame_index, 2);
 }

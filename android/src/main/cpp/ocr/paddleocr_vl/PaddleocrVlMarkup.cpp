@@ -1,5 +1,7 @@
 #include "PaddleocrVlMarkup.h"
 
+#include "../markup/OcrMarkdownText.h"
+
 #include "../OcrGeometry.h"
 #include "../OcrTextUtils.h"
 #include "../markup/OcrOtsl.h"
@@ -68,44 +70,6 @@ std::string StripSpecialsKeepMarkup(const std::string& raw) {
   return out;
 }
 
-std::string LayoutText(const std::string& markdown) {
-  std::string cleaned;
-  cleaned.reserve(markdown.size());
-  for (size_t i = 0; i < markdown.size();) {
-    if (markdown[i] == '<') {
-      const size_t end = markdown.find('>', i + 1);
-      if (end != std::string::npos) {
-        cleaned.push_back(' ');
-        i = end + 1;
-        continue;
-      }
-    }
-    const char c = markdown[i];
-    if (c == '#' || c == '*' || c == '_' || c == '`') {
-      cleaned.push_back(' ');
-      ++i;
-      continue;
-    }
-    cleaned.push_back(c);
-    ++i;
-  }
-  std::string out;
-  out.reserve(cleaned.size());
-  bool in_space = false;
-  for (unsigned char c : cleaned) {
-    if (std::isspace(c)) {
-      if (!in_space && !out.empty()) {
-        out.push_back(' ');
-        in_space = true;
-      }
-    } else {
-      out.push_back(static_cast<char>(c));
-      in_space = false;
-    }
-  }
-  while (!out.empty() && out.back() == ' ') out.pop_back();
-  return out;
-}
 
 void TrimInPlace(std::string& s) {
   size_t a = 0;
@@ -192,7 +156,9 @@ void ParseSpotting(const std::string& raw, const PaddleocrVlParseOptions& option
 
   if (instances.empty()) {
     out.markdown_utf8 = StripSpecialsKeepMarkup(raw);
-    out.text_utf8 = LayoutText(out.markdown_utf8);
+    OcrReadingText reading = MarkdownToReadingText(out.markdown_utf8, true, 0);
+    out.text_utf8 = std::move(reading.text_utf8);
+    out.elements = std::move(reading.elements);
     out.spans.clear();
     return;
   }
@@ -247,12 +213,12 @@ PaddleocrVlMarkup ParsePaddleocrVlMarkup(
     const OcrTable table = ParseGfmPipes(stripped);
     out.markdown_utf8 = table.RenderGfm();
     out.text_utf8 = table.RenderPlain();
-  } else if (profile.parser == PaddleocrVlParser::kPassthrough) {
-    out.markdown_utf8 = stripped;
-    out.text_utf8 = LayoutText(stripped);
   } else {
+    // Markdown: paragraphs (blank lines) and headings / list items survive.
     out.markdown_utf8 = stripped;
-    out.text_utf8 = LayoutText(stripped);
+    OcrReadingText reading = MarkdownToReadingText(stripped, /*soft_wrap=*/true, 0);
+    out.text_utf8 = std::move(reading.text_utf8);
+    out.elements = std::move(reading.elements);
   }
   out.spans.clear();
   OCR_LOGI("paddleocr_vl task=%s parser=%d content=%zu text=%zu", profile.id,
