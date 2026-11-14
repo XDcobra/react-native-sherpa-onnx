@@ -49,6 +49,9 @@ class ReaderRegistry {
   uint64_t nextId_ = 1;
 };
 
+/** Placeholder document (`debugRowCount`): `rows` text blocks, 10 per section. */
+std::shared_ptr<const ReaderSnapshot> MakePlaceholderSnapshot(int rows);
+
 /** Rebuilds the ID maps of a snapshot after its sections / blocks changed. */
 void ReindexSnapshot(ReaderSnapshot* snap);
 

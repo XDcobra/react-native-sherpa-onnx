@@ -54,6 +54,35 @@ void ReindexSnapshot(ReaderSnapshot* snap) {
   }
 }
 
+std::shared_ptr<const ReaderSnapshot> MakePlaceholderSnapshot(int rows) {
+  auto snap = std::make_shared<ReaderSnapshot>();
+  snap->documentId = "debug";
+  constexpr int kPerSection = 10;
+  for (int s = 0; s * kPerSection < rows; ++s) {
+    ReaderSection sec;
+    sec.id = "s" + std::to_string(s);
+    sec.sectionIndex = s;
+    sec.kind = "text";
+    sec.titleSource = "none";
+    sec.blockCount = std::min(kPerSection, rows - s * kPerSection);
+    for (int b = 0; b < sec.blockCount; ++b) {
+      ReaderBlock blk;
+      blk.id = sec.id + ".b" + std::to_string(b);
+      blk.fromFile = false;
+      std::string text = blk.id + " - ";
+      for (int k = 0; k <= (s * kPerSection + b) % 4; ++k) {
+        text += "The quick brown fox jumps over the lazy dog. ";
+      }
+      blk.appText = text;
+      blk.textHash = TextHashV1(text);
+      snap->blocks.push_back(std::move(blk));
+    }
+    snap->sections.push_back(std::move(sec));
+  }
+  ReindexSnapshot(snap.get());
+  return snap;
+}
+
 int RemapBlockByHash(const ReaderSnapshot& snap, const std::string& textHash, int hintIndex) {
   int best = -1;
   int bestDist = 0;

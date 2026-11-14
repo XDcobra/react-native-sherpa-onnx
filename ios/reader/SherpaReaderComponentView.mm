@@ -53,35 +53,6 @@ NSString *ToNS(const std::string &s)
   return [NSString stringWithUTF8String:s.c_str()] ?: @"";
 }
 
-/** Placeholder document for `debugRowCount` (spike / tests without a book). */
-std::shared_ptr<const rdr::ReaderSnapshot> DebugSnapshot(int rows)
-{
-  auto snap = std::make_shared<rdr::ReaderSnapshot>();
-  snap->documentId = "debug";
-  const int perSection = 10;
-  for (int s = 0; s * perSection < rows; ++s) {
-    rdr::ReaderSection sec;
-    sec.id = "s" + std::to_string(s);
-    sec.sectionIndex = s;
-    sec.kind = "text";
-    sec.blockCount = std::min(perSection, rows - s * perSection);
-    for (int b = 0; b < sec.blockCount; ++b) {
-      rdr::ReaderBlock blk;
-      blk.id = sec.id + ".b" + std::to_string(b);
-      blk.fromFile = false;
-      std::string text = blk.id + " — ";
-      for (int k = 0; k <= (s * perSection + b) % 4; ++k) {
-        text += "The quick brown fox jumps over the lazy dog. ";
-      }
-      blk.appText = text;
-      snap->blocks.push_back(std::move(blk));
-    }
-    snap->sections.push_back(std::move(sec));
-  }
-  rdr::ReindexSnapshot(snap.get());
-  return snap;
-}
-
 }  // namespace
 
 static NSString *const kTextCellId = @"SherpaReaderTextCell";
@@ -418,7 +389,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
       [self emitError:"ERR_READER_NOT_FOUND" message:"Reader document not found: " + _documentId];
     }
   } else if (_debugRowCount > 0) {
-    next = DebugSnapshot(_debugRowCount);
+    next = rdr::MakePlaceholderSnapshot(_debugRowCount);
   }
   const bool changed = next != _snap;
   const std::string frontierId =

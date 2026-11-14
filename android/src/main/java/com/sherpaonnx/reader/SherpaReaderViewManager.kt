@@ -58,45 +58,57 @@ class SherpaReaderViewManager :
 
   override fun setDebugRowCount(view: SherpaReaderView, value: Int) = view.setDebugRowCount(value)
 
-  override fun setDocumentId(view: SherpaReaderView, value: String?) = Unit
+  override fun setDocumentId(view: SherpaReaderView, value: String?) = view.setDocumentId(value)
 
-  override fun setDocumentRevision(view: SherpaReaderView, value: Int) = Unit
+  override fun setDocumentRevision(view: SherpaReaderView, value: Int) = view.setDocumentRevision(value)
 
+  // The block ID wins; the section ID is a fallback only for scrollToLocator.
   override fun setInitialSectionId(view: SherpaReaderView, value: String?) = Unit
 
-  override fun setInitialBlockId(view: SherpaReaderView, value: String?) = Unit
+  override fun setInitialBlockId(view: SherpaReaderView, value: String?) = view.setInitialBlockId(value)
 
-  override fun setInitialOffset(view: SherpaReaderView, value: Int) = Unit
+  override fun setInitialOffset(view: SherpaReaderView, value: Int) = view.setInitialOffset(value)
 
-  override fun setFurthestBlockId(view: SherpaReaderView, value: String?) = Unit
+  override fun setFurthestBlockId(view: SherpaReaderView, value: String?) = view.setFurthestBlockId(value)
 
-  override fun setFurthestRevision(view: SherpaReaderView, value: Int) = Unit
+  override fun setFurthestRevision(view: SherpaReaderView, value: Int) = view.setFurthestRevision(value)
 
-  override fun setFontFamily(view: SherpaReaderView, value: String?) = Unit
+  override fun setFontFamily(view: SherpaReaderView, value: String?) = view.setFontFamily(value)
 
-  override fun setFontSize(view: SherpaReaderView, value: Float) = Unit
+  override fun setFontSize(view: SherpaReaderView, value: Float) = view.setFontSize(value)
 
-  override fun setFontScale(view: SherpaReaderView, value: Float) = Unit
+  override fun setFontScale(view: SherpaReaderView, value: Float) = view.setFontScale(value)
 
-  override fun setMaxFontScale(view: SherpaReaderView, value: Float) = Unit
+  override fun setMaxFontScale(view: SherpaReaderView, value: Float) = view.setMaxFontScale(value)
 
-  override fun setLineHeight(view: SherpaReaderView, value: Float) = Unit
+  override fun setLineHeight(view: SherpaReaderView, value: Float) = view.setLineHeight(value)
 
-  override fun setParagraphSpacing(view: SherpaReaderView, value: Float) = Unit
+  override fun setParagraphSpacing(view: SherpaReaderView, value: Float) = view.setParagraphSpacing(value)
 
-  override fun setMarginHorizontal(view: SherpaReaderView, value: Float) = Unit
+  override fun setMarginHorizontal(view: SherpaReaderView, value: Float) = view.setMarginHorizontal(value)
 
-  override fun setMarginVertical(view: SherpaReaderView, value: Float) = Unit
+  override fun setMarginVertical(view: SherpaReaderView, value: Float) = view.setMarginVertical(value)
 
-  override fun setTextAlign(view: SherpaReaderView, value: String?) = Unit
+  override fun setTextAlign(view: SherpaReaderView, value: String?) = view.setTextAlign(value)
 
-  override fun setHyphenation(view: SherpaReaderView, value: Boolean) = Unit
+  override fun setHyphenation(view: SherpaReaderView, value: Boolean) = view.setHyphenation(value)
 
-  override fun setTextColor(view: SherpaReaderView, value: Int?) = Unit
+  override fun setTextColor(view: SherpaReaderView, value: Int?) = view.setTextColor(value)
 
+  // Reserved for highlights (not rendered yet).
   override fun setAccentColor(view: SherpaReaderView, value: Int?) = Unit
 
-  override fun setJumpThreshold(view: SherpaReaderView, value: Int) = Unit
+  override fun setJumpThreshold(view: SherpaReaderView, value: Int) = view.setJumpThreshold(value)
+
+  override fun onAfterUpdateTransaction(view: SherpaReaderView) {
+    super.onAfterUpdateTransaction(view)
+    view.onPropsApplied()
+  }
+
+  override fun onDropViewInstance(view: SherpaReaderView) {
+    view.dispose()
+    super.onDropViewInstance(view)
+  }
 
   // ---- Commands ----
 

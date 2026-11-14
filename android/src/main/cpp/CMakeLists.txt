@@ -323,6 +323,7 @@ set(SOURCES
     reader/ReaderFileHash.cpp
     reader/ReaderBridge.cpp
     jni/reader/sherpa-onnx-reader-jni.cpp
+    jni/reader/sherpa-onnx-reader-view-jni.cpp
     ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
     jni/document/sherpa-onnx-document-jni.cpp
     codec/CodecTypes.cpp
