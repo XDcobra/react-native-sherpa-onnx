@@ -60,13 +60,13 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeSnapshotRelease(JNIEnv*, jclas
   delete reinterpret_cast<SnapPtr*>(h);
 }
 
-/** 6 ints per block: type, headingLevel, section, imageFrame, imageWidth, imageHeight. */
+/** 7 ints per block: type, headingLevel, section, imageFrame, imageWidth, imageHeight, flags. */
 JNIEXPORT jintArray JNICALL
 Java_com_sherpaonnx_reader_ReaderViewNative_nativeBlockTable(JNIEnv* env, jclass, jlong h) {
   const auto* s = Snap(h);
   std::vector<jint> out;
   if (!s) return Ints(env, out);
-  out.reserve(s->blocks.size() * 6);
+  out.reserve(s->blocks.size() * 7);
   auto& images = sherpa_onnx::image::ImageRegistry::Instance();
   for (const auto& b : s->blocks) {
     int w = 0;
@@ -78,7 +78,8 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeBlockTable(JNIEnv* env, jclass
         hgt = fi.height;
       }
     }
-    out.insert(out.end(), {static_cast<jint>(b.type), b.headingLevel, b.section, b.imageFrame, w, hgt});
+    out.insert(out.end(), {static_cast<jint>(b.type), b.headingLevel, b.section, b.imageFrame, w,
+                           hgt, static_cast<jint>(b.flags)});
   }
   return Ints(env, out);
 }

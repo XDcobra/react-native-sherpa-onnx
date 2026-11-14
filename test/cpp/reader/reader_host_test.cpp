@@ -462,3 +462,106 @@ TEST(ReaderTracker, FollowReadsContinuouslyAndOnlyFarMovesJump) {
   EXPECT_EQ(Find(ev, Kind::Jump)->cause, "follow");
   EXPECT_EQ(t.Frontier(), 13);
 }
+
+// ---- Block text references, formats and page blocks ---------------------
+
+namespace {
+
+/** A hand-built structure: section 0 = page block + two text blocks. */
+std::shared_ptr<TxtOfflineEntry> HandBuiltEntry(const std::string& format, int version) {
+  // UTF-16: "Ä 😀 x" = 6 units (😀 is a surrogate pair), "\n\n", "Größe" = 5.
+  const std::string text = "\xC3\x84 \xF0\x9F\x98\x80 x\n\nGr\xC3\xB6\xC3\x9F" "e";
+  auto st = std::make_shared<TxtStructure>();
+  st->format = format;
+  st->version = version;
+  TxtStructSection sec;
+  sec.sectionIndex = 0;
+  sec.kind = "page";
+  sec.firstBlock = 0;
+  sec.blockCount = 3;
+  TxtStructBlock page;
+  page.type = TxtBlockType::Page;
+  page.blockIndex = 0;
+  page.imageHref = "page:1";
+  page.frameIndex = 4;
+  TxtStructBlock a;
+  a.type = TxtBlockType::Paragraph;
+  a.blockIndex = 1;
+  a.utf16Start = 0;
+  a.utf16End = 6;
+  a.flags = kTxtBlockFurniture;
+  a.hasRect = true;
+  a.rect[0] = 0.1f;
+  a.rect[1] = 0.05f;
+  a.rect[2] = 0.8f;
+  a.rect[3] = 0.02f;
+  TxtStructBlock b;
+  b.type = TxtBlockType::Heading;
+  b.headingLevel = 2;
+  b.blockIndex = 2;
+  b.utf16Start = 8;
+  b.utf16End = 13;
+  st->blocks = {page, a, b};
+  st->sections = {sec};
+  auto entry = std::make_shared<TxtOfflineEntry>();
+  entry->bufferId = "txt_off_hand";
+  EXPECT_TRUE(entry->tryPopulate(text, {}, {}, {}, "", "", ""));
+  EXPECT_TRUE(entry->trySetStructure(st));
+  return entry;
+}
+
+}  // namespace
+
+TEST(ReaderBlockText, ByteRangesFollowUtf16Offsets) {
+  ReaderError err;
+  const std::string id = ReaderRegistry::Instance().Create(HandBuiltEntry("pdf", 1),
+                                                           "img_off_pages", {}, "k", &err);
+  ASSERT_FALSE(id.empty()) << err.code << " " << err.message;
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  ASSERT_TRUE(snap);
+  EXPECT_EQ(snap->format, "pdf");
+  EXPECT_EQ(snap->structureVersion, 1);
+  ASSERT_EQ(snap->blocks.size(), 3u);
+
+  const ReaderBlock& page = snap->blocks[0];
+  EXPECT_EQ(page.type, ReaderBlockType::Page);
+  EXPECT_EQ(page.id, "s0.b0");
+  EXPECT_EQ(page.imageFrame, 4) << "direct frame index wins over href matching";
+  EXPECT_EQ(page.textHash, ImageHashV1("page:1"));
+  EXPECT_EQ(snap->BlockText(0), "");
+
+  EXPECT_EQ(snap->BlockText(1), "\xC3\x84 \xF0\x9F\x98\x80 x");
+  EXPECT_EQ(snap->BlockLength(1), 6);
+  EXPECT_EQ(snap->blocks[1].flags, kBlockFurniture);
+  EXPECT_TRUE(snap->blocks[1].hasRect);
+  EXPECT_FLOAT_EQ(snap->blocks[1].rect[2], 0.8f);
+  EXPECT_EQ(snap->BlockText(2), "Gr\xC3\xB6\xC3\x9F" "e");
+  EXPECT_EQ(snap->BlockLength(2), 5);
+  EXPECT_EQ(snap->blocks[2].textHash, TextHashV1("Gr\xC3\xB6\xC3\x9F" "e"));
+  // Only text blocks are indexed for offset mapping.
+  ASSERT_EQ(snap->textBlocks.size(), 2u);
+
+  const std::string json = SnapshotSummaryJson(*snap);
+  EXPECT_NE(json.find("\"format\":\"pdf\""), std::string::npos) << json;
+  const std::string blocks = BlocksJson(*snap, 0, 3, true);
+  EXPECT_NE(blocks.find("\"type\":\"page\""), std::string::npos) << blocks;
+  EXPECT_NE(blocks.find("\"furniture\":true"), std::string::npos) << blocks;
+  EXPECT_NE(blocks.find("\"rect\":[0.1000,0.0500,0.8000,0.0200]"), std::string::npos) << blocks;
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderBlockText, PerFormatVersionGate) {
+  ReaderError err;
+  EXPECT_TRUE(ReaderRegistry::Instance()
+                  .Create(HandBuiltEntry("pdf", 2), "", {}, "k", &err)
+                  .empty());
+  EXPECT_EQ(err.code, kErrReaderUnsupportedStructure);
+  err = {};
+  EXPECT_TRUE(ReaderRegistry::Instance()
+                  .Create(HandBuiltEntry("djvu", 1), "", {}, "k", &err)
+                  .empty());
+  EXPECT_EQ(err.code, kErrReaderUnsupportedStructure);
+  EXPECT_EQ(SupportedStructureVersion("epub"), kStructureVersion);
+  EXPECT_EQ(SupportedStructureVersion("fb2"), 1);
+  EXPECT_EQ(SupportedStructureVersion(""), 0);
+}

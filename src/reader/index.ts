@@ -40,6 +40,7 @@ export type {
   ReaderBlock,
   ReaderBlockType,
   ReaderDocument,
+  ReaderDocumentFormat,
   ReaderDocumentMetadata,
   ReaderFollowChange,
   ReaderFollowOptions,

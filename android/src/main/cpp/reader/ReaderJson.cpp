@@ -68,7 +68,8 @@ std::string SnapshotSummaryJson(const ReaderSnapshot& snap) {
   Field(&out, "id", snap.documentId, &first);
   Field(&out, "revision", snap.revision, &first);
   Field(&out, "documentKey", snap.documentKey, &first);
-  Field(&out, "structureVersion", kStructureVersion, &first);
+  Field(&out, "format", snap.format.empty() ? std::string("epub") : snap.format, &first);
+  Field(&out, "structureVersion", snap.structureVersion > 0 ? snap.structureVersion : kStructureVersion, &first);
   Field(&out, "textHashVersion", kTextHashVersion, &first);
   Field(&out, "blockCount", static_cast<long long>(snap.blocks.size()), &first);
   if (!snap.imageBufferId.empty()) Field(&out, "imageBufferId", snap.imageBufferId, &first);
@@ -124,10 +125,17 @@ std::string BlocksJson(const ReaderSnapshot& snap, int start, int max, bool incl
       out += ",\"textRange\":{\"start\":" + std::to_string(b.utf16Start) +
              ",\"end\":" + std::to_string(b.utf16End) + "}";
     }
-    if (b.type == ReaderBlockType::Image) {
-      Field(&out, "imageHref", b.imageHref, &f);
+    if (b.type == ReaderBlockType::Image || b.type == ReaderBlockType::Page) {
+      if (!b.imageHref.empty()) Field(&out, "imageHref", b.imageHref, &f);
       if (b.imageFrame >= 0) Field(&out, "imageFrameIndex", b.imageFrame, &f);
       if (b.hasAlt) Field(&out, "alt", b.alt, &f);
+    }
+    if (b.flags & kBlockFurniture) FieldBool(&out, "furniture", true, &f);
+    if (b.hasRect) {
+      char buf[96];
+      std::snprintf(buf, sizeof(buf), ",\"rect\":[%.4f,%.4f,%.4f,%.4f]", b.rect[0], b.rect[1],
+                    b.rect[2], b.rect[3]);
+      out += buf;
     }
     if (includeText && (b.type == ReaderBlockType::Paragraph || b.type == ReaderBlockType::Heading)) {
       Field(&out, "text", snap.BlockText(i), &f);

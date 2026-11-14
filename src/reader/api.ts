@@ -22,6 +22,7 @@ import type {
   ReaderAppSection,
   ReaderBlock,
   ReaderDocument,
+  ReaderDocumentFormat,
   ReaderLocator,
   ReaderRange,
   ReaderSectionInfo,
@@ -75,6 +76,20 @@ async function callNative<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 /** @internal Parses the native summary JSON. */
+const FORMATS: ReadonlyArray<ReaderDocumentFormat> = [
+  'epub',
+  'fb2',
+  'mobi',
+  'pdf',
+  'pages',
+];
+
+function parseFormat(value: unknown): ReaderDocumentFormat {
+  return FORMATS.includes(value as ReaderDocumentFormat)
+    ? (value as ReaderDocumentFormat)
+    : 'epub';
+}
+
 export function parseReaderDocument(json: string): ReaderDocument {
   const raw = JSON.parse(json) as Record<string, unknown>;
   const sections = (Array.isArray(raw.sections) ? raw.sections : []).map(
@@ -84,7 +99,7 @@ export function parseReaderDocument(json: string): ReaderDocument {
       const out: ReaderSectionInfo = {
         id: String(s.id ?? ''),
         origin: s.origin === 'app' ? 'app' : 'file',
-        kind: s.kind === 'image' ? 'image' : 'text',
+        kind: s.kind === 'image' || s.kind === 'page' ? s.kind : 'text',
         titleSource:
           titleSource === 'toc' ||
           titleSource === 'heading' ||
@@ -110,6 +125,7 @@ export function parseReaderDocument(json: string): ReaderDocument {
     id: String(raw.id ?? ''),
     revision: Number(raw.revision ?? 0),
     documentKey: String(raw.documentKey ?? ''),
+    format: parseFormat(raw.format),
     structureVersion: Number(raw.structureVersion ?? 0),
     textHashVersion: Number(raw.textHashVersion ?? 0),
     blockCount: Number(raw.blockCount ?? 0),

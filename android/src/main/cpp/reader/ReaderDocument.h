@@ -10,10 +10,29 @@
 namespace sherpa_onnx {
 namespace reader {
 
-/** Version of the structure rules this core reads (TxtStructure::version). */
+/** Version of the EPUB structure rules (TxtStructure::version for format "epub"). */
 inline constexpr int kStructureVersion = 1;
 
-enum class ReaderBlockType : int { Paragraph = 0, Heading = 1, Image = 2, Separator = 3 };
+/**
+ * Structure rules version this core reads for a format ("epub", "fb2", "mobi",
+ * "pdf", "pages"); 0 for an unknown format. Each format versions its rules on
+ * its own, so a change for one format keeps the IDs of the others.
+ */
+int SupportedStructureVersion(const std::string& format);
+
+enum class ReaderBlockType : int {
+  Paragraph = 0,
+  Heading = 1,
+  Image = 2,
+  Separator = 3,
+  /** A page image (PDF page, comic page); `s{n}.b0` of a page section. */
+  Page = 4,
+};
+
+/** ReaderBlock::flags. */
+enum ReaderBlockFlags : uint32_t {
+  kBlockFurniture = 1u << 0,  // running header / footer / page number
+};
 
 const char* ReaderBlockTypeName(ReaderBlockType t);
 
@@ -23,10 +42,23 @@ struct ReaderBlock {
   ReaderBlockType type = ReaderBlockType::Paragraph;
   int headingLevel = 0;
   std::string textHash;
+  /** Text block of the document's primary text buffer (has `utf16Start/End`). */
   bool fromFile = true;
-  int utf16Start = 0;  // file text blocks: range in the text buffer
+  int utf16Start = 0;  // file text blocks: range in the primary text buffer
   int utf16End = 0;
-  std::string appText;  // app text blocks
+  /**
+   * The block's text: UTF-8 bytes [textByteStart, textByteEnd) of *textSource,
+   * textUtf16Len UTF-16 units. File and OCR blocks alias their text buffer;
+   * app blocks own a string. Null for images, pages and separators.
+   */
+  std::shared_ptr<const std::string> textSource;
+  int textByteStart = 0;
+  int textByteEnd = 0;
+  int textUtf16Len = 0;
+  uint32_t flags = 0;  // ReaderBlockFlags
+  /** Normalized rectangle on its page / image (x, y, w, h in 0..1), if known. */
+  bool hasRect = false;
+  float rect[4] = {0, 0, 0, 0};
   std::string imageHref;
   std::string alt;
   bool hasAlt = false;
@@ -50,6 +82,9 @@ struct ReaderSnapshot {
   std::string documentId;
   int revision = 0;
   std::string documentKey;
+  /** "epub" | "fb2" | "mobi" | "pdf" | "pages". */
+  std::string format;
+  int structureVersion = 0;
   std::string imageBufferId;
   std::shared_ptr<TxtOfflineEntry> text;  // keeps the text alive
   std::vector<ReaderSection> sections;

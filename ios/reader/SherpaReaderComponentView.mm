@@ -858,7 +858,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   if (b.type == rdr::ReaderBlockType::Separator) return ceil(_theme.bodyFont.lineHeight * 1.5);
   // Rough guess from the text length: ~0.5 em per character.
   const CGFloat width = MAX(1, tableView.bounds.size.width - 2 * _theme.marginHorizontal);
-  const CGFloat chars = MAX(1, (CGFloat)(b.fromFile ? (b.utf16End - b.utf16Start) : b.appText.size()));
+  const CGFloat chars = MAX(1, (CGFloat)b.textUtf16Len);
   const CGFloat fontSize = _theme.bodyFont.pointSize;
   const CGFloat lines = MAX(1, ceil(chars * fontSize * 0.5 / width));
   return lines * fontSize * _theme.lineHeightMultiple * 1.2 + _theme.paragraphSpacing;

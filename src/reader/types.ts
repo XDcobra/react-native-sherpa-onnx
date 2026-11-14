@@ -17,7 +17,19 @@ export type ReaderLocator = {
   offset?: number;
 };
 
-export type ReaderBlockType = 'paragraph' | 'heading' | 'image' | 'separator';
+/** `page`: the image of a page in a page-based document (PDF, comic). */
+export type ReaderBlockType =
+  | 'paragraph'
+  | 'heading'
+  | 'image'
+  | 'separator'
+  | 'page';
+
+/**
+ * Source format of a reader document. `pages`: a document made only from page
+ * images (scanned PDF, comic), with text attached later (e.g. OCR).
+ */
+export type ReaderDocumentFormat = 'epub' | 'fb2' | 'mobi' | 'pdf' | 'pages';
 
 export type ReaderSectionInfo = {
   /** `s{index}` for file sections, `app:{id}` for app sections. */
@@ -25,7 +37,8 @@ export type ReaderSectionInfo = {
   /** Section index in the file (linear spine order); absent for app sections. */
   sectionIndex?: number;
   origin: 'file' | 'app';
-  kind: 'text' | 'image';
+  /** `page`: one page of a page-based document (PDF, comic). */
+  kind: 'text' | 'image' | 'page';
   href?: string;
   title?: string;
   titleSource: 'toc' | 'heading' | 'app' | 'none';
@@ -49,6 +62,8 @@ export type ReaderDocument = {
   id: string;
   revision: number;
   documentKey: string;
+  format: ReaderDocumentFormat;
+  /** Version of the structure rules of `format`. */
   structureVersion: number;
   textHashVersion: number;
   blockCount: number;
@@ -67,6 +82,10 @@ export type ReaderBlock = {
   imageHref?: string;
   imageFrameIndex?: number;
   alt?: string;
+  /** Running header, footer or page number (hidden in reflowed text). */
+  furniture?: boolean;
+  /** Position on its page or image, normalized `[x, y, width, height]` (0..1). */
+  rect?: [number, number, number, number];
   /**
    * UTF-16 range of the block in the document's text buffer (file text blocks
    * only). The shown text is exactly this slice.

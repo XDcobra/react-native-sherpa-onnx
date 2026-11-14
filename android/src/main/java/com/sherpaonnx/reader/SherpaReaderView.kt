@@ -831,16 +831,16 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     tracker = 0L
   }
 
-  private val blockCount: Int get() = blockTable.size / 6
+  private val blockCount: Int get() = blockTable.size / BLOCK_STRIDE
   private val sectionCount: Int get() = sectionTable.size / 2
 
-  private fun blockType(i: Int) = blockTable[i * 6]
+  private fun blockType(i: Int) = blockTable[i * BLOCK_STRIDE]
 
-  private fun blockLevel(i: Int) = blockTable[i * 6 + 1]
+  private fun blockLevel(i: Int) = blockTable[i * BLOCK_STRIDE + 1]
 
-  private fun blockSection(i: Int) = blockTable[i * 6 + 2]
+  private fun blockSection(i: Int) = blockTable[i * BLOCK_STRIDE + 2]
 
-  private fun blockFrame(i: Int) = blockTable[i * 6 + 3]
+  private fun blockFrame(i: Int) = blockTable[i * BLOCK_STRIDE + 3]
 
   private fun sectionFirstBlock(s: Int) = sectionTable[s * 2]
 
@@ -1351,8 +1351,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     private fun bindImage(holder: ImageHolder, index: Int, t: Theme) {
       val v = holder.frame
       val frame = blockFrame(index)
-      val w = blockTable[index * 6 + 4]
-      val h = blockTable[index * 6 + 5]
+      val w = blockTable[index * BLOCK_STRIDE + 4]
+      val h = blockTable[index * BLOCK_STRIDE + 5]
       val avail = if (recycler.width > 0) recycler.width else resources.displayMetrics.widthPixels
       val viewport = if (recycler.height > 0) recycler.height else resources.displayMetrics.heightPixels
       val width = max(1, avail - 2 * t.marginHorizontalPx)
@@ -1406,6 +1406,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   companion object {
     private const val PAYLOAD_HIGHLIGHT = "highlight"
     private val DEFAULT_ACCENT = Color.rgb(0, 122, 255)
+    /** Ints per block in nativeBlockTable: type, level, section, frame, w, h, flags. */
+    private const val BLOCK_STRIDE = 7
     private const val TYPE_HEADING = 1
     private const val TYPE_IMAGE = 2
     private const val TYPE_SEPARATOR = 3

@@ -52,6 +52,16 @@ class ReaderRegistry {
 /** Placeholder document (`debugRowCount`): `rows` text blocks, 10 per section. */
 std::shared_ptr<const ReaderSnapshot> MakePlaceholderSnapshot(int rows);
 
+/** Gives a block its own text (app blocks, OCR-derived text copies). */
+void SetOwnBlockText(ReaderBlock* b, std::string text);
+
+/**
+ * Points text blocks at `source` and resolves their UTF-8 byte ranges from
+ * `utf16Start/End` in one forward pass (blocks must not overlap).
+ */
+void ResolveByteRanges(const std::shared_ptr<const std::string>& source,
+                       std::vector<ReaderBlock*>* blocks);
+
 /** Rebuilds the ID maps of a snapshot after its sections / blocks changed. */
 void ReindexSnapshot(ReaderSnapshot* snap);
 

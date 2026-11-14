@@ -1,25 +1,38 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
 /**
- * Reading structure of an offline text buffer (reader structure v1, see
- * docs/reader.md): sections → blocks with UTF-16 ranges into the buffer text.
- * Filled by document extractors (EPUB today); stays in native memory next to
- * the text and is released with the buffer.
+ * Reading structure of an offline text buffer (see docs/reader.md): sections
+ * → blocks with UTF-16 ranges into the buffer text. Filled by document and PDF
+ * extractors; stays in native memory next to the text and is released with
+ * the buffer.
  */
-enum class TxtBlockType : int { Paragraph = 0, Heading = 1, Image = 2, Separator = 3 };
+enum class TxtBlockType : int {
+  Paragraph = 0,
+  Heading = 1,
+  Image = 2,
+  Separator = 3,
+  Page = 4,  // page image of a page-based document (PDF, comic)
+};
 
 inline const char *txt_block_type_name(TxtBlockType t) {
   switch (t) {
     case TxtBlockType::Heading: return "heading";
     case TxtBlockType::Image: return "image";
     case TxtBlockType::Separator: return "separator";
+    case TxtBlockType::Page: return "page";
     default: return "paragraph";
   }
 }
+
+/** TxtStructBlock::flags. */
+enum TxtBlockFlags : uint32_t {
+  kTxtBlockFurniture = 1u << 0,  // running header / footer / page number
+};
 
 struct TxtStructBlock {
   TxtBlockType type = TxtBlockType::Paragraph;
@@ -28,6 +41,12 @@ struct TxtStructBlock {
   int utf16Start = 0;  // image / separator: empty range at the cursor
   int utf16End = 0;
   int headingLevel = 0;
+  uint32_t flags = 0;  // TxtBlockFlags
+  /** Frame of the document's image buffer, when known directly (PDF pages). */
+  int frameIndex = -1;
+  /** Normalized rectangle on its page (x, y, w, h in 0..1), if known. */
+  bool hasRect = false;
+  float rect[4] = {0, 0, 0, 0};
   std::string imageHref;  // archive path of the image (images only)
   std::string alt;
   bool hasAlt = false;
@@ -46,6 +65,8 @@ struct TxtStructSection {
 };
 
 struct TxtStructure {
+  /** "epub" | "fb2" | "mobi" | "pdf" | "pages"; each format versions its rules. */
+  std::string format = "epub";
   int version = 1;
   std::vector<TxtStructSection> sections;
   std::vector<TxtStructBlock> blocks;

@@ -15,23 +15,72 @@ const char* ReaderBlockTypeName(ReaderBlockType t) {
     case ReaderBlockType::Heading: return "heading";
     case ReaderBlockType::Image: return "image";
     case ReaderBlockType::Separator: return "separator";
+    case ReaderBlockType::Page: return "page";
     default: return "paragraph";
   }
+}
+
+int SupportedStructureVersion(const std::string& format) {
+  if (format == "epub") return kStructureVersion;
+  if (format == "fb2" || format == "mobi" || format == "pdf" || format == "pages") return 1;
+  return 0;
 }
 
 std::string ReaderSnapshot::BlockText(int index) const {
   if (index < 0 || index >= static_cast<int>(blocks.size())) return {};
   const ReaderBlock& b = blocks[index];
-  if (!b.fromFile) return b.appText;
-  if (!text || b.utf16End <= b.utf16Start) return {};
-  return txt_utf16_slice(text->text, b.utf16Start, b.utf16End - b.utf16Start);
+  if (!b.textSource || b.textByteEnd <= b.textByteStart) return {};
+  return b.textSource->substr(static_cast<size_t>(b.textByteStart),
+                              static_cast<size_t>(b.textByteEnd - b.textByteStart));
 }
 
 int ReaderSnapshot::BlockLength(int index) const {
   if (index < 0 || index >= static_cast<int>(blocks.size())) return 0;
-  const ReaderBlock& b = blocks[index];
-  if (!b.fromFile) return txt_utf16_length(b.appText);
-  return std::max(0, b.utf16End - b.utf16Start);
+  return blocks[index].textUtf16Len;
+}
+
+void SetOwnBlockText(ReaderBlock* b, std::string text) {
+  b->textUtf16Len = txt_utf16_length(text);
+  b->textByteStart = 0;
+  b->textByteEnd = static_cast<int>(text.size());
+  b->textSource = std::make_shared<const std::string>(std::move(text));
+}
+
+void ResolveByteRanges(const std::shared_ptr<const std::string>& source,
+                       std::vector<ReaderBlock*>* blocks) {
+  // Blocks are in buffer order; one forward pass maps UTF-16 → byte offsets.
+  std::vector<ReaderBlock*>& bs = *blocks;
+  std::stable_sort(bs.begin(), bs.end(), [](const ReaderBlock* x, const ReaderBlock* y) {
+    return x->utf16Start < y->utf16Start;
+  });
+  const std::string& s = *source;
+  size_t byte = 0;
+  int u16 = 0;
+  auto advance_to = [&](int target) {
+    while (u16 < target && byte < s.size()) {
+      const unsigned char c = static_cast<unsigned char>(s[byte]);
+      int len = 1;
+      int units = 1;
+      if (c >= 0xF0) {
+        len = 4;
+        units = 2;
+      } else if (c >= 0xE0) {
+        len = 3;
+      } else if (c >= 0xC0) {
+        len = 2;
+      }
+      byte = std::min(s.size(), byte + static_cast<size_t>(len));
+      u16 += units;
+    }
+    return static_cast<int>(byte);
+  };
+  // Starts and ends interleave in buffer order (blocks do not overlap).
+  for (ReaderBlock* b : bs) {
+    b->textSource = source;
+    b->textByteStart = advance_to(b->utf16Start);
+    b->textByteEnd = advance_to(b->utf16End);
+    b->textUtf16Len = std::max(0, b->utf16End - b->utf16Start);
+  }
 }
 
 bool ReaderSnapshot::MapTextRange(int start, int end, int* fromBlock, int* fromOffset,
@@ -108,8 +157,8 @@ std::shared_ptr<const ReaderSnapshot> MakePlaceholderSnapshot(int rows) {
       for (int k = 0; k <= (s * kPerSection + b) % 4; ++k) {
         text += "The quick brown fox jumps over the lazy dog. ";
       }
-      blk.appText = text;
       blk.textHash = TextHashV1(text);
+      SetOwnBlockText(&blk, std::move(text));
       snap->blocks.push_back(std::move(blk));
     }
     snap->sections.push_back(std::move(sec));
@@ -172,9 +221,11 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
            "Text buffer has no reading structure (extract an EPUB with extractDocumentText)");
     return {};
   }
-  if (st->version != kStructureVersion) {
+  const std::string format = st->format.empty() ? "epub" : st->format;
+  const int supported = SupportedStructureVersion(format);
+  if (supported == 0 || st->version != supported) {
     SetErr(err, kErrReaderUnsupportedStructure,
-           "Unsupported structure version " + std::to_string(st->version));
+           "Unsupported structure: " + format + " v" + std::to_string(st->version));
     return {};
   }
   std::unordered_map<std::string, int> frameByHref;
@@ -184,6 +235,8 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
 
   auto snap = std::make_shared<ReaderSnapshot>();
   snap->documentKey = documentKey;
+  snap->format = format;
+  snap->structureVersion = st->version;
   snap->imageBufferId = imageBufferId;
   snap->text = text;
   snap->title = st->title;
@@ -211,18 +264,38 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
       b.imageHref = sb.imageHref;
       b.alt = sb.alt;
       b.hasAlt = sb.hasAlt;
-      if (b.type == ReaderBlockType::Image) {
-        auto f = frameByHref.find(b.imageHref);
-        if (f != frameByHref.end()) b.imageFrame = f->second;
+      b.flags = sb.flags;
+      b.hasRect = sb.hasRect;
+      for (int r = 0; r < 4; ++r) b.rect[r] = sb.rect[r];
+      if (b.type == ReaderBlockType::Image || b.type == ReaderBlockType::Page) {
+        if (sb.frameIndex >= 0) {
+          b.imageFrame = sb.frameIndex;
+        } else if (!b.imageHref.empty()) {
+          auto f = frameByHref.find(b.imageHref);
+          if (f != frameByHref.end()) b.imageFrame = f->second;
+        }
         b.textHash = ImageHashV1(b.imageHref);
       } else if (b.type == ReaderBlockType::Separator) {
         b.textHash = SeparatorHashV1();
-      } else {
-        b.textHash = TextHashV1(txt_utf16_slice(text->text, b.utf16Start, b.utf16End - b.utf16Start));
       }
       snap->blocks.push_back(std::move(b));
     }
     snap->sections.push_back(std::move(sec));
+  }
+  // Text: alias the buffer (UTF-8 byte ranges resolved in one pass), then hash.
+  std::shared_ptr<const std::string> source(text, &text->text);
+  std::vector<ReaderBlock*> textual;
+  for (ReaderBlock& b : snap->blocks) {
+    if (b.type == ReaderBlockType::Paragraph || b.type == ReaderBlockType::Heading) {
+      textual.push_back(&b);
+    }
+  }
+  ResolveByteRanges(source, &textual);
+  for (int i = 0; i < static_cast<int>(snap->blocks.size()); ++i) {
+    ReaderBlock& b = snap->blocks[i];
+    if (b.type == ReaderBlockType::Paragraph || b.type == ReaderBlockType::Heading) {
+      b.textHash = TextHashV1(snap->BlockText(i));
+    }
   }
   ReindexSnapshot(snap.get());
 
@@ -284,8 +357,8 @@ bool ReaderRegistry::InsertSection(const std::string& documentId,
     b.fromFile = false;
     b.type = in.type;
     b.headingLevel = in.type == ReaderBlockType::Heading ? std::max(1, std::min(6, in.level)) : 0;
-    b.appText = in.text;
     b.textHash = in.type == ReaderBlockType::Separator ? SeparatorHashV1() : TextHashV1(in.text);
+    if (in.type != ReaderBlockType::Separator) SetOwnBlockText(&b, in.text);
     blocks.push_back(std::move(b));
   }
   const ReaderSection& after = cur.sections[afterIdx];
