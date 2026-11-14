@@ -2,6 +2,7 @@
 
 #include "DocHtmlText.h"
 #include "DocPath.h"
+#include "DocStructureBuild.h"
 #include "DocUtf16.h"
 #include "DocXml.h"
 #include "decode/ImageDecoder.h"
@@ -282,97 +283,21 @@ std::map<std::string, std::string> LoadTocTitles(
   return titles;
 }
 
-/** Builds the reading structure for one section and appends its text + spans. */
+/** Appends one spine item through the shared structure builder. */
 void AppendSection(ExtractTextResult* r, TxtStructure* st, const HtmlExtract* hx,
                    int section_index, const std::string& href, const std::string& kind,
                    const std::string& raw_image_href,
                    const std::map<std::string, std::string>& toc, int* utf16_off) {
-  TxtStructSection sec;
-  sec.sectionIndex = section_index;
-  sec.href = href;
-  sec.kind = kind;
-  sec.firstBlock = static_cast<int>(st->blocks.size());
-  sec.utf16Start = *utf16_off;
-  sec.utf16End = *utf16_off;
-  bool has_text = false;
-  std::string first_heading;
-  const std::string base_dir = DirnameOf(href);
-
-  auto push_block = [&](TxtStructBlock b) {
-    b.sectionIndex = section_index;
-    b.blockIndex = static_cast<int>(st->blocks.size()) - sec.firstBlock;
-    st->blocks.push_back(std::move(b));
-  };
-
-  if (!raw_image_href.empty()) {
-    TxtStructBlock b;
-    b.type = TxtBlockType::Image;
-    b.imageHref = raw_image_href;
-    b.utf16Start = b.utf16End = *utf16_off;
-    push_block(std::move(b));
-  } else if (hx) {
-    for (const HtmlBlock& item : hx->items) {
-      TxtStructBlock b;
-      if (item.kind == HtmlBlockKind::Image || item.kind == HtmlBlockKind::Separator) {
-        if (item.kind == HtmlBlockKind::Image) {
-          b.type = TxtBlockType::Image;
-          b.imageHref = JoinHref(base_dir, item.image_src);
-          if (b.imageHref.empty()) continue;  // remote or empty src
-          b.alt = item.alt;
-          b.hasAlt = item.has_alt;
-        } else {
-          b.type = TxtBlockType::Separator;
-        }
-        b.utf16Start = b.utf16End = *utf16_off;
-        push_block(std::move(b));
-        continue;
-      }
-      if (*utf16_off > 0) {
-        r->text += "\n\n";
-        *utf16_off += 2;
-      }
-      const int start = *utf16_off;
-      r->text += item.text;
-      const int len = Utf16LengthOfUtf8(item.text);
-      *utf16_off += len;
-      DocTextSpan span;
-      span.utf16_start = start;
-      span.utf16_end = start + len;
-      span.level = "block";
-      span.section_index = section_index;
-      span.href = href;
-      r->spans.push_back(std::move(span));
-
-      b.type = item.kind == HtmlBlockKind::Heading ? TxtBlockType::Heading
-                                                   : TxtBlockType::Paragraph;
-      b.headingLevel = item.level;
-      b.utf16Start = start;
-      b.utf16End = start + len;
-      if (!has_text) sec.utf16Start = start;
-      sec.utf16End = start + len;
-      has_text = true;
-      if (first_heading.empty() && b.type == TxtBlockType::Heading) {
-        first_heading = item.text;
-      }
-      push_block(std::move(b));
-    }
-  }
-  if (!has_text) sec.utf16Start = sec.utf16End = *utf16_off;
-  sec.blockCount = static_cast<int>(st->blocks.size()) - sec.firstBlock;
-
+  StructureSectionInput in;
+  in.section_index = section_index;
+  in.href = href;
+  in.kind = kind;
+  in.items = hx ? &hx->items : nullptr;
+  in.raw_image_href = raw_image_href;
   auto t = toc.find(href);
-  if (t != toc.end()) {
-    sec.title = t->second;
-    sec.titleSource = "toc";
-  } else if (!first_heading.empty()) {
-    std::string h = first_heading;
-    std::replace(h.begin(), h.end(), '\n', ' ');
-    sec.title = h;
-    sec.titleSource = "heading";
-  }
-  st->sections.push_back(std::move(sec));
+  if (t != toc.end()) in.toc_title = t->second;
+  AppendStructureSection(r, st, in, utf16_off);
 }
-
 
 }  // namespace
 

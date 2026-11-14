@@ -312,6 +312,7 @@ set(SOURCES
     document/DocSniff.cpp
     document/DocHtmlText.cpp
     document/DocEpub.cpp
+    document/DocStructureBuild.cpp
     document/DocFb2.cpp
     document/DocComic.cpp
     document/DocMobi.cpp
