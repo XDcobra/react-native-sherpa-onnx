@@ -1,171 +1,540 @@
-# Reader API (`react-native-sherpa-onnx/reader`)
+# Reader (`react-native-sherpa-onnx/reader`)
 
-The reader API turns an EPUB into a **reader document with stable block IDs** and shows it in a **native, virtualized `ReaderView`** on iOS and Android. It works on the SDK's text and image buffers, so text, images and (later) read-aloud share the same positions.
+## Introduction
 
-```
-1. Structure extraction   file → text/image buffers + structure (sections, blocks, ranges)
-2. ReaderDocument         structure + buffers → document with stable IDs (+ app sections)
-3. ReaderView             native display, React Native inserts, reading events, commands
-```
+Show an EPUB in a native, virtualized reading view and build a reading app around it: positions that stay valid, your own React Native views inside the text, highlights, search, progress and read-aloud with sentence and word highlighting.
 
-Requirements and scope:
+Import from `react-native-sherpa-onnx/reader`.
 
-- **New Architecture (Fabric) only.** `ReaderView` is a Fabric component. It shows React children (inserts) inside the native list.
-- **EPUB needs lexbor** (`sherpaOnnxEnableLexbor=true` on Android, `SHERPA_ONNX_ENABLE_LEXBOR=1` on iOS), the same as `extractDocumentText`.
-- **v1 scope:**
-  - EPUB only, in scroll mode, with simple image blocks.
-  - Not yet supported: paging, zoom, and PDF / TXT / OCR pages.
+| ![Highlights, a chapter-end card and the selection bar](./images/example/reader_1.png) | ![A note as a React Native view in the reading flow](./images/example/reader_2.png) | ![Search hits highlighted in the text](./images/example/reader_3.png) |
+| --- | --- | --- |
+| Highlights · chapter-end insert · progress | Note insert after a paragraph | Search with all hits marked |
 
-The example app has a **Reader** screen (`example/src/screens/reader/`) that demonstrates the whole API.
+The screenshots are from the [example app](../example/README.md#reader) (`ReaderScreen`). Cards, notes, toolbar and selection bar are app UI built with the public API; the SDK draws the text, images and highlights.
 
----
+What the SDK gives you:
+
+- **`ReaderDocument`**: an EPUB as sections and blocks (paragraphs, headings, images, separators) with **stable IDs**. The same file gives the same IDs on every device, so stored positions, notes and analytics match.
+- **`ReaderView`**: a native list (`UITableView` on iOS, `RecyclerView` on Android) that reads the book text from native memory. Book text does not cross the JS bridge unless you ask for it.
+- **Inserts**: any React Native view placed between blocks, for example chapter-end cards, notes, quizzes or ads. They scroll with the text and stay interactive.
+- **App sections**: text that is not in the file (a preface, a reading guide, generated content), inserted between the book's sections.
+- **Reading events**: visible range, furthest position, section end, jumps and taps, computed by one shared C++ tracker on both platforms.
+- **Highlights and follow scrolling**: any number of marked ranges in three styles; one of them can be kept in view.
+- **Read aloud**: maps a TTS timeline onto the reader for sentence and word highlights.
+
+Requirements:
+
+- **New Architecture (Fabric) only.** `ReaderView` is a Fabric component.
+- **EPUB needs lexbor:** `sherpaOnnxEnableLexbor=true` (Android `gradle.properties`) and `SHERPA_ONNX_ENABLE_LEXBOR=1` (iOS), the same as `extractDocumentText` ([document-offline.md](document-offline.md)).
+- EPUB files in scroll mode. PDF, TXT and OCR pages are not shown in the reader.
 
 ## Quick start
 
+### Open a book and show it
+
 ```tsx
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   loadReaderDocument,
-  insertSection,
   releaseReaderDocument,
   ReaderView,
+  type ReaderDocument,
   type ReaderViewHandle,
 } from 'react-native-sherpa-onnx/reader';
 
-const doc = await loadReaderDocument(source); // FileSource of an .epub
-const withPath = await insertSection(doc, {
-  after: 's11',
-  id: 'app:path-a',
-  title: 'Another way',
-  blocks: [{ key: 'p1', type: 'paragraph', text: '…' }],
-});
+function Book({ source }: { source: FileSource }) {
+  const [doc, setDoc] = useState<ReaderDocument | null>(null);
+  const reader = useRef<ReaderViewHandle>(null);
 
-const reader = useRef<ReaderViewHandle>(null);
+  useEffect(() => {
+    let current: ReaderDocument | null = null;
+    loadReaderDocument(source).then((d) => setDoc((current = d)));
+    return () => {
+      if (current) releaseReaderDocument(current);
+    };
+  }, [source]);
 
-<ReaderView
-  ref={reader}
-  document={withPath}
-  initialLocator={saved}
-  furthestLocator={furthest}
-  theme={{
-    fontFamily: 'Literata',
-    fontScale: 'system',
-    lineHeight: 1.6,
-    colors: { background: '#FBF8F1', text: '#2A2724', accent: '#3F3AB8' },
-  }}
-  inserts={[
-    { key: 'invite-s11', at: { sectionEnd: 's11' } },
-    { key: 'turning-point', at: { beforeBlock: 's24.b7' } },
-  ]}
-  renderInsert={(key) => <InviteCard id={key} />}
-  onVisibleRangeChange={(range) => {}}
-  onFurthestPositionChange={(locator) => {}}
-  onSectionEnd={({ sectionId }) => {}}
-  onJump={({ from, to, distance, cause }) => {}}
-  onTap={() => {}}
-/>;
-
-reader.current?.scrollTo(locator);
-await releaseReaderDocument(withPath); // when the book is closed
+  return (
+    <ReaderView
+      ref={reader}
+      document={doc}
+      theme={{ lineHeight: 1.6, colors: { background: '#FBF8F1', text: '#2A2724' } }}
+      onVisibleRangeChange={(r) => r.settled && savePosition(r.first, r.firstOffset)}
+      style={{ flex: 1 }}
+    />
+  );
+}
 ```
 
----
+### Highlights and an insert
 
-## 1. Structure extraction
+```tsx
+<ReaderView
+  document={doc}
+  highlights={[
+    { id: 'note-1', from: { sectionId: 's7', blockId: 's7.b3' }, to: { sectionId: 's7', blockId: 's7.b3' } },
+  ]}
+  inserts={[{ key: 'end-s7', at: { sectionEnd: 's7' } }]}
+  renderInsert={(key) => <ChapterEndCard id={key} />}
+/>
+```
 
-For EPUB, `extractDocumentText` attaches a **structure** to the text buffer it fills (see [document-offline.md](document-offline.md)). The structure stays in native memory next to the text. JS gets a summary in the result's `structure` field. Book text is never sent over the bridge unless you ask for it (`getReaderBlocks(…, { includeText: true })`).
+### Read aloud
 
-| Element | Fields |
-|---|---|
-| Section | `sectionIndex`, `href`, `kind` (`text` \| `image`), `title?`, `titleSource` (`toc` \| `heading` \| `none`), UTF-16 text range |
-| Block | `type` (`paragraph` \| `heading` \| `image` \| `separator`), UTF-16 text range (empty for image and separator), `headingLevel` (1–6), `imageHref`, `alt` |
-| Metadata | `title`, `creator`, `language` (from `dc:` in the OPF) |
+```ts
+const result = await tts.synthesize(textIn, audioOut, { segmentation: { mode: 'auto' }, timeline: true });
+const timeline = await createReadAloudTimeline(doc, { text: textIn, tts: result.timeline! });
+const highlights = useReadAloudHighlights(timeline, positionMs); // positionMs from PcmPlayer onPosition
+```
 
-`extractDocumentImages(source, { scope: 'all' })` decodes every image the reading order references, inline images included. Each path is decoded once. The reader matches images to blocks by `href`. `loadReaderDocument` calls it for you.
+Details: [Read aloud](#read-aloud).
 
-### Structure rules, version 1
+## Concepts
 
-These rules are frozen as `structureVersion: 1`. Any change to them bumps the version (see [IDs](#2-readerdocument-and-stable-ids)). A golden file (`test/fixtures/reader/structure.reader-v1.txt`) makes the native tests fail on any unversioned change.
+### From file to view
 
-- **Sections** are the *linear* spine items, numbered from 0. Items with `linear="no"` are skipped.
-- **Block-forming tags:** `p`, `h1`–`h6`, `li`, `blockquote`, `pre`, `td`.
-  - `hr` produces a `separator` block.
-  - `img` and SVG `<image>` produce an `image` block. An image inside an open block is emitted **after** that block, so a paragraph is never split.
-- **Block type** comes from the tag that closes the block:
-  - `h1`–`h6` → `heading` with `headingLevel` 1–6.
-  - Loose text at body level → `paragraph`.
-- **Whitespace:**
-  - Runs of space, tab and newline inside text collapse to one space.
-  - `<br>` becomes `\n`.
-  - Block ends are trimmed.
-  - `pre` keeps its text unchanged.
-- **Text buffer layout:**
-  - The buffer holds text blocks only, joined by `\n\n`.
-  - Image and separator blocks have an empty range at the cursor position.
-  - `alt` text is not part of the buffer.
-- **Titles:**
-  - First choice is the EPUB 3 nav document (`nav[epub:type=toc]`, else the first `nav`), then the EPUB 2 NCX. The first TOC entry per file wins (`titleSource: 'toc'`).
-  - Fallback: the text of the section's first heading (`'heading'`).
-- **Image-only sections** (raw image spine items, or XHTML that holds only images) get one `image` block per image.
+```
+EPUB ──extractDocumentText──▶ text buffer + structure ─┐
+     ──extractDocumentImages(scope: 'all')──▶ images ──┼─▶ ReaderDocument ──▶ <ReaderView>
+     ──computeDocumentKey──▶ documentKey ─────────────┘   (stable IDs, app sections)
+```
 
----
+`loadReaderDocument(source)` runs all three steps. Use `createReaderDocument` when you already extracted the text, for example to synthesize it as well.
 
-## 2. ReaderDocument and stable IDs
+### Stable IDs and locators
 
 | Field | Example | Purpose |
 |---|---|---|
 | `documentKey` | SHA-256 of the file (hex) | Same file → same document on every device |
-| `structureVersion` | `1` | Version of the decomposition rules above |
-| `textHashVersion` | `1` | Version of the normalization and hash below |
+| `structureVersion` | `1` | Version of the [structure rules](#structure-rules); IDs only change when it changes |
+| `textHashVersion` | `1` | Version of the [textHash](#texthash) normalization |
 | `revision` | `1`, `2`, … | Increases with every `insertSection` / `removeSection` |
 | `blockId` | `s11.b42` | Section 11, block 42 (both 0-based); short, readable, ordered |
-| `textHash` | `9f2c41d07a3be511` | Remaps stored positions if the decomposition changes |
+| `textHash` | `9f2c41d07a3be511` | Finds a stored block again if `structureVersion` changes |
 
-**App sections** hold text that is not in the file, for example generated path chapters.
-- They have their own namespace: section ID `app:<id>` (`[A-Za-z0-9_-]+`), block IDs `app:<id>.<key>`.
-- Each one is inserted after an existing section.
-- Their blocks have the types `paragraph`, `heading` and `separator`.
+A **locator** is `{ sectionId, blockId, offset? }`. `offset` is a UTF-16 offset inside the block. Store positions with `documentKey`, `structureVersion` and the block's `textHash`; then a position survives a later structure version (see [remapLocator](#remaplocatordoc-stored-hint)).
 
-**Locator:** `{ sectionId, blockId, offset? }`. `offset` is an optional UTF-16 offset inside the block.
+### App sections and inserts
 
-### Functions
+| | App section | Insert |
+|---|---|---|
+| What | Text blocks that are not in the file | A React Native view |
+| Rendered by | The reader, like book text | React Native (your component) |
+| Positions, highlights, events | Yes, like file blocks | Reported in `visibleInserts` only |
+| IDs | `app:<id>`, blocks `app:<id>.<key>` | Your `key` |
+| Typical use | Preface, reading guide, generated chapter | Chapter-end card, note, quiz, banner |
 
-| Function | Result |
+## API reference
+
+### Documents
+
+#### `loadReaderDocument(source, options?)`
+
+```ts
+function loadReaderDocument(
+  source: FileSource,
+  options?: { imagesMaxSide?: number }
+): Promise<ReaderDocument>;
+```
+
+```ts
+const doc = await loadReaderDocument({ kind: 'fs', path: '/books/frankenstein.epub' });
+```
+
+Opens an EPUB in one call: extracts text, images (`scope: 'all'`, longest side 2048 by default) and `documentKey`. The document owns the image buffer; release it with `releaseReaderDocument`.
+
+#### `createReaderDocument(options)`
+
+```ts
+function createReaderDocument(options: {
+  text: OfflineTextBufferIdSource;
+  images?: string | { bufferId: string } | null;
+  documentKey: string;
+}): Promise<ReaderDocument>;
+```
+
+```ts
+await extractDocumentText(source, textBuffer);
+const doc = await createReaderDocument({ text: textBuffer, documentKey: await computeDocumentKey(source) });
+```
+
+Builds a document from a text buffer that `extractDocumentText` filled from an EPUB. Use it when the app keeps the text buffer, for example to read it aloud. The document keeps the text alive; your image buffer stays yours.
+
+#### `computeDocumentKey(source)`
+
+```ts
+function computeDocumentKey(source: FileSource): Promise<string>;
+```
+
+```ts
+const key = await computeDocumentKey(source); // 64 hex characters
+```
+
+SHA-256 of the file, computed natively. Use it as the key for stored positions, notes and highlights.
+
+#### `insertSection(doc, section)`
+
+```ts
+function insertSection(doc: ReaderDocument, section: ReaderAppSection): Promise<ReaderDocument>;
+```
+
+```ts
+const next = await insertSection(doc, { after: 's2', id: 'app:guide', title: 'Reading guide', blocks: [{ key: 'p1', type: 'paragraph', text: '…' }] });
+```
+
+Adds text that is not in the file after an existing section. Returns a new document value with a higher `revision`; pass it to the view, which keeps the reading position.
+
+#### `removeSection(doc, sectionId)`
+
+```ts
+function removeSection(doc: ReaderDocument, sectionId: string): Promise<ReaderDocument>;
+```
+
+```ts
+const next = await removeSection(doc, 'app:guide');
+```
+
+Removes an app section and returns a new document value.
+
+#### `releaseReaderDocument(doc)`
+
+```ts
+function releaseReaderDocument(doc: ReaderDocument): Promise<void>;
+```
+
+```ts
+await releaseReaderDocument(doc);
+```
+
+Frees the native document (and the image buffer `loadReaderDocument` created). Call it when the book is closed.
+
+### Blocks and positions
+
+#### `getReaderBlocks(doc, start?, count?, options?)`
+
+```ts
+function getReaderBlocks(
+  doc: ReaderDocument,
+  start?: number,
+  count?: number,
+  options?: { includeText?: boolean }
+): Promise<ReaderBlock[]>;
+```
+
+```ts
+const blocks = await getReaderBlocks(doc, 0, doc.blockCount, { includeText: true });
+```
+
+Blocks in reading order with ID, type, `textHash`, `textRange` and optionally the text. Use it for search, quotes, word counts or your own table of contents. Large ranges are paged natively in chunks of 4096.
+
+#### `mapTextRanges(doc, ranges)`
+
+```ts
+function mapTextRanges(
+  doc: ReaderDocument,
+  ranges: ReadonlyArray<readonly [number, number]>
+): Promise<Array<ReaderRange | null>>;
+```
+
+```ts
+const [range] = await mapTextRanges(doc, [[17456, 17520]]);
+```
+
+Turns UTF-16 ranges of the document's text buffer into reader ranges, in one native call. Use it when another pipeline (TTS, alignment, your own analysis) produced offsets in the text buffer. A start in the gap between two blocks moves to the next block, an end moves back; `null` when a range covers no text block.
+
+#### `locatorAtTextOffset(doc, offset)`
+
+```ts
+function locatorAtTextOffset(doc: ReaderDocument, offset: number): Promise<ReaderLocator | null>;
+```
+
+```ts
+const at = await locatorAtTextOffset(doc, 17456);
+```
+
+Locator of one text-buffer offset; short form of `mapTextRanges`.
+
+#### `remapLocator(doc, stored, hint?)`
+
+```ts
+function remapLocator(
+  doc: ReaderDocument,
+  stored: { textHash: string; offset?: number },
+  hint?: ReaderLocator | null
+): Promise<ReaderLocator | null>;
+```
+
+```ts
+const at = await remapLocator(doc, { textHash: saved.textHash, offset: saved.offset }, saved.locator);
+```
+
+Finds a stored position again when `structureVersion` changed since it was saved: the block with the same `textHash` nearest to `hint`. `null` if the text no longer exists.
+
+#### `compareLocators(a, b)`
+
+```ts
+function compareLocators(a: ReaderLocator, b: ReaderLocator): number | null;
+```
+
+```ts
+const ahead = (compareLocators(position, furthest) ?? 0) > 0;
+```
+
+Orders two file locators (negative: `a` first). Returns `null` when one of them is in an app section; use the block order from `getReaderBlocks` there.
+
+#### `formatBlockId(sectionIndex, blockIndex)` / `parseBlockId(blockId)`
+
+```ts
+function formatBlockId(sectionIndex: number, blockIndex: number): string;
+function parseBlockId(blockId: string): { sectionId: string; key: string; sectionIndex?: number; blockIndex?: number } | null;
+```
+
+```ts
+formatBlockId(11, 42); // 's11.b42'
+parseBlockId('app:guide.p1'); // { sectionId: 'app:guide', key: 'p1' }
+```
+
+Helpers for block IDs, for example to group stored notes by section.
+
+### ReaderView
+
+#### `<ReaderView>`
+
+```tsx
+<ReaderView ref={reader} document={doc} theme={theme} highlights={highlights} inserts={inserts} renderInsert={render} />
+```
+
+The native reading view. All props:
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `document` | `ReaderDocument \| null` | required | Value from `loadReaderDocument` / `createReaderDocument` / `insertSection`. A new `revision` keeps the reading position. |
+| `initialLocator` | `ReaderLocator \| null` | start | Applied once, on the first layout of a document; `onReady` fires afterwards. |
+| `furthestLocator` | `ReaderLocator \| null` | start | Starting frontier for `onFurthestPositionChange`. Set it to accept a jump as read. |
+| `theme` | `ReaderTheme` | see [Theme](#theme) | Font, size, spacing, margins, alignment, colors. |
+| `inserts` | `ReaderInsert[]` | `[]` | React Native views in the reading flow; see [Inserts](#inserts). |
+| `renderInsert` | `(key: string) => ReactNode` | — | Renders the insert with that key. |
+| `highlights` | `ReaderHighlight[]` | `[]` | Marked ranges; see [Highlights](#highlights). |
+| `follow` | `ReaderFollowOptions` | `{ mode: 'keepVisible' }` | Keeps the highlight with `follow: true` in view; see [Follow scrolling](#follow-scrolling). |
+| `jumpThreshold` | `number` | `20` | Blocks; a larger move is reported as `onJump`. |
+| `mode` | `'scroll'` | `'scroll'` | Layout mode. |
+| `style`, `testID` | | | As for `View`. |
+| `onReady`, `onVisibleRangeChange`, `onFurthestPositionChange`, `onSectionEnd`, `onJump`, `onTap`, `onFollowChange`, `onError` | | | See [JS Events](#js-events). |
+
+#### `reader.scrollTo(locator, options?)`
+
+```ts
+scrollTo(locator: ReaderLocator, options?: { animated?: boolean }): void;
+```
+
+```ts
+reader.current?.scrollTo({ sectionId: 's8', blockId: 's8.b0' }, { animated: true });
+```
+
+Puts the block, and the line holding `offset`, at the top of the reading area. Use it for a table of contents, search results and "back" buttons. If `blockId` is unknown, `sectionId` is used. A stored `{ blockId, offset }` from a settled `onVisibleRangeChange` lands on the same line.
+
+#### `reader.resumeFollow()`
+
+```ts
+resumeFollow(): void;
+```
+
+```ts
+reader.current?.resumeFollow();
+```
+
+Resumes follow scrolling after the user scrolled away, and places the followed highlight at the anchor. Use it for a "back to the reading position" button while reading aloud.
+
+### Read aloud
+
+#### `createReadAloudTimeline(doc, options)`
+
+```ts
+function createReadAloudTimeline(
+  doc: ReaderDocument,
+  options: CreateReadAloudTimelineOptions
+): Promise<ReadAloudTimeline>;
+```
+
+```ts
+const timeline = await createReadAloudTimeline(doc, { text: textIn, tts: result.timeline!, textOffset: sliceStart });
+```
+
+Turns the timeline of one synthesis (`tts.synthesize(…, { timeline: true })`) into sentences and words with reader ranges and playback times. Options: `granularity` (`'sentence'`, `'word'`, `'both'`), `textOffset` when you synthesized a slice, `words.timing` for exact word times, `words.split` for your own word splitter.
+
+#### `timeline.at(ms)`
+
+```ts
+at(ms: number): { sentence: ReadAloudUnit | null; word: ReadAloudUnit | null };
+```
+
+```ts
+const { sentence, word } = timeline.at(positionMs);
+```
+
+The sentence and word being spoken at a playback position, for your own logic (captions, analytics, a "repeat sentence" button).
+
+#### `useReadAloudHighlights(timeline, positionMs, options?)`
+
+```ts
+function useReadAloudHighlights(
+  timeline: ReadAloudTimeline | null,
+  positionMs: number | null,
+  options?: ReadAloudHighlightOptions
+): ReaderHighlight[];
+```
+
+```ts
+const spoken = useReadAloudHighlights(timeline, positionMs, { show: 'both', wordStyle: { style: 'underline' } });
+```
+
+React hook that returns the highlights for the units being spoken. The array only changes when the sentence or word changes, so the view updates at word rate, not at the rate of the position callback.
+
+#### `splitWords(sentence)`
+
+```ts
+function splitWords(sentence: string): Array<[number, number]>;
+```
+
+```ts
+splitWords('“Hello,” she said.'); // [[1, 6], [9, 12], [13, 17]]
+```
+
+The default word splitter: whitespace-separated words without surrounding punctuation. Wrap or replace it for `words.split`.
+
+## Theme
+
+`theme` (`ReaderTheme`) styles the book text. All fields are optional.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `fontFamily` | system serif | Font family, resolved as for `<Text>` (custom fonts work the same way). |
+| `fontSize` | `18` | Base size in pt / dp. |
+| `fontScale` | `'system'` | `'system'` follows Dynamic Type / the Android font scale; a number multiplies `fontSize`. |
+| `maxFontScale` | `0` (no limit) | Upper limit for `'system'`. |
+| `lineHeight` | `1.5` | Line-height multiplier. |
+| `paragraphSpacing` | `0.75` | Space between blocks, in em. |
+| `margins` | `{ horizontal: 20, vertical: 24 }` | Text inset inside the view. |
+| `textAlign` | `'start'` | `'start'` or `'justify'`. |
+| `hyphenation` | `true` | Uses the book's `language`. |
+| `colors` | system text color, transparent background, system blue accent | `{ background, text, accent }`; `accent` is the default highlight color. |
+
+When the theme changes, the first visible line stays in place. The same holds for a width change (rotation) and a new `revision`.
+
+## JS Events
+
+| Callback | Payload | Fires when |
+|---|---|---|
+| `onReady` | `{ blockCount, sectionCount }` | The first layout of a document is done and `initialLocator` is applied. |
+| `onVisibleRangeChange` | `ReaderVisibleRange` | The first or last visible block changes, and once more with `settled: true` when scrolling stops. `firstOffset` (settled only) is the UTF-16 offset of the first visible line. |
+| `onFurthestPositionChange` | `ReaderLocator` | The frontier advanced while reading continuously. |
+| `onSectionEnd` | `{ sectionId, blockId }` | The last block of a section came into view while reading continuously. Fires once per transition into view. |
+| `onJump` | `ReaderJump` | The position moved more than `jumpThreshold` blocks. The app decides whether the jump counts as read. |
+| `onTap` | `{ blockId }` | A tap on text (not on inserts), for example to select a paragraph or toggle toolbars. |
+| `onFollowChange` | `{ following, reason }` | Follow scrolling paused (`'user'`) or resumed (`'resumed'`, `'command'`). |
+| `onError` | `{ code, message }` | For example `ERR_READER_NOT_FOUND` for a released document, or `ERR_READER_INVALID_ARGUMENT` for a highlight with unknown block IDs. |
+
+Rules (shared C++ tracker, identical on iOS and Android):
+
+- **Visible:** a block counts when at least 50 % of `min(blockHeight, viewportHeight)` is on screen. Inserts are listed in `visibleInserts`, not as blocks.
+- **Furthest position:** advances only while the visible range touches the current frontier. A jump does not move it; set `furthestLocator` to accept one.
+- **Jump causes** (`ReaderJump.cause`):
+  - `'scroll'`: the visible range moved more than `jumpThreshold` blocks without continuous visibility, for example by dragging the scroll indicator.
+  - `'fling'`: a fling landed more than `jumpThreshold` blocks away.
+  - `'scrollTo'`: the command moved the view; always reported, whatever the distance.
+  - `'follow'`: follow scrolling moved far, for example when read-aloud restarted elsewhere. Shorter follow moves count as continuous reading.
+
+## Highlights
+
+![Underline, background and a chapter-end insert](./images/example/reader_highlights_cut.png)
+
+`highlights` marks any number of ranges at the same time: search hits, the sentence being read, notes, the user's selection.
+
+- **Styles:** `'background'` (default), `'underline'`, `'textColor'`. `color` defaults to the theme's `accent` (backgrounds at 30 % opacity). Use translucent colors for backgrounds so the text stays readable.
+- **Ranges:** `from` is inclusive, `to` exclusive. Without `offset`, `from` is the start and `to` the end of the block, so `{ from: at, to: at }` marks one whole block. A range may span blocks; blocks in between are marked whole. Image and separator blocks are skipped.
+- **Order:** highlights may overlap and are drawn in array order; a later `textColor` wins over an earlier one.
+- **IDs:** keep `id` stable; the same `id` with a new range moves a highlight.
+- **Cost:** a change redraws only the affected rows. The text layout does not change, so the reading position stays.
+- Offsets are clamped to the block and never split a surrogate pair. A highlight with an unknown block ID is skipped and reported through `onError`.
+
+## Follow scrolling
+
+The first highlight with `follow: true` is kept in view while it moves, for example the word being read aloud.
+
+| `follow` option | Default | Meaning |
+|---|---|---|
+| `mode` | `'keepVisible'` | `'keepVisible'`: scroll only when the highlight leaves the comfort zone (10 %–85 % of the height), then place it at `anchor`. `'center'`: keep it centered on every change. `'off'`: never scroll. |
+| `anchor` | `0.3` | 0..1: where `keepVisible` places the highlight. |
+| `pauseOnUserScroll` | `true` | A drag by the user pauses following (`onFollowChange({ following: false, reason: 'user' })`). It resumes when the highlight is back in the comfort zone, or with `resumeFollow()`. |
+
+Follow scrolling counts as continuous reading: no `onJump` for short moves, and the furthest position and section ends advance.
+
+## Inserts
+
+An insert is a React Native view placed between blocks. It is full width, takes the height Yoga gives it, scrolls with the text and keeps presses, accessibility and state.
+
+| `at` | Position |
 |---|---|
-| `loadReaderDocument(source, { imagesMaxSide? })` | Extracts the text, images (`scope: 'all'`, max side 2048 by default) and `documentKey`, then calls `createReaderDocument`. The document owns the image buffer; the temporary text handle is released. |
-| `createReaderDocument({ text, images?, documentKey })` | Builds a document from a text buffer that carries a structure (`ERR_READER_NO_STRUCTURE` otherwise) and an optional image buffer. |
-| `computeDocumentKey(source)` | SHA-256 (hex) of the file, computed natively. |
-| `insertSection(doc, { after, id, title?, blocks })` | Returns a **new** `ReaderDocument` value with a higher `revision`; pass it to the view. The old value stays readable until it is released. |
-| `removeSection(doc, sectionId)` | Removes an app section; returns a new value. |
-| `getReaderBlocks(doc, start?, count?, { includeText? })` | Blocks in reading order with `id`, `sectionId`, `type`, `textHash`, `textRange` (file text blocks: UTF-16 range in the text buffer), … The native side pages in chunks of 4096. |
-| `mapTextRanges(doc, [[start, end], …])` | Maps UTF-16 ranges of the document's text buffer onto `{ from, to }` reader ranges in one native call (`null` for a range that covers no file text block). Starts in the gap between two blocks move to the next block, ends move back. |
-| `locatorAtTextOffset(doc, offset)` | Locator of one text-buffer offset. |
-| `remapLocator(doc, { textHash, offset? }, hint?)` | The block with the same `textHash` nearest to `hint`, or `null`. Use it when `structureVersion` changed since a position was stored. |
-| `releaseReaderDocument(doc)` | Frees the native document and, when created by `loadReaderDocument`, its image buffer. |
-| `formatBlockId`, `parseBlockId`, `compareLocators` | Helpers. `compareLocators` returns `null` when the order is not defined, for example between an app section and a file section. |
+| `{ sectionEnd: 's7' }` | After the last block of a section |
+| `{ beforeBlock: 's7.b3' }` | Before a block |
+| `{ afterBlock: 's7.b3' }` | After a block |
 
-Errors carry `code` from `ReaderErrorCode`:
-- `ERR_READER_NOT_FOUND`
-- `ERR_READER_NO_STRUCTURE`
-- `ERR_READER_UNSUPPORTED_STRUCTURE`
-- `ERR_READER_INVALID_ARGUMENT`
+```tsx
+const inserts = notes.map((n) => ({ key: n.id, at: { afterBlock: n.blockId } }));
+<ReaderView inserts={inserts} renderInsert={(key) => <NoteCard note={byId[key]} />} />;
+```
 
-Store positions together with `documentKey`, `structureVersion` and the block's `textHash`. Then a position survives a later structure version.
+- Change `inserts` at any time; the reading position stays. Height changes of an insert (for example an expanding card) keep the visible text in place.
+- Keep `renderInsert` cheap; it runs for every insert in the list. Pass changing data through props or context.
+- Inserts are not blocks: they have no locator and do not count for jumps or the furthest position.
 
-### textHash, version 1
+## Read aloud
+
+![Sentence background and word underline while reading aloud](./images/example/reader_read_aloud_cut.png)
+
+The SDK maps synthesized speech onto the reader, so the sentence or word being spoken can be highlighted and followed.
+
+1. **Synthesize with a timeline:** `tts.synthesize(textIn, audioOut, { segmentation: { mode: 'auto' }, timeline: true })`. `result.timeline` lists each text segment with its UTF-16 range in `textIn` and its sample range in `audioOut` ([tts-offline.md](tts-offline.md#ttssynthesizetextin-audioout-options)).
+2. **Map it onto the reader:** `createReadAloudTimeline(doc, { text: textIn, tts: result.timeline, textOffset })`.
+   - **Sentences** are the TTS segments; their times are exact.
+   - **Words** are estimated by default: each sentence's duration is spread over its words by length, with a pause after punctuation. With `words: { timing: { aligned } }` the times come from word alignment; words without a match keep their estimate.
+   - `textOffset` is where `textIn` starts in the document's text buffer when you synthesized a slice. Read slice ranges from `getReaderBlocks(…).textRange`.
+3. **Play and highlight:** pass the `PcmPlayer` position to `useReadAloudHighlights`, and the result to `highlights`. By default the word is followed when words are shown, else the sentence.
+
+Long books: synthesize in chunks (whole paragraphs up to a section end) and prepare the next chunk while one plays; see [use case examples](#use-case-examples).
+
+Limits:
+
+- The default word splitter needs spaces between words. For Chinese, Japanese or Thai pass `words.split`; otherwise each sentence is one unit.
+- `result.timeline.exact` is `false` when a segmentation policy rewrote the text (`overlapChars > 0`, `text_punctuation_assisted`); ranges may then be off by a few characters.
+
+## Structure rules
+
+`structureVersion` describes how an EPUB is split into sections and blocks. The rules below change only together with that number; a golden file in the native tests guards them.
+
+- **Sections** are the linear spine items, numbered from 0. Items with `linear="no"` are skipped.
+- **Block-forming tags:** `p`, `h1`–`h6`, `li`, `blockquote`, `pre`, `td`.
+  - `hr` produces a `separator` block.
+  - `img` and SVG `<image>` produce an `image` block. An image inside an open block is emitted after that block, so a paragraph is never split.
+- **Block type** comes from the tag that closes the block: `h1`–`h6` → `heading` with `headingLevel` 1–6; everything else → `paragraph`.
+- **Whitespace:** runs of space, tab and newline collapse to one space; `<br>` becomes `\n`; block ends are trimmed; `pre` keeps its text.
+- **Text buffer layout:** the buffer holds text blocks only, joined by `\n\n`. Image and separator blocks have an empty range; `alt` text is not part of the buffer.
+- **Titles:** the EPUB 3 nav document (`nav[epub:type=toc]`, else the first `nav`), then the EPUB 2 NCX; the first entry per file wins (`titleSource: 'toc'`). Fallback: the section's first heading (`'heading'`).
+- **Image-only sections** (raw image spine items, or XHTML with only images) get one `image` block per image.
+- **Metadata:** `title`, `creator` and `language` from the OPF `dc:` fields.
+
+## textHash
+
+`textHash` identifies a block's text independent of its position. Backends can compute it with the reference below (matches the native code byte for byte).
 
 1. Decode UTF-8 to code points (invalid bytes → U+FFFD).
 2. Remove U+00AD, U+200B–U+200D, U+2060 and U+FEFF.
-3. Quotes:
-   - U+2018, U+2019, U+201A, U+201B, U+2032, U+02BC, U+0060, U+00B4, U+2039, U+203A → `'`.
-   - U+201C–U+201F, U+2033, U+00AB, U+00BB → `"`.
+3. Quotes: U+2018, U+2019, U+201A, U+201B, U+2032, U+02BC, U+0060, U+00B4, U+2039, U+203A → `'`; U+201C–U+201F, U+2033, U+00AB, U+00BB → `"`.
 4. U+2010–U+2015 and U+2212 → `-`; U+2026 → `...`.
-5. Unicode whitespace (U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000): each run collapses to one U+0020, and both ends are trimmed.
-6. No case folding and no Unicode normalization (NFC/NFKC).
+5. Unicode whitespace (U+0009–U+000D, U+0020, U+0085, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029, U+202F, U+205F, U+3000): each run becomes one U+0020; both ends are trimmed.
+6. No case folding, no Unicode normalization.
 7. `textHash` = lowercase hex of the first 8 bytes of SHA-256 over the normalized UTF-8.
-8. Image blocks hash `"\x1Fimage:" + href`, separators hash `"\x1Fseparator"`. The block type is not part of the hash.
-
-Reference implementation (Python 3; matches the native code byte for byte, for backends):
+8. Image blocks hash `"\x1Fimage:" + href`, separators `"\x1Fseparator"`. The block type is not part of the hash.
 
 ```python
 import hashlib
@@ -176,7 +545,7 @@ DQ = {0x201C, 0x201D, 0x201E, 0x201F, 0x2033, 0x00AB, 0x00BB}
 WS = (set(range(0x09, 0x0E)) | set(range(0x2000, 0x200B))
       | {0x20, 0x85, 0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000})
 
-def normalize_v1(text: str) -> str:
+def normalize(text: str) -> str:
     out, space = [], False
     for ch in text:
         cp = ord(ch)
@@ -200,160 +569,347 @@ def normalize_v1(text: str) -> str:
             out.append(ch)
     return "".join(out)  # trailing whitespace never emits a space
 
-def text_hash_v1(text: str) -> str:
-    return hashlib.sha256(normalize_v1(text).encode("utf-8")).hexdigest()[:16]
+def text_hash(text: str) -> str:
+    return hashlib.sha256(normalize(text).encode("utf-8")).hexdigest()[:16]
 
-def image_hash_v1(href: str) -> str:
+def image_hash(href: str) -> str:
     return hashlib.sha256(("\x1fimage:" + href).encode("utf-8")).hexdigest()[:16]
 
-SEPARATOR_HASH_V1 = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
+SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 ```
 
----
+## Accessibility
 
-## 3. ReaderView
+- VoiceOver and TalkBack read the blocks in order; inserts sit between them and stay accessible.
+- Headings carry the header trait (`accessibilityHeading` on Android).
+- Image blocks use `alt`; images without `alt` are hidden from screen readers.
+- `fontScale: 'system'` follows Dynamic Type and the Android font size.
 
-The view is a native list: `UITableView` with TextKit 1 text cells on iOS, `RecyclerView` with `TextView` rows on Android. It is virtualized and runs in scroll mode. Book text is read from native memory per visible block.
+## Limits
 
-### Props
+- EPUB only, scroll mode only; no zoom and no text selection (use `onTap` and highlights for paragraph-level selection).
+- Inline formatting (italics, bold, links) is not kept; each block has one text style.
+- An image is scaled to the text width and is at most 90 % of the viewport high.
 
-| Prop | Type | Notes |
-|---|---|---|
-| `document` | `ReaderDocument \| null` | Value from `createReaderDocument` / `insertSection`. A new `revision` keeps the reading position. |
-| `initialLocator` | `ReaderLocator?` | Applied once, on the first layout of a document. `onReady` fires afterwards. |
-| `furthestLocator` | `ReaderLocator?` | Start value of the frontier for `onFurthestPositionChange`. The app owns it, for example after confirming a jump. |
-| `mode` | `'scroll'` | Paged mode comes later. |
-| `theme` | `ReaderTheme` | See below. |
-| `inserts` | `ReaderInsert[]` | `{ key, at: { sectionEnd } \| { beforeBlock } \| { afterBlock } }` |
-| `renderInsert` | `(key) => ReactNode` | A React Native view in the reading flow: full width, its own height (Yoga). Presses, height changes and accessibility work as usual. |
-| `jumpThreshold` | `number` | In blocks; default 20. |
-| `highlights` | `ReaderHighlight[]` | Marked ranges; see [Highlights](#highlights). |
-| `follow` | `ReaderFollowOptions` | Follow scrolling for the highlight with `follow: true`; see [Follow scrolling](#follow-scrolling). |
-
-`ReaderTheme` fields:
-
-| Field | Meaning |
-|---|---|
-| `fontFamily` | Font family, resolved as for `<Text>`; default is the system serif. |
-| `fontSize` | Size in pt/dp; default 18. |
-| `fontScale` | `'system'` (default) follows Dynamic Type / the system font scale; a number multiplies `fontSize`. |
-| `maxFontScale` | Upper limit for the `'system'` scale. |
-| `lineHeight` | Line-height multiplier; default 1.5. |
-| `paragraphSpacing` | Space between blocks, in em; default 0.75. |
-| `margins` | `{ horizontal, vertical }`; default 20 / 24. |
-| `textAlign` | `'start'` or `'justify'`. |
-| `hyphenation` | Default `true`. Uses the book's `language`. |
-| `colors` | `{ background, text, accent }`; `accent` is the default highlight color. |
-
-When the theme changes, the first visible block stays in place. The same holds for a width change (rotation) and for a new `revision`.
-
-### Events
-
-| Event | Payload | Rule |
-|---|---|---|
-| `onReady` | `{ blockCount, sectionCount }` | First layout of a document done, initial locator applied. |
-| `onVisibleRangeChange` | `{ first, last, firstOffset, settled, visibleInserts }` | Fires when the first or last visible block changes, and once more with `settled: true` when scrolling stops. `firstOffset` (settled only) is the UTF-16 offset of the first visible line of `first`. |
-| `onFurthestPositionChange` | `ReaderLocator` | The frontier advanced while reading continuously. |
-| `onSectionEnd` | `{ sectionId, blockId }` | The last block of a section came into view while reading continuously. Fires once per transition into view; scrolling away and back fires it again. |
-| `onJump` | `{ from, to, distance, cause }` | The position moved more than `jumpThreshold` blocks. The app decides whether the jump counts as reading. |
-| `onTap` | `{ blockId }` | Tap on text, not on inserts; for example to toggle toolbars. |
-| `onError` | `{ code, message }` | For example `ERR_READER_NOT_FOUND` for a released document, or `ERR_READER_INVALID_ARGUMENT` for a highlight with unknown block IDs. |
-| `onFollowChange` | `{ following, reason }` | Follow scrolling paused (`reason: 'user'`) or resumed (`'resumed'`, `'command'`). |
-
-Event rules (shared C++ `ReaderTracker`, identical on both platforms):
-
-- **Visible:** a block counts when at least 50 % of `min(blockHeight, viewportHeight)` is on screen. Inserts are reported in `visibleInserts` but are not blocks.
-- **Furthest position:** advances only when the continuously visible range touches the current frontier. A jump forward does not move it. The app can accept a jump by setting `furthestLocator`.
-- **Jump causes:**
-  - `'scroll'`: the visible range moved more than N blocks without continuous visibility, for example by dragging the scroll indicator.
-  - `'fling'`: a fling landed more than N blocks away.
-  - `'scrollTo'`: the jump came from the command; this cause is always reported.
-  - `'follow'`: follow scrolling moved more than N blocks (for example read-aloud restarted elsewhere). Smaller follow moves count as continuous reading: no jump, and the furthest position and section ends advance.
-
-### Commands (ref)
-
-- `scrollTo(locator, { animated? })`: puts the block, and the line holding `offset`, at the top of the reading area. If `blockId` is unknown, `sectionId` is used. Restoring a stored `{ blockId, offset }` from a settled `onVisibleRangeChange` lands on the same line.
-- `resumeFollow()`: resumes follow scrolling after the user paused it and places the followed highlight at the anchor.
-
-### Highlights
-
-`highlights` marks any number of ranges at the same time, for example the sentence and word being read aloud, search hits and notes.
+## Types and constants
 
 ```ts
-type ReaderHighlight = {
-  id: string;            // stable; pass the same id with a new range to move it
-  from: ReaderLocator;   // inclusive; without offset: start of the block
-  to: ReaderLocator;     // exclusive; without offset: end of the block
-  style?: 'background' | 'underline' | 'textColor'; // default 'background'
-  color?: ColorValue;    // default: theme accent (background at 30 % opacity)
-  follow?: boolean;      // keep this one in view (the first with follow wins)
+import {
+  ReaderView, // native reading view (Fabric)
+  loadReaderDocument, // EPUB → ReaderDocument in one call
+  createReaderDocument, // ReaderDocument from an extracted text buffer
+  computeDocumentKey, // SHA-256 of a file
+  insertSection, // add an app section
+  removeSection, // remove an app section
+  releaseReaderDocument, // free the native document
+  getReaderBlocks, // blocks in reading order (optionally with text)
+  mapTextRanges, // text-buffer ranges → reader ranges
+  locatorAtTextOffset, // text-buffer offset → locator
+  remapLocator, // find a stored block again by textHash
+  compareLocators, // order two locators
+  formatBlockId, // 's11.b42'
+  parseBlockId, // block ID → section ID + key
+  createReadAloudTimeline, // TTS timeline → sentences / words on the reader
+  useReadAloudHighlights, // spoken units → highlights (React hook)
+  splitWords, // default word splitter
+  ReaderErrorCode, // error code object
+  READER_STRUCTURE_VERSION, // current structure rules version
+  READER_TEXT_HASH_VERSION, // current textHash version
+} from 'react-native-sherpa-onnx/reader';
+
+import type {
+  ReaderDocument, ReaderSectionInfo, ReaderDocumentMetadata, ReaderBlock, ReaderBlockType,
+  ReaderLocator, ReaderRange, ReaderAppSection, ReaderAppBlock, ReaderInsert, ReaderInsertTarget,
+  ReaderTheme, ReaderHighlight, ReaderHighlightStyle, ReaderFollowOptions, ReaderFollowChange,
+  ReaderVisibleRange, ReaderJump, ReaderJumpCause, ReaderViewProps, ReaderViewHandle,
+  ReadAloudTimeline, ReadAloudUnit, ReadAloudPosition, ReadAloudAlignedWord,
+  CreateReadAloudTimelineOptions, ReadAloudHighlightOptions, ReaderErrorCodeValue,
+} from 'react-native-sherpa-onnx/reader';
+```
+
+| Type | Description |
+| --- | --- |
+| `ReaderDocument` | `{ id, revision, documentKey, structureVersion, textHashVersion, blockCount, sections, metadata }` (immutable value) |
+| `ReaderSectionInfo` | `{ id, sectionIndex?, origin: 'file' \| 'app', kind: 'text' \| 'image', href?, title?, titleSource, blockCount, firstBlockId, lastBlockId }` |
+| `ReaderDocumentMetadata` | `{ title?, creator?, language? }` |
+| `ReaderBlock` | `{ id, sectionId, index, type, headingLevel?, textHash, text?, imageHref?, imageFrameIndex?, alt?, textRange? }` |
+| `ReaderBlockType` | `'paragraph' \| 'heading' \| 'image' \| 'separator'` |
+| `ReaderLocator` | `{ sectionId, blockId, offset? }` |
+| `ReaderRange` | `{ from, to }` (`to` exclusive) |
+| `ReaderAppSection` / `ReaderAppBlock` | `{ after, id, title?, blocks }` / `{ key, type: 'paragraph' \| 'heading' \| 'separator', text?, level? }` |
+| `ReaderInsert` / `ReaderInsertTarget` | `{ key, at }` / `{ sectionEnd } \| { beforeBlock } \| { afterBlock }` |
+| `ReaderTheme` | See [Theme](#theme) |
+| `ReaderHighlight` | `{ id, from, to, style?, color?, follow? }` |
+| `ReaderHighlightStyle` | `'background' \| 'underline' \| 'textColor'` |
+| `ReaderFollowOptions` / `ReaderFollowChange` | `{ mode?, anchor?, pauseOnUserScroll? }` / `{ following, reason }` |
+| `ReaderVisibleRange` | `{ first, last, firstOffset, settled, visibleInserts }` |
+| `ReaderJump` / `ReaderJumpCause` | `{ from, to, distance, cause }` / `'scroll' \| 'fling' \| 'scrollTo' \| 'follow'` |
+| `ReaderViewProps` / `ReaderViewHandle` | View props / ref: `scrollTo`, `resumeFollow` |
+| `ReadAloudTimeline` | `{ durationMs, sentences, words, at(ms) }` |
+| `ReadAloudUnit` | `{ kind, index, sentenceIndex, range, textStart, textEnd, startMs, endMs }` |
+| `ReadAloudPosition` | `{ sentence, word }` (each `ReadAloudUnit \| null`) |
+| `ReadAloudAlignedWord` | `{ text, startSample, endSample }` (exact word times) |
+| `CreateReadAloudTimelineOptions` | `{ text, tts, textOffset?, granularity?, words?: { timing?, split? } }` |
+| `ReadAloudHighlightOptions` | `{ show?, sentenceStyle?, wordStyle?, follow?, idPrefix? }` |
+
+## Error codes
+
+| Code | Meaning |
+| --- | --- |
+| `ERR_READER_NOT_FOUND` | Document or text buffer not found, for example after `releaseReaderDocument`. |
+| `ERR_READER_NO_STRUCTURE` | The text buffer has no reading structure. Extract an EPUB with `extractDocumentText` first. |
+| `ERR_READER_UNSUPPORTED_STRUCTURE` | The structure was made with other structure rules than this SDK supports. |
+| `ERR_READER_INVALID_ARGUMENT` | Invalid app section ID or block key, or a highlight with an unknown block ID (`onError`). |
+
+Errors from extraction (`ERR_DOC_*`, for example `ERR_DOC_DRM`) and file access (`FILEIO_*`) surface unchanged from `loadReaderDocument`.
+
+## Use case examples
+
+<details>
+<summary>Resume where the reader left off</summary>
+
+Store the settled position per book and pass it back as `initialLocator`. Store the frontier too, so progress continues from there.
+
+```tsx
+const saved = await store.get(doc.documentKey); // { at, furthest } | undefined
+
+<ReaderView
+  document={doc}
+  initialLocator={saved?.at}
+  furthestLocator={saved?.furthest}
+  onVisibleRangeChange={(r) => {
+    if (r.settled) store.patch(doc.documentKey, { at: { ...r.first, offset: r.firstOffset } });
+  }}
+  onFurthestPositionChange={(l) => store.patch(doc.documentKey, { furthest: l })}
+/>;
+```
+
+</details>
+
+<details>
+<summary>Keep stored positions valid across SDK updates</summary>
+
+Save `structureVersion` and the block's `textHash` with each position. When the version differs, find the block again by its text.
+
+```ts
+const block = (await getReaderBlocks(doc)).find((b) => b.id === locator.blockId)!;
+const record = { documentKey: doc.documentKey, structureVersion: doc.structureVersion, locator, textHash: block.textHash };
+
+// later
+const at =
+  record.structureVersion === doc.structureVersion
+    ? record.locator
+    : await remapLocator(doc, { textHash: record.textHash, offset: record.locator.offset }, record.locator);
+```
+
+</details>
+
+<details>
+<summary>Chapter-end card with a "next chapter" button</summary>
+
+```tsx
+const inserts = doc.sections
+  .filter((s, i) => s.origin === 'file' && doc.sections[i + 1])
+  .map((s) => ({ key: s.id, at: { sectionEnd: s.id } }));
+
+const renderInsert = (sectionId: string) => {
+  const i = doc.sections.findIndex((s) => s.id === sectionId);
+  const next = doc.sections[i + 1]!;
+  return (
+    <Button
+      title={`Next: ${next.title ?? 'Continue'}`}
+      onPress={() => reader.current?.scrollTo({ sectionId: next.id, blockId: next.firstBlockId }, { animated: true })}
+    />
+  );
 };
 ```
 
-- A range may span several blocks; blocks in between are marked whole. Image and separator blocks are skipped.
-- Highlights may overlap. They are drawn in array order, so later entries draw on top of earlier ones (a later `textColor` wins over an earlier one).
-- Offsets are clamped to the block and never split a surrogate pair. A highlight with an unknown block ID is ignored and reported through `onError`.
-- Updating highlights only redraws the affected rows; the text layout does not change, so the reading position stays.
+</details>
 
-### Follow scrolling
+<details>
+<summary>Notes attached to a paragraph</summary>
 
-The highlight with `follow: true` is kept in view while it moves.
-
-| `follow` option | Default | Meaning |
-|---|---|---|
-| `mode` | `'keepVisible'` | `'keepVisible'`: scroll only when the highlight leaves the comfort zone (10 %–85 % of the height), then place its first line at `anchor`. `'center'`: keep it centered on every change. `'off'`: never scroll. |
-| `anchor` | `0.3` | 0..1: where `keepVisible` places the highlight. |
-| `pauseOnUserScroll` | `true` | A drag by the user pauses following (`onFollowChange({ following: false, reason: 'user' })`). It resumes when the highlight is back in the comfort zone, or with `resumeFollow()`. |
-
-Follow scrolling reads like continuous reading (see the jump cause `'follow'` above).
-
-## 4. Read aloud
-
-The SDK maps synthesized speech onto the reader, so an app can highlight the sentence or the word being spoken.
-
-1. Synthesize with a timeline: `tts.synthesize(textIn, audioOut, { segmentation: { mode: 'auto' }, timeline: true })`. The result's `timeline` lists each text segment (a sentence, or a part of a long sentence) with its UTF-16 range in `textIn` and its sample range in `audioOut` (see [tts-offline.md](tts-offline.md#ttssynthesizetextin-audioout-options)).
-2. `createReadAloudTimeline(doc, { text: textIn, tts: result.timeline, textOffset })` turns it into reader units:
-   - **Sentences** are the TTS segments. Their times are exact (from the sample counts).
-   - **Words** are estimated by default: each sentence's duration is spread over its words by length, with a pause after punctuation. With `words: { timing: { aligned } }` the times come from word alignment (for example `alignTextToAudio` with `granularity: 'word'`, mode `accurate`); words without a match keep their estimate.
-   - The default word splitter needs spaces between words. For languages without spaces (Chinese, Japanese, Thai) pass `words: { split }`; otherwise each sentence is one unit.
-   - `textOffset` is where `textIn` starts in the document's text buffer, when you synthesized a slice (for example from the paragraph the user tapped). Read the slice range from `getReaderBlocks(…).textRange`.
-3. Play the audio with a `PcmPlayer` and pass its position to `useReadAloudHighlights(timeline, positionMs, options)`. It returns the highlights for the unit being spoken; the array only changes when the sentence or word changes.
+Select a paragraph with `onTap`, underline it while selected, and show each note as an insert after its block.
 
 ```tsx
-const result = await tts.synthesize(textIn, audioOut, {
-  segmentation: { mode: 'auto' },
-  timeline: true,
-});
-const timeline = await createReadAloudTimeline(doc, {
-  text: textIn,
-  tts: result.timeline!,
-  textOffset: sliceStart,
-});
-const player = await createPcmPlayer(audioOut.bufferId, {
-  onPosition: (e) => setPositionMs(e.positionMs),
-});
+const [selected, setSelected] = useState<ReaderLocator | null>(null);
+const [notes, setNotes] = useState<Array<{ id: string; at: ReaderLocator; text: string }>>([]);
 
-const highlights = useReadAloudHighlights(timeline, positionMs, {
-  show: 'both', // 'sentence' | 'word' | 'both'
-  sentenceStyle: { style: 'background' },
-  wordStyle: { style: 'underline' },
-  // follow: 'word' when words are shown, else 'sentence'
-});
-
-<ReaderView document={doc} highlights={[...searchHits, ...highlights]} />;
+<ReaderView
+  document={doc}
+  onTap={({ blockId }) => setSelected({ sectionId: parseBlockId(blockId)!.sectionId, blockId })}
+  highlights={selected ? [{ id: 'selection', from: selected, to: selected, style: 'underline' }] : []}
+  inserts={notes.map((n) => ({ key: n.id, at: { afterBlock: n.at.blockId } }))}
+  renderInsert={(key) => <NoteCard note={notes.find((n) => n.id === key)!} />}
+/>;
 ```
 
-`timeline.at(ms)` returns the sentence and word at a playback position for your own logic. For long books, synthesize in chunks (for example whole paragraphs up to a section end) and prepare the next chunk while one plays. The example app's Read aloud screen does this (`example/src/screens/documents/ReaderReadAloudPanel.tsx`).
+</details>
 
-### Accessibility
+<details>
+<summary>Search with all hits marked</summary>
 
-- VoiceOver and TalkBack read the blocks in order.
-- Headings carry the header trait (`accessibilityHeading` on Android).
-- Image blocks use `alt`; images without `alt` are hidden.
-- Inserts are regular React Native views and stay accessible.
+```ts
+const blocks = await getReaderBlocks(doc, 0, doc.blockCount, { includeText: true });
+const hits: ReaderHighlight[] = [];
+for (const b of blocks) {
+  const re = /monster/gi;
+  for (let m = re.exec(b.text ?? ''); m; m = re.exec(b.text ?? '')) {
+    const at = { sectionId: b.sectionId, blockId: b.id };
+    hits.push({ id: `hit:${hits.length}`, from: { ...at, offset: m.index }, to: { ...at, offset: m.index + m[0].length }, style: 'textColor', color: '#EA580C' });
+  }
+}
+setHighlights(hits);
+reader.current?.scrollTo(hits[0]!.from); // the line with the first hit at the top
+```
 
-### Limits (v1)
+</details>
 
-- EPUB only; scroll mode only; no zoom, no text selection.
-- An image is scaled to the text width and is at most 90 % of the viewport high.
-- The text in a block has a single style; inline formatting such as italics is not kept yet.
+<details>
+<summary>Add a preface or generated chapter (app section)</summary>
+
+```ts
+const withGuide = await insertSection(doc, {
+  after: doc.sections[0]!.id,
+  id: 'app:guide',
+  title: 'Reading guide',
+  blocks: [
+    { key: 'h', type: 'heading', level: 2, text: 'Reading guide' },
+    { key: 'p1', type: 'paragraph', text: 'Look out for the letters at the start…' },
+  ],
+});
+setDoc(withGuide); // the view keeps the reading position
+
+// later
+setDoc(await removeSection(withGuide, 'app:guide'));
+```
+
+</details>
+
+<details>
+<summary>Chapter title and progress in a footer</summary>
+
+```tsx
+const starts = new Map<string, number>();
+doc.sections.reduce((n, s) => (starts.set(s.id, n), n + s.blockCount), 0);
+
+onVisibleRangeChange={(r) => {
+  if (!r.settled) return;
+  const section = doc.sections.find((s) => s.id === r.first.sectionId);
+  const blockIndex = (starts.get(r.first.sectionId) ?? 0) + (parseBlockId(r.first.blockId)?.blockIndex ?? 0);
+  setFooter({ title: section?.title, percent: Math.round((100 * (blockIndex + 1)) / doc.blockCount) });
+}}
+```
+
+</details>
+
+<details>
+<summary>Offer a way back after a jump, or count it as read</summary>
+
+```tsx
+<ReaderView
+  document={doc}
+  furthestLocator={furthest}
+  onJump={(j) => {
+    setBackTarget(j.from); // show "Back" → reader.current?.scrollTo(j.from)
+    if (j.cause === 'scrollTo' && userConfirmedSkip) setFurthest(j.to); // accept as read
+  }}
+/>
+```
+
+</details>
+
+<details>
+<summary>Read a book aloud from the tapped paragraph</summary>
+
+Synthesize one chunk (whole paragraphs, up to ~1500 characters, within a section), map it with `textOffset`, and prepare the next chunk while it plays.
+
+```ts
+const blocks = (await getReaderBlocks(doc)).filter((b) => b.textRange);
+const startIndex = blocks.findIndex((b) => b.id === tappedBlockId);
+const { start } = blocks[startIndex]!.textRange!;
+const end = blocks[Math.min(startIndex + 5, blocks.length - 1)]!.textRange!.end;
+
+const textIn = await createOfflineTextBufferFromText(await getOfflineTextBufferTextSlice(bookText, start, end - start));
+const audioOut = await createEmptyOfflineAudioBuffer(await tts.getSampleRate());
+const result = await tts.synthesize(textIn, audioOut, { segmentation: { mode: 'auto' }, timeline: true });
+const timeline = await createReadAloudTimeline(doc, { text: textIn, tts: result.timeline!, textOffset: start });
+
+const player = await createPcmPlayer(audioOut, { onPosition: (e) => setPositionMs(e.positionMs), onEnded: playNextChunk });
+
+// in the component
+const spoken = useReadAloudHighlights(timeline, positionMs);
+<ReaderView document={doc} highlights={spoken} follow={{ mode: 'keepVisible' }} onFollowChange={(c) => setPaused(!c.following)} />;
+```
+
+`bookText` is the buffer you passed to `createReaderDocument`. The example app's `ReaderReadAloudPanel.tsx` has the full chunk loop.
+
+</details>
+
+<details>
+<summary>Exact word timing from alignment</summary>
+
+```ts
+await alignment.alignTextToAudio(textIn, audioOut, segmentsOut, { mode: 'accurate', granularity: 'word' /* + model config */ });
+const aligned = (await getOfflineSegmentBufferSegments(segmentsOut, 0, 100_000))
+  .filter((s) => s.kind === 'alignment')
+  .map((s) => ({ text: s.payload?.text ?? '', startSample: s.startSample, endSample: s.endSample }));
+
+const timeline = await createReadAloudTimeline(doc, { text: textIn, tts: result.timeline!, words: { timing: { aligned } } });
+```
+
+See [alignment-offline.md](alignment-offline.md).
+
+</details>
+
+<details>
+<summary>Word highlights for languages without spaces</summary>
+
+```ts
+const segmenter = new Intl.Segmenter('ja', { granularity: 'word' });
+const split = (sentence: string) =>
+  [...segmenter.segment(sentence)].filter((s) => s.isWordLike).map((s) => [s.index, s.index + s.segment.length] as [number, number]);
+
+const timeline = await createReadAloudTimeline(doc, { text: textIn, tts: result.timeline!, words: { split } });
+```
+
+`Intl.Segmenter` needs a JS engine that ships it; any splitter returning UTF-16 `[start, end)` ranges works.
+
+</details>
+
+<details>
+<summary>Follow the system dark mode</summary>
+
+```tsx
+const dark = useColorScheme() === 'dark';
+<ReaderView
+  document={doc}
+  theme={{ colors: dark ? { background: '#15171A', text: '#E4E0D8', accent: '#8AB4F8' } : { background: '#FBF8F1', text: '#2A2724', accent: '#3F3AB8' } }}
+/>;
+```
+
+The first visible line stays in place when the theme changes.
+
+</details>
+
+## Example app
+
+| ![Example 1](./images/example/reader_1.png) | ![Example 2](./images/example/reader_2.png) | ![Example 3](./images/example/reader_3.png) |
+| --- | --- | --- |
+
+The monorepo example exposes **Reader** (`example/src/screens/reader/ReaderScreen.tsx`) as a developer showcase for this API: book picker, appearance, contents, an app section, chapter-end and note inserts, marks, search, progress, jump back and resume. Read-aloud with sentence and word highlights is on **Read aloud** (`example/src/screens/documents/ReaderReadAloudPanel.tsx`). See [example/README.md](../example/README.md#reader).
+
+---
+
+## See also
+
+- [Offline e-documents](document-offline.md): `extractDocumentText`, `extractDocumentImages`
+- [TTS (offline)](tts-offline.md): `timeline` option
+- [PCM player](pcm-player.md): playback position for read-aloud
+- [Alignment](alignment-offline.md): exact word times
+- [Text buffers (offline)](textbuffer-offline.md)
+- [Reader internals](internal/reader/reader-internal.md) (maintainers)
+
+## Native crash diagnostics
+
+If native code fails or the app crashes but the tombstone shows only a UI/GPU thread, inspect the SDK last-activity ring buffer (enabled by default when the native library loads). Full details: [native-diagnostics.md](./native-diagnostics.md) - Android log tag `SherpaNativeDiag`; iOS subsystem `com.sherpaonnx.diag`. Optional JS: `getNativeDiagnosticSnapshot` / `configureNativeDiagnostics` from `react-native-sherpa-onnx/diagnostics`.

@@ -309,15 +309,14 @@ Home section **Documents (EPUB, MOBI, PDF, …)** → **Read aloud**. Extract EP
 
 Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/hello.mobi`, `test_edocs/hello.azw3`, `test_edocs/drm.mobi`, `test_edocs/mixed.epub`, `test_edocs/manga.cbz`, plus the digital and scan-only PDFs from `test_pdfs/`.
 
-Text EPUBs open in the native `ReaderView`:
+Text EPUBs open in the native `ReaderView` (see [Reader](#reader)):
 - Tap a paragraph to start reading there. Synthesis runs in chunks of whole paragraphs, and the next chunk is prepared while one plays.
-- The sentence and word being spoken are highlighted, from the TTS timeline (`createReadAloudTimeline`, `useReadAloudHighlights`).
+- The sentence and word being spoken are highlighted from the TTS timeline (`createReadAloudTimeline`, `useReadAloudHighlights`).
 - Chips switch the granularity (sentence / word / both), the style of each (background / underline / text color) and follow scrolling (`keepVisible` / `center` / `off`).
 - Scrolling by hand pauses following; **Back to reading position** resumes it.
-- An optional demo marks every "the" to show several highlights at once.
-- The Reader samples (`structure.epub`, `long.epub`, `frankenstein.epub`) are listed here too.
+- The Reader books (`frankenstein.epub`, `long.epub`, `structure.epub`) are listed here too.
 
-See [docs/reader.md](../docs/reader.md#4-read-aloud).
+See [docs/reader.md](../docs/reader.md#read-aloud).
 
 1. Text EPUB / FB2 / DRM-free MOBI / AZW3 → `extractDocumentText` → OfflineTextBuffer (`origin: markup`) → `tts.synthesize` → playback. The current block span is highlighted from playback position.
 2. PDF with a text layer → `extractPdfTextLayer` → same TTS path (`origin: textLayer`).
@@ -332,19 +331,25 @@ See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offlin
 
 ## Reader
 
-Home section **Documents (EPUB, MOBI, PDF, …)** → **Reader**. Opens an EPUB with `loadReaderDocument` and shows it in the native `ReaderView` (New Architecture). The screen inserts an app section (`app:demo`) after the second section and places two React Native insert cards in the reading flow: one at the end of the first section, one before a block of the third.
+| ![Reader 1](../docs/images/example/reader_1.png) | ![Reader 2](../docs/images/example/reader_2.png) | ![Reader 3](../docs/images/example/reader_3.png) |
+| ------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------ |
+| Marks, selection, chapter-end card, progress     | Note inserted after a paragraph                  | Search with all hits marked                      |
 
-Toolbar:
-- **Sections:** jump to any section (`scrollTo`).
-- **Aa:** theme, text size, line height and jump threshold.
-- **Save / Restore:** store the reading position and remount the reader at it (`initialLocator`).
+Home section **Documents (EPUB, MOBI, PDF, …)** → **Reader**. Pick an example book (or your own EPUB) in the shared document picker; `loadReaderDocument` turns it into a `ReaderDocument` with stable block IDs, shown in the native `ReaderView` (New Architecture). Everything around the text is app UI built with the public API:
 
-The log panel shows every reader event; in development each event is also logged as a `READER_SMOKE {…}` line.
+- **Contents:** all sections with titles from the EPUB contents; tap one to jump (`scrollTo`). Finished chapters (`onSectionEnd`) are ticked, the section with the furthest read position (`onFurthestPositionChange`) is marked. The sheet also inserts / removes an app section (`insertSection` / `removeSection`) without losing the reading position.
+- **Aa:** theme (paper / sepia / night), font, text size (system or fixed scale), line height, alignment and margins (`ReaderTheme`). The first visible line stays in place on every change.
+- **Search:** finds a word in the whole book (`getReaderBlocks` with text), marks every hit in text color, the current one with a background, and steps through them (`scrollTo` with an offset).
+- **Tap a paragraph:** it is underlined and a bar offers **Mark** (background highlight) and **Add note**. Notes are React Native views inserted after the paragraph (`inserts`, `afterBlock`); each chapter ends with a card that continues to the next one (`sectionEnd`).
+- **Footer:** current chapter and position in the book (`onVisibleRangeChange`); after a jump, **Back to …** returns to where you were (`onJump`).
+- **Resume:** open another book and come back; the reader opens at the last position (`initialLocator`, `furthestLocator`).
 
-Bundled fixtures (Reader samples):
-- `test_edocs/structure.epub`: headings, an inline image, a separator, `pre` text and nav TOC titles.
-- `test_edocs/long.epub`: 40 chapters, 6160 blocks.
-- `test_edocs/frankenstein.epub`: Standard Ebooks, public domain / CC0.
-- Plus the Read aloud EPUBs.
+Bundled books (`test_edocs/`):
+- `frankenstein.epub`: Mary Shelley, *Frankenstein* (Standard Ebooks, public domain / CC0): a real book with contents, a title page image, front and back matter.
+- `long.epub`: 40 chapters, 6160 blocks for fast scrolling, jumps and search.
+- `structure.epub`: headings, an inline image, a separator, preformatted text and an image page.
+- `mixed.epub`, `hello.epub`: text chapters with an image-only page; a short text-only book.
 
-See [docs/reader.md](../docs/reader.md).
+Read-aloud with sentence and word highlights in the same view is on **Read aloud** (see [Documents (read aloud)](#documents-read-aloud)).
+
+Implementation: `example/src/screens/reader/ReaderScreen.tsx` and `example/src/screens/documents/ReaderReadAloudPanel.tsx`. API reference: [docs/reader.md](../docs/reader.md).
