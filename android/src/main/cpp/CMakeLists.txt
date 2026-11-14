@@ -263,6 +263,7 @@ set(SOURCES
     ocr/OcrTextUtils.cpp
     ocr/OcrEngine.cpp
     ocr/OcrReadingOrder.cpp
+    ocr/OcrTextData.cpp
     ocr/OcrTextPopulate.cpp
     ocr/OcrRecognizeContext.cpp
     ocr/OcrRecognizeSpec.cpp
@@ -328,6 +329,7 @@ set(SOURCES
     reader/ReaderRegistry.cpp
     reader/ReaderTracker.cpp
     reader/ReaderLayout.cpp
+    reader/ReaderOcrText.cpp
     reader/ReaderHighlights.cpp
     reader/ReaderJson.cpp
     reader/ReaderFileHash.cpp

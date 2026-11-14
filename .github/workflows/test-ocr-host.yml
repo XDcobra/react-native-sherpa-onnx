@@ -14,18 +14,26 @@ on:
       - main
     paths:
       - 'android/src/main/cpp/ocr/**'
+      - 'android/src/main/cpp/reader/**'
+      - 'android/src/main/cpp/pdf/**'
       - 'test/cpp/ocr/**'
       - 'test/cpp/CMakeLists.txt'
       - 'test/fixtures/ocr/**'
+      - 'test/fixtures/pdf/**'
+      - 'example/android/app/src/main/assets/test_pdfs/**'
       - '.github/workflows/test-ocr-host.yml'
   push:
     branches:
       - main
     paths:
       - 'android/src/main/cpp/ocr/**'
+      - 'android/src/main/cpp/reader/**'
+      - 'android/src/main/cpp/pdf/**'
       - 'test/cpp/ocr/**'
       - 'test/cpp/CMakeLists.txt'
       - 'test/fixtures/ocr/**'
+      - 'test/fixtures/pdf/**'
+      - 'example/android/app/src/main/assets/test_pdfs/**'
       - '.github/workflows/test-ocr-host.yml'
   workflow_dispatch:
     inputs:

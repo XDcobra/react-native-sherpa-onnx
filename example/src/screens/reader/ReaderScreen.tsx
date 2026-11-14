@@ -18,6 +18,7 @@ import {
   insertSection,
   loadReaderDocument,
   ReaderView,
+  recognizeReaderPages,
   releaseReaderDocument,
   removeSection,
   type ReaderBlock,
@@ -34,8 +35,10 @@ import {
 import { ExampleDocumentFileList } from '../../components/ExampleDocumentFileList';
 import { FileSourcePicker } from '../../components/FileSourcePicker';
 import { OcrChoiceRow } from '../../components/ocr/OcrChoiceRow';
+import { OcrModelInitPanel } from '../../components/OcrModelInitPanel';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import { READER_FILES } from '../../documentConfig';
+import { useOcrModelInit } from '../../hooks/useOcrModelInit';
 import {
   fileSourceFromBundledPath,
   toFileSource,
@@ -48,7 +51,7 @@ type SizeName = 'system' | '0.9×' | '1.2×' | '1.5×';
 type LineName = '1.3' | '1.5' | '1.8';
 type AlignName = 'start' | 'justify';
 type MarginName = 'narrow' | 'normal' | 'wide';
-type Panel = 'none' | 'appearance' | 'search';
+type Panel = 'none' | 'appearance' | 'search' | 'text';
 
 const THEMES: Record<
   ThemeName,
@@ -167,6 +170,15 @@ export default function ReaderScreen() {
   const [panel, setPanel] = useState<Panel>('none');
   const [showContents, setShowContents] = useState(false);
 
+  // Text for scans and comics (OCR)
+  const ocrAbortRef = useRef<AbortController | null>(null);
+  const ocr = useOcrModelInit({
+    onBeforeInit: () => ocrAbortRef.current?.abort(),
+  });
+  const [direction, setDirection] = useState<'ltr' | 'rtl'>('ltr');
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrStatus, setOcrStatus] = useState<string | null>(null);
+
   // Reading state from events
   const [chapterId, setChapterId] = useState<string | null>(null);
   const [position, setPosition] = useState<ReaderLocator | null>(null);
@@ -216,9 +228,52 @@ export default function ReaderScreen() {
     return () => clearTimeout(t);
   }, [notice]);
 
+  // ---- Text for scans and comics ----
+
+  const recognizePages = useCallback(
+    async (scope: 'around' | 'all') => {
+      const engine = ocr.engineRef.current;
+      const current = docRef.current;
+      if (!engine || !current) return;
+      ocrAbortRef.current?.abort();
+      const controller = new AbortController();
+      ocrAbortRef.current = controller;
+      setOcrBusy(true);
+      setOcrStatus('Recognizing…');
+      const apply = (next: ReaderDocument) => {
+        // Ignore results for a document that was closed meanwhile.
+        if (docRef.current?.id !== next.id) return;
+        docRef.current = next;
+        setDoc(next);
+      };
+      try {
+        const next = await recognizeReaderPages(current, engine, {
+          scope,
+          at: position,
+          recognize: { readingDirection: direction },
+          onDocument: apply,
+          onProgress: (e) => setOcrStatus(`${e.done} / ${e.total} pages`),
+          signal: controller.signal,
+        });
+        apply(next);
+        setOcrStatus(
+          controller.signal.aborted
+            ? 'Stopped.'
+            : 'Done: the pages show their text.'
+        );
+      } catch (err: unknown) {
+        setOcrStatus(err instanceof Error ? err.message : String(err));
+      } finally {
+        setOcrBusy(false);
+      }
+    },
+    [direction, ocr.engineRef, position]
+  );
+
   // ---- Open / close ----
 
   const release = useCallback(async () => {
+    ocrAbortRef.current?.abort();
     const current = docRef.current;
     docRef.current = null;
     textsRef.current = null;
@@ -636,7 +691,80 @@ export default function ReaderScreen() {
                   setPanel((p) => (p === 'search' ? 'none' : 'search'))
                 }
               />
+              {doc.sections.some(
+                (s) => s.kind === 'page' || s.kind === 'image'
+              ) ? (
+                <ToolbarButton
+                  id="reader-ocr"
+                  label="Text"
+                  active={panel === 'text'}
+                  onPress={() =>
+                    setPanel((p) => (p === 'text' ? 'none' : 'text'))
+                  }
+                />
+              ) : null}
             </View>
+
+            {panel === 'text' ? (
+              <View style={styles.panel}>
+                <Text style={styles.sectionHint}>
+                  Pages without a text layer get their text from OCR, page by
+                  page around the reading position or for the whole book.
+                </Text>
+                <OcrModelInitPanel
+                  ocr={ocr}
+                  title="OCR model"
+                  disabled={ocrBusy}
+                  showScatteredTest={false}
+                />
+                <OcrChoiceRow
+                  label="Direction"
+                  options={['ltr', 'rtl'] as const}
+                  value={direction}
+                  onChange={setDirection}
+                />
+                <View style={styles.actionButtons}>
+                  <Pressable
+                    testID="reader-ocr-around"
+                    style={[
+                      styles.actionButton,
+                      (!ocr.initializedFolder || ocrBusy) && styles.pressed,
+                    ]}
+                    disabled={!ocr.initializedFolder || ocrBusy}
+                    onPress={() => {
+                      recognizePages('around').catch(() => {});
+                    }}
+                  >
+                    <Text style={styles.actionButtonText}>Around here</Text>
+                  </Pressable>
+                  <Pressable
+                    testID="reader-ocr-all"
+                    style={[
+                      styles.actionButton,
+                      (!ocr.initializedFolder || ocrBusy) && styles.pressed,
+                    ]}
+                    disabled={!ocr.initializedFolder || ocrBusy}
+                    onPress={() => {
+                      recognizePages('all').catch(() => {});
+                    }}
+                  >
+                    <Text style={styles.actionButtonText}>Whole book</Text>
+                  </Pressable>
+                  {ocrBusy ? (
+                    <Pressable
+                      testID="reader-ocr-stop"
+                      style={styles.actionButton}
+                      onPress={() => ocrAbortRef.current?.abort()}
+                    >
+                      <Text style={styles.actionButtonText}>Stop</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                {ocrStatus ? (
+                  <Text style={styles.sectionHint}>{ocrStatus}</Text>
+                ) : null}
+              </View>
+            ) : null}
 
             {panel === 'appearance' ? (
               <View style={styles.panel}>

@@ -4060,6 +4060,15 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise,
   ) = readerHelper.createReaderPagesDocument(imageBufferId, documentKey, promise)
 
+  override fun attachReaderPageText(
+    documentId: String,
+    textBufferId: String,
+    promise: Promise,
+  ) = readerHelper.attachReaderPageText(documentId, textBufferId, promise)
+
+  override fun getReaderPages(documentId: String, promise: Promise) =
+    readerHelper.getReaderPages(documentId, promise)
+
   override fun insertReaderSection(
     documentId: String,
     after: String,

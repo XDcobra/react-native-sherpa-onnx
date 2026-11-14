@@ -25,6 +25,14 @@ std::string JsonEscape(const std::string& s);
  */
 std::string TocJson(const ReaderSnapshot& snap);
 
+/**
+ * Pages that can get OCR text: `{"imageBufferId", "pages":[{sectionId, blockId,
+ * frame, hasText}]}` for every page block and every image block of an
+ * image-only section, in reading order. `hasText`: the page already has text
+ * blocks (text layer or OCR).
+ */
+std::string PagesJson(const ReaderSnapshot& snap);
+
 /** `[{"from":locator,"to":locator} | null, ...]` for text-buffer UTF-16 ranges (see MapTextRange). */
 std::string TextRangesJson(const ReaderSnapshot& snap, const std::vector<int>& starts,
                            const std::vector<int>& ends);

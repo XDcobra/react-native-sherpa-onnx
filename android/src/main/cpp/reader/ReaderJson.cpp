@@ -147,6 +147,50 @@ std::string BlocksJson(const ReaderSnapshot& snap, int start, int max, bool incl
   return out;
 }
 
+std::string PagesJson(const ReaderSnapshot& snap) {
+  std::string out = "{";
+  bool first = true;
+  Field(&out, "imageBufferId", snap.imageBufferId, &first);
+  out += ",\"pages\":[";
+  bool firstPage = true;
+  for (const ReaderSection& sec : snap.sections) {
+    const bool pageSection = sec.kind == "page";
+    const bool imageSection = sec.kind == "image";
+    if (!pageSection && !imageSection) continue;
+    for (int k = 0; k < sec.blockCount; ++k) {
+      const int i = sec.firstBlock + k;
+      const ReaderBlock& b = snap.blocks[i];
+      const bool candidate = b.imageFrame >= 0 && (b.type == ReaderBlockType::Page ||
+                                                   (imageSection && b.type == ReaderBlockType::Image));
+      if (!candidate) continue;
+      bool hasText = false;
+      if (b.type == ReaderBlockType::Page) {
+        for (int j = sec.firstBlock; j < sec.firstBlock + sec.blockCount; ++j) {
+          const ReaderBlockType t = snap.blocks[j].type;
+          if ((t == ReaderBlockType::Paragraph || t == ReaderBlockType::Heading) &&
+              snap.BlockLength(j) > 0) {
+            hasText = true;
+          }
+        }
+      } else {
+        hasText = i + 1 < static_cast<int>(snap.blocks.size()) &&
+                  snap.blocks[i + 1].id.rfind(b.id + ".t", 0) == 0;
+      }
+      if (!firstPage) out.push_back(',');
+      firstPage = false;
+      out.push_back('{');
+      bool f = true;
+      Field(&out, "sectionId", sec.id, &f);
+      Field(&out, "blockId", b.id, &f);
+      Field(&out, "frame", b.imageFrame, &f);
+      FieldBool(&out, "hasText", hasText, &f);
+      out.push_back('}');
+    }
+  }
+  out += "]}";
+  return out;
+}
+
 std::string TocJson(const ReaderSnapshot& snap) {
   std::string out = "[";
   bool any = false;

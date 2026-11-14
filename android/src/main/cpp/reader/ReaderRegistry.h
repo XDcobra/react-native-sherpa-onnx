@@ -49,6 +49,16 @@ class ReaderRegistry {
   std::string CreatePages(const std::string& imageBufferId, const std::vector<PageInput>& pages,
                           const std::string& documentKey, ReaderError* err);
 
+  /**
+   * Attaches OCR text: a buffer filled by recognize() on this document's image
+   * buffer (it carries a TxtOcrLayout). For each recognized frame, its blocks
+   * become children `{id}.t{j}` of the page and image blocks that show the
+   * frame, replacing earlier OCR text there. Publishes a new revision.
+   * `attached` (optional) receives the number of blocks that got text.
+   */
+  bool AttachPageText(const std::string& documentId, std::shared_ptr<TxtOfflineEntry> ocr,
+                      int* attached, ReaderError* err);
+
   bool InsertSection(const std::string& documentId, const ReaderAppSectionInput& section,
                      ReaderError* err);
   bool RemoveSection(const std::string& documentId, const std::string& sectionId,

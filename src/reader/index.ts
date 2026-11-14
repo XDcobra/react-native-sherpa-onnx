@@ -34,6 +34,8 @@ export {
   remapLocator,
   removeSection,
 } from './api';
+export { attachReaderPageText, recognizeReaderPages } from './ocr';
+export type { RecognizeReaderPagesOptions } from './ocr';
 export type {
   CreateReaderDocumentOptions,
   LoadReaderDocumentOptions,

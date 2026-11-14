@@ -26,7 +26,7 @@ Requirements:
 
 - **New Architecture (Fabric) only.** `ReaderView` is a Fabric component.
 - **EPUB and MOBI need lexbor:** `sherpaOnnxEnableLexbor=true` (Android `gradle.properties`) and `SHERPA_ONNX_ENABLE_LEXBOR=1` (iOS), the same as `extractDocumentText` ([document-offline.md](document-offline.md)). **PDF needs PDFium** ([pdf-offline.md](pdf-offline.md)).
-- Scroll mode. Scanned pages and comics are shown as page images; text for them (OCR) is not attached yet.
+- Scroll mode. Scanned pages and comics are shown as page images; their text comes from an OCR engine ([Text for scans and comics](#text-for-scans-and-comics)).
 
 ## Quick start
 
@@ -169,6 +169,38 @@ const doc = await createReaderDocument({ text: textBuffer, documentKey: await co
 ```
 
 Builds a document from a text buffer with a reading structure (`extractDocumentText`, or `extractPdfTextLayer(…, { layout: 'paragraphs' })` with the PDF's page buffer as `images`), or with `pages` from an image buffer: one page section per frame (`format: 'pages'`). Use it when the app keeps the buffers, for example to read the text aloud. The document keeps the text alive; your image buffers stay yours and must outlive the document.
+
+#### `attachReaderPageText(doc, { text })`
+
+```ts
+function attachReaderPageText(
+  doc: ReaderDocument,
+  options: { text: OfflineTextBufferIdSource }
+): Promise<ReaderDocument>;
+```
+
+```ts
+await ocr.recognize(pagesBuffer, ocrText, { frames: [4] });
+doc = await attachReaderPageText(doc, { text: ocrText });
+```
+
+Attaches OCR text to the pages it was recognized from. `text` is a buffer filled by an OCR engine's `recognize` on the document's own image buffer. Each recognized page gets text blocks after its page block, and text recognized earlier for that page is replaced. Resolves the new document value (higher `revision`). See [Text for scans and comics](#text-for-scans-and-comics).
+
+#### `recognizeReaderPages(doc, ocr, options?)`
+
+```ts
+function recognizeReaderPages(
+  doc: ReaderDocument,
+  ocr: OcrEngine,
+  options?: RecognizeReaderPagesOptions
+): Promise<ReaderDocument>;
+```
+
+```ts
+doc = await recognizeReaderPages(doc, ocr, { scope: 'around', at: position, onDocument: setDoc });
+```
+
+Recognizes page images one page per `recognize` call and attaches each page's text as it is done. `scope: 'around'` (default) does the page at `at`, `ahead` pages after it (default 2) and `behind` pages before it (default 1). `'all'` does the whole book from the first page, and `{ sections }` does the pages you name. Pages that already have text are skipped unless `force` is set. `onDocument` receives new document values at most every `updateIntervalMs` (default 300) and once at the end. `recognize` passes options such as `readingDirection: 'rtl'` (manga) or a VLM `instruction` to every call. With `signal`, the run stops after the page in progress, and recognized pages keep their text. Run one at a time per document.
 
 #### `computeDocumentKey(source)`
 
@@ -532,6 +564,34 @@ Page sections (PDF pages, comic pages) start with their page image; `pageDisplay
 
 Hidden blocks still count for reading progress: they belong to the row that shows them (the page, or the nearest text row), so `onFurthestPositionChange` and `onSectionEnd` see every block. In `'image'`, a block counts as visible when at least half of it (or of the viewport) is on screen, from its rectangle on the page; `scrollTo` a block puts its place on the page at the top. Pages are full width without margins, and their height comes from the page size before the page is rendered.
 
+## Text for scans and comics
+
+A page without a text layer (a scanned PDF page, a comic page, an image-only section of an EPUB) gets its text from an OCR engine (`react-native-sherpa-onnx/ocr`). Text grows page by page while the user reads, or a full run does the whole book:
+
+```ts
+const ocr = await createOCR({ modelPath });
+const doc = await loadReaderDocument(scanPdf);       // pages show as images
+const next = await recognizeReaderPages(doc, ocr, {
+  scope: 'around',                                    // or 'all'
+  at: position,                                       // from onVisibleRangeChange
+  recognize: { readingDirection: 'rtl' },             // manga
+  onDocument: setDoc,                                 // the view updates as pages are done
+});
+```
+
+Each recognized page gets text blocks `s{n}.b0.t{j}` (for an image block, `{imageBlockId}.t{j}`) right after its page block. The blocks are built from what the model returns:
+
+| | `ppocr`, `doctr`, `paddleocr_vl` spotting | `doc_vlm` | `nemotron_parse`, `paddleocr_vl` (Markdown) |
+| --- | --- | --- | --- |
+| Paragraphs | From the line boxes: reading order, columns, gaps, indents, line ends | The model's items | The Markdown blocks |
+| Headings | — (a clearly larger line is its own paragraph) | Title → level 1, section header → its level | `#` → title / section header |
+| Running headers, page numbers | A lone page number at the top or bottom of the page | Page header / footer elements | — |
+| Place on the page | Union of the paragraph's line boxes | The element's box | — (the whole page) |
+
+The blocks are text blocks like any other: they show in `'text'` mode (the page image is then hidden), count for reading progress, can be highlighted and searched. In `'image'` mode they count as visible where they are on the page. A page's first heading becomes the section title when the section has none.
+
+Block IDs of OCR text are stable for the same model and settings only; recognizing a page again replaces its blocks. Store positions on OCR pages by the page block (`s{n}.b0`) or keep the `textHash` (see [remapLocator](#remaplocatordoc-stored-hint)).
+
 ## Structure rules
 
 `structureVersion` describes how an EPUB is split into sections and blocks. The rules below change only together with that number; a golden file in the native tests guards them.
@@ -623,6 +683,8 @@ import {
   ReaderView, // native reading view (Fabric)
   loadReaderDocument, // book file → ReaderDocument in one call
   createReaderDocument, // ReaderDocument from a text buffer or page images
+  attachReaderPageText, // OCR text buffer → text blocks on its pages
+  recognizeReaderPages, // OCR pages around the reading position or the whole book
   computeDocumentKey, // SHA-256 of a file
   insertSection, // add an app section
   removeSection, // remove an app section
@@ -647,7 +709,7 @@ import type {
   ReaderLocator, ReaderRange, ReaderAppSection, ReaderAppBlock, ReaderInsert, ReaderInsertTarget,
   ReaderTheme, ReaderHighlight, ReaderHighlightStyle, ReaderFollowOptions, ReaderFollowChange,
   ReaderVisibleRange, ReaderJump, ReaderJumpCause, ReaderViewProps, ReaderViewHandle, ReaderPageDisplay,
-  CreateReaderDocumentOptions, LoadReaderDocumentOptions,
+  CreateReaderDocumentOptions, LoadReaderDocumentOptions, RecognizeReaderPagesOptions,
   ReadAloudTimeline, ReadAloudUnit, ReadAloudPosition, ReadAloudAlignedWord,
   CreateReadAloudTimelineOptions, ReadAloudHighlightOptions, ReaderErrorCodeValue,
 } from 'react-native-sherpa-onnx/reader';
@@ -673,6 +735,7 @@ import type {
 | `ReaderViewProps` / `ReaderViewHandle` | View props / ref: `scrollTo`, `resumeFollow` |
 | `ReaderPageDisplay` | `'auto' \| 'text' \| 'image' \| 'imageAndText'` ([Pages](#pages)) |
 | `CreateReaderDocumentOptions` / `LoadReaderDocumentOptions` | Options of `createReaderDocument` / `loadReaderDocument` |
+| `RecognizeReaderPagesOptions` | `{ scope?, at?, ahead?, behind?, force?, recognize?, onDocument?, updateIntervalMs?, onProgress?, signal? }` |
 | `ReadAloudTimeline` | `{ durationMs, sentences, words, at(ms) }` |
 | `ReadAloudUnit` | `{ kind, index, sentenceIndex, range, textStart, textEnd, startMs, endMs }` |
 | `ReadAloudPosition` | `{ sentence, word }` (each `ReadAloudUnit \| null`) |
@@ -687,7 +750,7 @@ import type {
 | `ERR_READER_NOT_FOUND` | Document or text buffer not found, for example after `releaseReaderDocument`. |
 | `ERR_READER_NO_STRUCTURE` | The text buffer has no reading structure. Extract an EPUB with `extractDocumentText` first. |
 | `ERR_READER_UNSUPPORTED_STRUCTURE` | The structure was made with other structure rules than this SDK supports. |
-| `ERR_READER_INVALID_ARGUMENT` | Invalid app section ID or block key, or a highlight with an unknown block ID (`onError`). |
+| `ERR_READER_INVALID_ARGUMENT` | Invalid app section ID or block key, a highlight with an unknown block ID (`onError`), or OCR text without an OCR layout or from another image buffer (`attachReaderPageText`). |
 
 Errors from extraction (`ERR_DOC_*`, for example `ERR_DOC_DRM`) and file access (`FILEIO_*`) surface unchanged from `loadReaderDocument`.
 

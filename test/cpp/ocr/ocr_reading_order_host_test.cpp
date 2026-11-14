@@ -113,3 +113,31 @@ TEST(OcrReadingOrder, LeavesNonLineResultsAlone) {
   ArrangeLinesIntoParagraphs(&empty, OcrReadingDirection::kLtr);
   EXPECT_TRUE(empty.text_utf8.empty());
 }
+
+TEST(OcrReadingOrder, LargerTitleLineDoesNotJoinTheText) {
+  // A 40 px title right above 20 px body lines, both flush left.
+  OcrResult r = Lines({
+      {"Hello World", 50, 40, 560, 80},
+      {"The keeper counted the ships", 50, 86, 560, 106},
+      {"every evening.", 50, 110, 300, 130},
+  });
+  ArrangeLinesIntoParagraphs(&r, OcrReadingDirection::kLtr);
+  EXPECT_EQ(r.text_utf8, "Hello World\n\nThe keeper counted the ships every evening.");
+}
+
+TEST(OcrReadingOrder, RaggedLineEndsWhenTheNextWordWouldHaveFit) {
+  // Column edge 560. "short." ends 200 px early while "Another" (~100 px) would
+  // have fit: a paragraph end. "counted the" ends 60 px early before
+  // "lighthouse" (~120 px): an ordinary wrap.
+  OcrResult r = Lines({
+      {"The keeper counted the", 50, 40, 500, 60},
+      {"lighthouse lamps every night.", 50, 64, 560, 84},
+      {"It was short.", 50, 88, 360, 108},
+      {"Another day began with fog and", 50, 112, 560, 132},
+      {"rain.", 50, 136, 120, 156},
+  });
+  ArrangeLinesIntoParagraphs(&r, OcrReadingDirection::kLtr);
+  EXPECT_EQ(r.text_utf8,
+            "The keeper counted the lighthouse lamps every night. It was short.\n\nAnother day "
+            "began with fog and rain.");
+}

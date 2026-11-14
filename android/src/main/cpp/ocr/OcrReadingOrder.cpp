@@ -82,6 +82,21 @@ struct Gap {
   float at = 0;  // split coordinate
 };
 
+/** Width of a horizontal line's first word, estimated from its share of the characters. */
+float FirstWordWidth(const Line& l) {
+  size_t chars = 0;
+  size_t first = 0;
+  bool in_first = true;
+  for (size_t i = 0; i < l.text.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(l.text[i]);
+    if ((c & 0xC0u) == 0x80u) continue;  // continuation byte
+    ++chars;
+    if (c == ' ') in_first = false;
+    if (in_first) ++first;
+  }
+  return chars == 0 ? 0.f : l.w() * static_cast<float>(first) / static_cast<float>(chars);
+}
+
 /** Widest gap in the projection of [lo, hi] intervals (none: size 0). */
 Gap WidestGap(std::vector<std::pair<float, float>> iv) {
   Gap best;
@@ -202,9 +217,10 @@ void ArrangeLinesIntoParagraphs(OcrResult* r, OcrReadingDirection direction) {
   XyCut(lines, all, vertical, rtl, 0.8f * em, EdgesOf(lines, all, vertical), &edges, &order);
 
   // Paragraphs: the next line continues the paragraph when it follows close
-  // below (or beside, for vertical text) with overlapping extent and no
-  // first-line indent, and the previous line ran to its column's far edge
-  // (a line ending well before it — last line, heading — ends a paragraph).
+  // below (or beside, for vertical text) with overlapping extent, about the
+  // same size and no first-line indent, and the previous line ended where the
+  // next line's first word would not have fit (a line ending early — last
+  // line, heading — ends a paragraph).
   std::vector<std::vector<int>> paragraphs;
   for (size_t k = 0; k < order.size(); ++k) {
     const Line& b = lines[order[k]];
@@ -221,9 +237,16 @@ void ArrangeLinesIntoParagraphs(OcrResult* r, OcrReadingDirection direction) {
         // margin (a short last line of the paragraph does not).
         const bool indent = rtl ? (a.x1 - b.x1) > em && b.x0 <= a.x0 + 2 * em
                                 : (b.x0 - a.x0) > em && b.x1 >= a.x1 - 2 * em;
-        const bool short_prev = rtl ? (a.x0 - col.lo) > 3 * em : (col.hi - a.x1) > 3 * em;
+        // The previous line ended early: the next line's first word (plus a
+        // space and some slack) would have fit after it — a typesetter's wrap.
+        const float room = rtl ? (a.x0 - col.lo) : (col.hi - a.x1);
+        const bool short_prev = room > FirstWordWidth(b) + 0.6f * em;
+        // Lines of clearly different size (a title above body text) do not
+        // join. One font varies up to ~1.3 between lines with and without
+        // ascenders / descenders.
+        const bool same_size = std::max(a.h(), b.h()) <= 1.4f * std::min(a.h(), b.h());
         // "exam-" + lowercase continuation: the same paragraph whatever the layout.
-        join = gap >= -0.3f * em && gap <= 0.8f * em && overlap &&
+        join = gap >= -0.3f * em && gap <= 0.8f * em && overlap && same_size &&
                (hyphenated || (!indent && !short_prev));
       } else {
         const float gap = rtl ? a.x0 - b.x1 : b.x0 - a.x1;

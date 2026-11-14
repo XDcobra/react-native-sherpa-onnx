@@ -16,6 +16,10 @@ internal object ReaderNative {
 
   @JvmStatic external fun nativeCreatePagesDocument(imageBufferId: String, documentKey: String): Array<String>
 
+  @JvmStatic external fun nativeAttachPageText(documentId: String, textBufferId: String): Array<String>
+
+  @JvmStatic external fun nativeGetPages(documentId: String): Array<String>
+
   @JvmStatic external fun nativeInsertSection(
     documentId: String,
     after: String,

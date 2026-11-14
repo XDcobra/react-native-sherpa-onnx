@@ -87,6 +87,24 @@ Java_com_sherpaonnx_reader_ReaderNative_nativeCreatePagesDocument(JNIEnv* env, j
 }
 
 JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeAttachPageText(JNIEnv* env, jclass, jstring docId,
+                                                             jstring textId) {
+  std::string json;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeAttachPageText(Std(env, docId), Std(env, textId),
+                                                           &json, &err);
+  return Result(env, ok, json, err);
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeGetPages(JNIEnv* env, jclass, jstring docId) {
+  std::string json;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeGetPages(Std(env, docId), &json, &err);
+  return Result(env, ok, json, err);
+}
+
+JNIEXPORT jobjectArray JNICALL
 Java_com_sherpaonnx_reader_ReaderNative_nativeInsertSection(
     JNIEnv* env, jclass, jstring docId, jstring after, jstring sectionId, jstring title,
     jobjectArray keys, jobjectArray types, jobjectArray texts, jintArray levels) {

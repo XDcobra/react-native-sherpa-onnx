@@ -154,6 +154,23 @@ bool BridgeMapTextRanges(const std::string& documentId, const std::vector<int>& 
   return true;
 }
 
+bool BridgeAttachPageText(const std::string& documentId, const std::string& textBufferId,
+                          std::string* json, ReaderError* err) {
+  if (!ReaderRegistry::Instance().AttachPageText(documentId, txt_get_offline_entry(textBufferId),
+                                                 nullptr, err)) {
+    return false;
+  }
+  *json = SnapshotSummaryJson(*ReaderRegistry::Instance().Snapshot(documentId));
+  return true;
+}
+
+bool BridgeGetPages(const std::string& documentId, std::string* json, ReaderError* err) {
+  std::shared_ptr<const ReaderSnapshot> snap;
+  if (!SnapshotOrError(documentId, &snap, err)) return false;
+  *json = PagesJson(*snap);
+  return true;
+}
+
 bool BridgeGetToc(const std::string& documentId, std::string* json, ReaderError* err) {
   std::shared_ptr<const ReaderSnapshot> snap;
   if (!SnapshotOrError(documentId, &snap, err)) return false;

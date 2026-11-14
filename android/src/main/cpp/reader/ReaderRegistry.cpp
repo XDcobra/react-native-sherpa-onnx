@@ -1,5 +1,6 @@
 #include "ReaderRegistry.h"
 
+#include "ReaderOcrText.h"
 #include "ReaderTextHash.h"
 #include "../textbuffer/TxtUtf16.h"
 
@@ -359,6 +360,96 @@ std::string ReaderRegistry::CreatePages(const std::string& imageBufferId,
   const std::string id = snap->documentId;
   docs_[id] = std::move(snap);
   return id;
+}
+
+bool ReaderRegistry::AttachPageText(const std::string& documentId,
+                                    std::shared_ptr<TxtOfflineEntry> ocr, int* attached,
+                                    ReaderError* err) {
+  if (attached) *attached = 0;
+  if (!ocr) {
+    SetErr(err, kErrReaderNotFound, "Text buffer not found");
+    return false;
+  }
+  std::shared_ptr<const TxtOcrLayout> layout = ocr->getOcrLayout();
+  if (!layout) {
+    SetErr(err, kErrReaderInvalidArgument,
+           "Text buffer has no OCR layout (fill it with an OCR engine's recognize)");
+    return false;
+  }
+  // Built outside the lock: the buffer is immutable once populated.
+  std::unordered_map<int, std::vector<OcrTextBlock>> byFrame;
+  for (auto& fb : BuildOcrFrameBlocks(*ocr, *layout)) byFrame[fb.frameIndex] = std::move(fb.blocks);
+  std::shared_ptr<const std::string> source(ocr, &ocr->text);
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = docs_.find(documentId);
+  if (it == docs_.end()) {
+    SetErr(err, kErrReaderNotFound, "Reader document not found: " + documentId);
+    return false;
+  }
+  const ReaderSnapshot& cur = *it->second;
+  if (layout->imageBufferId != cur.imageBufferId) {
+    SetErr(err, kErrReaderInvalidArgument,
+           "OCR text was recognized on another image buffer (" + layout->imageBufferId + ")");
+    return false;
+  }
+  auto next = std::make_shared<ReaderSnapshot>(cur);
+  next->blocks.clear();
+  next->blocks.reserve(cur.blocks.size());
+  int count = 0;
+  for (size_t s = 0; s < cur.sections.size(); ++s) {
+    ReaderSection& sec = next->sections[s];
+    const int before = static_cast<int>(next->blocks.size());
+    std::string replaced;  // parent whose old OCR children are skipped
+    for (int k = 0; k < cur.sections[s].blockCount; ++k) {
+      const ReaderBlock& b = cur.blocks[cur.sections[s].firstBlock + k];
+      if (!replaced.empty() && b.id.rfind(replaced + ".t", 0) == 0) continue;
+      replaced.clear();
+      next->blocks.push_back(b);
+      if (b.type != ReaderBlockType::Page && b.type != ReaderBlockType::Image) continue;
+      auto f = byFrame.find(b.imageFrame);
+      if (b.imageFrame < 0 || f == byFrame.end()) continue;
+      replaced = b.id;
+      std::vector<ReaderBlock> children;
+      children.reserve(f->second.size());
+      for (size_t j = 0; j < f->second.size(); ++j) {
+        const OcrTextBlock& o = f->second[j];
+        ReaderBlock c;
+        c.id = b.id + ".t" + std::to_string(j);
+        c.fromFile = false;
+        c.type = o.type;
+        c.headingLevel = o.headingLevel;
+        c.flags = o.flags;
+        c.hasRect = o.hasRect;
+        for (int r = 0; r < 4; ++r) c.rect[r] = o.rect[r];
+        c.utf16Start = o.utf16Start;
+        c.utf16End = o.utf16End;
+        children.push_back(std::move(c));
+      }
+      std::vector<ReaderBlock*> ptrs;
+      for (auto& c : children) ptrs.push_back(&c);
+      ResolveByteRanges(source, &ptrs);
+      for (auto& c : children) {
+        // Ranges point into the OCR buffer, not the document's text.
+        c.utf16Start = c.utf16End = 0;
+        const std::string t = c.textSource->substr(static_cast<size_t>(c.textByteStart),
+                                                   static_cast<size_t>(c.textByteEnd - c.textByteStart));
+        c.textHash = TextHashV1(t);
+        if (sec.titleSource == "none" && c.type == ReaderBlockType::Heading && !t.empty()) {
+          sec.title = t;
+          sec.titleSource = "heading";
+        }
+        next->blocks.push_back(std::move(c));
+        ++count;
+      }
+    }
+    sec.blockCount = static_cast<int>(next->blocks.size()) - before;
+  }
+  ReindexSnapshot(next.get());
+  next->revision = cur.revision + 1;
+  it->second = std::move(next);
+  if (attached) *attached = count;
+  return true;
 }
 
 bool ReaderRegistry::InsertSection(const std::string& documentId,

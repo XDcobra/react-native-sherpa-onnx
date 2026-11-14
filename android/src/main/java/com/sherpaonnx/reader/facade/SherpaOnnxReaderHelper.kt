@@ -58,6 +58,12 @@ internal class SherpaOnnxReaderHelper(reactContext: ReactApplicationContext) {
   fun createReaderPagesDocument(imageBufferId: String, key: String, promise: Promise) =
     run(promise) { ReaderNative.nativeCreatePagesDocument(imageBufferId, key) }
 
+  fun attachReaderPageText(documentId: String, textBufferId: String, promise: Promise) =
+    run(promise) { ReaderNative.nativeAttachPageText(documentId, textBufferId) }
+
+  fun getReaderPages(documentId: String, promise: Promise) =
+    run(promise) { ReaderNative.nativeGetPages(documentId) }
+
   fun insertReaderSection(
     documentId: String,
     after: String,

@@ -1424,6 +1424,15 @@ export interface Spec extends TurboModule {
     documentKey: string
   ): Promise<string>;
 
+  /** Attaches an OCR text buffer to the pages it was recognized from. Resolves the new summary JSON. */
+  attachReaderPageText(
+    documentId: string,
+    textBufferId: string
+  ): Promise<string>;
+
+  /** Pages that can get OCR text: `{ imageBufferId, pages: [{ sectionId, blockId, frame, hasText }] }` JSON. */
+  getReaderPages(documentId: string): Promise<string>;
+
   /** Inserts an app section; block arrays are parallel. Resolves the new summary JSON. */
   insertReaderSection(
     documentId: string,

@@ -6,6 +6,7 @@
 #include "ReaderHighlights.h"
 #include "ReaderJson.h"
 #include "ReaderLayout.h"
+#include "ReaderOcrText.h"
 #include "ReaderRegistry.h"
 #include "ReaderTextHash.h"
 #include "ReaderTracker.h"
@@ -445,6 +446,150 @@ TEST(ReaderDocument, PageDocumentOneSectionPerFrame) {
 
   EXPECT_TRUE(ReaderRegistry::Instance().CreatePages("img_off_x", {}, "k", &err).empty());
   EXPECT_EQ(err.code, kErrReaderInvalidArgument);
+}
+
+// ---- OCR text on pages (attachReaderPageText) ------------------------------
+
+namespace {
+
+TxtSpatialSpan LineSpan(int start, int end, int frame, float x0, float y0, float x1, float y1) {
+  TxtSpatialSpan s;
+  s.utf16Start = start;
+  s.utf16End = end;
+  s.level = "line";
+  s.frameIndex = frame;
+  const float q[8] = {x0, y0, x1, y0, x1, y1, x0, y1};
+  for (int i = 0; i < 8; ++i) s.quad[i] = q[i];
+  s.origin = "ocr";
+  return s;
+}
+
+/**
+ * Two 1000x1400 frames of `img_off_ocr`. Frame 0: a title, a paragraph of two
+ * lines and a page number at the bottom; frame 1: one paragraph.
+ */
+std::shared_ptr<TxtOfflineEntry> OcrEntry(const std::string& imageBufferId, bool withFrame1 = true) {
+  const std::string text = withFrame1
+      ? "The Harbour\n\nShips came in at night and\nleft before dawn.\n\n12\n\nSecond page."
+      : "The Harbour\n\nShips came in at night and\nleft before dawn.\n\n12";
+  std::vector<TxtSpatialSpan> spans = {
+      LineSpan(0, 11, 0, 100, 100, 600, 160),
+      LineSpan(13, 39, 0, 100, 300, 900, 340),
+      LineSpan(40, 57, 0, 100, 350, 500, 390),
+      LineSpan(59, 61, 0, 480, 1340, 520, 1370),
+  };
+  if (withFrame1) spans.push_back(LineSpan(63, 75, 1, 100, 100, 400, 140));
+  auto entry = std::make_shared<TxtOfflineEntry>();
+  EXPECT_TRUE(entry->tryPopulate(text, {}, {}, {}, "", "", "", spans));
+  auto layout = std::make_shared<TxtOcrLayout>();
+  layout->family = "ppocr";
+  layout->imageBufferId = imageBufferId;
+  layout->frames.push_back({0, 0, 61, 1000, 1400});
+  if (withFrame1) layout->frames.push_back({1, 63, 75, 1000, 1400});
+  TxtOcrElement title;
+  title.kind = "title";
+  title.frameIndex = 0;
+  title.hasUtf16 = true;
+  title.utf16Start = 0;
+  title.utf16End = 11;
+  layout->elements.push_back(title);
+  EXPECT_TRUE(entry->trySetOcrLayout(layout));
+  return entry;
+}
+
+std::string CreateTwoPages(const std::string& imageBufferId) {
+  ReaderError err;
+  std::vector<ReaderRegistry::PageInput> pages(2);
+  const std::string id = ReaderRegistry::Instance().CreatePages(imageBufferId, pages, "scan", &err);
+  EXPECT_FALSE(id.empty()) << err.message;
+  return id;
+}
+
+}  // namespace
+
+TEST(ReaderOcrText, BlocksFromParagraphsElementsAndLines) {
+  auto entry = OcrEntry("img_off_ocr");
+  const auto frames = BuildOcrFrameBlocks(*entry, *entry->getOcrLayout());
+  ASSERT_EQ(frames.size(), 2u);
+  ASSERT_EQ(frames[0].blocks.size(), 3u);
+  const auto& title = frames[0].blocks[0];
+  EXPECT_EQ(title.type, ReaderBlockType::Heading);
+  EXPECT_EQ(title.headingLevel, 1);
+  EXPECT_EQ(title.utf16Start, 0);
+  EXPECT_EQ(title.utf16End, 11);
+  const auto& para = frames[0].blocks[1];
+  EXPECT_EQ(para.type, ReaderBlockType::Paragraph);
+  EXPECT_EQ(para.utf16Start, 13);
+  EXPECT_EQ(para.utf16End, 57);
+  ASSERT_TRUE(para.hasRect);
+  EXPECT_NEAR(para.rect[0], 0.1f, 1e-4);
+  EXPECT_NEAR(para.rect[1], 300.f / 1400, 1e-4);
+  EXPECT_NEAR(para.rect[2], 0.8f, 1e-4) << "union of both lines";
+  EXPECT_NEAR(para.rect[3], 90.f / 1400, 1e-4);
+  EXPECT_TRUE(frames[0].blocks[2].flags & kBlockFurniture) << "page number at the bottom";
+  EXPECT_EQ(frames[1].frameIndex, 1);
+  ASSERT_EQ(frames[1].blocks.size(), 1u);
+}
+
+TEST(ReaderOcrText, AttachAddsChildBlocksAndReplacesThem) {
+  const std::string id = CreateTwoPages("img_off_ocr");
+  auto& reg = ReaderRegistry::Instance();
+  ReaderError err;
+  int attached = 0;
+  ASSERT_TRUE(reg.AttachPageText(id, OcrEntry("img_off_ocr"), &attached, &err)) << err.message;
+  EXPECT_EQ(attached, 4);
+  auto snap = reg.Snapshot(id);
+  EXPECT_EQ(snap->revision, 2);
+  ASSERT_EQ(snap->blocks.size(), 6u);
+  EXPECT_EQ(snap->blocks[1].id, "s0.b0.t0");
+  EXPECT_EQ(snap->BlockText(1), "The Harbour");
+  EXPECT_EQ(snap->blocks[1].type, ReaderBlockType::Heading);
+  EXPECT_EQ(snap->BlockText(2), "Ships came in at night and\nleft before dawn.");
+  EXPECT_EQ(snap->blocks[2].textHash, TextHashV1(snap->BlockText(2)));
+  EXPECT_FALSE(snap->blocks[2].fromFile);
+  EXPECT_EQ(snap->blocks[5].id, "s1.b0.t0");
+  EXPECT_EQ(snap->sections[0].blockCount, 4);
+  EXPECT_EQ(snap->sections[0].title, "The Harbour");
+  EXPECT_EQ(snap->sections[0].titleSource, "heading");
+  EXPECT_EQ(snap->blocks[snap->BlockIndex("s1.b0.t0")].section, 1);
+
+  // Text mode now shows the text, page image hidden; the page number is hidden too.
+  auto rows = PlanRows(*snap, PageDisplay::kText);
+  std::vector<std::string> shown;
+  for (const auto& r : rows) shown.push_back(snap->blocks[r.block].id);
+  EXPECT_EQ(shown, (std::vector<std::string>{"s0.b0.t0", "s0.b0.t1", "s1.b0.t0"}));
+  // Image mode keeps one page per page.
+  EXPECT_EQ(PlanRows(*snap, PageDisplay::kImage).size(), 2u);
+  const std::string pages = PagesJson(*snap);
+  EXPECT_NE(pages.find("\"hasText\":true"), std::string::npos) << pages;
+  EXPECT_EQ(pages.find("\"hasText\":false"), std::string::npos) << pages;
+
+  // Recognizing page 0 again replaces its children; page 1 keeps its text.
+  ASSERT_TRUE(reg.AttachPageText(id, OcrEntry("img_off_ocr", false), &attached, &err));
+  snap = reg.Snapshot(id);
+  EXPECT_EQ(snap->revision, 3);
+  EXPECT_EQ(snap->blocks.size(), 6u);
+  EXPECT_GE(snap->BlockIndex("s1.b0.t0"), 0);
+  reg.Release(id);
+}
+
+TEST(ReaderOcrText, AttachRejectsOtherBuffersAndPlainText) {
+  const std::string id = CreateTwoPages("img_off_mine");
+  auto& reg = ReaderRegistry::Instance();
+  ReaderError err;
+  EXPECT_FALSE(reg.AttachPageText(id, OcrEntry("img_off_other"), nullptr, &err));
+  EXPECT_EQ(err.code, kErrReaderInvalidArgument);
+  auto plain = std::make_shared<TxtOfflineEntry>();
+  ASSERT_TRUE(plain->tryPopulate("plain", {}, {}, {}, "", "", ""));
+  EXPECT_FALSE(reg.AttachPageText(id, plain, nullptr, &err));
+  EXPECT_EQ(err.code, kErrReaderInvalidArgument);
+  EXPECT_EQ(reg.Snapshot(id)->revision, 1);
+  const std::string pages = PagesJson(*reg.Snapshot(id));
+  EXPECT_NE(pages.find("\"imageBufferId\":\"img_off_mine\""), std::string::npos) << pages;
+  EXPECT_NE(pages.find("{\"sectionId\":\"s1\",\"blockId\":\"s1.b0\",\"frame\":1,\"hasText\":false}"),
+            std::string::npos)
+      << pages;
+  reg.Release(id);
 }
 
 TEST(ReaderLayout, NonPageSectionsKeepOneRowPerBlock) {

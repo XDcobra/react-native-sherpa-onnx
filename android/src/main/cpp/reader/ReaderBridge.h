@@ -19,6 +19,13 @@ bool BridgeCreateDocument(const std::string& textBufferId, const std::string& im
 bool BridgeCreatePagesDocument(const std::string& imageBufferId, const std::string& documentKey,
                                std::string* json, ReaderError* err);
 
+/** Attaches an OCR text buffer (see ReaderRegistry::AttachPageText); new summary JSON. */
+bool BridgeAttachPageText(const std::string& documentId, const std::string& textBufferId,
+                          std::string* json, ReaderError* err);
+
+/** Pages that can get OCR text (see PagesJson). */
+bool BridgeGetPages(const std::string& documentId, std::string* json, ReaderError* err);
+
 /** App section from parallel arrays (types: paragraph | heading | separator). */
 bool BridgeInsertSection(const std::string& documentId, const std::string& after,
                          const std::string& sectionId, const std::string& title,
