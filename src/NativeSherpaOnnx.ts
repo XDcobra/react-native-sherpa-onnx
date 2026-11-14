@@ -1470,7 +1470,18 @@ export interface Spec extends TurboModule {
   mapReaderTextRanges(
     documentId: string,
     starts: number[],
-    ends: number[]
+    ends: number[],
+    /** "" = the document's text buffer; else a slice from createReaderTextSlice. */
+    sliceBufferId: string
+  ): Promise<string>;
+
+  /** Text slice for reading aloud: `{ bufferId, length, from, to }` JSON. `toBlockId` "" = no end; `maxLength` <= 0 = no limit. */
+  createReaderTextSlice(
+    documentId: string,
+    fromBlockId: string,
+    fromOffset: number,
+    toBlockId: string,
+    maxLength: number
   ): Promise<string>;
   /** JSON array of `{ title, level, sectionId, blockId }` (reader contents). */
   getReaderToc(documentId: string): Promise<string>;

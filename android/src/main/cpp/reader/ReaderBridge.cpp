@@ -140,7 +140,8 @@ bool BridgeFindBlockByHash(const std::string& documentId, const std::string& tex
 }
 
 bool BridgeMapTextRanges(const std::string& documentId, const std::vector<int>& starts,
-                         const std::vector<int>& ends, std::string* json, ReaderError* err) {
+                         const std::vector<int>& ends, const std::string& sliceBufferId,
+                         std::string* json, ReaderError* err) {
   std::shared_ptr<const ReaderSnapshot> snap;
   if (!SnapshotOrError(documentId, &snap, err)) return false;
   if (starts.size() != ends.size()) {
@@ -149,6 +150,18 @@ bool BridgeMapTextRanges(const std::string& documentId, const std::vector<int>& 
       err->message = "starts and ends differ in length";
     }
     return false;
+  }
+  if (!sliceBufferId.empty()) {
+    auto slice = ReaderRegistry::Instance().Slice(sliceBufferId);
+    if (!slice || slice->documentId != documentId) {
+      if (err) {
+        err->code = kErrReaderInvalidArgument;
+        err->message = "Not a text slice of this document: " + sliceBufferId;
+      }
+      return false;
+    }
+    *json = SliceRangesJson(*snap, *slice, starts, ends);
+    return true;
   }
   *json = TextRangesJson(*snap, starts, ends);
   return true;
@@ -168,6 +181,36 @@ bool BridgeGetPages(const std::string& documentId, std::string* json, ReaderErro
   std::shared_ptr<const ReaderSnapshot> snap;
   if (!SnapshotOrError(documentId, &snap, err)) return false;
   *json = PagesJson(*snap);
+  return true;
+}
+
+bool BridgeCreateTextSlice(const std::string& documentId, const std::string& fromBlockId,
+                           int fromOffset, const std::string& toBlockId, int maxLength,
+                           std::string* json, ReaderError* err) {
+  std::shared_ptr<const ReaderSnapshot> snap;
+  if (!SnapshotOrError(documentId, &snap, err)) return false;
+  const int from = snap->BlockIndex(fromBlockId);
+  const int to = toBlockId.empty() ? -1 : snap->BlockIndex(toBlockId);
+  if (from < 0 || (!toBlockId.empty() && to < 0)) {
+    err->code = kErrReaderInvalidArgument;
+    err->message = "Unknown block: " + (from < 0 ? fromBlockId : toBlockId);
+    return false;
+  }
+  auto slice = std::make_shared<ReaderTextSlice>();
+  if (!BuildTextSlice(*snap, from, std::max(0, fromOffset), to, maxLength, slice.get())) {
+    err->code = kErrReaderInvalidArgument;
+    err->message = "No text from " + fromBlockId;
+    return false;
+  }
+  std::string bufferId;
+  std::string error;
+  if (!txt_create_offline_from_text(slice->text, snap->language, "", "", &bufferId, &error)) {
+    err->code = kErrReaderInvalidArgument;
+    err->message = error.empty() ? "Failed to create the slice's text buffer" : error;
+    return false;
+  }
+  *json = SliceJson(*snap, *slice, bufferId);
+  ReaderRegistry::Instance().AddSlice(bufferId, std::move(slice));
   return true;
 }
 

@@ -269,12 +269,13 @@ const blocks = await getReaderBlocks(doc, 0, doc.blockCount, { includeText: true
 
 Blocks in reading order with ID, type, `textHash`, `textRange` and optionally the text. Use it for search, quotes, word counts or your own table of contents. Large ranges are paged natively in chunks of 4096.
 
-#### `mapTextRanges(doc, ranges)`
+#### `mapTextRanges(doc, ranges, options?)`
 
 ```ts
 function mapTextRanges(
   doc: ReaderDocument,
-  ranges: ReadonlyArray<readonly [number, number]>
+  ranges: ReadonlyArray<readonly [number, number]>,
+  options?: { slice?: ReaderTextSlice | null }
 ): Promise<Array<ReaderRange | null>>;
 ```
 
@@ -282,7 +283,22 @@ function mapTextRanges(
 const [range] = await mapTextRanges(doc, [[17456, 17520]]);
 ```
 
-Turns UTF-16 ranges of the document's text buffer into reader ranges, in one native call. Use it when another pipeline (TTS, alignment, your own analysis) produced offsets in the text buffer. A start in the gap between two blocks moves to the next block, an end moves back; `null` when a range covers no text block.
+Turns UTF-16 ranges of the document's text buffer into reader ranges, in one native call. Use it when another pipeline (TTS, alignment, your own analysis) produced offsets in the text buffer. With `slice`, the ranges are in that slice's buffer instead. A start in the gap between two blocks moves to the next block, an end moves back; `null` when a range covers no text block.
+
+#### `createReaderTextSlice(doc, options)`
+
+```ts
+function createReaderTextSlice(
+  doc: ReaderDocument,
+  options: { from: ReaderLocator; to?: ReaderLocator | null; maxLength?: number }
+): Promise<ReaderTextSlice>;
+```
+
+```ts
+const slice = await createReaderTextSlice(doc, { from: position, maxLength: 4000 });
+```
+
+Puts the text the reader shows from `from` on into a new offline text buffer, to read it aloud. It takes paragraphs and headings from the file, OCR text and app sections, leaves out running headers, footers and page numbers, and joins the blocks with a blank line. It ends after the block of `to`, or before the first block that would make it longer than `maxLength` UTF-16 units. Pass the slice to `createReadAloudTimeline` and `mapTextRanges`, and release `slice.buffer` when done.
 
 #### `locatorAtTextOffset(doc, offset)`
 
@@ -400,10 +416,10 @@ function createReadAloudTimeline(
 ```
 
 ```ts
-const timeline = await createReadAloudTimeline(doc, { text: textIn, tts: result.timeline!, textOffset: sliceStart });
+const timeline = await createReadAloudTimeline(doc, { slice, tts: result.timeline! });
 ```
 
-Turns the timeline of one synthesis (`tts.synthesize(…, { timeline: true })`) into sentences and words with reader ranges and playback times. Options: `granularity` (`'sentence'`, `'word'`, `'both'`), `textOffset` when you synthesized a slice, `words.timing` for exact word times, `words.split` for your own word splitter.
+Turns the timeline of one synthesis (`tts.synthesize(…, { timeline: true })`) into sentences and words with reader ranges and playback times. The synthesized text is a `slice` from `createReaderTextSlice` (its buffer is `text`), or `text` with `textOffset` for a part of the document's text buffer. Options: `granularity` (`'sentence'`, `'word'`, `'both'`), `words.timing` for exact word times, `words.split` for your own word splitter.
 
 #### `timeline.at(ms)`
 
@@ -495,6 +511,7 @@ Rules (shared C++ tracker, identical on iOS and Android):
 
 - **Styles:** `'background'` (default), `'underline'`, `'textColor'`. `color` defaults to the theme's `accent` (backgrounds at 30 % opacity). Use translucent colors for backgrounds so the text stays readable.
 - **Ranges:** `from` is inclusive, `to` exclusive. Without `offset`, `from` is the start and `to` the end of the block, so `{ from: at, to: at }` marks one whole block. A range may span blocks; blocks in between are marked whole. Image and separator blocks are skipped.
+- **On page images** (`pageDisplay: 'image'`), highlights of a page's text are drawn over the page: background as a translucent area, underline as a line under the text, text color as a frame. They are placed on the text's lines (PDF text layer, OCR line boxes). A part of a line, such as a word, is placed by its characters' share of the line, an estimate. Without line boxes the paragraph's area is marked, and without any position (`nemotron_parse`, `paddleocr_vl` Markdown) the whole page. Follow scrolling keeps the marked line in view.
 - **Order:** highlights may overlap and are drawn in array order; a later `textColor` wins over an earlier one.
 - **IDs:** keep `id` stable; the same `id` with a new range moves a highlight.
 - **Cost:** a change redraws only the affected rows. The text layout does not change, so the reading position stays.
@@ -538,10 +555,10 @@ const inserts = notes.map((n) => ({ key: n.id, at: { afterBlock: n.blockId } }))
 The SDK maps synthesized speech onto the reader, so the sentence or word being spoken can be highlighted and followed.
 
 1. **Synthesize with a timeline:** `tts.synthesize(textIn, audioOut, { segmentation: { mode: 'auto' }, timeline: true })`. `result.timeline` lists each text segment with its UTF-16 range in `textIn` and its sample range in `audioOut` ([tts-offline.md](tts-offline.md#ttssynthesizetextin-audioout-options)).
-2. **Map it onto the reader:** `createReadAloudTimeline(doc, { text: textIn, tts: result.timeline, textOffset })`.
+2. **Map it onto the reader:** `createReadAloudTimeline(doc, { slice, tts: result.timeline })` when you synthesized a [text slice](#createreadertextslicedoc-options) (any book, also PDF and OCR pages, across page breaks), or `createReadAloudTimeline(doc, { text: textIn, tts: result.timeline, textOffset })` for a part of the document's text buffer.
    - **Sentences** are the TTS segments; their times are exact.
    - **Words** are estimated by default: each sentence's duration is spread over its words by length, with a pause after punctuation. With `words: { timing: { aligned } }` the times come from word alignment; words without a match keep their estimate.
-   - `textOffset` is where `textIn` starts in the document's text buffer when you synthesized a slice. Read slice ranges from `getReaderBlocks(…).textRange`.
+   - `textOffset` is where `textIn` starts in the document's text buffer when you synthesized a part of it. Read block ranges from `getReaderBlocks(…).textRange`. With `slice`, positions are in the slice and `textOffset` is not used.
 3. **Play and highlight:** pass the `PcmPlayer` position to `useReadAloudHighlights`, and the result to `highlights`. By default the word is followed when words are shown, else the sentence.
 
 Long books: synthesize in chunks (whole paragraphs up to a section end) and prepare the next chunk while one plays; see [use case examples](#use-case-examples).
@@ -672,7 +689,7 @@ SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 ## Limits
 
 - Scroll mode only; no zoom and no text selection (use `onTap` and highlights for paragraph-level selection).
-- Highlights are drawn in text only; on page images they are not drawn yet.
+- On page images, a highlight inside a line (a word) is placed by estimate; OCR models without positions mark the whole page.
 - Inline formatting (italics, bold, links) is not kept; each block has one text style.
 - An image is scaled to the text width and is at most 90 % of the viewport high.
 
@@ -684,6 +701,7 @@ import {
   loadReaderDocument, // book file → ReaderDocument in one call
   createReaderDocument, // ReaderDocument from a text buffer or page images
   attachReaderPageText, // OCR text buffer → text blocks on its pages
+  createReaderTextSlice, // text from a position on, for reading aloud
   recognizeReaderPages, // OCR pages around the reading position or the whole book
   computeDocumentKey, // SHA-256 of a file
   insertSection, // add an app section
@@ -709,7 +727,7 @@ import type {
   ReaderLocator, ReaderRange, ReaderAppSection, ReaderAppBlock, ReaderInsert, ReaderInsertTarget,
   ReaderTheme, ReaderHighlight, ReaderHighlightStyle, ReaderFollowOptions, ReaderFollowChange,
   ReaderVisibleRange, ReaderJump, ReaderJumpCause, ReaderViewProps, ReaderViewHandle, ReaderPageDisplay,
-  CreateReaderDocumentOptions, LoadReaderDocumentOptions, RecognizeReaderPagesOptions,
+  CreateReaderDocumentOptions, LoadReaderDocumentOptions, RecognizeReaderPagesOptions, ReaderTextSlice,
   ReadAloudTimeline, ReadAloudUnit, ReadAloudPosition, ReadAloudAlignedWord,
   CreateReadAloudTimelineOptions, ReadAloudHighlightOptions, ReaderErrorCodeValue,
 } from 'react-native-sherpa-onnx/reader';
@@ -735,12 +753,13 @@ import type {
 | `ReaderViewProps` / `ReaderViewHandle` | View props / ref: `scrollTo`, `resumeFollow` |
 | `ReaderPageDisplay` | `'auto' \| 'text' \| 'image' \| 'imageAndText'` ([Pages](#pages)) |
 | `CreateReaderDocumentOptions` / `LoadReaderDocumentOptions` | Options of `createReaderDocument` / `loadReaderDocument` |
+| `ReaderTextSlice` | `{ buffer, length, from, to }` (see `createReaderTextSlice`) |
 | `RecognizeReaderPagesOptions` | `{ scope?, at?, ahead?, behind?, force?, recognize?, onDocument?, updateIntervalMs?, onProgress?, signal? }` |
 | `ReadAloudTimeline` | `{ durationMs, sentences, words, at(ms) }` |
 | `ReadAloudUnit` | `{ kind, index, sentenceIndex, range, textStart, textEnd, startMs, endMs }` |
 | `ReadAloudPosition` | `{ sentence, word }` (each `ReadAloudUnit \| null`) |
 | `ReadAloudAlignedWord` | `{ text, startSample, endSample }` (exact word times) |
-| `CreateReadAloudTimelineOptions` | `{ text, tts, textOffset?, granularity?, words?: { timing?, split? } }` |
+| `CreateReadAloudTimelineOptions` | `{ text?, slice?, tts, textOffset?, granularity?, words?: { timing?, split? } }` |
 | `ReadAloudHighlightOptions` | `{ show?, sentenceStyle?, wordStyle?, follow?, idPrefix? }` |
 
 ## Error codes

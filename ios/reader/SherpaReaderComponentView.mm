@@ -432,6 +432,31 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   return out;
 }
 
+/** Highlights of the blocks a page row stands for, as marks on the page image. */
+- (NSArray<SherpaReaderPageMark *> *)pageMarksForRow:(const ReaderRow &)row
+{
+  NSMutableArray<SherpaReaderPageMark *> *out = [NSMutableArray array];
+  if (!_snap || !row.page || row.coverLast <= row.coverFirst) return out;
+  for (int block = row.coverFirst; block <= row.coverLast; ++block) {
+    auto it = _resolved.byBlock.find(block);
+    if (it == _resolved.byBlock.end()) continue;
+    for (const auto &sp : it->second) {
+      UIColor *color = sp.hasColor ? ColorFromARGB(sp.color)
+                       : sp.style == rdr::HighlightStyle::Background
+                           ? [_theme.accentColor colorWithAlphaComponent:0.3]
+                           : _theme.accentColor;
+      for (const auto &r : rdr::TextRangeRects(*_snap, block, sp.start, sp.end)) {
+        SherpaReaderPageMark *m = [SherpaReaderPageMark new];
+        m.rect = CGRectMake(r.x, r.y, r.w, r.h);
+        m.style = (SherpaReaderHighlightStyle)sp.style;
+        m.color = color;
+        [out addObject:m];
+      }
+    }
+  }
+  return out;
+}
+
 /** Applies changed highlights to visible rows in place, then follows. */
 - (void)applyHighlights
 {
@@ -439,12 +464,17 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   for (NSIndexPath *path in _tableView.indexPathsForVisibleRows) {
     if (path.row >= (NSInteger)_rows.size()) continue;
     const auto &row = _rows[path.row];
-    if (row.kind != RowKind::Block || std::find(changed.begin(), changed.end(), row.blockIndex) == changed.end()) {
-      continue;
-    }
+    if (row.kind != RowKind::Block) continue;
+    // A row changes when any block it stands for changed (page images cover their text).
+    const bool touched = std::any_of(changed.begin(), changed.end(), [&](int b) {
+      return b >= row.coverFirst && b <= row.coverLast;
+    });
+    if (!touched) continue;
     UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
     if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
       [(SherpaReaderTextCell *)cell updateHighlights:[self spansForBlock:row.blockIndex] theme:_theme];
+    } else if ([cell isKindOfClass:SherpaReaderImageCell.class]) {
+      [(SherpaReaderImageCell *)cell updatePageMarks:[self pageMarksForRow:row]];
     }
   }
   [self followAnimated:YES force:NO];
@@ -468,10 +498,19 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   if (cell == nil) return NO;
   const CGRect r = [_tableView rectForRowAtIndexPath:path];
   CGFloat lineTop = 0;
-  if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
+  CGFloat lineHeight = ceil(_theme.bodyFont.lineHeight * _theme.lineHeightMultiple);
+  const auto &target = _rows[row];
+  if (target.page && target.blockIndex != _resolved.followBlock) {
+    // On a page image: the followed text's line on the page.
+    const auto rects = rdr::TextRangeRects(*_snap, _resolved.followBlock, _resolved.followOffset,
+                                           _resolved.followOffset + 1);
+    if (!rects.empty()) {
+      lineTop = rects.front().y * r.size.height;
+      lineHeight = MAX(1, rects.front().h * r.size.height);
+    }
+  } else if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
     lineTop = [(SherpaReaderTextCell *)cell lineTopForCharacterOffset:_resolved.followOffset];
   }
-  const CGFloat lineHeight = ceil(_theme.bodyFont.lineHeight * _theme.lineHeightMultiple);
   *out = CGRectMake(0, r.origin.y + lineTop, r.size.width, MIN(lineHeight, r.size.height));
   return YES;
 }
@@ -823,6 +862,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
                             alt:(b.hasAlt ? ToNS(b.alt) : nil)
                           theme:_theme
                            page:row.page];
+    [cell updatePageMarks:[self pageMarksForRow:row]];
     return cell;
   }
   if (b.type == rdr::ReaderBlockType::Separator) {

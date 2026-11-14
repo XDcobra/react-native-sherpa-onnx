@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ReaderDocument.h"
+#include "ReaderTextSlice.h"
 
 #include <string>
 #include <vector>
@@ -36,6 +37,14 @@ std::string PagesJson(const ReaderSnapshot& snap);
 /** `[{"from":locator,"to":locator} | null, ...]` for text-buffer UTF-16 ranges (see MapTextRange). */
 std::string TextRangesJson(const ReaderSnapshot& snap, const std::vector<int>& starts,
                            const std::vector<int>& ends);
+
+/** The same for UTF-16 ranges of a text slice (see MapSliceRange). */
+std::string SliceRangesJson(const ReaderSnapshot& snap, const ReaderTextSlice& slice,
+                            const std::vector<int>& starts, const std::vector<int>& ends);
+
+/** `{bufferId, length, from: locator, to: locator}` of a new slice. */
+std::string SliceJson(const ReaderSnapshot& snap, const ReaderTextSlice& slice,
+                      const std::string& bufferId);
 
 }  // namespace reader
 }  // namespace sherpa_onnx

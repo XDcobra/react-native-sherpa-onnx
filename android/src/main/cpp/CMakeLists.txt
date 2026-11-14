@@ -330,6 +330,7 @@ set(SOURCES
     reader/ReaderTracker.cpp
     reader/ReaderLayout.cpp
     reader/ReaderOcrText.cpp
+    reader/ReaderTextSlice.cpp
     reader/ReaderHighlights.cpp
     reader/ReaderJson.cpp
     reader/ReaderFileHash.cpp

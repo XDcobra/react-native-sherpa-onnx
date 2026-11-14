@@ -9,7 +9,12 @@ import { getOfflineTextBufferTextSlice } from '../textbuffer';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
 import type { TtsTimeline } from '../tts/types';
 import { mapTextRanges } from './api';
-import type { ReaderDocument, ReaderHighlight, ReaderRange } from './types';
+import type {
+  ReaderDocument,
+  ReaderHighlight,
+  ReaderRange,
+  ReaderTextSlice,
+} from './types';
 
 /** One spoken sentence or word, mapped onto the reader. */
 export type ReadAloudUnit = {
@@ -19,7 +24,7 @@ export type ReadAloudUnit = {
   /** Index of the sentence this unit belongs to (itself for sentences). */
   sentenceIndex: number;
   range: ReaderRange;
-  /** UTF-16 range in the document's text buffer. */
+  /** UTF-16 range in the synthesized text (the slice, or the document's text buffer). */
   textStart: number;
   textEnd: number;
   startMs: number;
@@ -47,13 +52,21 @@ export type ReadAloudAlignedWord = {
 };
 
 export type CreateReadAloudTimelineOptions = {
-  /** The text buffer that was synthesized (the TTS input). */
-  text: OfflineTextBufferIdSource;
+  /**
+   * The text buffer that was synthesized (the TTS input). Optional with
+   * `slice`: its buffer is used.
+   */
+  text?: OfflineTextBufferIdSource;
   /** `result.timeline` from `tts.synthesize(…, { timeline: true })`. */
   tts: TtsTimeline;
   /**
-   * Where the synthesized text starts in the document's text buffer. Use it
-   * when you synthesized a slice (e.g. from the tapped paragraph on). Default 0.
+   * The synthesized text is this slice (`createReaderTextSlice`): any text
+   * the reader shows, also OCR text and app sections, across pages.
+   */
+  slice?: ReaderTextSlice | null;
+  /**
+   * Without `slice`: where the synthesized text starts in the document's text
+   * buffer, when you synthesized a part of it. Default 0.
    */
   textOffset?: number;
   /** Default `'both'`. */
@@ -139,7 +152,15 @@ export async function createReadAloudTimeline(
   options: CreateReadAloudTimelineOptions
 ): Promise<ReadAloudTimeline> {
   const { tts } = options;
-  const base = Math.max(0, Math.trunc(options.textOffset ?? 0));
+  const slice = options.slice ?? null;
+  const source = options.text ?? slice?.buffer;
+  if (!source) {
+    throw Object.assign(
+      new Error('ERR_READER_INVALID_ARGUMENT: pass `text` or `slice`'),
+      { code: 'ERR_READER_INVALID_ARGUMENT' }
+    );
+  }
+  const base = slice ? 0 : Math.max(0, Math.trunc(options.textOffset ?? 0));
   const granularity = options.granularity ?? 'both';
   const wantWords = granularity !== 'sentence';
   const wantSentences = granularity !== 'word';
@@ -151,9 +172,7 @@ export async function createReadAloudTimeline(
   );
   const textEnd = segments.reduce((m, s) => Math.max(m, s.utf16End), 0);
   const text =
-    textEnd > 0
-      ? await getOfflineTextBufferTextSlice(options.text, 0, textEnd)
-      : '';
+    textEnd > 0 ? await getOfflineTextBufferTextSlice(source, 0, textEnd) : '';
 
   const pending: Pending[] = [];
   const wordPending: Pending[] = [];
@@ -210,7 +229,8 @@ export async function createReadAloudTimeline(
   const all = [...pending, ...wordPending];
   const ranges = await mapTextRanges(
     doc,
-    all.map((u) => [base + u.start, base + u.end] as const)
+    all.map((u) => [base + u.start, base + u.end] as const),
+    { slice }
   );
 
   const sentences: ReadAloudUnit[] = [];

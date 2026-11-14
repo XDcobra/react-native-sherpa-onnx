@@ -9,6 +9,7 @@
 #include "ReaderOcrText.h"
 #include "ReaderRegistry.h"
 #include "ReaderTextHash.h"
+#include "ReaderTextSlice.h"
 #include "ReaderTracker.h"
 
 #include <cstdio>
@@ -232,9 +233,24 @@ std::shared_ptr<TxtOfflineEntry> LoadPdfEntry() {
   opts.layout = sherpa_onnx::pdf::PdfTextLayout::kParagraphs;
   auto r = sherpa_onnx::pdf::ExtractPdfTextLayer(src, opts);
   EXPECT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  // Spans as PopulateTextFromPdf stores them (line quads with the page size).
+  std::vector<TxtSpatialSpan> spans;
+  for (const auto& ps : r.spans) {
+    TxtSpatialSpan t;
+    t.utf16Start = ps.utf16_start;
+    t.utf16End = ps.utf16_end;
+    t.level = ps.level;
+    t.frameIndex = ps.frame_index;
+    for (int i = 0; i < 8; ++i) t.quad[i] = ps.quad[i];
+    t.origin = "textLayer";
+    t.hasPageWidth = t.hasPageHeight = true;
+    t.pageWidth = ps.page_width;
+    t.pageHeight = ps.page_height;
+    spans.push_back(t);
+  }
   auto entry = std::make_shared<TxtOfflineEntry>();
   entry->bufferId = "txt_off_pdf";
-  EXPECT_TRUE(entry->tryPopulate(r.text, {}, {}, {}, "", "", ""));
+  EXPECT_TRUE(entry->tryPopulate(r.text, {}, {}, {}, "", "", "", spans));
   EXPECT_TRUE(entry->trySetStructure(r.structure));
   return entry;
 }
@@ -589,6 +605,127 @@ TEST(ReaderOcrText, AttachRejectsOtherBuffersAndPlainText) {
   EXPECT_NE(pages.find("{\"sectionId\":\"s1\",\"blockId\":\"s1.b0\",\"frame\":1,\"hasText\":false}"),
             std::string::npos)
       << pages;
+  reg.Release(id);
+}
+
+// ---- Text slices for reading aloud ----------------------------------------
+
+TEST(ReaderTextSlice, FromAnOffsetAcrossBlocksAndBack) {
+  const std::string id = CreateDoc("structure.epub");
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  ReaderTextSlice slice;
+  ASSERT_TRUE(BuildTextSlice(*snap, 0, 3, -1, 0, &slice));
+  EXPECT_EQ(slice.text.rfind("pter One\n\n", 0), 0u) << slice.text.substr(0, 40);
+  ASSERT_GE(slice.entries.size(), 2u);
+  EXPECT_EQ(slice.entries[0].blockId, "s0.b0");
+  EXPECT_EQ(slice.entries[0].blockOffset, 3);
+  EXPECT_EQ(slice.entries[0].length, 8);
+  EXPECT_EQ(slice.entries[1].sliceStart, 10);
+  // A range inside the first block, and one across the blank line.
+  int a = -1, ao = 0, z = -1, zo = 0;
+  ASSERT_TRUE(MapSliceRange(slice, *snap, 0, 4, &a, &ao, &z, &zo));
+  EXPECT_EQ(snap->blocks[a].id, "s0.b0");
+  EXPECT_EQ(ao, 3);
+  EXPECT_EQ(zo, 7);
+  ASSERT_TRUE(MapSliceRange(slice, *snap, 5, 14, &a, &ao, &z, &zo));
+  EXPECT_EQ(ao, 8);
+  EXPECT_EQ(snap->blocks[z].id, slice.entries[1].blockId);
+  EXPECT_EQ(zo, 4);
+  EXPECT_FALSE(MapSliceRange(slice, *snap, 8, 10, &a, &ao, &z, &zo)) << "only the blank line";
+  // maxLength stops before a block that would not fit; the first block always fits.
+  ReaderTextSlice small;
+  ASSERT_TRUE(BuildTextSlice(*snap, 0, 0, -1, 5, &small));
+  EXPECT_EQ(small.entries.size(), 1u);
+  EXPECT_EQ(small.text, "Chapter One");
+  // toBlock is inclusive.
+  ReaderTextSlice two;
+  ASSERT_TRUE(BuildTextSlice(*snap, 0, 0, 1, 0, &two));
+  EXPECT_EQ(two.entries.size(), 2u);
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderTextSlice, PdfSliceSkipsFurnitureAndPages) {
+  if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) GTEST_SKIP() << "PDFium not linked";
+  const std::string id = CreatePdfDoc();
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  ReaderTextSlice slice;
+  // From page 3's page block across to page 4.
+  ASSERT_TRUE(BuildTextSlice(*snap, snap->BlockIndex("s2.b0"), 0, snap->BlockIndex("s3.b3"), 0,
+                             &slice));
+  EXPECT_EQ(slice.entries.front().blockId, "s2.b3") << "page image and running header skipped";
+  EXPECT_EQ(slice.entries.back().blockId, "s3.b3") << "page 4's header and number skipped";
+  for (const auto& e : slice.entries) EXPECT_NE(e.blockId, "s3.b1");
+  EXPECT_NE(slice.text.find("coat and the\n\nrain came in sideways"), std::string::npos)
+      << "a paragraph across the page break reads on";
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderTextSlice, OcrBlocksAreReadAndSlicesGoWithTheDocument) {
+  const std::string id = CreateTwoPages("img_off_ocr");
+  auto& reg = ReaderRegistry::Instance();
+  ReaderError err;
+  ASSERT_TRUE(reg.AttachPageText(id, OcrEntry("img_off_ocr"), nullptr, &err));
+  auto snap = reg.Snapshot(id);
+  auto slice = std::make_shared<ReaderTextSlice>();
+  ASSERT_TRUE(BuildTextSlice(*snap, 0, 0, -1, 0, slice.get()));
+  EXPECT_EQ(slice->text,
+            "The Harbour\n\nShips came in at night and\nleft before dawn.\n\nSecond page.")
+      << "the page number is not read";
+  reg.AddSlice("txt_off_slice", slice);
+  EXPECT_TRUE(reg.Slice("txt_off_slice"));
+  reg.Release(id);
+  EXPECT_FALSE(reg.Slice("txt_off_slice")) << "released with its document";
+}
+
+// ---- Highlights on page images -------------------------------------------
+
+TEST(ReaderHighlightRects, PdfLinesAndPartsOfALine) {
+  if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) GTEST_SKIP() << "PDFium not linked";
+  const std::string id = CreatePdfDoc();
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  const int para = snap->BlockIndex("s2.b5");
+  const auto& b = snap->blocks[para];
+  ASSERT_EQ(b.lines.size(), 3u) << "three lines on the page";
+  EXPECT_EQ(b.lines[0].start, 0);
+  EXPECT_EQ(b.lines.back().end, snap->BlockLength(para));
+  const auto all = TextRangeRects(*snap, para, 0, snap->BlockLength(para));
+  ASSERT_EQ(all.size(), 3u);
+  for (const auto& r : all) {
+    EXPECT_GE(r.y, b.rect[1] - 1e-3f);
+    EXPECT_LE(r.y + r.h, b.rect[1] + b.rect[3] + 1e-3f);
+  }
+  // The first word: the left part of the first line.
+  const auto word = TextRangeRects(*snap, para, 0, 3);
+  ASSERT_EQ(word.size(), 1u);
+  EXPECT_NEAR(word[0].x, all[0].x, 1e-4);
+  EXPECT_LT(word[0].w, all[0].w / 5);
+  EXPECT_FLOAT_EQ(word[0].y, all[0].y);
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderHighlightRects, OcrLinesThenBlockThenPage) {
+  const std::string id = CreateTwoPages("img_off_ocr");
+  auto& reg = ReaderRegistry::Instance();
+  ReaderError err;
+  ASSERT_TRUE(reg.AttachPageText(id, OcrEntry("img_off_ocr"), nullptr, &err));
+  auto snap = reg.Snapshot(id);
+  const int para = snap->BlockIndex("s0.b0.t1");  // two recognized lines
+  ASSERT_EQ(snap->blocks[para].lines.size(), 2u);
+  // "left" starts the second line: its rect starts at the line's left edge.
+  const auto left = TextRangeRects(*snap, para, 27, 31);
+  ASSERT_EQ(left.size(), 1u);
+  EXPECT_NEAR(left[0].x, 0.1f, 1e-4);
+  EXPECT_NEAR(left[0].y, 350.f / 1400, 1e-4);
+  // A block without line boxes: its rectangle; without a rectangle: the page.
+  ReaderSnapshot copy = *snap;
+  copy.blocks[para].lines.clear();
+  const auto block = TextRangeRects(copy, para, 0, 5);
+  ASSERT_EQ(block.size(), 1u);
+  EXPECT_NEAR(block[0].w, 0.8f, 1e-4);
+  copy.blocks[para].hasRect = false;
+  const auto page = TextRangeRects(copy, para, 0, 5);
+  ASSERT_EQ(page.size(), 1u);
+  EXPECT_EQ(page[0].w, 1.f);
   reg.Release(id);
 }
 

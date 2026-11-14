@@ -53,7 +53,19 @@ bool BridgeFindBlockByHash(const std::string& documentId, const std::string& tex
  * range (null when the range covers no file text block).
  */
 bool BridgeMapTextRanges(const std::string& documentId, const std::vector<int>& starts,
-                         const std::vector<int>& ends, std::string* json, ReaderError* err);
+                         const std::vector<int>& ends, const std::string& sliceBufferId,
+                         std::string* json, ReaderError* err);
+
+/**
+ * Text slice for reading aloud (see BuildTextSlice): a new offline text buffer
+ * with the text of the blocks from `fromBlockId` / `fromOffset` on, up to
+ * `toBlockId` ("" = no end) or `maxLength` (<= 0 = no limit). JSON
+ * `{bufferId, length, from, to}`; ranges of the buffer map with
+ * BridgeMapTextRanges(…, bufferId).
+ */
+bool BridgeCreateTextSlice(const std::string& documentId, const std::string& fromBlockId,
+                           int fromOffset, const std::string& toBlockId, int maxLength,
+                           std::string* json, ReaderError* err);
 
 /** Contents JSON (see TocJson). */
 bool BridgeGetToc(const std::string& documentId, std::string* json, ReaderError* err);

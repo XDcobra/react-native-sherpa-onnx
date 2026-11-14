@@ -4103,8 +4103,25 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     documentId: String,
     starts: ReadableArray,
     ends: ReadableArray,
+    sliceBufferId: String,
     promise: Promise,
-  ) = readerHelper.mapReaderTextRanges(documentId, starts, ends, promise)
+  ) = readerHelper.mapReaderTextRanges(documentId, starts, ends, sliceBufferId, promise)
+
+  override fun createReaderTextSlice(
+    documentId: String,
+    fromBlockId: String,
+    fromOffset: Double,
+    toBlockId: String,
+    maxLength: Double,
+    promise: Promise,
+  ) = readerHelper.createReaderTextSlice(
+    documentId,
+    fromBlockId,
+    fromOffset.toInt(),
+    toBlockId,
+    maxLength.toInt(),
+    promise,
+  )
 
   override fun getReaderToc(documentId: String, promise: Promise) =
     readerHelper.getReaderToc(documentId, promise)

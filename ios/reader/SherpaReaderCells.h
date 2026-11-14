@@ -53,6 +53,13 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
 - (CGFloat)lineTopForCharacterOffset:(NSInteger)offset;
 @end
 
+/** A highlight over a page image: `rect` normalized to the page. */
+@interface SherpaReaderPageMark : NSObject
+@property (nonatomic, assign) CGRect rect;
+@property (nonatomic, assign) SherpaReaderHighlightStyle style;
+@property (nonatomic, strong) UIColor *color;
+@end
+
 @interface SherpaReaderImageCell : UITableViewCell
 - (void)configureWithBufferId:(nullable NSString *)bufferId
                    frameIndex:(NSInteger)frameIndex
@@ -64,6 +71,8 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
                           alt:(nullable NSString *)alt
                         theme:(SherpaReaderTheme *)theme
                          page:(BOOL)page;
+/** Highlights drawn over the page (background fill, underline, text-color frame). */
+- (void)updatePageMarks:(NSArray<SherpaReaderPageMark *> *)marks;
 @end
 
 @interface SherpaReaderSeparatorCell : UITableViewCell

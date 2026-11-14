@@ -46,7 +46,20 @@ internal object ReaderNative {
     hintBlockId: String,
   ): Array<String>
 
-  @JvmStatic external fun nativeMapTextRanges(documentId: String, starts: IntArray, ends: IntArray): Array<String>
+  @JvmStatic external fun nativeMapTextRanges(
+    documentId: String,
+    starts: IntArray,
+    ends: IntArray,
+    sliceBufferId: String,
+  ): Array<String>
+
+  @JvmStatic external fun nativeCreateTextSlice(
+    documentId: String,
+    fromBlockId: String,
+    fromOffset: Int,
+    toBlockId: String,
+    maxLength: Int,
+  ): Array<String>
 
   @JvmStatic external fun nativeGetToc(documentId: String): Array<String>
 

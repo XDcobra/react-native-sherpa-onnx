@@ -7,6 +7,7 @@ const mockNative = {
   getReaderBlocks: jest.fn(),
   findReaderBlockByHash: jest.fn(),
   mapReaderTextRanges: jest.fn(),
+  createReaderTextSlice: jest.fn(),
   getReaderToc: jest.fn(),
   releaseReaderDocument: jest.fn(),
 };
@@ -68,6 +69,7 @@ jest.mock('../../imagebuffer', () => ({
 import {
   compareLocators,
   createReaderDocument,
+  createReaderTextSlice,
   formatBlockId,
   getReaderBlocks,
   getReaderToc,
@@ -401,7 +403,8 @@ describe('reader api', () => {
     expect(mockNative.mapReaderTextRanges).toHaveBeenCalledWith(
       'rdr_1',
       [10, 100],
-      [40, 101]
+      [40, 101],
+      ''
     );
     await expect(mapTextRanges(SUMMARY as never, [])).resolves.toEqual([]);
     mockNative.mapReaderTextRanges.mockResolvedValue(
@@ -409,6 +412,37 @@ describe('reader api', () => {
     );
     await expect(locatorAtTextOffset(SUMMARY as never, 13)).resolves.toEqual(
       from
+    );
+  });
+
+  it('creates a text slice and maps its ranges through it', async () => {
+    const from = { sectionId: 's2', blockId: 's2.b3', offset: 0 };
+    const to = { sectionId: 's3', blockId: 's3.b3', offset: 35 };
+    mockNative.createReaderTextSlice.mockResolvedValue(
+      JSON.stringify({ bufferId: 'txt_off_7', length: 900, from, to })
+    );
+    const slice = await createReaderTextSlice(SUMMARY as never, {
+      from: { sectionId: 's2', blockId: 's2.b0' },
+      to: { sectionId: 's3', blockId: 's3.b3' },
+      maxLength: 4000.5,
+    });
+    expect(mockNative.createReaderTextSlice).toHaveBeenCalledWith(
+      'rdr_1',
+      's2.b0',
+      0,
+      's3.b3',
+      4000
+    );
+    expect(slice).toEqual({ buffer: 'txt_off_7', length: 900, from, to });
+    mockNative.mapReaderTextRanges.mockResolvedValue(
+      JSON.stringify([{ from, to }])
+    );
+    await mapTextRanges(SUMMARY as never, [[0, 900]], { slice });
+    expect(mockNative.mapReaderTextRanges).toHaveBeenLastCalledWith(
+      'rdr_1',
+      [0],
+      [900],
+      'txt_off_7'
     );
   });
 

@@ -535,6 +535,14 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     if (row < 0) return null
     val holder = recycler.findViewHolderForAdapterPosition(row) ?: return null
     val item = holder.itemView
+    val r = rows.getOrNull(row) as? Row.Block
+    if (r != null && r.page && r.index != followBlock) {
+      // On a page image: the followed text's line on the page.
+      val rects = ReaderViewNative.nativeTextRangeRects(snapshot, followBlock, followOffset, followOffset + 1)
+      if (rects.size >= 4) {
+        return intArrayOf(item.top + (rects[1] * item.height).toInt(), max(1, (rects[3] * item.height).toInt()))
+      }
+    }
     val tv = (holder as? TextHolder)?.text
     val layout = tv?.layout
     if (tv == null || layout == null) return intArrayOf(item.top, min(item.height, (theme.fontSizePx * theme.lineHeight).toInt()))
@@ -615,6 +623,30 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       dispatchFollowChange(true, "command")
     }
     follow(animated = true, force = true, place = true)
+  }
+
+  /** Highlights of the blocks a page row stands for, as rects on the page image. */
+  private fun pageMarks(r: Row.Block, t: Theme): List<PageMark> {
+    if (!r.page || r.coverLast <= r.coverFirst || spansByBlock.isEmpty()) return emptyList()
+    val out = ArrayList<PageMark>()
+    for (block in r.coverFirst..r.coverLast) {
+      val spans = spansByBlock[block] ?: continue
+      for (sp in spans) {
+        val color =
+          when {
+            sp.hasColor -> sp.color
+            sp.style == 0 -> (t.accentColor and 0x00FFFFFF) or (0x4D shl 24)
+            else -> t.accentColor
+          }
+        val rects = ReaderViewNative.nativeTextRangeRects(snapshot, block, sp.start, sp.end)
+        var k = 0
+        while (k + 3 < rects.size) {
+          out += PageMark(rects[k], rects[k + 1], rects[k + 2], rects[k + 3], sp.style, color)
+          k += 4
+        }
+      }
+    }
+    return out
   }
 
   /** Text with highlight spans (colors default to the theme accent). */
@@ -1323,7 +1355,59 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
   private class TextHolder(val text: TextView) : RecyclerView.ViewHolder(text)
 
-  private class ImageHolder(val frame: OfflineImageBufferFrameView) : RecyclerView.ViewHolder(frame)
+  private class ImageHolder(
+    root: FrameLayout,
+    val frame: OfflineImageBufferFrameView,
+    val overlay: PageHighlightOverlay,
+  ) : RecyclerView.ViewHolder(root)
+
+  /** A highlight drawn over a page image: a rect normalized to the page. */
+  private data class PageMark(val x: Float, val y: Float, val w: Float, val h: Float, val style: Int, val color: Int)
+
+  /**
+   * Highlights over a page image (the page fills the view): background as a
+   * translucent fill, underline as a line under the text, text color as a frame.
+   */
+  private class PageHighlightOverlay(context: Context) : View(context) {
+    var marks: List<PageMark> = emptyList()
+      set(value) {
+        if (field != value) {
+          field = value
+          invalidate()
+        }
+      }
+    private val fill = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val stroke =
+      android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = PixelUtil.toPixelFromDIP(2f)
+      }
+
+    override fun onDraw(canvas: Canvas) {
+      val w = width.toFloat()
+      val h = height.toFloat()
+      for (m in marks) {
+        val l = m.x * w
+        val t = m.y * h
+        val r = (m.x + m.w) * w
+        val b = (m.y + m.h) * h
+        when (m.style) {
+          1 -> {
+            stroke.color = m.color
+            canvas.drawLine(l, b, r, b, stroke)
+          }
+          2 -> {
+            stroke.color = m.color
+            canvas.drawRect(l, t, r, b, stroke)
+          }
+          else -> {
+            fill.color = m.color
+            canvas.drawRect(l, t, r, b, fill)
+          }
+        }
+      }
+    }
+  }
 
   private class SeparatorHolder(val line: SeparatorView) : RecyclerView.ViewHolder(line)
 
@@ -1347,14 +1431,25 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
       val lp = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
       return when (viewType) {
-        VIEW_IMAGE ->
-          ImageHolder(
+        VIEW_IMAGE -> {
+          val frame =
             OfflineImageBufferFrameView(reactContext).apply {
-              layoutParams = lp
+              layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
               setResizeMode("contain")
               adjustViewBounds = false
             }
-          )
+          val overlay =
+            PageHighlightOverlay(parent.context).apply {
+              layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            }
+          val root =
+            FrameLayout(parent.context).apply {
+              layoutParams = lp
+              addView(frame)
+              addView(overlay)
+            }
+          ImageHolder(root, frame, overlay)
+        }
         VIEW_SEPARATOR -> SeparatorHolder(SeparatorView(parent.context).apply { layoutParams = lp })
         VIEW_INSERT -> InsertHolder(InsertContainer(parent.context).apply { layoutParams = lp })
         else ->
@@ -1374,6 +1469,10 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         holder.text.text = styled(blockText(r.index), spansByBlock[r.index], theme)
         return
       }
+      if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_HIGHLIGHT } && holder is ImageHolder && r is Row.Block) {
+        holder.overlay.marks = pageMarks(r, theme)
+        return
+      }
       onBindViewHolder(holder, position)
     }
 
@@ -1384,7 +1483,10 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         is Row.Block ->
           when (holder) {
             is TextHolder -> bindText(holder, r.index, t)
-            is ImageHolder -> bindImage(holder, r.index, t, r.page)
+            is ImageHolder -> {
+              bindImage(holder, r.index, t, r.page)
+              holder.overlay.marks = pageMarks(r, t)
+            }
             is SeparatorHolder -> {
               holder.line.setLineColor(t.textColor)
               holder.line.layoutParams.height = ceil(t.fontSizePx * 1.2f * 1.5f).toInt()
@@ -1421,6 +1523,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
     private fun bindImage(holder: ImageHolder, index: Int, t: Theme, page: Boolean) {
       val v = holder.frame
+      val root = holder.itemView
       val frame = blockFrame(index)
       val w = blockTable[index * BLOCK_STRIDE + 4]
       val h = blockTable[index * BLOCK_STRIDE + 5]
@@ -1428,12 +1531,12 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       val viewport = if (recycler.height > 0) recycler.height else resources.displayMetrics.heightPixels
       if (page) {
         // A page: full width, no margins, its own height (pages follow each other).
-        v.layoutParams.height = if (frame >= 0 && w > 0 && h > 0) ceil(avail.toFloat() * h / w).toInt() else 0
+        root.layoutParams.height = if (frame >= 0 && w > 0 && h > 0) ceil(avail.toFloat() * h / w).toInt() else 0
         v.setPadding(0, 0, 0, 0)
       } else {
         val width = max(1, avail - 2 * t.marginHorizontalPx)
         val height = if (frame >= 0 && w > 0 && h > 0) min(width.toFloat() * h / w, viewport * 0.9f) else 0f
-        v.layoutParams.height = if (height > 0) ceil(height + 1.5f * t.paragraphSpacingPx).toInt() else 0
+        root.layoutParams.height = if (height > 0) ceil(height + 1.5f * t.paragraphSpacingPx).toInt() else 0
         v.setPadding(t.marginHorizontalPx, t.paragraphSpacingPx / 2, t.marginHorizontalPx, t.paragraphSpacingPx)
       }
       v.setMaxSide(2048)

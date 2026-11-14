@@ -157,6 +157,16 @@ std::vector<OcrFrameBlocks> BuildOcrFrameBlocks(const TxtOfflineEntry& ocr,
         if (std::min(s.utf16End, blk.utf16End) <= std::max(s.utf16Start, blk.utf16Start)) continue;
         float a0, c0, a1, c1;
         QuadBounds(s.quad, &a0, &c0, &a1, &c1);
+        if (f.width > 0 && f.height > 0 && s.level == "line" && a1 > a0 && c1 > c0) {
+          ReaderLineBox line;
+          line.start = std::max(s.utf16Start, blk.utf16Start) - blk.utf16Start;
+          line.end = std::min(s.utf16End, blk.utf16End) - blk.utf16Start;
+          line.rect[0] = a0 / f.width;
+          line.rect[1] = c0 / f.height;
+          line.rect[2] = (a1 - a0) / f.width;
+          line.rect[3] = (c1 - c0) / f.height;
+          blk.lines.push_back(line);
+        }
         x0 = std::min(x0, a0);
         y0 = std::min(y0, c0);
         x1 = std::max(x1, a1);

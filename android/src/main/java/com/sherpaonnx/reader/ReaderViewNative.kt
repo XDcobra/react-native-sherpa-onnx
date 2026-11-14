@@ -32,6 +32,9 @@ internal object ReaderViewNative {
     viewport: Float,
   ): IntArray
 
+  /** 4 floats per rect (x, y, w, h normalized to the page) of [start, end) of a block's text. */
+  @JvmStatic external fun nativeTextRangeRects(handle: Long, block: Int, start: Int, end: Int): FloatArray
+
   /** Px from a row's top where [target] starts (a block's place on a page image; else 0). */
   @JvmStatic external fun nativeBlockOffsetInRow(
     handle: Long,

@@ -216,27 +216,58 @@ std::string TocJson(const ReaderSnapshot& snap) {
   return out;
 }
 
-std::string TextRangesJson(const ReaderSnapshot& snap, const std::vector<int>& starts,
-                           const std::vector<int>& ends) {
-  auto locator = [&](int block, int offset) {
-    return "{\"sectionId\":" + JsonEscape(snap.sections[snap.blocks[block].section].id) +
-           ",\"blockId\":" + JsonEscape(snap.blocks[block].id) +
-           ",\"offset\":" + std::to_string(offset) + "}";
-  };
+namespace {
+
+std::string LocatorJson(const ReaderSnapshot& snap, int block, int offset) {
+  return "{\"sectionId\":" + JsonEscape(snap.sections[snap.blocks[block].section].id) +
+         ",\"blockId\":" + JsonEscape(snap.blocks[block].id) +
+         ",\"offset\":" + std::to_string(offset) + "}";
+}
+
+template <typename Map>
+std::string RangesJson(const ReaderSnapshot& snap, const std::vector<int>& starts,
+                       const std::vector<int>& ends, Map map) {
   const size_t n = std::min(starts.size(), ends.size());
   std::string out = "[";
   out.reserve(n * 96);
   for (size_t i = 0; i < n; ++i) {
     if (i > 0) out.push_back(',');
     int a = -1, ao = 0, z = -1, zo = 0;
-    if (!snap.MapTextRange(starts[i], ends[i], &a, &ao, &z, &zo)) {
+    if (!map(starts[i], ends[i], &a, &ao, &z, &zo)) {
       out += "null";
       continue;
     }
-    out += "{\"from\":" + locator(a, ao) + ",\"to\":" + locator(z, zo) + "}";
+    out += "{\"from\":" + LocatorJson(snap, a, ao) + ",\"to\":" + LocatorJson(snap, z, zo) + "}";
   }
   out.push_back(']');
   return out;
+}
+
+}  // namespace
+
+std::string TextRangesJson(const ReaderSnapshot& snap, const std::vector<int>& starts,
+                           const std::vector<int>& ends) {
+  return RangesJson(snap, starts, ends, [&](int s, int e, int* a, int* ao, int* z, int* zo) {
+    return snap.MapTextRange(s, e, a, ao, z, zo);
+  });
+}
+
+std::string SliceRangesJson(const ReaderSnapshot& snap, const ReaderTextSlice& slice,
+                            const std::vector<int>& starts, const std::vector<int>& ends) {
+  return RangesJson(snap, starts, ends, [&](int s, int e, int* a, int* ao, int* z, int* zo) {
+    return MapSliceRange(slice, snap, s, e, a, ao, z, zo);
+  });
+}
+
+std::string SliceJson(const ReaderSnapshot& snap, const ReaderTextSlice& slice,
+                      const std::string& bufferId) {
+  const ReaderSliceEntry& first = slice.entries.front();
+  const ReaderSliceEntry& last = slice.entries.back();
+  const int a = snap.BlockIndex(first.blockId);
+  const int z = snap.BlockIndex(last.blockId);
+  return "{\"bufferId\":" + JsonEscape(bufferId) + ",\"length\":" + std::to_string(slice.length) +
+         ",\"from\":" + LocatorJson(snap, a, first.blockOffset) +
+         ",\"to\":" + LocatorJson(snap, z, last.blockOffset + last.length) + "}";
 }
 
 }  // namespace reader

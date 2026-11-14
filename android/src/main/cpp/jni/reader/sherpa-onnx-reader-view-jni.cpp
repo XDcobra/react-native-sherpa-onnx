@@ -131,6 +131,22 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeBlockOffsetInRow(JNIEnv*, jcla
   return rdr::BlockOffsetInRow(*s, row, target, rowHeight);
 }
 
+/** 4 floats per rect (x, y, w, h normalized to the page) of [start, end) of a block's text. */
+JNIEXPORT jfloatArray JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativeTextRangeRects(JNIEnv* env, jclass, jlong h,
+                                                                 jint block, jint start, jint end) {
+  const auto* s = Snap(h);
+  std::vector<jfloat> out;
+  if (s) {
+    for (const auto& r : rdr::TextRangeRects(*s, block, start, end)) {
+      out.insert(out.end(), {r.x, r.y, r.w, r.h});
+    }
+  }
+  jfloatArray arr = env->NewFloatArray(static_cast<jsize>(out.size()));
+  if (!out.empty()) env->SetFloatArrayRegion(arr, 0, static_cast<jsize>(out.size()), out.data());
+  return arr;
+}
+
 /** 2 ints per section: firstBlock, blockCount. */
 JNIEXPORT jintArray JNICALL
 Java_com_sherpaonnx_reader_ReaderViewNative_nativeSectionTable(JNIEnv* env, jclass, jlong h) {

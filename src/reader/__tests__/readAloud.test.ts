@@ -10,15 +10,20 @@ jest.mock('../../textbuffer', () => ({
 
 // Identity mapping: the locator offset is the text-buffer offset.
 const mockMap = jest.fn(
-  async (_doc: unknown, ranges: ReadonlyArray<readonly [number, number]>) =>
+  async (
+    _doc: unknown,
+    ranges: ReadonlyArray<readonly [number, number]>,
+    _options?: unknown
+  ) =>
     ranges.map(([a, b]) => ({
       from: { sectionId: 's0', blockId: 's0.b0', offset: a },
       to: { sectionId: 's0', blockId: 's0.b0', offset: b },
     }))
 );
 jest.mock('../api', () => ({
-  mapTextRanges: (...a: [unknown, ReadonlyArray<readonly [number, number]>]) =>
-    mockMap(...a),
+  mapTextRanges: (
+    ...a: [unknown, ReadonlyArray<readonly [number, number]>, unknown?]
+  ) => mockMap(...a),
 }));
 
 import {
@@ -108,6 +113,29 @@ describe('read aloud timeline', () => {
     expect(t.words).toEqual([]);
     expect(t.sentences[0]!.range.from.offset).toBe(500);
     expect(t.sentences[1]!.textEnd).toBe(529);
+  });
+
+  it('reads a text slice and maps through it', async () => {
+    const slice = {
+      buffer: 'txt_off_slice',
+      length: 29,
+      from: { sectionId: 's2', blockId: 's2.b0.t0', offset: 0 },
+      to: { sectionId: 's3', blockId: 's3.b0.t1', offset: 4 },
+    } as never;
+    mockMap.mockClear();
+    const t = await createReadAloudTimeline(DOC, {
+      slice,
+      tts: TTS,
+      textOffset: 500, // ignored with a slice
+      granularity: 'sentence',
+    });
+    expect(mockText.slice).toHaveBeenLastCalledWith('txt_off_slice', 0, 29);
+    expect(mockMap.mock.calls[0]![1]![0]).toEqual([0, 17]);
+    expect(mockMap.mock.calls[0]![2]).toEqual({ slice });
+    expect(t.sentences[0]!.textStart).toBe(0);
+    await expect(
+      createReadAloudTimeline(DOC, { tts: TTS } as never)
+    ).rejects.toMatchObject({ code: 'ERR_READER_INVALID_ARGUMENT' });
   });
 
   it('uses aligned word times in order and keeps estimates for misses', async () => {

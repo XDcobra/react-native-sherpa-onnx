@@ -36,6 +36,13 @@ enum ReaderBlockFlags : uint32_t {
 
 const char* ReaderBlockTypeName(ReaderBlockType t);
 
+/** A line of a block's text on its page: [start, end) UTF-16 in the block, rect normalized to the page. */
+struct ReaderLineBox {
+  int start = 0;
+  int end = 0;
+  float rect[4] = {0, 0, 0, 0};  // x, y, w, h
+};
+
 struct ReaderBlock {
   std::string id;  // "s3.b12" | "app:guide.intro"
   int section = 0;  // index into ReaderSnapshot::sections
@@ -59,6 +66,8 @@ struct ReaderBlock {
   /** Normalized rectangle on its page / image (x, y, w, h in 0..1), if known. */
   bool hasRect = false;
   float rect[4] = {0, 0, 0, 0};
+  /** Its lines on the page (PDF text layer, OCR), for highlights on the page image. */
+  std::vector<ReaderLineBox> lines;
   std::string imageHref;
   std::string alt;
   bool hasAlt = false;

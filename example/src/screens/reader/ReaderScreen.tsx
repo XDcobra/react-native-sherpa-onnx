@@ -244,6 +244,7 @@ export default function ReaderScreen() {
         // Ignore results for a document that was closed meanwhile.
         if (docRef.current?.id !== next.id) return;
         docRef.current = next;
+        textsRef.current = null; // new blocks for search
         setDoc(next);
       };
       try {

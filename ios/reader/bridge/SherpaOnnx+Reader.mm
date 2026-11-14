@@ -174,8 +174,9 @@ RCT_EXPORT_METHOD(findReaderBlockByHash : (NSString *)documentId textHash : (NSS
 }
 
 RCT_EXPORT_METHOD(mapReaderTextRanges : (NSString *)documentId starts : (NSArray *)
-                      starts ends : (NSArray *)ends resolve : (RCTPromiseResolveBlock)
-                          resolve reject : (RCTPromiseRejectBlock)reject) {
+                      starts ends : (NSArray *)ends sliceBufferId : (NSString *)
+                          sliceBufferId resolve : (RCTPromiseResolveBlock)
+                              resolve reject : (RCTPromiseRejectBlock)reject) {
   std::vector<int> s;
   std::vector<int> e;
   s.reserve(starts.count);
@@ -186,7 +187,23 @@ RCT_EXPORT_METHOD(mapReaderTextRanges : (NSString *)documentId starts : (NSArray
     std::string json;
     sherpa_onnx::reader::ReaderError err;
     const bool ok =
-        sherpa_onnx::reader::BridgeMapTextRanges(Std(documentId), s, e, &json, &err);
+        sherpa_onnx::reader::BridgeMapTextRanges(Std(documentId), s, e, Std(sliceBufferId), &json,
+                                                 &err);
+    Finish(ok, json, err, resolve, reject);
+  });
+}
+
+RCT_EXPORT_METHOD(createReaderTextSlice : (NSString *)documentId fromBlockId : (
+                      NSString *)fromBlockId fromOffset : (double)fromOffset toBlockId : (
+                          NSString *)toBlockId maxLength : (double)maxLength resolve : (
+                              RCTPromiseResolveBlock)resolve reject : (RCTPromiseRejectBlock)
+                              reject) {
+  dispatch_async(ReaderQueue(), ^{
+    std::string json;
+    sherpa_onnx::reader::ReaderError err;
+    const bool ok = sherpa_onnx::reader::BridgeCreateTextSlice(
+        Std(documentId), Std(fromBlockId), (int)fromOffset, Std(toBlockId), (int)maxLength, &json,
+        &err);
     Finish(ok, json, err, resolve, reject);
   });
 }

@@ -184,6 +184,42 @@ int RemapBlockByHash(const ReaderSnapshot& snap, const std::string& textHash, in
 
 namespace {
 
+/**
+ * Line boxes of placed blocks (PDF text layer) from the buffer's line spans:
+ * spans with a page size, in buffer order, cut to each block's range.
+ */
+void AttachLineBoxes(const std::vector<TxtSpatialSpan>& spans, std::vector<ReaderBlock*> blocks) {
+  if (spans.empty()) return;
+  std::stable_sort(blocks.begin(), blocks.end(), [](const ReaderBlock* x, const ReaderBlock* y) {
+    return x->utf16Start < y->utf16Start;
+  });
+  size_t k = 0;
+  for (ReaderBlock* b : blocks) {
+    if (!b->hasRect) continue;
+    while (k < spans.size() && spans[k].utf16End <= b->utf16Start) ++k;
+    for (size_t j = k; j < spans.size() && spans[j].utf16Start < b->utf16End; ++j) {
+      const TxtSpatialSpan& s = spans[j];
+      if (s.level != "line" || !s.hasPageWidth || !s.hasPageHeight || s.pageWidth <= 0 ||
+          s.pageHeight <= 0) {
+        continue;
+      }
+      const float x0 = std::min({s.quad[0], s.quad[2], s.quad[4], s.quad[6]});
+      const float x1 = std::max({s.quad[0], s.quad[2], s.quad[4], s.quad[6]});
+      const float y0 = std::min({s.quad[1], s.quad[3], s.quad[5], s.quad[7]});
+      const float y1 = std::max({s.quad[1], s.quad[3], s.quad[5], s.quad[7]});
+      ReaderLineBox line;
+      line.start = std::max(s.utf16Start, b->utf16Start) - b->utf16Start;
+      line.end = std::min(s.utf16End, b->utf16End) - b->utf16Start;
+      if (line.end <= line.start) continue;
+      line.rect[0] = x0 / s.pageWidth;
+      line.rect[1] = y0 / s.pageHeight;
+      line.rect[2] = (x1 - x0) / s.pageWidth;
+      line.rect[3] = (y1 - y0) / s.pageHeight;
+      b->lines.push_back(line);
+    }
+  }
+}
+
 void SetErr(ReaderError* err, const char* code, const std::string& message) {
   if (err) {
     err->code = code;
@@ -294,6 +330,7 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
     }
   }
   ResolveByteRanges(source, &textual);
+  AttachLineBoxes(text->spatialSpans, textual);
   for (int i = 0; i < static_cast<int>(snap->blocks.size()); ++i) {
     ReaderBlock& b = snap->blocks[i];
     if (b.type == ReaderBlockType::Paragraph || b.type == ReaderBlockType::Heading) {
@@ -424,6 +461,7 @@ bool ReaderRegistry::AttachPageText(const std::string& documentId,
         for (int r = 0; r < 4; ++r) c.rect[r] = o.rect[r];
         c.utf16Start = o.utf16Start;
         c.utf16End = o.utf16End;
+        c.lines = o.lines;
         children.push_back(std::move(c));
       }
       std::vector<ReaderBlock*> ptrs;
@@ -549,7 +587,22 @@ std::shared_ptr<const ReaderSnapshot> ReaderRegistry::Snapshot(const std::string
 
 bool ReaderRegistry::Release(const std::string& documentId) {
   std::lock_guard<std::mutex> lock(mutex_);
+  for (auto it = slices_.begin(); it != slices_.end();) {
+    it = it->second->documentId == documentId ? slices_.erase(it) : std::next(it);
+  }
   return docs_.erase(documentId) > 0;
+}
+
+void ReaderRegistry::AddSlice(const std::string& textBufferId,
+                              std::shared_ptr<const ReaderTextSlice> slice) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  slices_[textBufferId] = std::move(slice);
+}
+
+std::shared_ptr<const ReaderTextSlice> ReaderRegistry::Slice(const std::string& textBufferId) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = slices_.find(textBufferId);
+  return it == slices_.end() ? nullptr : it->second;
 }
 
 }  // namespace reader

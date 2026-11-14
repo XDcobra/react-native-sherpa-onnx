@@ -20,7 +20,10 @@ import {
   releasePipelineTextBuffer,
   resolveOfflineTextBufferId,
 } from '../textbuffer';
-import type { OfflineTextBufferIdSource } from '../textbuffer/types';
+import type {
+  OfflineTextBufferHandle,
+  OfflineTextBufferIdSource,
+} from '../textbuffer/types';
 import type {
   ReaderAppSection,
   ReaderBlock,
@@ -28,6 +31,7 @@ import type {
   ReaderDocumentFormat,
   ReaderLocator,
   ReaderRange,
+  ReaderTextSlice,
   ReaderTocEntry,
   ReaderSectionInfo,
 } from './types';
@@ -427,21 +431,68 @@ export async function remapLocator(
 
 /**
  * Maps UTF-16 ranges of the document's text buffer (e.g. sentences that were
- * read aloud) onto reader ranges, in one native call. A range start in the gap
- * between two blocks moves to the next block, an end moves back to the
- * previous one; ranges that cover no file text block resolve to `null`.
+ * read aloud) onto reader ranges, in one native call. With `slice`, the
+ * ranges are in that slice's buffer instead (`createReaderTextSlice`). A range
+ * start in the gap between two blocks moves to the next block, an end moves
+ * back to the previous one; ranges that cover no text block resolve to `null`.
+ *
+ * @throws {Error} `ERR_READER_INVALID_ARGUMENT` — `slice` is not a slice of this document.
  */
 export async function mapTextRanges(
   doc: ReaderDocument,
-  ranges: ReadonlyArray<readonly [number, number]>
+  ranges: ReadonlyArray<readonly [number, number]>,
+  options?: { slice?: ReaderTextSlice | null }
 ): Promise<Array<ReaderRange | null>> {
   if (ranges.length === 0) return [];
   const starts = ranges.map((r) => Math.trunc(r[0]));
   const ends = ranges.map((r) => Math.trunc(r[1]));
+  const sliceId = options?.slice ? String(options.slice.buffer) : '';
   const json = await callNative(() =>
-    getNative().mapReaderTextRanges(doc.id, starts, ends)
+    getNative().mapReaderTextRanges(doc.id, starts, ends, sliceId)
   );
   return JSON.parse(json) as Array<ReaderRange | null>;
+}
+
+/**
+ * Puts the text of consecutive blocks into a new offline text buffer, to read
+ * it aloud: paragraphs and headings from `from` on (file text, OCR text and
+ * app sections; running headers, footers and page numbers left out), joined
+ * by a blank line. It ends after the block of `to`, or before the first block
+ * that would make it longer than `maxLength` UTF-16 units (the first block is
+ * always included). Pass the slice to `createReadAloudTimeline` /
+ * `mapTextRanges`; release `slice.buffer` when done.
+ *
+ * @throws {Error} `ERR_READER_INVALID_ARGUMENT` — unknown block, or no text from `from` on.
+ */
+export async function createReaderTextSlice(
+  doc: ReaderDocument,
+  options: {
+    from: ReaderLocator;
+    to?: ReaderLocator | null;
+    maxLength?: number;
+  }
+): Promise<ReaderTextSlice> {
+  const json = await callNative(() =>
+    getNative().createReaderTextSlice(
+      doc.id,
+      options.from.blockId,
+      Math.max(0, Math.trunc(options.from.offset ?? 0)),
+      options.to?.blockId ?? '',
+      Math.trunc(options.maxLength ?? 0)
+    )
+  );
+  const raw = JSON.parse(json) as {
+    bufferId: string;
+    length: number;
+    from: ReaderLocator;
+    to: ReaderLocator;
+  };
+  return {
+    buffer: raw.bufferId as OfflineTextBufferHandle,
+    length: Number(raw.length ?? 0),
+    from: raw.from,
+    to: raw.to,
+  };
 }
 
 /** Locator of a single text-buffer UTF-16 offset (`null` if it is in no block). */

@@ -156,7 +156,8 @@ Java_com_sherpaonnx_reader_ReaderNative_nativeFindBlockByHash(JNIEnv* env, jclas
 
 JNIEXPORT jobjectArray JNICALL
 Java_com_sherpaonnx_reader_ReaderNative_nativeMapTextRanges(JNIEnv* env, jclass, jstring docId,
-                                                            jintArray starts, jintArray ends) {
+                                                            jintArray starts, jintArray ends,
+                                                            jstring sliceId) {
   auto read = [env](jintArray a) {
     std::vector<int> v;
     if (a) {
@@ -168,7 +169,20 @@ Java_com_sherpaonnx_reader_ReaderNative_nativeMapTextRanges(JNIEnv* env, jclass,
   std::string json;
   sherpa_onnx::reader::ReaderError err;
   const bool ok = sherpa_onnx::reader::BridgeMapTextRanges(Std(env, docId), read(starts),
-                                                          read(ends), &json, &err);
+                                                          read(ends), Std(env, sliceId), &json,
+                                                          &err);
+  return Result(env, ok, json, err);
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeCreateTextSlice(JNIEnv* env, jclass, jstring docId,
+                                                              jstring fromBlockId, jint fromOffset,
+                                                              jstring toBlockId, jint maxLength) {
+  std::string json;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeCreateTextSlice(
+      Std(env, docId), Std(env, fromBlockId), fromOffset, Std(env, toBlockId), maxLength, &json,
+      &err);
   return Result(env, ok, json, err);
 }
 

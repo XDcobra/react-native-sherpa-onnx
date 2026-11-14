@@ -78,5 +78,35 @@ ResolvedHighlights ResolveHighlights(const ReaderSnapshot& snap,
   return out;
 }
 
+std::vector<PageRect> TextRangeRects(const ReaderSnapshot& snap, int block, int start, int end) {
+  std::vector<PageRect> out;
+  if (block < 0 || block >= static_cast<int>(snap.blocks.size()) || end <= start) return out;
+  const ReaderBlock& b = snap.blocks[block];
+  for (const ReaderLineBox& l : b.lines) {
+    const int a = std::max(start, l.start);
+    const int z = std::min(end, l.end);
+    if (z <= a || l.end <= l.start) continue;
+    const float len = static_cast<float>(l.end - l.start);
+    const float f0 = static_cast<float>(a - l.start) / len;
+    const float f1 = static_cast<float>(z - l.start) / len;
+    PageRect r{l.rect[0], l.rect[1], l.rect[2], l.rect[3]};
+    if (l.rect[3] > 1.5f * l.rect[2]) {  // vertical text runs top to bottom
+      r.y = l.rect[1] + f0 * l.rect[3];
+      r.h = (f1 - f0) * l.rect[3];
+    } else {
+      r.x = l.rect[0] + f0 * l.rect[2];
+      r.w = (f1 - f0) * l.rect[2];
+    }
+    out.push_back(r);
+  }
+  if (!out.empty()) return out;
+  if (b.hasRect) {
+    out.push_back({b.rect[0], b.rect[1], b.rect[2], b.rect[3]});
+  } else {
+    out.push_back({0, 0, 1, 1});
+  }
+  return out;
+}
+
 }  // namespace reader
 }  // namespace sherpa_onnx

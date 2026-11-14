@@ -160,8 +160,66 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 
 @end
 
+@implementation SherpaReaderPageMark
+@end
+
+/** Draws page marks over the page image it covers. */
+@interface SherpaReaderPageOverlay : UIView
+@property (nonatomic, copy) NSArray<SherpaReaderPageMark *> *marks;
+@end
+
+@implementation SherpaReaderPageOverlay
+
+- (instancetype)initWithFrame:(CGRect)frame {
+  if (self = [super initWithFrame:frame]) {
+    self.opaque = NO;
+    self.backgroundColor = UIColor.clearColor;
+    self.userInteractionEnabled = NO;
+    self.contentMode = UIViewContentModeRedraw;
+  }
+  return self;
+}
+
+- (void)setMarks:(NSArray<SherpaReaderPageMark *> *)marks {
+  _marks = [marks copy];
+  [self setNeedsDisplay];
+}
+
+- (void)drawRect:(CGRect)rect {
+  const CGSize size = self.bounds.size;
+  for (SherpaReaderPageMark *m in _marks) {
+    const CGRect r = CGRectMake(m.rect.origin.x * size.width, m.rect.origin.y * size.height,
+                                m.rect.size.width * size.width, m.rect.size.height * size.height);
+    switch (m.style) {
+      case SherpaReaderHighlightStyleUnderline: {
+        UIBezierPath *line = [UIBezierPath bezierPath];
+        [line moveToPoint:CGPointMake(CGRectGetMinX(r), CGRectGetMaxY(r))];
+        [line addLineToPoint:CGPointMake(CGRectGetMaxX(r), CGRectGetMaxY(r))];
+        line.lineWidth = 2;
+        [m.color setStroke];
+        [line stroke];
+        break;
+      }
+      case SherpaReaderHighlightStyleTextColor: {
+        UIBezierPath *frame = [UIBezierPath bezierPathWithRect:r];
+        frame.lineWidth = 2;
+        [m.color setStroke];
+        [frame stroke];
+        break;
+      }
+      default:
+        [m.color setFill];
+        UIRectFillUsingBlendMode(r, kCGBlendModeNormal);
+        break;
+    }
+  }
+}
+
+@end
+
 @implementation SherpaReaderImageCell {
   OfflineImageBufferFrameView *_frameView;
+  SherpaReaderPageOverlay *_overlay;
 }
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
@@ -197,10 +255,21 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   _frameView.maxSide = 2048;
   _frameView.bufferId = bufferId;
   _frameView.frameIndex = frameIndex;
+  if (_overlay == nil) {
+    _overlay = [[SherpaReaderPageOverlay alloc] initWithFrame:CGRectZero];
+  }
+  [_overlay removeFromSuperview];
+  [self.contentView addSubview:_overlay];
+  Pin(_overlay, _frameView, UIEdgeInsetsZero);
+  _overlay.marks = @[];
   // Images without alt text are decorative: hidden from VoiceOver.
   self.isAccessibilityElement = alt.length > 0;
   self.accessibilityLabel = alt;
   self.accessibilityTraits = UIAccessibilityTraitImage;
+}
+
+- (void)updatePageMarks:(NSArray<SherpaReaderPageMark *> *)marks {
+  _overlay.marks = marks ?: @[];
 }
 
 @end

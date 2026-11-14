@@ -19,6 +19,8 @@ struct OcrTextBlock {
   int utf16End = 0;
   bool hasRect = false;
   float rect[4] = {0, 0, 0, 0};  // x, y, w, h normalized to the frame
+  /** Its recognized lines: ranges in the block text, rects normalized to the frame. */
+  std::vector<ReaderLineBox> lines;
 };
 
 struct OcrFrameBlocks {

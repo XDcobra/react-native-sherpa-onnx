@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ReaderDocument.h"
+#include "ReaderTextSlice.h"
 
 #include <mutex>
 
@@ -65,11 +66,17 @@ class ReaderRegistry {
                      ReaderError* err);
 
   std::shared_ptr<const ReaderSnapshot> Snapshot(const std::string& documentId) const;
+  /** Releases the document and the slices made from it. */
   bool Release(const std::string& documentId);
+
+  /** Remembers which blocks a slice's text buffer holds (kept until the document is released). */
+  void AddSlice(const std::string& textBufferId, std::shared_ptr<const ReaderTextSlice> slice);
+  std::shared_ptr<const ReaderTextSlice> Slice(const std::string& textBufferId) const;
 
  private:
   mutable std::mutex mutex_;
   std::unordered_map<std::string, std::shared_ptr<const ReaderSnapshot>> docs_;
+  std::unordered_map<std::string, std::shared_ptr<const ReaderTextSlice>> slices_;
   uint64_t nextId_ = 1;
 };
 

@@ -98,10 +98,27 @@ internal class SherpaOnnxReaderHelper(reactContext: ReactApplicationContext) {
   fun findReaderBlockByHash(documentId: String, textHash: String, hintBlockId: String, promise: Promise) =
     run(promise) { ReaderNative.nativeFindBlockByHash(documentId, textHash, hintBlockId) }
 
-  fun mapReaderTextRanges(documentId: String, starts: ReadableArray, ends: ReadableArray, promise: Promise) {
+  fun mapReaderTextRanges(
+    documentId: String,
+    starts: ReadableArray,
+    ends: ReadableArray,
+    sliceBufferId: String,
+    promise: Promise,
+  ) {
     val s = IntArray(starts.size()) { starts.getDouble(it).toInt() }
     val e = IntArray(ends.size()) { ends.getDouble(it).toInt() }
-    run(promise) { ReaderNative.nativeMapTextRanges(documentId, s, e) }
+    run(promise) { ReaderNative.nativeMapTextRanges(documentId, s, e, sliceBufferId) }
+  }
+
+  fun createReaderTextSlice(
+    documentId: String,
+    fromBlockId: String,
+    fromOffset: Int,
+    toBlockId: String,
+    maxLength: Int,
+    promise: Promise,
+  ) = run(promise) {
+    ReaderNative.nativeCreateTextSlice(documentId, fromBlockId, fromOffset, toBlockId, maxLength)
   }
 
   fun getReaderToc(documentId: String, promise: Promise) =

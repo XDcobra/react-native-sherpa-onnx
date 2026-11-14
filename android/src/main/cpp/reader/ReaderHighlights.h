@@ -56,5 +56,18 @@ struct ResolvedHighlights {
 ResolvedHighlights ResolveHighlights(const ReaderSnapshot& snap,
                                      const std::vector<HighlightInput>& inputs);
 
+/** A rectangle normalized to the page: x, y, w, h. */
+struct PageRect {
+  float x = 0, y = 0, w = 0, h = 0;
+};
+
+/**
+ * Where [start, end) of a block's text is on its page, for highlights drawn
+ * over a page image: per line box the covered part of the line, placed by
+ * character position (along the line; top to bottom for vertical lines);
+ * without line boxes the block's rectangle; without that the whole page.
+ */
+std::vector<PageRect> TextRangeRects(const ReaderSnapshot& snap, int block, int start, int end);
+
 }  // namespace reader
 }  // namespace sherpa_onnx

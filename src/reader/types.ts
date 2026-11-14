@@ -1,5 +1,6 @@
 import type { ColorValue, StyleProp, ViewStyle } from 'react-native';
 import type { ReactNode } from 'react';
+import type { OfflineTextBufferHandle } from '../textbuffer/types';
 
 /** Version of the structure decomposition rules (see docs/reader.md). */
 export const READER_STRUCTURE_VERSION = 1;
@@ -105,6 +106,22 @@ export type ReaderTocEntry = {
 
 /** A range in the reading flow: `from` inclusive, `to` exclusive. */
 export type ReaderRange = { from: ReaderLocator; to: ReaderLocator };
+
+/**
+ * Text of consecutive blocks in a new offline text buffer, for reading aloud
+ * (`createReaderTextSlice`): paragraphs and headings from `from` on, joined
+ * by a blank line, without running headers, footers and page numbers. Ranges
+ * of `buffer` map back with `mapTextRanges(doc, ranges, { slice })`. Release
+ * `buffer` (`releasePipelineTextBuffer`) when done.
+ */
+export type ReaderTextSlice = {
+  buffer: OfflineTextBufferHandle;
+  /** UTF-16 length of the slice text. */
+  length: number;
+  /** Where the slice starts and ends (`to.offset` exclusive). */
+  from: ReaderLocator;
+  to: ReaderLocator;
+};
 
 export type ReaderAppBlock = {
   /** Unique within the section, `[A-Za-z0-9_-]+`. */
