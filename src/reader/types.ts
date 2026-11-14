@@ -132,7 +132,62 @@ export type ReaderVisibleRange = {
   visibleInserts: string[];
 };
 
-export type ReaderJumpCause = 'scroll' | 'fling' | 'scrollTo';
+/**
+ * - `scroll`: moved more than `jumpThreshold` blocks without continuous visibility.
+ * - `fling`: a fling landed more than `jumpThreshold` blocks away.
+ * - `scrollTo`: the `scrollTo` command.
+ * - `follow`: follow scrolling moved far (e.g. read-aloud restarted elsewhere).
+ */
+export type ReaderJumpCause = 'scroll' | 'fling' | 'scrollTo' | 'follow';
+
+/** How a highlight is drawn. */
+export type ReaderHighlightStyle = 'background' | 'underline' | 'textColor';
+
+/**
+ * A marked range in the reading flow. Several highlights can be shown at the
+ * same time and may overlap; later entries draw on top.
+ */
+export type ReaderHighlight = {
+  /** Stable ID; moving a highlight means passing the same ID with a new range. */
+  id: string;
+  /** Inclusive start. Without `offset`: start of the block. */
+  from: ReaderLocator;
+  /** Exclusive end. Without `offset`: end of the block. */
+  to: ReaderLocator;
+  /** Default `'background'`. */
+  style?: ReaderHighlightStyle;
+  /**
+   * Default: the theme's accent color (for `background` at 30 % opacity).
+   * Use a translucent color for backgrounds so the text stays readable.
+   */
+  color?: ColorValue;
+  /** Keep this highlight in view (see `follow`). The first one with `follow` wins. */
+  follow?: boolean;
+};
+
+/** Follow scrolling: keeps the followed highlight in view. */
+export type ReaderFollowOptions = {
+  /**
+   * - `keepVisible` (default): scroll only when the highlight leaves the
+   *   comfort zone (10 %–85 % of the height), then place it at `anchor`.
+   * - `center`: keep the highlight centered on every change.
+   * - `off`: never scroll.
+   */
+  mode?: 'keepVisible' | 'center' | 'off';
+  /** 0..1, where `keepVisible` places the highlight. Default 0.3. */
+  anchor?: number;
+  /**
+   * Pause following while the user scrolls (default true). It resumes when the
+   * highlight is back in the comfort zone, or with `resumeFollow()`.
+   */
+  pauseOnUserScroll?: boolean;
+};
+
+export type ReaderFollowChange = {
+  following: boolean;
+  /** `user`: paused by user scrolling; `resumed`: back in view; `command`: `resumeFollow()`. */
+  reason: 'user' | 'resumed' | 'command';
+};
 
 export type ReaderJump = {
   from: ReaderLocator;
@@ -153,6 +208,10 @@ export type ReaderViewProps = {
   renderInsert?: (key: string) => ReactNode;
   /** Blocks; a move further than this is reported as a jump. Default 20. */
   jumpThreshold?: number;
+  /** Marked ranges (search hits, read-aloud sentence / word, notes, …). */
+  highlights?: ReaderHighlight[];
+  /** Follow scrolling for the highlight with `follow: true`. */
+  follow?: ReaderFollowOptions;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   onReady?: (info: { blockCount: number; sectionCount: number }) => void;
@@ -162,12 +221,14 @@ export type ReaderViewProps = {
   onJump?: (jump: ReaderJump) => void;
   onTap?: (info: { blockId: string }) => void;
   onError?: (error: { code: string; message: string }) => void;
+  /** Follow scrolling paused or resumed. */
+  onFollowChange?: (change: ReaderFollowChange) => void;
   /** @internal Spike/testing only: render N placeholder rows without a document. */
   __debugRowCount?: number;
 };
 
 export type ReaderViewHandle = {
   scrollTo(locator: ReaderLocator, options?: { animated?: boolean }): void;
-  /** Reserved for read-aloud; not implemented yet. */
-  highlight(range: { from: ReaderLocator; to: ReaderLocator }): void;
+  /** Resume follow scrolling after the user paused it (scrolls to the highlight). */
+  resumeFollow(): void;
 };

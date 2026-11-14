@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "image/ImageRegistry.h"
+#include "reader/ReaderHighlights.h"
 #include "reader/ReaderRegistry.h"
 #include "reader/ReaderTracker.h"
 
@@ -187,7 +188,7 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeTrackerFrontier(JNIEnv*, jclas
 /**
  * 6 ints per event: kind (0 visible, 1 furthest, 2 section end, 3 jump),
  * then visible: first, last, settled; furthest: block; section end: block,
- * section; jump: from, to, distance, cause (0 scroll, 1 fling, 2 scrollTo).
+ * section; jump: from, to, distance, cause (0 scroll, 1 fling, 2 scrollTo, 3 follow).
  */
 JNIEXPORT jintArray JNICALL
 Java_com_sherpaonnx_reader_ReaderViewNative_nativeTrackerSample(JNIEnv* env, jclass, jlong h,
@@ -207,10 +208,79 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeTrackerSample(JNIEnv* env, jcl
         out.insert(out.end(), {2, e.block, e.section, 0, 0, 0});
         break;
       case rdr::TrackerEvent::Kind::Jump: {
-        const int cause = e.cause == "fling" ? 1 : e.cause == "scrollTo" ? 2 : 0;
+        const int cause = e.cause == "fling"      ? 1
+                          : e.cause == "scrollTo" ? 2
+                          : e.cause == "follow"   ? 3
+                                                  : 0;
         out.insert(out.end(), {3, e.from, e.to, e.distance, cause, 0});
         break;
       }
+    }
+  }
+  return Ints(env, out);
+}
+
+/**
+ * Resolves highlights (parallel arrays, one entry per highlight; style 0
+ * background, 1 underline, 2 text color; flags bit 0 hasColor, bit 1 follow).
+ * Result ints: followBlock, followOffset, invalidCount, invalid input indices…,
+ * then per block: block, spanCount, (start, end, style, color, hasColor)…
+ */
+JNIEXPORT jintArray JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativeResolveHighlights(
+    JNIEnv* env, jclass, jlong h, jobjectArray ids, jobjectArray fromIds, jintArray fromOffsets,
+    jobjectArray toIds, jintArray toOffsets, jintArray styles, jintArray colors, jintArray flags) {
+  std::vector<jint> out;
+  const auto* s = Snap(h);
+  const jsize n = ids ? env->GetArrayLength(ids) : 0;
+  auto ints = [env, n](jintArray a) {
+    std::vector<jint> v(n, 0);
+    if (a && env->GetArrayLength(a) >= n && n > 0) env->GetIntArrayRegion(a, 0, n, v.data());
+    return v;
+  };
+  auto str = [env](jobjectArray a, jsize i) {
+    auto* js = static_cast<jstring>(env->GetObjectArrayElement(a, i));
+    std::string r = Std(env, js);
+    if (js) env->DeleteLocalRef(js);
+    return r;
+  };
+  if (!s) {
+    out.insert(out.end(), {-1, 0, 0});
+    return Ints(env, out);
+  }
+  const auto fo = ints(fromOffsets), to = ints(toOffsets), st = ints(styles), co = ints(colors),
+             fl = ints(flags);
+  std::vector<rdr::HighlightInput> inputs(n);
+  for (jsize i = 0; i < n; ++i) {
+    auto& in = inputs[i];
+    in.id = str(ids, i);
+    in.fromBlockId = str(fromIds, i);
+    in.fromOffset = fo[i];
+    in.toBlockId = str(toIds, i);
+    in.toOffset = to[i];
+    in.style = static_cast<rdr::HighlightStyle>(st[i] >= 0 && st[i] <= 2 ? st[i] : 0);
+    in.color = static_cast<uint32_t>(co[i]);
+    in.hasColor = (fl[i] & 1) != 0;
+    in.follow = (fl[i] & 2) != 0;
+  }
+  const rdr::ResolvedHighlights r = rdr::ResolveHighlights(*s, inputs);
+  std::vector<jint> invalid;
+  for (jsize i = 0; i < n; ++i) {
+    for (const auto& id : r.invalidIds) {
+      if (id == inputs[i].id) {
+        invalid.push_back(i);
+        break;
+      }
+    }
+  }
+  out.insert(out.end(), {r.followBlock, r.followOffset, static_cast<jint>(invalid.size())});
+  out.insert(out.end(), invalid.begin(), invalid.end());
+  for (const auto& [block, spans] : r.byBlock) {
+    out.push_back(block);
+    out.push_back(static_cast<jint>(spans.size()));
+    for (const auto& sp : spans) {
+      out.insert(out.end(), {sp.start, sp.end, static_cast<jint>(sp.style), static_cast<jint>(sp.color),
+                             sp.hasColor ? 1 : 0});
     }
   }
   return Ints(env, out);

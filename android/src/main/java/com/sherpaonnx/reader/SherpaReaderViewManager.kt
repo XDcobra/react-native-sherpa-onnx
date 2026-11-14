@@ -95,8 +95,16 @@ class SherpaReaderViewManager :
 
   override fun setTextColor(view: SherpaReaderView, value: Int?) = view.setTextColor(value)
 
-  // Reserved for highlights (not rendered yet).
-  override fun setAccentColor(view: SherpaReaderView, value: Int?) = Unit
+  override fun setAccentColor(view: SherpaReaderView, value: Int?) = view.setAccentColor(value)
+
+  override fun setHighlights(view: SherpaReaderView, value: ReadableArray?) = view.setHighlights(value)
+
+  override fun setFollowMode(view: SherpaReaderView, value: String?) = view.setFollowMode(value)
+
+  override fun setFollowAnchor(view: SherpaReaderView, value: Float) = view.setFollowAnchor(value)
+
+  override fun setFollowPauseOnUserScroll(view: SherpaReaderView, value: Boolean) =
+    view.setFollowPauseOnUserScroll(value)
 
   override fun setJumpThreshold(view: SherpaReaderView, value: Int) = view.setJumpThreshold(value)
 
@@ -123,6 +131,8 @@ class SherpaReaderViewManager :
     offset: Int,
     animated: Boolean,
   ) = view.scrollToLocator(sectionId, blockId, offset, animated)
+
+  override fun resumeFollow(view: SherpaReaderView) = view.resumeFollow()
 
   companion object {
     const val REACT_CLASS = "SherpaReaderView"

@@ -2,6 +2,9 @@
 
 #import "../imagebuffer/OfflineImageBufferFrameView.h"
 
+@implementation SherpaReaderHighlightSpan
+@end
+
 @implementation SherpaReaderTheme
 
 - (UIFont *)fontForHeadingLevel:(NSInteger)level {
@@ -13,7 +16,33 @@
   return d ? [UIFont fontWithDescriptor:d size:size] : [UIFont boldSystemFontOfSize:size];
 }
 
-- (NSAttributedString *)attributedText:(NSString *)text headingLevel:(NSInteger)level {
+- (void)applyHighlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights
+                     to:(NSMutableAttributedString *)s {
+  const NSUInteger len = s.length;
+  for (SherpaReaderHighlightSpan *h in highlights) {
+    if (h.range.location >= len) continue;
+    const NSRange r = NSMakeRange(h.range.location, MIN(h.range.length, len - h.range.location));
+    if (r.length == 0) continue;
+    switch (h.style) {
+      case SherpaReaderHighlightStyleBackground:
+        [s addAttribute:NSBackgroundColorAttributeName
+                  value:h.color ?: [self.accentColor colorWithAlphaComponent:0.3]
+                  range:r];
+        break;
+      case SherpaReaderHighlightStyleUnderline:
+        [s addAttribute:NSUnderlineStyleAttributeName value:@(NSUnderlineStyleThick) range:r];
+        [s addAttribute:NSUnderlineColorAttributeName value:h.color ?: self.accentColor range:r];
+        break;
+      case SherpaReaderHighlightStyleTextColor:
+        [s addAttribute:NSForegroundColorAttributeName value:h.color ?: self.accentColor range:r];
+        break;
+    }
+  }
+}
+
+- (NSAttributedString *)attributedText:(NSString *)text
+                          headingLevel:(NSInteger)level
+                            highlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights {
   NSMutableParagraphStyle *p = [NSMutableParagraphStyle new];
   p.lineHeightMultiple = self.lineHeightMultiple;
   p.alignment = level > 0 ? NSTextAlignmentNatural : self.alignment;
@@ -26,7 +55,12 @@
   if (self.language.length > 0) {
     attrs[NSLanguageIdentifierAttributeName] = self.language;
   }
-  return [[NSAttributedString alloc] initWithString:text attributes:attrs];
+  if (highlights.count == 0) {
+    return [[NSAttributedString alloc] initWithString:text attributes:attrs];
+  }
+  NSMutableAttributedString *s = [[NSMutableAttributedString alloc] initWithString:text attributes:attrs];
+  [self applyHighlights:highlights to:s];
+  return s;
 }
 
 @end
@@ -43,6 +77,8 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 
 @implementation SherpaReaderTextCell {
   NSArray<NSLayoutConstraint *> *_pins;
+  NSString *_text;
+  NSInteger _level;
 }
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
@@ -73,7 +109,10 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 
 - (void)configureWithText:(NSString *)text
              headingLevel:(NSInteger)level
+               highlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights
                     theme:(SherpaReaderTheme *)theme {
+  _text = [text copy];
+  _level = level;
   const CGFloat top = level > 0 ? theme.paragraphSpacing : 0;
   UIEdgeInsets insets = UIEdgeInsetsMake(top, theme.marginHorizontal, theme.paragraphSpacing,
                                          theme.marginHorizontal);
@@ -86,9 +125,17 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
     [_textView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-insets.bottom],
   ];
   [NSLayoutConstraint activateConstraints:_pins];
-  _textView.attributedText = [theme attributedText:text headingLevel:level];
+  _textView.attributedText = [theme attributedText:text headingLevel:level highlights:highlights];
   self.accessibilityLabel = text;
   self.accessibilityTraits = level > 0 ? UIAccessibilityTraitHeader : UIAccessibilityTraitStaticText;
+}
+
+- (void)updateHighlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights
+                   theme:(SherpaReaderTheme *)theme {
+  if (_text == nil) return;
+  // Same string and fonts: only color / underline attributes change, so the
+  // text layout (and the row height) stays the same.
+  _textView.attributedText = [theme attributedText:_text headingLevel:_level highlights:highlights];
 }
 
 - (NSInteger)characterOffsetAtPoint:(CGPoint)point {

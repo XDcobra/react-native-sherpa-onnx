@@ -42,6 +42,19 @@ internal object ReaderViewNative {
 
   @JvmStatic external fun nativeTrackerFrontier(handle: Long): Int
 
+  /** See sherpa-onnx-reader-view-jni.cpp for the packed result layout. */
+  @JvmStatic external fun nativeResolveHighlights(
+    handle: Long,
+    ids: Array<String>,
+    fromIds: Array<String>,
+    fromOffsets: IntArray,
+    toIds: Array<String>,
+    toOffsets: IntArray,
+    styles: IntArray,
+    colors: IntArray,
+    flags: IntArray,
+  ): IntArray
+
   @JvmStatic external fun nativeTrackerSample(handle: Long, first: Int, last: Int, phase: Int): IntArray
 
   const val PHASE_DRAG = 0
@@ -49,4 +62,5 @@ internal object ReaderViewNative {
   const val PHASE_IDLE = 2
   const val PHASE_PROGRAMMATIC = 3
   const val PHASE_LAYOUT = 4
+  const val PHASE_FOLLOW = 5
 }

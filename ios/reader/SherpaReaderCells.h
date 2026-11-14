@@ -4,6 +4,20 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
+  SherpaReaderHighlightStyleBackground = 0,
+  SherpaReaderHighlightStyleUnderline = 1,
+  SherpaReaderHighlightStyleTextColor = 2,
+};
+
+/** Part of a highlight inside one block: UTF-16 range of the block text. */
+@interface SherpaReaderHighlightSpan : NSObject
+@property (nonatomic, assign) NSRange range;
+@property (nonatomic, assign) SherpaReaderHighlightStyle style;
+/** nil: the theme's accent (background at 30 % opacity). */
+@property (nonatomic, strong, nullable) UIColor *color;
+@end
+
 /** Resolved typography and colors of a ReaderView (from the `theme` props). */
 @interface SherpaReaderTheme : NSObject
 @property (nonatomic, strong) UIFont *bodyFont;
@@ -18,7 +32,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, nullable) NSString *language;
 
 - (UIFont *)fontForHeadingLevel:(NSInteger)level;
-- (NSAttributedString *)attributedText:(NSString *)text headingLevel:(NSInteger)level;
+- (NSAttributedString *)attributedText:(NSString *)text
+                          headingLevel:(NSInteger)level
+                            highlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights;
 @end
 
 /** Paragraph / heading row: non-editable TextKit 1 text view (offset ↔ point). */
@@ -26,7 +42,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong, readonly) UITextView *textView;
 - (void)configureWithText:(NSString *)text
              headingLevel:(NSInteger)level
+               highlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights
                     theme:(SherpaReaderTheme *)theme;
+/** Re-applies highlights only (same text and theme; the layout does not change). */
+- (void)updateHighlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights
+                   theme:(SherpaReaderTheme *)theme;
 /** UTF-16 offset of the character at `point` (cell coordinates). */
 - (NSInteger)characterOffsetAtPoint:(CGPoint)point;
 /** Top of the line holding `offset`, in cell coordinates. */

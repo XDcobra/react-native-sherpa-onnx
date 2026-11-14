@@ -10,6 +10,13 @@ import android.graphics.Typeface
 import android.os.Build
 import android.os.SystemClock
 import android.text.Layout
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.TextPaint
+import android.text.style.BackgroundColorSpan
+import android.text.style.CharacterStyle
+import android.text.style.ForegroundColorSpan
+import android.text.style.UpdateAppearance
 import android.util.LruCache
 import android.util.TypedValue
 import android.view.GestureDetector
@@ -31,6 +38,7 @@ import com.facebook.react.uimanager.ThemedReactContext
 import com.facebook.react.uimanager.events.NativeGestureUtil
 import com.sherpaonnx.image.OfflineImageBufferFrameView
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -64,10 +72,32 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     val justify: Boolean,
     val hyphenation: Boolean,
     val textColor: Int,
+    val accentColor: Int,
   )
 
+  /** One `highlights` prop entry (style 0 background, 1 underline, 2 text color). */
+  private data class HighlightSpec(
+    val id: String,
+    val fromBlockId: String,
+    val fromOffset: Int,
+    val toBlockId: String,
+    val toOffset: Int,
+    val style: Int,
+    val color: Int,
+    val hasColor: Boolean,
+    val follow: Boolean,
+  )
+
+  /** Resolved part of a highlight inside one block (UTF-16 range of the block text). */
+  private data class Span(val start: Int, val end: Int, val style: Int, val color: Int, val hasColor: Boolean)
+
   /** A scroll to a block that finishes after the next layout pass(es). */
-  private class PendingScroll(val row: Int, val offset: Int, val sampleAfter: Boolean) {
+  private class PendingScroll(
+    val row: Int,
+    val offset: Int,
+    val sampleAfter: Boolean,
+    val followAfter: Boolean = false,
+  ) {
     var lineCorrected = false
   }
 
@@ -92,6 +122,12 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   private var justify = false
   private var hyphenation = true
   private var textColor: Int? = null
+  private var accentColor: Int? = null
+  private var highlightSpecs: List<HighlightSpec> = emptyList()
+  private var highlightsDirty = false
+  private var followMode = "keepVisible"
+  private var followAnchor = 0.3f
+  private var followPauseOnUser = true
 
   /** Logical React children, in Fabric's order. Not attached to this view. */
   internal val hosts = mutableListOf<SherpaReaderInsertView>()
@@ -119,14 +155,28 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   private var programmaticScroll = false
   private var pendingScroll: PendingScroll? = null
   private var pendingLayoutSample = false
+  private var pendingFollowCheck = false
   private var lastOriginSync = 0L
+
+  // ---- Highlights and follow ----
+  private var spansByBlock: Map<Int, List<Span>> = emptyMap()
+  private var rowByBlock = IntArray(0)
+  private var followBlock = -1
+  private var followOffset = 0
+  private var followedBlock = -1
+  private var followedOffset = 0
+  private var followPaused = false
+  private var followScroll = false
+  private var reportedInvalid: List<String> = emptyList()
 
   init {
     recycler.layoutManager = layoutManager
     recycler.adapter = adapter
     recycler.itemAnimator = null
     recycler.clipToPadding = false
-    recycler.onLayoutDone = { if (pendingScroll != null || pendingLayoutSample) post(afterLayout) }
+    recycler.onLayoutDone = {
+      if (pendingScroll != null || pendingLayoutSample || pendingFollowCheck) post(afterLayout)
+    }
     addView(recycler, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     recycler.addOnScrollListener(
       object : RecyclerView.OnScrollListener() {
@@ -134,7 +184,10 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
           when (rv.scrollState) {
             RecyclerView.SCROLL_STATE_DRAGGING -> sample(ReaderViewNative.PHASE_DRAG)
             RecyclerView.SCROLL_STATE_SETTLING ->
-              if (!programmaticScroll) sample(ReaderViewNative.PHASE_MOMENTUM)
+              when {
+                followScroll -> sample(ReaderViewNative.PHASE_FOLLOW)
+                !programmaticScroll -> sample(ReaderViewNative.PHASE_MOMENTUM)
+              }
           }
           // Throttled: Pressability measures on touch-down; at rest the sync is exact.
           if (SystemClock.uptimeMillis() - lastOriginSync > 50) syncInsertOrigins()
@@ -142,16 +195,32 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
         override fun onScrollStateChanged(rv: RecyclerView, newState: Int) {
           when (newState) {
-            RecyclerView.SCROLL_STATE_DRAGGING -> programmaticScroll = false
+            RecyclerView.SCROLL_STATE_DRAGGING -> {
+              programmaticScroll = false
+              followScroll = false
+              if (followPauseOnUser && !followPaused && followBlock >= 0 && followMode != "off") {
+                followPaused = true
+                dispatchFollowChange(false, "user")
+              }
+            }
             RecyclerView.SCROLL_STATE_SETTLING ->
-              if (!programmaticScroll) sample(ReaderViewNative.PHASE_MOMENTUM)
+              if (!programmaticScroll && !followScroll) sample(ReaderViewNative.PHASE_MOMENTUM)
             RecyclerView.SCROLL_STATE_IDLE -> {
               syncInsertOrigins()
               if (programmaticScroll) {
                 programmaticScroll = false
                 sample(ReaderViewNative.PHASE_PROGRAMMATIC)
               }
+              if (followScroll) {
+                followScroll = false
+                sample(ReaderViewNative.PHASE_FOLLOW)
+              }
               sample(ReaderViewNative.PHASE_IDLE)
+              // The user scrolled the followed highlight back into the comfort zone.
+              if (followPaused && followInComfortZone()) {
+                followPaused = false
+                dispatchFollowChange(true, "resumed")
+              }
             }
           }
         }
@@ -295,6 +364,58 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     textColor = v
   }
 
+  internal fun setAccentColor(v: Int?) {
+    accentColor = v
+  }
+
+  internal fun setHighlights(value: ReadableArray?) {
+    val next = ArrayList<HighlightSpec>()
+    if (value != null) {
+      for (i in 0 until value.size()) {
+        val m = value.getMap(i) ?: continue
+        next +=
+          HighlightSpec(
+            id = m.getString("id") ?: "",
+            fromBlockId = m.getString("fromBlockId") ?: "",
+            fromOffset = if (m.hasKey("fromOffset")) m.getInt("fromOffset") else -1,
+            toBlockId = m.getString("toBlockId") ?: "",
+            toOffset = if (m.hasKey("toOffset")) m.getInt("toOffset") else -1,
+            style =
+              when (m.getString("style")) {
+                "underline" -> 1
+                "textColor" -> 2
+                else -> 0
+              },
+            color = if (m.hasKey("color")) m.getInt("color") else 0,
+            hasColor = m.hasKey("hasColor") && m.getBoolean("hasColor"),
+            follow = m.hasKey("follow") && m.getBoolean("follow"),
+          )
+      }
+    }
+    if (next != highlightSpecs) {
+      highlightSpecs = next
+      highlightsDirty = true
+    }
+  }
+
+  private var followModeDirty = false
+
+  internal fun setFollowMode(v: String?) {
+    val mode = v ?: "keepVisible"
+    if (mode == followMode) return
+    followMode = mode
+    followModeDirty = true
+    if (mode == "off") followPaused = false
+  }
+
+  internal fun setFollowAnchor(v: Float) {
+    followAnchor = v.coerceIn(0f, 1f)
+  }
+
+  internal fun setFollowPauseOnUserScroll(v: Boolean) {
+    followPauseOnUser = v
+  }
+
   /** Called once per Fabric props transaction. */
   internal fun onPropsApplied() {
     if (frontierDirty) {
@@ -310,6 +431,193 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       theme = next
       scheduleRebuild()
     }
+    if (highlightsDirty && !rebuildPosted) {
+      // A pending rebuild resolves highlights itself.
+      highlightsDirty = false
+      applyHighlights()
+    } else if (followModeDirty && !rebuildPosted) {
+      follow(animated = true, force = true)
+    }
+    followModeDirty = false
+  }
+
+  // ---- Highlights and follow ----
+
+  /** Resolves `highlightSpecs` against the snapshot; returns blocks whose spans changed. */
+  private fun resolveHighlights(): Set<Int> {
+    val specs = highlightSpecs
+    val next = HashMap<Int, List<Span>>()
+    var fb = -1
+    var fo = 0
+    val invalid = ArrayList<String>()
+    if (snapshot != 0L && specs.isNotEmpty()) {
+      val packed =
+        ReaderViewNative.nativeResolveHighlights(
+          snapshot,
+          Array(specs.size) { specs[it].id },
+          Array(specs.size) { specs[it].fromBlockId },
+          IntArray(specs.size) { specs[it].fromOffset },
+          Array(specs.size) { specs[it].toBlockId },
+          IntArray(specs.size) { specs[it].toOffset },
+          IntArray(specs.size) { specs[it].style },
+          IntArray(specs.size) { specs[it].color },
+          IntArray(specs.size) { (if (specs[it].hasColor) 1 else 0) or (if (specs[it].follow) 2 else 0) },
+        )
+      if (packed.size >= 3) {
+        fb = packed[0]
+        fo = packed[1]
+        val nInvalid = packed[2]
+        var k = 3
+        repeat(nInvalid) { invalid += specs.getOrNull(packed[k++])?.id ?: "" }
+        while (k + 1 < packed.size) {
+          val block = packed[k]
+          val n = packed[k + 1]
+          k += 2
+          val list = ArrayList<Span>(n)
+          repeat(n) {
+            list += Span(packed[k], packed[k + 1], packed[k + 2], packed[k + 3], packed[k + 4] == 1)
+            k += 5
+          }
+          next[block] = list
+        }
+      }
+    }
+    val changed = HashSet<Int>()
+    for ((block, spans) in next) if (spansByBlock[block] != spans) changed += block
+    for (block in spansByBlock.keys) if (block !in next) changed += block
+    spansByBlock = next
+    followBlock = fb
+    followOffset = fo
+    if (invalid.isNotEmpty() && invalid != reportedInvalid) {
+      dispatchError("ERR_READER_INVALID_ARGUMENT", "Unknown highlight range: ${invalid.joinToString()}")
+    }
+    reportedInvalid = invalid
+    return changed
+  }
+
+  /** Re-applies changed highlights to their rows (spans only), then follows. */
+  private fun applyHighlights() {
+    for (block in resolveHighlights()) {
+      val row = rowByBlock.getOrElse(block) { -1 }
+      if (row >= 0) adapter.notifyItemChanged(row, PAYLOAD_HIGHLIGHT)
+    }
+    follow(animated = true, force = false)
+  }
+
+  private fun dispatchFollowChange(following: Boolean, reason: String) {
+    ReaderEvents.dispatch(this, ReaderEvents.FOLLOW_CHANGE) {
+      putBoolean("following", following)
+      putString("reason", reason)
+    }
+  }
+
+  /** Top and height of the followed highlight's first line (recycler coordinates), or null if not laid out. */
+  private fun followLine(): IntArray? {
+    if (followBlock < 0) return null
+    val row = rowByBlock.getOrElse(followBlock) { -1 }
+    if (row < 0) return null
+    val holder = recycler.findViewHolderForAdapterPosition(row) ?: return null
+    val item = holder.itemView
+    val tv = (holder as? TextHolder)?.text
+    val layout = tv?.layout
+    if (tv == null || layout == null) return intArrayOf(item.top, min(item.height, (theme.fontSizePx * theme.lineHeight).toInt()))
+    val line = layout.getLineForOffset(min(followOffset, tv.text.length))
+    val top = item.top + tv.paddingTop + layout.getLineTop(line)
+    return intArrayOf(top, layout.getLineBottom(line) - layout.getLineTop(line))
+  }
+
+  /** True when the followed line lies in the comfort zone (10 %–85 % of the height). */
+  private fun followInComfortZone(): Boolean {
+    val line = followLine() ?: return false
+    val h = recycler.height
+    return line[0] >= 0.10f * h && line[0] + line[1] <= 0.85f * h
+  }
+
+  /**
+   * Keeps the followed highlight in view. `force` re-checks even if the
+   * highlight did not move (mode change, resume, reflow).
+   */
+  private fun follow(animated: Boolean, force: Boolean) {
+    if (snapshot == 0L || followBlock < 0) {
+      followedBlock = -1
+      return
+    }
+    val moved = followBlock != followedBlock || followOffset != followedOffset
+    followedBlock = followBlock
+    followedOffset = followOffset
+    if ((!moved && !force) || followMode == "off") return
+    if (recycler.scrollState == RecyclerView.SCROLL_STATE_DRAGGING) return
+    if (followPaused) {
+      if (!followInComfortZone()) return
+      followPaused = false
+      dispatchFollowChange(true, "resumed")
+    }
+    val line = followLine()
+    if (line == null) {
+      // Far away (row not laid out): jump there first, then place it exactly.
+      val row = rowByBlock.getOrElse(followBlock) { -1 }
+      if (row < 0) return
+      recycler.stopScroll()
+      programmaticScroll = false
+      followScroll = false
+      pendingScroll = PendingScroll(row, followOffset, sampleAfter = false, followAfter = true)
+      layoutManager.scrollToPositionWithOffset(row, 0)
+      return
+    }
+    val h = recycler.height
+    val dy =
+      if (followMode == "center") {
+        line[0] + line[1] / 2 - h / 2
+      } else {
+        if (line[0] >= 0.10f * h && line[0] + line[1] <= 0.85f * h) {
+          if (!animated) sample(ReaderViewNative.PHASE_FOLLOW)
+          return
+        }
+        line[0] - (followAnchor * h).toInt()
+      }
+    if (abs(dy) < 1) {
+      if (!animated) sample(ReaderViewNative.PHASE_FOLLOW)
+      return
+    }
+    if (animated) {
+      followScroll = true
+      recycler.smoothScrollBy(0, dy)
+    } else {
+      recycler.scrollBy(0, dy)
+      syncInsertOrigins()
+      sample(ReaderViewNative.PHASE_FOLLOW)
+      sample(ReaderViewNative.PHASE_IDLE)
+    }
+  }
+
+  internal fun resumeFollow() {
+    if (followPaused) {
+      followPaused = false
+      dispatchFollowChange(true, "command")
+    }
+    follow(animated = true, force = true)
+  }
+
+  /** Text with highlight spans (colors default to the theme accent). */
+  private fun styled(text: String, spans: List<Span>?, t: Theme): CharSequence {
+    if (spans.isNullOrEmpty()) return text
+    val out = SpannableString(text)
+    for (sp in spans) {
+      val start = sp.start.coerceIn(0, text.length)
+      val end = sp.end.coerceIn(start, text.length)
+      if (end <= start) continue
+      val span: Any =
+        when (sp.style) {
+          1 -> UnderlineColorSpan(if (sp.hasColor) sp.color else t.accentColor, PixelUtil.toPixelFromDIP(2f))
+          2 -> ForegroundColorSpan(if (sp.hasColor) sp.color else t.accentColor)
+          else ->
+            BackgroundColorSpan(
+              if (sp.hasColor) sp.color else (t.accentColor and 0x00FFFFFF) or (0x4D shl 24)
+            )
+        }
+      out.setSpan(span, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+    return out
   }
 
   override fun onConfigurationChanged(newConfig: Configuration?) {
@@ -345,6 +653,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       justify = justify,
       hyphenation = hyphenation,
       textColor = textColor ?: defaultTextColor,
+      accentColor = accentColor ?: DEFAULT_ACCENT,
     )
   }
 
@@ -406,6 +715,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
           adapter.notifyItemRangeChanged(0, rows.size)
           anchor?.let { restoreAnchor(it) }
           pendingLayoutSample = true
+          pendingFollowCheck = true
           recycler.requestLayout()
         }
       }
@@ -541,6 +851,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
   private fun rebuildRows() {
     loadSnapshot()
+    highlightsDirty = false
+    val highlightChanges = resolveHighlights()
     recycler.setPadding(0, theme.marginVerticalPx, 0, theme.marginVerticalPx)
     val next = ArrayList<Row>(blockCount + inserts.size)
     if (snapshot != 0L) {
@@ -576,6 +888,14 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       },
       false,
     ).dispatchUpdatesTo(adapter)
+    rowByBlock = IntArray(blockCount) { -1 }
+    for ((pos, row) in next.withIndex()) if (row is Row.Block) rowByBlock[row.index] = pos
+    if (!themeChanged) {
+      for (block in highlightChanges) {
+        val row = rowByBlock.getOrElse(block) { -1 }
+        if (row >= 0) adapter.notifyItemChanged(row, PAYLOAD_HIGHLIGHT)
+      }
+    }
 
     if (snapshot == 0L || blockCount == 0) return
     val anchor = pendingAnchor
@@ -589,6 +909,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       restoreAnchor(anchor)
     }
     pendingLayoutSample = true
+    // Reflow (theme, revision) may have moved the followed highlight.
+    pendingFollowCheck = true
     recycler.requestLayout()
     if (!readySent) {
       readySent = true
@@ -606,7 +928,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       else -> false
     }
 
-  private fun rowOfBlock(block: Int): Int = rows.indexOfFirst { it is Row.Block && it.index == block }
+  private fun rowOfBlock(block: Int): Int =
+    rowByBlock.getOrElse(block) { -1 }.takeIf { it >= 0 } ?: rows.indexOfFirst { it is Row.Block && it.index == block }
 
   private fun blockText(i: Int): String =
     textCache.get(i) ?: (ReaderViewNative.nativeBlockText(snapshot, i) ?: "").also { textCache.put(i, it) }
@@ -633,10 +956,20 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
           sample(ReaderViewNative.PHASE_PROGRAMMATIC)
           sample(ReaderViewNative.PHASE_IDLE)
         }
+        if (p.followAfter) {
+          // Far follow move: counts as follow (a jump if far), then place it at the anchor.
+          sample(ReaderViewNative.PHASE_FOLLOW)
+          sample(ReaderViewNative.PHASE_IDLE)
+          follow(animated = false, force = true)
+        }
       }
       if (pendingLayoutSample) {
         pendingLayoutSample = false
         sample(ReaderViewNative.PHASE_LAYOUT)
+      }
+      if (pendingFollowCheck && pendingScroll == null) {
+        pendingFollowCheck = false
+        follow(animated = false, force = true)
       }
     }
 
@@ -724,6 +1057,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
               when (ev[k + 4]) {
                 1 -> "fling"
                 2 -> "scrollTo"
+                3 -> "follow"
                 else -> "scroll"
               },
             )
@@ -958,6 +1292,16 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       }
     }
 
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int, payloads: MutableList<Any>) {
+      val r = rows.getOrNull(position)
+      if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_HIGHLIGHT } && holder is TextHolder && r is Row.Block) {
+        // Highlight-only change: same text and fonts, so the row height stays.
+        holder.text.text = styled(blockText(r.index), spansByBlock[r.index], theme)
+        return
+      }
+      onBindViewHolder(holder, position)
+    }
+
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
       val t = theme
       when (val r = rows[position]) {
@@ -996,7 +1340,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
           if (t.justify && level == 0) Layout.JUSTIFICATION_MODE_INTER_WORD else Layout.JUSTIFICATION_MODE_NONE
       }
       tv.textLocale = locale ?: Locale.getDefault()
-      tv.text = blockText(index)
+      tv.text = styled(blockText(index), spansByBlock[index], t)
       ViewCompat.setAccessibilityHeading(tv, level > 0)
     }
 
@@ -1043,7 +1387,21 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     }
   }
 
+  /** Underline with its own color and thickness (API 29+; older versions use the text color). */
+  private class UnderlineColorSpan(private val color: Int, private val thickness: Float) :
+    CharacterStyle(), UpdateAppearance {
+    override fun updateDrawState(tp: TextPaint) {
+      tp.isUnderlineText = true
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        tp.underlineColor = color
+        tp.underlineThickness = thickness
+      }
+    }
+  }
+
   companion object {
+    private const val PAYLOAD_HIGHLIGHT = "highlight"
+    private val DEFAULT_ACCENT = Color.rgb(0, 122, 255)
     private const val TYPE_HEADING = 1
     private const val TYPE_IMAGE = 2
     private const val TYPE_SEPARATOR = 3

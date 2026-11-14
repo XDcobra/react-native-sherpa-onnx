@@ -14,9 +14,11 @@
 #import <react/renderer/components/SherpaOnnxSpec/RCTComponentViewHelpers.h>
 
 #include "ImageRegistry.h"
+#include "ReaderHighlights.h"
 #include "ReaderRegistry.h"
 #include "ReaderTracker.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -46,6 +48,46 @@ bool SameInserts(const std::vector<SherpaReaderViewInsertsStruct> &a,
     }
   }
   return true;
+}
+
+bool SameHighlights(const std::vector<SherpaReaderViewHighlightsStruct> &a,
+                    const std::vector<SherpaReaderViewHighlightsStruct> &b)
+{
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    const auto &x = a[i];
+    const auto &y = b[i];
+    if (x.id != y.id || x.fromBlockId != y.fromBlockId || x.fromOffset != y.fromOffset ||
+        x.toBlockId != y.toBlockId || x.toOffset != y.toOffset || x.style != y.style ||
+        x.color != y.color || x.hasColor != y.hasColor || x.follow != y.follow) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool SameSpans(const std::vector<rdr::HighlightSpan> &a, const std::vector<rdr::HighlightSpan> &b)
+{
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (a[i].start != b[i].start || a[i].end != b[i].end || a[i].style != b[i].style ||
+        a[i].color != b[i].color || a[i].hasColor != b[i].hasColor) {
+      return false;
+    }
+  }
+  return true;
+}
+
+UIColor *ColorFromARGB(uint32_t argb)
+{
+  return [UIColor colorWithRed:((argb >> 16) & 0xFF) / 255.0
+                         green:((argb >> 8) & 0xFF) / 255.0
+                          blue:(argb & 0xFF) / 255.0
+                         alpha:((argb >> 24) & 0xFF) / 255.0];
 }
 
 NSString *ToNS(const std::string &s)
@@ -115,6 +157,16 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
   std::vector<ReaderRow> _rows;
   std::vector<SherpaReaderViewInsertsStruct> _inserts;
   std::unique_ptr<rdr::ReaderTracker> _tracker;
+  std::vector<SherpaReaderViewHighlightsStruct> _highlightProps;
+  rdr::ResolvedHighlights _resolved;
+  std::vector<std::string> _reportedInvalid;
+  std::string _followMode;
+  CGFloat _followAnchor;
+  BOOL _followPauseOnUser;
+  BOOL _followPaused;
+  BOOL _followAnimation;
+  int _followedBlock;
+  int _followedOffset;
 
   std::string _documentId;
   int _documentRevision;
@@ -153,6 +205,10 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
     _initialOffset = -1;
     _jumpThreshold = 20;
     _tracker = std::make_unique<rdr::ReaderTracker>();
+    _followMode = "keepVisible";
+    _followAnchor = 0.3;
+    _followPauseOnUser = YES;
+    _followedBlock = -1;
 
     _tableView = [[UITableView alloc] initWithFrame:self.bounds style:UITableViewStylePlain];
     _tableView.dataSource = self;
@@ -286,9 +342,211 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     [_blockHeights removeAllObjects];
     rowsChanged = YES;
   }
-  if (rowsChanged) {
-    [self scheduleRebuild];
+  const bool followModeChanged = _followMode != newP.followMode;
+  _followMode = newP.followMode;
+  _followAnchor = MIN(1, MAX(0, newP.followAnchor));
+  _followPauseOnUser = newP.followPauseOnUserScroll;
+  if (_followMode == "off" && _followPaused) {
+    _followPaused = NO;
   }
+  const bool highlightsChanged = !SameHighlights(_highlightProps, newP.highlights);
+  if (highlightsChanged) {
+    _highlightProps = newP.highlights;
+  }
+  if (rowsChanged) {
+    // The rebuild resolves highlights against the new snapshot / theme.
+    [self scheduleRebuild];
+  } else if (highlightsChanged) {
+    [self applyHighlights];
+  } else if (followModeChanged) {
+    [self followAnimated:YES force:YES];
+  }
+}
+
+#pragma mark - Highlights and follow
+
+/** Resolves `_highlightProps` against the snapshot; returns blocks whose spans changed. */
+- (std::vector<int>)resolveHighlights
+{
+  std::vector<rdr::HighlightInput> inputs;
+  inputs.reserve(_highlightProps.size());
+  for (const auto &h : _highlightProps) {
+    rdr::HighlightInput in;
+    in.id = h.id;
+    in.fromBlockId = h.fromBlockId;
+    in.fromOffset = h.fromOffset;
+    in.toBlockId = h.toBlockId;
+    in.toOffset = h.toOffset;
+    in.style = h.style == "underline" ? rdr::HighlightStyle::Underline
+        : h.style == "textColor"      ? rdr::HighlightStyle::TextColor
+                                      : rdr::HighlightStyle::Background;
+    in.color = static_cast<uint32_t>(h.color);
+    in.hasColor = h.hasColor;
+    in.follow = h.follow;
+    inputs.push_back(std::move(in));
+  }
+  rdr::ResolvedHighlights next;
+  if (_snap) {
+    next = rdr::ResolveHighlights(*_snap, inputs);
+  }
+  std::vector<int> changed;
+  for (const auto &[block, spans] : next.byBlock) {
+    auto it = _resolved.byBlock.find(block);
+    if (it == _resolved.byBlock.end() || !SameSpans(it->second, spans)) changed.push_back(block);
+  }
+  for (const auto &[block, spans] : _resolved.byBlock) {
+    if (next.byBlock.find(block) == next.byBlock.end()) changed.push_back(block);
+  }
+  _resolved = std::move(next);
+  if (!_resolved.invalidIds.empty() && _resolved.invalidIds != _reportedInvalid) {
+    std::string ids;
+    for (const auto &id : _resolved.invalidIds) ids += (ids.empty() ? "" : ", ") + id;
+    [self emitError:"ERR_READER_INVALID_ARGUMENT" message:"Unknown highlight range: " + ids];
+  }
+  _reportedInvalid = _resolved.invalidIds;
+  return changed;
+}
+
+- (nullable NSArray<SherpaReaderHighlightSpan *> *)spansForBlock:(int)block
+{
+  auto it = _resolved.byBlock.find(block);
+  if (it == _resolved.byBlock.end()) return nil;
+  NSMutableArray<SherpaReaderHighlightSpan *> *out = [NSMutableArray arrayWithCapacity:it->second.size()];
+  for (const auto &sp : it->second) {
+    SherpaReaderHighlightSpan *h = [SherpaReaderHighlightSpan new];
+    h.range = NSMakeRange(sp.start, sp.end - sp.start);
+    h.style = (SherpaReaderHighlightStyle)sp.style;
+    h.color = sp.hasColor ? ColorFromARGB(sp.color) : nil;
+    [out addObject:h];
+  }
+  return out;
+}
+
+/** Applies changed highlights to visible rows in place, then follows. */
+- (void)applyHighlights
+{
+  const std::vector<int> changed = [self resolveHighlights];
+  for (NSIndexPath *path in _tableView.indexPathsForVisibleRows) {
+    if (path.row >= (NSInteger)_rows.size()) continue;
+    const auto &row = _rows[path.row];
+    if (row.kind != RowKind::Block || std::find(changed.begin(), changed.end(), row.blockIndex) == changed.end()) {
+      continue;
+    }
+    UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
+    if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
+      [(SherpaReaderTextCell *)cell updateHighlights:[self spansForBlock:row.blockIndex] theme:_theme];
+    }
+  }
+  [self followAnimated:YES force:NO];
+}
+
+- (void)emitFollowChange:(BOOL)following reason:(const char *)reason
+{
+  if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
+    emitter->onFollowChange({(bool)following, reason});
+  }
+}
+
+/** Content-space rect of the followed highlight's first line; NO if its row is not laid out. */
+- (BOOL)followLineRect:(CGRect *)out
+{
+  if (_resolved.followBlock < 0) return NO;
+  const NSInteger row = [self rowForBlock:_resolved.followBlock];
+  if (row == NSNotFound) return NO;
+  NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:0];
+  UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
+  if (cell == nil) return NO;
+  const CGRect r = [_tableView rectForRowAtIndexPath:path];
+  CGFloat lineTop = 0;
+  if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
+    lineTop = [(SherpaReaderTextCell *)cell lineTopForCharacterOffset:_resolved.followOffset];
+  }
+  const CGFloat lineHeight = ceil(_theme.bodyFont.lineHeight * _theme.lineHeightMultiple);
+  *out = CGRectMake(0, r.origin.y + lineTop, r.size.width, MIN(lineHeight, r.size.height));
+  return YES;
+}
+
+/** True when the followed line lies in the comfort zone (10 %–85 % of the height). */
+- (BOOL)followTargetInComfortZone
+{
+  CGRect line;
+  if (![self followLineRect:&line]) return NO;
+  const CGFloat h = _tableView.bounds.size.height;
+  const CGFloat y = line.origin.y - _tableView.contentOffset.y;
+  return y >= 0.10 * h && y + line.size.height <= 0.85 * h;
+}
+
+/**
+ * Keeps the followed highlight in view. `force` re-checks even if the
+ * highlight did not move (mode change, resume, reflow).
+ */
+- (void)followAnimated:(BOOL)animated force:(BOOL)force
+{
+  if (!_snap || _resolved.followBlock < 0) {
+    _followedBlock = -1;
+    return;
+  }
+  const bool moved = _resolved.followBlock != _followedBlock || _resolved.followOffset != _followedOffset;
+  _followedBlock = _resolved.followBlock;
+  _followedOffset = _resolved.followOffset;
+  if ((!moved && !force) || _followMode == "off" || _dragging) return;
+  if (_followPaused) {
+    if (![self followTargetInComfortZone]) return;
+    _followPaused = NO;
+    [self emitFollowChange:YES reason:"resumed"];
+  }
+  CGRect line;
+  if (![self followLineRect:&line]) {
+    // Far away (row not laid out): jump there first, then place it exactly.
+    const NSInteger row = [self rowForBlock:_resolved.followBlock];
+    if (row == NSNotFound) return;
+    NSIndexPath *path = [NSIndexPath indexPathForRow:row inSection:0];
+    [_tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionTop animated:NO];
+    [_tableView layoutIfNeeded];
+    if (![self followLineRect:&line]) return;
+    animated = NO;
+  }
+  const CGFloat h = _tableView.bounds.size.height;
+  const CGFloat y = line.origin.y - _tableView.contentOffset.y;
+  CGFloat target;
+  if (_followMode == "center") {
+    target = line.origin.y + line.size.height / 2 - h / 2;
+  } else {
+    if (y >= 0.10 * h && y + line.size.height <= 0.85 * h) {
+      if (!animated) {
+        [self sampleWithPhase:rdr::ScrollPhase::Follow];
+      }
+      return;
+    }
+    target = line.origin.y - _followAnchor * h;
+  }
+  const CGFloat minY = -_tableView.contentInset.top;
+  const CGFloat maxY = MAX(minY, _tableView.contentSize.height + _tableView.contentInset.bottom - h);
+  target = MIN(maxY, MAX(minY, target));
+  if (fabs(target - _tableView.contentOffset.y) < 1) {
+    if (!animated) {
+      [self sampleWithPhase:rdr::ScrollPhase::Follow];
+    }
+    return;
+  }
+  if (animated) {
+    _followAnimation = YES;
+    [_tableView setContentOffset:CGPointMake(0, target) animated:YES];
+  } else {
+    _tableView.contentOffset = CGPointMake(0, target);
+    [self syncInsertOrigins];
+    [self sampleWithPhase:rdr::ScrollPhase::Follow];
+    [self sampleWithPhase:rdr::ScrollPhase::Idle];
+  }
+}
+
+- (void)resumeFollow
+{
+  if (_followPaused) {
+    _followPaused = NO;
+    [self emitFollowChange:YES reason:"command"];
+  }
+  [self followAnimated:YES force:YES];
 }
 
 - (void)contentSizeCategoryChanged
@@ -414,6 +672,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 - (void)rebuildRows
 {
   [self loadSnapshot];
+  [self resolveHighlights];
   std::vector<ReaderRow> rows;
   if (_snap) {
     rows.reserve(_snap->blocks.size() + _inserts.size());
@@ -444,6 +703,8 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     }
   }
   [self sampleWithPhase:rdr::ScrollPhase::Layout];
+  // Reflow (theme, revision) may have moved the followed highlight.
+  [self followAnimated:NO force:YES];
   if (!_readySent) {
     _readySent = YES;
     if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
@@ -546,6 +807,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
                                                                        forIndexPath:indexPath];
   [cell configureWithText:ToNS(_snap->BlockText(row.blockIndex))
              headingLevel:(b.type == rdr::ReaderBlockType::Heading ? b.headingLevel : 0)
+               highlights:[self spansForBlock:row.blockIndex]
                     theme:_theme];
   return cell;
 }
@@ -640,6 +902,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
       [self->_tableView layoutIfNeeded];
     }];
     [self sampleWithPhase:rdr::ScrollPhase::Layout];
+    [self followAnimated:NO force:YES];
   }
   [self syncInsertOrigins];
 }
@@ -747,6 +1010,11 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 {
   _dragging = YES;
   _programmaticAnimation = NO;
+  _followAnimation = NO;
+  if (_followPauseOnUser && !_followPaused && _resolved.followBlock >= 0 && _followMode != "off") {
+    _followPaused = YES;
+    [self emitFollowChange:NO reason:"user"];
+  }
   [self cancelReactTouches];
 }
 
@@ -756,6 +1024,8 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     [self sampleWithPhase:rdr::ScrollPhase::Drag];
   } else if (scrollView.isDecelerating) {
     [self sampleWithPhase:rdr::ScrollPhase::Momentum];
+  } else if (_followAnimation) {
+    [self sampleWithPhase:rdr::ScrollPhase::Follow];
   }
   // Throttled: Pressability measures on touch-down; at rest the sync is exact.
   if (CACurrentMediaTime() - _lastOriginSync > 0.05) {
@@ -784,6 +1054,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     _programmaticAnimation = NO;
     [self sampleWithPhase:rdr::ScrollPhase::Programmatic];
   }
+  if (_followAnimation) {
+    _followAnimation = NO;
+    [self sampleWithPhase:rdr::ScrollPhase::Follow];
+  }
   [self settle];
 }
 
@@ -791,6 +1065,11 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 {
   [self syncInsertOrigins];
   [self sampleWithPhase:rdr::ScrollPhase::Idle];
+  // The user scrolled the followed highlight back into the comfort zone.
+  if (_followPaused && !_dragging && [self followTargetInComfortZone]) {
+    _followPaused = NO;
+    [self emitFollowChange:YES reason:"resumed"];
+  }
 }
 
 #pragma mark - Tap

@@ -6,7 +6,11 @@ import {
   useRef,
   type ElementRef,
 } from 'react';
-import { StyleSheet, type NativeSyntheticEvent } from 'react-native';
+import {
+  processColor,
+  StyleSheet,
+  type NativeSyntheticEvent,
+} from 'react-native';
 
 import SherpaReaderInsertView from './SherpaReaderInsertViewNativeComponent';
 import SherpaReaderView, {
@@ -14,7 +18,9 @@ import SherpaReaderView, {
   type NativeProps,
 } from './SherpaReaderViewNativeComponent';
 import type {
+  ReaderHighlight,
   ReaderInsert,
+  ReaderJumpCause,
   ReaderLocator,
   ReaderViewHandle,
   ReaderViewProps,
@@ -41,6 +47,39 @@ export function insertSpecFor(insert: ReaderInsert): {
   return { key: insert.key, kind: 'afterBlock', target: at.afterBlock };
 }
 
+/** ARGB from processColor (unsigned on iOS) as the signed Int32 the prop carries. */
+function toInt32(argb: number): number {
+  const n = Math.trunc(argb) % 0x100000000;
+  return n > 0x7fffffff ? n - 0x100000000 : n;
+}
+
+/** Flat native form of a highlight (colors resolved to ARGB ints). */
+export function highlightSpecFor(h: ReaderHighlight): {
+  id: string;
+  fromBlockId: string;
+  fromOffset: number;
+  toBlockId: string;
+  toOffset: number;
+  style: string;
+  color: number;
+  hasColor: boolean;
+  follow: boolean;
+} {
+  const processed = h.color != null ? processColor(h.color) : null;
+  const hasColor = typeof processed === 'number';
+  return {
+    id: h.id,
+    fromBlockId: h.from.blockId,
+    fromOffset: h.from.offset ?? -1,
+    toBlockId: h.to.blockId,
+    toOffset: h.to.offset ?? -1,
+    style: h.style ?? 'background',
+    color: hasColor ? toInt32(processed as number) : 0,
+    hasColor,
+    follow: h.follow === true,
+  };
+}
+
 function locator(
   sectionId: string,
   blockId: string,
@@ -65,6 +104,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       inserts,
       renderInsert,
       jumpThreshold,
+      highlights,
+      follow,
       style,
       testID,
       onReady,
@@ -74,6 +115,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       onJump,
       onTap,
       onError,
+      onFollowChange,
       __debugRowCount,
     } = props;
     const nativeRef = useRef<ElementRef<typeof SherpaReaderView>>(null);
@@ -91,10 +133,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             options?.animated ?? false
           );
         },
-        highlight() {
-          if (__DEV__) {
-            console.warn('[ReaderView] highlight() is not implemented yet.');
-          }
+        resumeFollow() {
+          if (nativeRef.current) Commands.resumeFollow(nativeRef.current);
         },
       }),
       []
@@ -112,6 +152,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     const insertSpecs = useMemo(
       () => (inserts ?? []).map(insertSpecFor),
       [inserts]
+    );
+    const highlightSpecs = useMemo(
+      () => (highlights ?? []).map(highlightSpecFor),
+      [highlights]
     );
 
     const handleReady = useCallback(
@@ -161,7 +205,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           from: locator(n.fromSectionId, n.fromBlockId),
           to: locator(n.toSectionId, n.toBlockId),
           distance: n.distance,
-          cause: n.cause as 'scroll' | 'fling' | 'scrollTo',
+          cause: n.cause as ReaderJumpCause,
         });
       },
       [onJump]
@@ -175,6 +219,15 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       (e: NativeSyntheticEvent<NativeEvent<'onReaderError'>>) =>
         onError?.({ code: e.nativeEvent.code, message: e.nativeEvent.message }),
       [onError]
+    );
+
+    const handleFollowChange = useCallback(
+      (e: NativeSyntheticEvent<NativeEvent<'onFollowChange'>>) =>
+        onFollowChange?.({
+          following: e.nativeEvent.following,
+          reason: e.nativeEvent.reason as 'user' | 'resumed' | 'command',
+        }),
+      [onFollowChange]
     );
 
     const fontScale =
@@ -214,6 +267,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         accentColor={theme?.colors?.accent}
         inserts={insertSpecs}
         jumpThreshold={jumpThreshold ?? 20}
+        highlights={highlightSpecs}
+        followMode={follow?.mode ?? 'keepVisible'}
+        followAnchor={Math.min(1, Math.max(0, follow?.anchor ?? 0.3))}
+        followPauseOnUserScroll={follow?.pauseOnUserScroll ?? true}
         debugRowCount={__debugRowCount ?? 0}
         onReaderReady={handleReady}
         onVisibleRangeChange={handleVisible}
@@ -222,6 +279,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         onJump={handleJump}
         onReaderTap={handleTap}
         onReaderError={handleError}
+        onFollowChange={handleFollowChange}
       >
         {renderInsert
           ? insertSpecs.map((spec) => (

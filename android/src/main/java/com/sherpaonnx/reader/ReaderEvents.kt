@@ -29,8 +29,9 @@ internal object ReaderEvents {
   const val JUMP = "topJump"
   const val TAP = "topReaderTap"
   const val ERROR = "topReaderError"
+  const val FOLLOW_CHANGE = "topFollowChange"
 
-  val ALL = listOf(READY, VISIBLE_RANGE, FURTHEST, SECTION_END, JUMP, TAP, ERROR)
+  val ALL = listOf(READY, VISIBLE_RANGE, FURTHEST, SECTION_END, JUMP, TAP, ERROR, FOLLOW_CHANGE)
 
   fun dispatch(view: View, name: String, build: WritableMap.() -> Unit) {
     val context = view.context as? ReactContext ?: return

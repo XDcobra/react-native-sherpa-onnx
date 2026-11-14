@@ -16,6 +16,27 @@ type InsertSpec = Readonly<{
   target: string;
 }>;
 
+type HighlightSpec = Readonly<{
+  id: string;
+  fromBlockId: string;
+  /** -1: start of the block. */
+  fromOffset: CodegenTypes.Int32;
+  toBlockId: string;
+  /** Exclusive; -1: end of the block. */
+  toOffset: CodegenTypes.Int32;
+  /** `background` | `underline` | `textColor`. */
+  style: string;
+  /** ARGB as a signed 32-bit int (processColor); ignored unless `hasColor`. */
+  color: CodegenTypes.Int32;
+  hasColor: boolean;
+  follow: boolean;
+}>;
+
+type FollowChangeEvent = Readonly<{
+  following: boolean;
+  reason: string;
+}>;
+
 type ReadyEvent = Readonly<{
   blockCount: CodegenTypes.Int32;
   sectionCount: CodegenTypes.Int32;
@@ -84,6 +105,11 @@ export interface NativeProps extends ViewProps {
   accentColor?: ColorValue;
   inserts?: ReadonlyArray<InsertSpec>;
   jumpThreshold?: CodegenTypes.WithDefault<CodegenTypes.Int32, 20>;
+  highlights?: ReadonlyArray<HighlightSpec>;
+  /** `keepVisible` | `center` | `off`. */
+  followMode?: CodegenTypes.WithDefault<string, 'keepVisible'>;
+  followAnchor?: CodegenTypes.WithDefault<CodegenTypes.Float, 0.3>;
+  followPauseOnUserScroll?: CodegenTypes.WithDefault<boolean, true>;
   /** Spike/testing only: placeholder rows when there is no document. */
   debugRowCount?: CodegenTypes.WithDefault<CodegenTypes.Int32, 0>;
   onReaderReady?: CodegenTypes.DirectEventHandler<ReadyEvent>;
@@ -93,6 +119,7 @@ export interface NativeProps extends ViewProps {
   onJump?: CodegenTypes.DirectEventHandler<JumpEvent>;
   onReaderTap?: CodegenTypes.DirectEventHandler<TapEvent>;
   onReaderError?: CodegenTypes.DirectEventHandler<ErrorEvent>;
+  onFollowChange?: CodegenTypes.DirectEventHandler<FollowChangeEvent>;
 }
 
 type ComponentType = HostComponent<NativeProps>;
@@ -105,10 +132,11 @@ interface NativeCommands {
     offset: CodegenTypes.Int32,
     animated: boolean
   ) => void;
+  resumeFollow: (viewRef: React.ElementRef<ComponentType>) => void;
 }
 
 export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
-  supportedCommands: ['scrollToLocator'],
+  supportedCommands: ['scrollToLocator', 'resumeFollow'],
 });
 
 export default codegenNativeComponent<NativeProps>(
