@@ -331,6 +331,7 @@ set(SOURCES
     reader/ReaderLayout.cpp
     reader/ReaderOcrText.cpp
     reader/ReaderTextSlice.cpp
+    reader/ReaderSidecar.cpp
     reader/ReaderHighlights.cpp
     reader/ReaderJson.cpp
     reader/ReaderFileHash.cpp

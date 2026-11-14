@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ReaderDocument.h"
+#include "ReaderSidecar.h"
 #include "ReaderTextSlice.h"
 
 #include <mutex>
@@ -59,6 +60,15 @@ class ReaderRegistry {
    */
   bool AttachPageText(const std::string& documentId, std::shared_ptr<TxtOfflineEntry> ocr,
                       int* attached, ReaderError* err);
+
+  /**
+   * Attaches OCR text saved with a sidecar (see ReaderSidecar.h) to the same
+   * pages, in a new revision. Rejects (kErrReaderSidecarMismatch) a sidecar of
+   * another document, of another model when both name one, or with a page
+   * that this document does not have. `pages` receives the pages attached.
+   */
+  bool AttachRecognition(const std::string& documentId, SidecarContent content,
+                         const std::string& expectModelId, int* pages, ReaderError* err);
 
   bool InsertSection(const std::string& documentId, const ReaderAppSectionInput& section,
                      ReaderError* err);

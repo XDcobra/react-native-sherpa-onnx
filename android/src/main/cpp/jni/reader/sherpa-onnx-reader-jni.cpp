@@ -186,6 +186,62 @@ Java_com_sherpaonnx_reader_ReaderNative_nativeCreateTextSlice(JNIEnv* env, jclas
   return Result(env, ok, json, err);
 }
 
+/** Object[]: sidecar bytes (byte[] or null), pages (Integer), errorCode, errorMessage. */
+JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeEncodeRecognition(JNIEnv* env, jclass,
+                                                                jstring docId, jstring modelId) {
+  std::vector<uint8_t> bytes;
+  int pages = 0;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeEncodeRecognition(Std(env, docId), Std(env, modelId),
+                                                              &bytes, &pages, &err);
+  jclass objCls = env->FindClass("java/lang/Object");
+  jobjectArray out = env->NewObjectArray(4, objCls, nullptr);
+  if (ok) {
+    jbyteArray arr = env->NewByteArray(static_cast<jsize>(bytes.size()));
+    if (!bytes.empty()) {
+      env->SetByteArrayRegion(arr, 0, static_cast<jsize>(bytes.size()),
+                              reinterpret_cast<const jbyte*>(bytes.data()));
+    }
+    env->SetObjectArrayElement(out, 0, arr);
+    env->DeleteLocalRef(arr);
+  }
+  jclass intCls = env->FindClass("java/lang/Integer");
+  jmethodID valueOf = env->GetStaticMethodID(intCls, "valueOf", "(I)Ljava/lang/Integer;");
+  jobject boxed = env->CallStaticObjectMethod(intCls, valueOf, static_cast<jint>(pages));
+  env->SetObjectArrayElement(out, 1, boxed);
+  env->DeleteLocalRef(boxed);
+  if (!ok) {
+    jstring code = sherpaonnx::NewJStringUtf8(env, err.code);
+    jstring msg = sherpaonnx::NewJStringUtf8(env, err.message);
+    env->SetObjectArrayElement(out, 2, code);
+    env->SetObjectArrayElement(out, 3, msg);
+    env->DeleteLocalRef(code);
+    env->DeleteLocalRef(msg);
+  }
+  env->DeleteLocalRef(intCls);
+  env->DeleteLocalRef(objCls);
+  return out;
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeLoadRecognition(JNIEnv* env, jclass, jstring docId,
+                                                              jbyteArray data, jstring modelId) {
+  std::vector<uint8_t> bytes;
+  if (data) {
+    bytes.resize(static_cast<size_t>(env->GetArrayLength(data)));
+    if (!bytes.empty()) {
+      env->GetByteArrayRegion(data, 0, static_cast<jsize>(bytes.size()),
+                              reinterpret_cast<jbyte*>(bytes.data()));
+    }
+  }
+  std::string json;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeLoadRecognition(
+      Std(env, docId), bytes.data(), bytes.size(), Std(env, modelId), &json, &err);
+  return Result(env, ok, json, err);
+}
+
 JNIEXPORT jobjectArray JNICALL
 Java_com_sherpaonnx_reader_ReaderNative_nativeGetToc(JNIEnv* env, jclass, jstring docId) {
   std::string json;

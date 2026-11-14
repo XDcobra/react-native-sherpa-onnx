@@ -1,6 +1,8 @@
 const mockNative = {
   getReaderPages: jest.fn(),
   attachReaderPageText: jest.fn(),
+  saveReaderRecognition: jest.fn(),
+  loadReaderRecognition: jest.fn(),
 };
 const mockText = {
   createEmptyOfflineTextBuffer: jest.fn(),
@@ -25,7 +27,12 @@ jest.mock('../../textbuffer', () => ({
     typeof id === 'string' ? id : (id as { bufferId: string }).bufferId,
 }));
 
-import { attachReaderPageText, recognizeReaderPages } from '../ocr';
+import {
+  attachReaderPageText,
+  loadReaderRecognition,
+  recognizeReaderPages,
+  saveReaderRecognition,
+} from '../ocr';
 
 const DOC = {
   id: 'rdr_1',
@@ -74,6 +81,41 @@ describe('reader ocr', () => {
     mockNative.attachReaderPageText.mockImplementation(async () =>
       JSON.stringify({ ...DOC, revision: ++revision })
     );
+  });
+
+  it('saves and loads recognized pages through the native sidecar calls', async () => {
+    mockNative.saveReaderRecognition.mockResolvedValue({
+      pages: 3,
+      outputKind: 'path',
+      outputPath: '/data/book.ocr',
+    });
+    const dest = { kind: 'fs', path: '/data/book.ocr' } as never;
+    await expect(
+      saveReaderRecognition(DOC as never, dest, { modelId: 'ppocrv6-tiny' })
+    ).resolves.toEqual({ pages: 3, outputPath: '/data/book.ocr' });
+    expect(mockNative.saveReaderRecognition).toHaveBeenCalledWith(
+      'rdr_1',
+      dest,
+      'ppocrv6-tiny',
+      false,
+      false
+    );
+    mockNative.loadReaderRecognition.mockResolvedValue(
+      JSON.stringify({ ...DOC, revision: 5 })
+    );
+    const doc = await loadReaderRecognition(DOC as never, dest);
+    expect(doc.revision).toBe(5);
+    expect(mockNative.loadReaderRecognition).toHaveBeenCalledWith(
+      'rdr_1',
+      dest,
+      ''
+    );
+    mockNative.loadReaderRecognition.mockRejectedValue(
+      new Error('ERR_READER_SIDECAR_MISMATCH: another document')
+    );
+    await expect(
+      loadReaderRecognition(DOC as never, dest)
+    ).rejects.toMatchObject({ code: 'ERR_READER_SIDECAR_MISMATCH' });
   });
 
   it('attachReaderPageText resolves the new revision', async () => {

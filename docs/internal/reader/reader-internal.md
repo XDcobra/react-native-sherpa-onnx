@@ -15,9 +15,12 @@ Bridges                    ios/reader/bridge/SherpaOnnx+Reader.mm     ios/reader
         ▼                                            ▼
 Shared C++ core            android/src/main/cpp/reader/   (compiled into the iOS pod as well)
   ReaderRegistry · ReaderSnapshot · ReaderTracker · ReaderHighlights · ReaderJson · ReaderTextHash · ReaderFileHash · ReaderBridge
+  ReaderLayout (rows per page display) · ReaderOcrText (OCR → blocks) · ReaderTextSlice · ReaderSidecar
         │
         ▼
-Structure source           android/src/main/cpp/document/DocEpub.cpp → textbuffer/TxtStructure.h (attached to TxtOfflineEntry)
+Structure sources          document/DocEpub.cpp · DocFb2.cpp · DocMobi.cpp · pdf/PdfStructureBuilder.cpp → textbuffer/TxtStructure.h (attached to TxtOfflineEntry)
+                           page documents: ReaderRegistry::CreatePages over an image buffer
+                           OCR text: textbuffer/TxtOcrLayout.h on the OCR buffer → ReaderOcrText → child blocks
 ```
 
 All rules that must behave the same on both platforms live in the shared C++ core: IDs and hashes, the snapshot model, text-range mapping, highlight resolution and the reading tracker. The platform views only lay out rows, draw text and feed scroll samples into the tracker.
@@ -61,11 +64,11 @@ All rules that must behave the same on both platforms live in the shared C++ cor
 
 ### Rows
 
-Both platforms build a row list from the snapshot: one row per block, plus insert rows placed by `sectionEnd` / `beforeBlock` / `afterBlock`. Rows are rebuilt (`scheduleRebuild` → `rebuildRows`) on a new document revision, a new insert list or an insert key change.
+Both platforms build the row list from the shared plan `PlanRows(snapshot, pageDisplay)` (`ReaderLayout.cpp`): one row per block outside page sections; in page sections the plan follows `pageDisplay` (see section 5). Every row stands for a range of blocks (`coverFirst..coverLast`), so blocks without a row of their own still count for visibility, furthest position and section ends. Insert rows are placed by `sectionEnd` / `beforeBlock` / `afterBlock` (an insert at a covered block goes before / after its row). Rows are rebuilt (`scheduleRebuild` → `rebuildRows`) on a new document revision, a new insert list, an insert key change or a new `pageDisplay`.
 
-- **Android:** `RecyclerView` + `LinearLayoutManager`. Row updates use `DiffUtil` so holders stay valid and the first visible row stays put. Block metadata comes from JNI as flat int tables (`nativeBlockTable`: 6 ints per block; `nativeSectionTable`: 2 per section); text is fetched per row (`nativeBlockText`) into an `LruCache` of 256 entries. Text rows are `TextView`s; image rows use `OfflineImageBufferFrameView`.
+- **Android:** `RecyclerView` + `LinearLayoutManager`. Row updates use `DiffUtil` so holders stay valid and the first visible row stays put. Block metadata comes from JNI as flat int tables (`nativeBlockTable`: 7 ints per block — type, level, section, frame, expected width / height, flags; `nativeSectionTable`: 2 per section); text is fetched per row (`nativeBlockText`) into an `LruCache` of 256 entries. Text rows are `TextView`s; image rows use `OfflineImageBufferFrameView`.
 - **iOS:** `UITableView` with TextKit 1 text cells (`SherpaReaderTextCell`), image cells (`OfflineImageBufferFrameView`), separator cells and insert cells. The view reads the snapshot directly from `ReaderRegistry` (same C++ core). Measured row heights are cached as estimates; `keepingAnchor:` keeps the first visible row in place across row changes (UIKit otherwise re-estimates rows above the viewport).
-- Images are scaled to the text width and capped at 90 % of the viewport height.
+- Images are scaled to the text width and capped at 90 % of the viewport height. Page images are full width without margins, sized from the frame's expected size (known before a lazy page is rendered).
 
 ### Reflow (theme, width, revision)
 
@@ -96,7 +99,7 @@ The view samples `(firstVisibleBlock, lastVisibleBlock, phase)` and the tracker 
 
 Rules (tested in `reader_host_test`):
 
-- A block is visible when ≥ 50 % of `min(blockHeight, viewportHeight)` is on screen; inserts are reported separately and never count as blocks.
+- A block is visible when ≥ 50 % of `min(blockHeight, viewportHeight)` is on screen; inserts are reported separately and never count as blocks. The views ask `RowVisibleBlocks` per row: a plain row reports its cover range; a page image that stands for its text reports the blocks whose rectangle is visible (the page block while the page's top is on screen, or when no text block is).
 - **Jump:** a move of more than `jumpThreshold` blocks without continuous visibility: during a drag (`scroll`), a fling landing that far from where the finger lifted (`fling`), any programmatic scroll (`scrollTo`, always reported), or a far follow scroll (`follow`).
 - **Furthest:** the end of the continuously read stretch, advanced only while that stretch starts at or before frontier + 1. The app can set the frontier (`furthestLocator`).
 - **Section end:** the last block of a section enters the visible range during continuous reading; once per transition.
@@ -120,6 +123,12 @@ Rules (tested in `reader_host_test`):
 - The follow scroll is animated and flagged (`followScroll` / `_followAnimation`); samples taken during it use `ScrollPhase::Follow`, so the tracker treats it as reading.
 - A user drag while following (and `pauseOnUserScroll`) pauses following and emits `onFollowChange({ following: false, reason: 'user' })`. After the scroll settles, following resumes on its own when the target is back in the comfort zone (`'resumed'`). `resumeFollow()` resumes and places the target at the anchor even if it is already in the zone (`'command'`).
 
+### Highlights on page images
+
+- Blocks placed on a page keep line boxes (`ReaderBlock::lines`: UTF-16 range in the block, rect normalized to the page): from the PDF text layer's line spans at `Create`, from OCR line spans in `ReaderOcrText`.
+- `TextRangeRects(snapshot, block, start, end)` turns a highlight span into page rects: per line the covered share of the line by character count (top to bottom for vertical lines), else the block rect, else the whole page.
+- Android draws them in `PageHighlightOverlay` over the page's frame view (image rows are a `FrameLayout`); iOS in `SherpaReaderPageOverlay` inside `SherpaReaderImageCell`. A highlight change rebinds / updates the page row that covers the changed block. Follow scrolling targets the first rect's line on the page.
+
 ## 4. Read aloud
 
 ### TTS timeline (`src/pipeline/offlineOrchestrator.ts`, `src/tts/index.ts`)
@@ -133,17 +142,27 @@ Rules (tested in `reader_host_test`):
 - **Sentences:** one per non-empty TTS segment, trimmed of surrounding whitespace; times from samples, so exact.
 - **Words:** `splitWords` (whitespace tokens, edge punctuation trimmed) or the app's `words.split`. Each sentence's duration is spread over its words by weight = code-point length + pause bonus (5 after `.!?…`, 3 after `,;:`).
 - **Aligned words:** matched in order against the word list with a normalized-text compare and a look-ahead of 6 words; matched words take the aligned sample times, the rest keep their estimates.
-- All units are mapped with **one** `mapTextRanges` call, offset by `textOffset`.
+- All units are mapped with **one** `mapTextRanges` call, offset by `textOffset`, or through a text slice (`slice`): `createReaderTextSlice` builds a native text buffer from readable blocks (`BuildTextSlice`: paragraphs and headings, file / OCR / app, no furniture, joined `\n\n`) and registers the slice map under the buffer ID (`ReaderRegistry::AddSlice`, dropped with the document); `mapReaderTextRanges(…, sliceBufferId)` maps with `MapSliceRange` by block ID.
 - `at(ms)` is a binary search over sentences and words.
 - `useReadAloudHighlights` memoizes on the spoken unit indices and the style options, so the native view receives a new `highlights` array only when the sentence or word changes. Default follow: the word when words are shown (a long sentence would otherwise scroll out of view), else the sentence.
 
-## 5. Tests and checks
+## 5. Formats, pages and OCR
+
+- **Formats and versions.** `TxtStructure::format` (`epub`, `fb2`, `mobi`, `pdf`, `pages`) with its own `version`; `SupportedStructureVersion(format)` gates `Create`. Goldens per format in `test/fixtures/reader/*.reader-v1.txt`.
+- **PDF** (`pdf/PdfStructureBuilder`): PDFium characters → lines (`PdfTextLayerExtractor`, layout `paragraphs`) → paragraphs (gap, indent, next-word-fits rule, hyphen join), headings by font size groups, furniture (repeated top/bottom lines, page numbers), one section per page (`kind: "page"`, `href: "page:N"`, `label`) with the page block first (`frameIndex = page - 1`), contents from the outline. `loadReaderDocument` pairs it with a lazy page buffer of all pages.
+- **Page documents** (`CreatePages`): one section per frame of an image buffer, block `s{n}.b0` of type page, `format: "pages"`; comics come from `extractDocumentImages(strategy: 'lazy-lru')` (archive pages decoded on demand, sizes from the image headers).
+- **Row plan** (`ReaderLayout`): `text` hides the page block when the page has text and hides furniture; `image` shows one page row covering the section; `imageAndText` shows the page then the text. Hidden blocks join the previous row of their section (leading ones the first row).
+- **OCR** (`ReaderOcrText`, `AttachPageText`): the OCR buffer's `TxtOcrLayout` gives frame ranges, sizes and elements; each frame's text is split at blank lines; elements type the blocks; line spans place them. `WithChildren` replaces a parent's children `{id}.t{j}` and publishes a revision; `ocrFamily` remembers the family per parent. `recognizeReaderPages` (JS) picks pages from `getReaderPages` (`PagesJson`) and recognizes one frame per call.
+- **Sidecar** (`ReaderSidecar`): little-endian binary — magic `SHRDOCR\0`, `u32` version (1), `str` documentKey, `str` modelId, `u32` pages; per page `str` parent block ID, `i32` frame, `str` family, `u32` blocks; per block `u8` type, `u8` level, `u32` flags, `u8` hasRect, `4×f32` rect, `str` text, `u32` lines, per line `i32` start, `i32` end, `4×f32` rect (`str` = `u32` length + UTF-8). `AttachRecognition` checks documentKey, modelId (when both are set) and that every parent exists with the same frame, then reuses `WithChildren`. The bridges encode / decode natively and use FileIO to write / read the bytes.
+
+## 6. Tests and checks
 
 | What | Where | Run |
 |---|---|---|
-| Structure golden file, IDs, textHash, registry, MapTextRange, highlights, tracker (incl. Follow) | `test/cpp/reader/reader_host_test.cpp` | `cmake -S test/cpp -B test/cpp/build && cmake --build test/cpp/build --target reader_host_test && ./test/cpp/build/reader_host_test` |
+| Structure golden files (EPUB, FB2, MOBI, AZW3, PDF), IDs, textHash, registry, MapTextRange, highlights, tracker (incl. Follow), row plan and visibility, OCR blocks, slices, highlight rects, sidecar | `test/cpp/reader/reader_host_test.cpp` (PDF parts need PDFium; CMake downloads it) | `cmake -S test/cpp -B test/cpp/build && cmake --build test/cpp/build --target reader_host_test && ./test/cpp/build/reader_host_test` |
 | JS API, highlight specs, read-aloud timeline | `src/reader/__tests__/` | `yarn jest src/reader` |
 | TTS timeline | `src/tts/__tests__/synthesize-timeline.test.ts`, orchestrator tests | `yarn jest src/tts src/pipeline` |
+| Scanned PDF page → PDFium → ppocrv6-tiny → reader blocks | `test/cpp/ocr/ocr_reader_pages_host_test.cpp` (in `ppocr_host_test`; skips without the pack in `build/ocr-models`) | `cmake --build test/cpp/build --target ppocr_host_test && ./test/cpp/build/ppocr_host_test` |
 | Turbo signatures | | `yarn check:ios-turbo-signatures` |
 
 Device smoke checks (both platforms; build iOS and Android one after the other, never in parallel):
@@ -154,7 +173,7 @@ Device smoke checks (both platforms; build iOS and Android one after the other, 
 
 Android tips: drive the device with `adb shell input` and `uiautomator dump`; read JS logs with `adb logcat` (`ReactNativeJS`). A CDP log client that reconnects in a loop keeps the "Refreshing…" banner up and makes `uiautomator` fail with "could not get idle state". Fast Refresh re-runs effect cleanups, so a screen that releases its document in a cleanup must be reopened after an edit.
 
-## 6. Change checklist
+## 7. Change checklist
 
 - New native prop: add it to `SherpaReaderViewNativeComponent.ts`, both view implementations and the Android view manager; check that its name does not collide with a Yoga style prop.
 - New rule in the structure, IDs or hash: bump the matching version constant, update the golden file and reader.md.

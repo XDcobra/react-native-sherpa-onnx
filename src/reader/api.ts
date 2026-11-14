@@ -44,6 +44,10 @@ export const ReaderErrorCode = {
   NO_STRUCTURE: 'ERR_READER_NO_STRUCTURE',
   UNSUPPORTED_STRUCTURE: 'ERR_READER_UNSUPPORTED_STRUCTURE',
   INVALID_ARGUMENT: 'ERR_READER_INVALID_ARGUMENT',
+  /** Not a reader OCR sidecar, or a corrupt one. */
+  SIDECAR_INVALID: 'ERR_READER_SIDECAR_INVALID',
+  /** A sidecar of another document or model, or with pages this document does not have. */
+  SIDECAR_MISMATCH: 'ERR_READER_SIDECAR_MISMATCH',
 } as const;
 
 export type ReaderErrorCodeValue =
@@ -68,7 +72,8 @@ function nativeCode(err: unknown): string | undefined {
   return /^(ERR_READER_[A-Z_]+)/.exec(msg)?.[1];
 }
 
-async function callNative<T>(fn: () => Promise<T>): Promise<T> {
+/** @internal Maps `ERR_READER_*` rejections onto `error.code`. */
+export async function callNative<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err: unknown) {

@@ -6,6 +6,7 @@
 import { TurboModuleRegistry } from 'react-native';
 
 import type { Spec } from '../NativeSherpaOnnx';
+import type { FileDestination, FileSource } from '../fileio/types';
 import type { OcrEngine, OcrRecognizeOptions } from '../ocr/types';
 import {
   createEmptyOfflineTextBuffer,
@@ -13,7 +14,7 @@ import {
   resolveOfflineTextBufferId,
 } from '../textbuffer';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
-import { parseReaderDocument } from './api';
+import { callNative, parseReaderDocument } from './api';
 import type { ReaderDocument, ReaderLocator } from './types';
 
 const getNative = (): Spec =>
@@ -58,7 +59,63 @@ export async function attachReaderPageText(
 ): Promise<ReaderDocument> {
   const textId = resolveOfflineTextBufferId(options.text);
   return parseReaderDocument(
-    await getNative().attachReaderPageText(doc.id, textId)
+    await callNative(() => getNative().attachReaderPageText(doc.id, textId))
+  );
+}
+
+/**
+ * Saves the document's recognized pages (OCR text with its blocks, places
+ * and lines) to a sidecar file, so a later session can show and read them
+ * without running OCR again. Encoded and written natively. `modelId`
+ * (optional) names the OCR model and is checked on load.
+ *
+ * @throws {Error} `FILEIO_*` — the destination cannot be written (or exists without `overwrite`).
+ */
+export async function saveReaderRecognition(
+  doc: ReaderDocument,
+  destination: FileDestination,
+  options?: {
+    modelId?: string;
+    overwrite?: boolean;
+    /** Create missing parent folders of `destination` (default false). */
+    createParentDirectories?: boolean;
+  }
+): Promise<{ pages: number; outputPath: string }> {
+  const raw = await callNative(() =>
+    getNative().saveReaderRecognition(
+      doc.id,
+      destination as Object,
+      options?.modelId ?? '',
+      options?.overwrite ?? false,
+      options?.createParentDirectories ?? false
+    )
+  );
+  return {
+    pages: Number(raw.pages ?? 0),
+    outputPath: String(raw.outputPath ?? ''),
+  };
+}
+
+/**
+ * Loads a sidecar from {@link saveReaderRecognition} and attaches its text to
+ * the same pages, natively. Resolves the new document value.
+ *
+ * @throws {Error} `ERR_READER_SIDECAR_INVALID` — not a reader OCR sidecar, or corrupt.
+ * @throws {Error} `ERR_READER_SIDECAR_MISMATCH` — saved for another file (`documentKey`), another model (`modelId`, when both name one), or with pages this document does not have.
+ */
+export async function loadReaderRecognition(
+  doc: ReaderDocument,
+  source: FileSource,
+  options?: { modelId?: string }
+): Promise<ReaderDocument> {
+  return parseReaderDocument(
+    await callNative(() =>
+      getNative().loadReaderRecognition(
+        doc.id,
+        source as Object,
+        options?.modelId ?? ''
+      )
+    )
   );
 }
 

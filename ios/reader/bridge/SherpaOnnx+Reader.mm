@@ -208,6 +208,97 @@ RCT_EXPORT_METHOD(createReaderTextSlice : (NSString *)documentId fromBlockId : (
   });
 }
 
+RCT_EXPORT_METHOD(saveReaderRecognition : (NSString *)documentId destination : (
+                      NSDictionary *)destination modelId : (NSString *)modelId overwrite : (
+                          BOOL)overwrite createParentDirectories : (BOOL)
+                              createParentDirectories resolve : (RCTPromiseResolveBlock)
+                                  resolve reject : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(ReaderQueue(), ^{
+    std::vector<uint8_t> bytes;
+    int pages = 0;
+    sherpa_onnx::reader::ReaderError err;
+    if (!sherpa_onnx::reader::BridgeEncodeRecognition(Std(documentId), Std(modelId), &bytes,
+                                                      &pages, &err)) {
+      Finish(false, "", err, resolve, reject);
+      return;
+    }
+    NSString *errCode = nil;
+    NSString *errMsg = nil;
+    FileIOWriteHandle *wh = [FileIOResolver resolveDestination:destination
+                                                     overwrite:overwrite
+                                       createParentDirectories:createParentDirectories
+                                                         error:&errCode
+                                                       message:&errMsg];
+    if (!wh) {
+      reject(errCode ?: @"FILEIO_RESOLVE_ERROR", errMsg ?: @"Failed to resolve destination", nil);
+      return;
+    }
+    NSData *data = [NSData dataWithBytes:bytes.data() length:bytes.size()];
+    if (wh.isFilePath) {
+      NSError *writeErr = nil;
+      if (![data writeToFile:wh.filePath options:NSDataWritingAtomic error:&writeErr]) {
+        [wh cleanup];
+        reject(@"ERR_READER_SIDECAR_WRITE", writeErr.localizedDescription ?: @"Write failed",
+               writeErr);
+        return;
+      }
+    } else if (wh.stream != nil) {
+      [wh.stream open];
+      const NSInteger written = [wh.stream write:(const uint8_t *)bytes.data()
+                                       maxLength:bytes.size()];
+      [wh.stream close];
+      if (written != (NSInteger)bytes.size()) {
+        [wh cleanup];
+        reject(@"ERR_READER_SIDECAR_WRITE", @"Write failed", nil);
+        return;
+      }
+    }
+    NSString *outputPath = wh.resultPath ?: wh.filePath ?: @"";
+    const BOOL isPath = wh.isFilePath;
+    [wh cleanup];
+    resolve(@{
+      @"pages" : @(pages),
+      @"outputKind" : isPath ? @"path" : @"stream",
+      @"outputPath" : outputPath,
+    });
+  });
+}
+
+RCT_EXPORT_METHOD(loadReaderRecognition : (NSString *)documentId source : (
+                      NSDictionary *)source modelId : (NSString *)modelId resolve : (
+                          RCTPromiseResolveBlock)resolve reject : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(ReaderQueue(), ^{
+    NSString *errCode = nil;
+    NSString *errMsg = nil;
+    FileIOReadHandle *rh = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+    if (!rh) {
+      reject(errCode ?: @"FILEIO_RESOLVE_ERROR", errMsg ?: @"Failed to resolve source", nil);
+      return;
+    }
+    NSData *data = nil;
+    if (rh.isFilePath) {
+      data = [NSData dataWithContentsOfFile:rh.filePath];
+    } else if (rh.stream != nil) {
+      [rh.stream open];
+      NSMutableData *buffer = [NSMutableData data];
+      uint8_t chunk[65536];
+      NSInteger n = 0;
+      while ((n = [rh.stream read:chunk maxLength:sizeof(chunk)]) > 0) {
+        [buffer appendBytes:chunk length:n];
+      }
+      [rh.stream close];
+      data = buffer;
+    }
+    [rh cleanup];
+    std::string json;
+    sherpa_onnx::reader::ReaderError err;
+    const bool ok = sherpa_onnx::reader::BridgeLoadRecognition(
+        Std(documentId), static_cast<const uint8_t *>(data.bytes), data.length, Std(modelId), &json,
+        &err);
+    Finish(ok, json, err, resolve, reject);
+  });
+}
+
 RCT_EXPORT_METHOD(getReaderToc : (NSString *)documentId resolve : (RCTPromiseResolveBlock)
                       resolve reject : (RCTPromiseRejectBlock)reject) {
   dispatch_async(ReaderQueue(), ^{

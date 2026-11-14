@@ -202,6 +202,29 @@ doc = await recognizeReaderPages(doc, ocr, { scope: 'around', at: position, onDo
 
 Recognizes page images one page per `recognize` call and attaches each page's text as it is done. `scope: 'around'` (default) does the page at `at`, `ahead` pages after it (default 2) and `behind` pages before it (default 1). `'all'` does the whole book from the first page, and `{ sections }` does the pages you name. Pages that already have text are skipped unless `force` is set. `onDocument` receives new document values at most every `updateIntervalMs` (default 300) and once at the end. `recognize` passes options such as `readingDirection: 'rtl'` (manga) or a VLM `instruction` to every call. With `signal`, the run stops after the page in progress, and recognized pages keep their text. Run one at a time per document.
 
+#### `saveReaderRecognition(doc, destination, options?)` / `loadReaderRecognition(doc, source, options?)`
+
+```ts
+function saveReaderRecognition(
+  doc: ReaderDocument,
+  destination: FileDestination,
+  options?: { modelId?: string; overwrite?: boolean; createParentDirectories?: boolean }
+): Promise<{ pages: number; outputPath: string }>;
+
+function loadReaderRecognition(
+  doc: ReaderDocument,
+  source: FileSource,
+  options?: { modelId?: string }
+): Promise<ReaderDocument>;
+```
+
+```ts
+await saveReaderRecognition(doc, { kind: 'app', base: 'documents', path: 'book.ocr' }, { modelId, createParentDirectories: true });
+doc = await loadReaderRecognition(doc, { kind: 'app', base: 'documents', path: 'book.ocr' });
+```
+
+Saves the document's recognized pages to a sidecar file, and loads them back in a later session without running OCR again. The file holds each page's text blocks with their type, place, line boxes and text. Encoding, writing, reading and attaching happen natively, so no text crosses the bridge. Loading rejects a file of another book (`documentKey`), of another model (when you pass `modelId` on save and load and they differ), and one with pages this document does not have (`ERR_READER_SIDECAR_MISMATCH`). It also rejects a corrupt file (`ERR_READER_SIDECAR_INVALID`).
+
 #### `computeDocumentKey(source)`
 
 ```ts
@@ -607,6 +630,8 @@ Each recognized page gets text blocks `s{n}.b0.t{j}` (for an image block, `{imag
 
 The blocks are text blocks like any other: they show in `'text'` mode (the page image is then hidden), count for reading progress, can be highlighted and searched. In `'image'` mode they count as visible where they are on the page. A page's first heading becomes the section title when the section has none.
 
+To keep the recognized text between sessions, save it with `saveReaderRecognition` and load it with `loadReaderRecognition`; the document then has the same blocks as after OCR.
+
 Block IDs of OCR text are stable for the same model and settings only; recognizing a page again replaces its blocks. Store positions on OCR pages by the page block (`s{n}.b0`) or keep the `textHash` (see [remapLocator](#remaplocatordoc-stored-hint)).
 
 ## Structure rules
@@ -702,6 +727,8 @@ import {
   createReaderDocument, // ReaderDocument from a text buffer or page images
   attachReaderPageText, // OCR text buffer → text blocks on its pages
   createReaderTextSlice, // text from a position on, for reading aloud
+  saveReaderRecognition, // recognized pages → sidecar file
+  loadReaderRecognition, // sidecar file → recognized pages again
   recognizeReaderPages, // OCR pages around the reading position or the whole book
   computeDocumentKey, // SHA-256 of a file
   insertSection, // add an app section
@@ -769,6 +796,8 @@ import type {
 | `ERR_READER_NOT_FOUND` | Document or text buffer not found, for example after `releaseReaderDocument`. |
 | `ERR_READER_NO_STRUCTURE` | The text buffer has no reading structure. Extract an EPUB with `extractDocumentText` first. |
 | `ERR_READER_UNSUPPORTED_STRUCTURE` | The structure was made with other structure rules than this SDK supports. |
+| `ERR_READER_SIDECAR_INVALID` | `loadReaderRecognition`: not a reader OCR sidecar, or a corrupt one. |
+| `ERR_READER_SIDECAR_MISMATCH` | `loadReaderRecognition`: the sidecar is for another book or model, or has pages this document does not have. |
 | `ERR_READER_INVALID_ARGUMENT` | Invalid app section ID or block key, a highlight with an unknown block ID (`onError`), or OCR text without an OCR layout or from another image buffer (`attachReaderPageText`). |
 
 Errors from extraction (`ERR_DOC_*`, for example `ERR_DOC_DRM`) and file access (`FILEIO_*`) surface unchanged from `loadReaderDocument`.

@@ -4126,6 +4126,29 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun getReaderToc(documentId: String, promise: Promise) =
     readerHelper.getReaderToc(documentId, promise)
 
+  override fun saveReaderRecognition(
+    documentId: String,
+    destination: ReadableMap,
+    modelId: String,
+    overwrite: Boolean,
+    createParentDirectories: Boolean,
+    promise: Promise,
+  ) = readerHelper.saveReaderRecognition(
+    documentId,
+    destination,
+    modelId,
+    overwrite,
+    createParentDirectories,
+    promise,
+  )
+
+  override fun loadReaderRecognition(
+    documentId: String,
+    source: ReadableMap,
+    modelId: String,
+    promise: Promise,
+  ) = readerHelper.loadReaderRecognition(documentId, source, modelId, promise)
+
   override fun releaseReaderDocument(documentId: String, promise: Promise) =
     readerHelper.releaseReaderDocument(documentId, promise)
 

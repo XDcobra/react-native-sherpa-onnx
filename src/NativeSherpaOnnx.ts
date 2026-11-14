@@ -1488,6 +1488,22 @@ export interface Spec extends TurboModule {
 
   releaseReaderDocument(documentId: string): Promise<boolean>;
 
+  /** Writes the recognized pages to a sidecar file (encoded natively). */
+  saveReaderRecognition(
+    documentId: string,
+    destination: Object,
+    modelId: string,
+    overwrite: boolean,
+    createParentDirectories: boolean
+  ): Promise<{ pages: number; outputKind: string; outputPath: string }>;
+
+  /** Reads a sidecar file and attaches its pages natively. Resolves the new summary JSON. */
+  loadReaderRecognition(
+    documentId: string,
+    source: Object,
+    modelId: string
+  ): Promise<string>;
+
   /** Container format by content ("epub", "fb2", "mobi", "cbz", "cbr", "pdf"; "" = unknown). */
   detectDocumentFormat(source: Object): Promise<string>;
 

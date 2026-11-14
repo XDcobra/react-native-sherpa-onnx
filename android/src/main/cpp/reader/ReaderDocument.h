@@ -113,6 +113,8 @@ struct ReaderSnapshot {
   std::string language;
   /** Contents from the source (may be empty; TocJson falls back to section titles). */
   std::vector<ReaderTocEntry> toc;
+  /** OCR family whose text a page / image block holds (block ID → family). */
+  std::unordered_map<std::string, std::string> ocrFamily;
   /** File text blocks (non-empty buffer range) in buffer order, for offset lookups. */
   std::vector<int> textBlocks;
 

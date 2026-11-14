@@ -121,6 +121,47 @@ internal class SherpaOnnxReaderHelper(reactContext: ReactApplicationContext) {
     ReaderNative.nativeCreateTextSlice(documentId, fromBlockId, fromOffset, toBlockId, maxLength)
   }
 
+  /** Encodes the recognized pages natively and writes the bytes to `destination`. */
+  fun saveReaderRecognition(
+    documentId: String,
+    destination: ReadableMap,
+    modelId: String,
+    overwrite: Boolean,
+    createParentDirectories: Boolean,
+    promise: Promise,
+  ) {
+    executor.execute {
+      try {
+        val out = ReaderNative.nativeEncodeRecognition(documentId, modelId)
+        val bytes = out.getOrNull(0) as? ByteArray
+        if (bytes == null) {
+          val code = out.getOrNull(2) as? String ?: ERR_INVALID
+          promise.reject(code, "$code: ${out.getOrNull(3) as? String ?: ""}")
+          return@execute
+        }
+        val written = fileIO.saveBytes(bytes, destination, overwrite, createParentDirectories)
+        written.putInt("pages", (out.getOrNull(1) as? Number)?.toInt() ?: 0)
+        promise.resolve(written)
+      } catch (e: Exception) {
+        Log.e(TAG, "saveReaderRecognition failed", e)
+        promise.reject("ERR_READER_SIDECAR_WRITE", e.message, e)
+      }
+    }
+  }
+
+  /** Reads the sidecar from `source` and attaches it natively; resolves the summary JSON. */
+  fun loadReaderRecognition(documentId: String, source: ReadableMap, modelId: String, promise: Promise) {
+    executor.execute {
+      try {
+        val bytes = fileIO.readAllBytes(source)
+        settle(ReaderNative.nativeLoadRecognition(documentId, bytes, modelId), promise)
+      } catch (e: Exception) {
+        Log.e(TAG, "loadReaderRecognition failed", e)
+        promise.reject("ERR_READER_SIDECAR_INVALID", e.message, e)
+      }
+    }
+  }
+
   fun getReaderToc(documentId: String, promise: Promise) =
     run(promise) { ReaderNative.nativeGetToc(documentId) }
 

@@ -1,6 +1,7 @@
 #include "ReaderRegistry.h"
 
 #include "ReaderOcrText.h"
+#include "ReaderSidecar.h"
 #include "ReaderTextHash.h"
 #include "../textbuffer/TxtUtf16.h"
 
@@ -399,6 +400,59 @@ std::string ReaderRegistry::CreatePages(const std::string& imageBufferId,
   return id;
 }
 
+namespace {
+
+/**
+ * A copy of `cur` where each parent in `byParent` (block ID → children with
+ * text, type, rect, lines) gets those children right after it, replacing its
+ * earlier OCR children (`{id}.t{j}`). Children get their IDs and textHash; a
+ * section without a title takes its first child heading.
+ */
+std::shared_ptr<ReaderSnapshot> WithChildren(
+    const ReaderSnapshot& cur, std::unordered_map<std::string, std::vector<ReaderBlock>>* byParent,
+    int* count) {
+  auto next = std::make_shared<ReaderSnapshot>(cur);
+  next->blocks.clear();
+  next->blocks.reserve(cur.blocks.size());
+  for (size_t s = 0; s < cur.sections.size(); ++s) {
+    ReaderSection& sec = next->sections[s];
+    const int before = static_cast<int>(next->blocks.size());
+    std::string replaced;  // parent whose old OCR children are skipped
+    for (int k = 0; k < cur.sections[s].blockCount; ++k) {
+      const ReaderBlock& b = cur.blocks[cur.sections[s].firstBlock + k];
+      if (!replaced.empty() && b.id.rfind(replaced + ".t", 0) == 0) continue;
+      replaced.clear();
+      next->blocks.push_back(b);
+      auto f = byParent->find(b.id);
+      if (f == byParent->end()) continue;
+      replaced = b.id;
+      for (size_t j = 0; j < f->second.size(); ++j) {
+        ReaderBlock c = std::move(f->second[j]);
+        c.id = b.id + ".t" + std::to_string(j);
+        c.fromFile = false;
+        c.utf16Start = c.utf16End = 0;  // text lives in its own source, not the document's buffer
+        const std::string t = c.textSource ? c.textSource->substr(
+                                                 static_cast<size_t>(c.textByteStart),
+                                                 static_cast<size_t>(c.textByteEnd - c.textByteStart))
+                                           : std::string();
+        c.textHash = TextHashV1(t);
+        if (sec.titleSource == "none" && c.type == ReaderBlockType::Heading && !t.empty()) {
+          sec.title = t;
+          sec.titleSource = "heading";
+        }
+        next->blocks.push_back(std::move(c));
+        if (count) ++*count;
+      }
+    }
+    sec.blockCount = static_cast<int>(next->blocks.size()) - before;
+  }
+  ReindexSnapshot(next.get());
+  next->revision = cur.revision + 1;
+  return next;
+}
+
+}  // namespace
+
 bool ReaderRegistry::AttachPageText(const std::string& documentId,
                                     std::shared_ptr<TxtOfflineEntry> ocr, int* attached,
                                     ReaderError* err) {
@@ -430,63 +484,80 @@ bool ReaderRegistry::AttachPageText(const std::string& documentId,
            "OCR text was recognized on another image buffer (" + layout->imageBufferId + ")");
     return false;
   }
-  auto next = std::make_shared<ReaderSnapshot>(cur);
-  next->blocks.clear();
-  next->blocks.reserve(cur.blocks.size());
-  int count = 0;
-  for (size_t s = 0; s < cur.sections.size(); ++s) {
-    ReaderSection& sec = next->sections[s];
-    const int before = static_cast<int>(next->blocks.size());
-    std::string replaced;  // parent whose old OCR children are skipped
-    for (int k = 0; k < cur.sections[s].blockCount; ++k) {
-      const ReaderBlock& b = cur.blocks[cur.sections[s].firstBlock + k];
-      if (!replaced.empty() && b.id.rfind(replaced + ".t", 0) == 0) continue;
-      replaced.clear();
-      next->blocks.push_back(b);
-      if (b.type != ReaderBlockType::Page && b.type != ReaderBlockType::Image) continue;
-      auto f = byFrame.find(b.imageFrame);
-      if (b.imageFrame < 0 || f == byFrame.end()) continue;
-      replaced = b.id;
-      std::vector<ReaderBlock> children;
-      children.reserve(f->second.size());
-      for (size_t j = 0; j < f->second.size(); ++j) {
-        const OcrTextBlock& o = f->second[j];
-        ReaderBlock c;
-        c.id = b.id + ".t" + std::to_string(j);
-        c.fromFile = false;
-        c.type = o.type;
-        c.headingLevel = o.headingLevel;
-        c.flags = o.flags;
-        c.hasRect = o.hasRect;
-        for (int r = 0; r < 4; ++r) c.rect[r] = o.rect[r];
-        c.utf16Start = o.utf16Start;
-        c.utf16End = o.utf16End;
-        c.lines = o.lines;
-        children.push_back(std::move(c));
-      }
-      std::vector<ReaderBlock*> ptrs;
-      for (auto& c : children) ptrs.push_back(&c);
-      ResolveByteRanges(source, &ptrs);
-      for (auto& c : children) {
-        // Ranges point into the OCR buffer, not the document's text.
-        c.utf16Start = c.utf16End = 0;
-        const std::string t = c.textSource->substr(static_cast<size_t>(c.textByteStart),
-                                                   static_cast<size_t>(c.textByteEnd - c.textByteStart));
-        c.textHash = TextHashV1(t);
-        if (sec.titleSource == "none" && c.type == ReaderBlockType::Heading && !t.empty()) {
-          sec.title = t;
-          sec.titleSource = "heading";
-        }
-        next->blocks.push_back(std::move(c));
-        ++count;
-      }
+  // Children per page / image block that shows a recognized frame.
+  std::unordered_map<std::string, std::vector<ReaderBlock>> byParent;
+  for (const ReaderBlock& b : cur.blocks) {
+    if (b.type != ReaderBlockType::Page && b.type != ReaderBlockType::Image) continue;
+    auto f = byFrame.find(b.imageFrame);
+    if (b.imageFrame < 0 || f == byFrame.end()) continue;
+    std::vector<ReaderBlock> children;
+    children.reserve(f->second.size());
+    for (const OcrTextBlock& o : f->second) {
+      ReaderBlock c;
+      c.type = o.type;
+      c.headingLevel = o.headingLevel;
+      c.flags = o.flags;
+      c.hasRect = o.hasRect;
+      for (int r = 0; r < 4; ++r) c.rect[r] = o.rect[r];
+      c.utf16Start = o.utf16Start;
+      c.utf16End = o.utf16End;
+      c.lines = o.lines;
+      children.push_back(std::move(c));
     }
-    sec.blockCount = static_cast<int>(next->blocks.size()) - before;
+    std::vector<ReaderBlock*> ptrs;
+    for (auto& c : children) ptrs.push_back(&c);
+    ResolveByteRanges(source, &ptrs);
+    byParent[b.id] = std::move(children);
   }
-  ReindexSnapshot(next.get());
-  next->revision = cur.revision + 1;
+  int count = 0;
+  auto next = WithChildren(cur, &byParent, &count);
+  for (const ReaderBlock& b : cur.blocks) {
+    if ((b.type == ReaderBlockType::Page || b.type == ReaderBlockType::Image) &&
+        byFrame.count(b.imageFrame) && b.imageFrame >= 0) {
+      next->ocrFamily[b.id] = layout->family;
+    }
+  }
   it->second = std::move(next);
   if (attached) *attached = count;
+  return true;
+}
+
+bool ReaderRegistry::AttachRecognition(const std::string& documentId, SidecarContent content,
+                                       const std::string& expectModelId, int* pages,
+                                       ReaderError* err) {
+  if (pages) *pages = 0;
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = docs_.find(documentId);
+  if (it == docs_.end()) {
+    SetErr(err, kErrReaderNotFound, "Reader document not found: " + documentId);
+    return false;
+  }
+  const ReaderSnapshot& cur = *it->second;
+  if (content.documentKey != cur.documentKey) {
+    SetErr(err, kErrReaderSidecarMismatch, "The sidecar belongs to another document");
+    return false;
+  }
+  if (!expectModelId.empty() && !content.modelId.empty() && expectModelId != content.modelId) {
+    SetErr(err, kErrReaderSidecarMismatch,
+           "The sidecar was recognized with another model (" + content.modelId + ")");
+    return false;
+  }
+  std::unordered_map<std::string, std::vector<ReaderBlock>> byParent;
+  std::unordered_map<std::string, std::string> families;
+  for (SidecarPage& p : content.pages) {
+    const int parent = cur.BlockIndex(p.parentBlockId);
+    if (parent < 0 || cur.blocks[parent].imageFrame != p.frame) {
+      SetErr(err, kErrReaderSidecarMismatch,
+             "The sidecar's page " + p.parentBlockId + " is not in this document");
+      return false;
+    }
+    families[p.parentBlockId] = p.family;
+    byParent[p.parentBlockId] = std::move(p.blocks);
+  }
+  auto next = WithChildren(cur, &byParent, nullptr);
+  for (auto& [id, family] : families) next->ocrFamily[id] = family;
+  if (pages) *pages = static_cast<int>(families.size());
+  it->second = std::move(next);
   return true;
 }
 

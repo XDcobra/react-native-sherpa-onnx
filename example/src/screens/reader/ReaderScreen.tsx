@@ -17,8 +17,10 @@ import {
   getReaderBlocks,
   insertSection,
   loadReaderDocument,
+  loadReaderRecognition,
   ReaderView,
   recognizeReaderPages,
+  saveReaderRecognition,
   releaseReaderDocument,
   removeSection,
   type ReaderBlock,
@@ -270,6 +272,43 @@ export default function ReaderScreen() {
     },
     [direction, ocr.engineRef, position]
   );
+
+  // Recognized text is saved per book (documentKey) in the app's documents folder.
+  const sidecarFor = (d: ReaderDocument) => ({
+    kind: 'app' as const,
+    base: 'documents' as const,
+    path: `reader-ocr-${d.documentKey.slice(0, 16)}.bin`,
+  });
+
+  const saveText = useCallback(async () => {
+    const current = docRef.current;
+    if (!current) return;
+    try {
+      const r = await saveReaderRecognition(current, sidecarFor(current), {
+        modelId: ocr.initializedFolder ?? undefined,
+        overwrite: true,
+        createParentDirectories: true,
+      });
+      setOcrStatus(`Saved the text of ${r.pages} pages.`);
+    } catch (err: unknown) {
+      setOcrStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, [ocr.initializedFolder]);
+
+  const loadText = useCallback(async () => {
+    const current = docRef.current;
+    if (!current) return;
+    try {
+      const next = await loadReaderRecognition(current, sidecarFor(current));
+      if (docRef.current?.id !== next.id) return;
+      docRef.current = next;
+      textsRef.current = null;
+      setDoc(next);
+      setOcrStatus('Loaded the saved text: no OCR needed.');
+    } catch (err: unknown) {
+      setOcrStatus(err instanceof Error ? err.message : String(err));
+    }
+  }, []);
 
   // ---- Open / close ----
 
@@ -750,6 +789,26 @@ export default function ReaderScreen() {
                     }}
                   >
                     <Text style={styles.actionButtonText}>Whole book</Text>
+                  </Pressable>
+                  <Pressable
+                    testID="reader-ocr-save"
+                    style={[styles.actionButton, ocrBusy && styles.pressed]}
+                    disabled={ocrBusy}
+                    onPress={() => {
+                      saveText().catch(() => {});
+                    }}
+                  >
+                    <Text style={styles.actionButtonText}>Save</Text>
+                  </Pressable>
+                  <Pressable
+                    testID="reader-ocr-load"
+                    style={[styles.actionButton, ocrBusy && styles.pressed]}
+                    disabled={ocrBusy}
+                    onPress={() => {
+                      loadText().catch(() => {});
+                    }}
+                  >
+                    <Text style={styles.actionButtonText}>Load</Text>
                   </Pressable>
                   {ocrBusy ? (
                     <Pressable

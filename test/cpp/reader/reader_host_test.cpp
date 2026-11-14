@@ -8,6 +8,7 @@
 #include "ReaderLayout.h"
 #include "ReaderOcrText.h"
 #include "ReaderRegistry.h"
+#include "ReaderSidecar.h"
 #include "ReaderTextHash.h"
 #include "ReaderTextSlice.h"
 #include "ReaderTracker.h"
@@ -726,6 +727,78 @@ TEST(ReaderHighlightRects, OcrLinesThenBlockThenPage) {
   const auto page = TextRangeRects(copy, para, 0, 5);
   ASSERT_EQ(page.size(), 1u);
   EXPECT_EQ(page[0].w, 1.f);
+  reg.Release(id);
+}
+
+// ---- Sidecar: save and load recognized pages ------------------------------
+
+TEST(ReaderSidecar, RoundTripRestoresTheSameBlocks) {
+  auto& reg = ReaderRegistry::Instance();
+  ReaderError err;
+  const std::string id = CreateTwoPages("img_off_side");
+  ASSERT_TRUE(reg.AttachPageText(id, OcrEntry("img_off_side"), nullptr, &err));
+  auto snap = reg.Snapshot(id);
+  const SidecarContent saved = CollectRecognition(*snap, "ppocrv6-tiny");
+  ASSERT_EQ(saved.pages.size(), 2u);
+  EXPECT_EQ(saved.pages[0].family, "ppocr");
+  const std::vector<uint8_t> bytes = EncodeSidecar(saved);
+
+  // A fresh document of the same file (same documentKey) gets the text back.
+  const std::string other = CreateTwoPages("img_off_side2");
+  SidecarContent loaded;
+  std::string error;
+  ASSERT_TRUE(DecodeSidecar(bytes.data(), bytes.size(), &loaded, &error)) << error;
+  int pages = 0;
+  ASSERT_TRUE(reg.AttachRecognition(other, loaded, "ppocrv6-tiny", &pages, &err)) << err.message;
+  EXPECT_EQ(pages, 2);
+  auto restored = reg.Snapshot(other);
+  EXPECT_EQ(restored->revision, 2);
+  ASSERT_EQ(restored->blocks.size(), snap->blocks.size());
+  for (size_t i = 0; i < snap->blocks.size(); ++i) {
+    const auto& a = snap->blocks[i];
+    const auto& b = restored->blocks[i];
+    EXPECT_EQ(a.id, b.id);
+    EXPECT_EQ(a.type, b.type);
+    EXPECT_EQ(a.flags, b.flags);
+    EXPECT_EQ(a.textHash, b.textHash);
+    EXPECT_EQ(snap->BlockText(static_cast<int>(i)), restored->BlockText(static_cast<int>(i)));
+    EXPECT_EQ(a.lines.size(), b.lines.size());
+    if (a.hasRect) EXPECT_FLOAT_EQ(a.rect[1], b.rect[1]);
+  }
+  EXPECT_EQ(restored->sections[0].title, "The Harbour");
+  reg.Release(id);
+  reg.Release(other);
+}
+
+TEST(ReaderSidecar, RejectsOtherDocumentsModelsAndBrokenFiles) {
+  auto& reg = ReaderRegistry::Instance();
+  ReaderError err;
+  const std::string id = CreateTwoPages("img_off_side3");
+  ASSERT_TRUE(reg.AttachPageText(id, OcrEntry("img_off_side3"), nullptr, &err));
+  SidecarContent saved = CollectRecognition(*reg.Snapshot(id), "model-a");
+  auto bytes = EncodeSidecar(saved);
+  SidecarContent loaded;
+  std::string error;
+  ASSERT_TRUE(DecodeSidecar(bytes.data(), bytes.size(), &loaded, &error));
+
+  EXPECT_FALSE(reg.AttachRecognition(id, loaded, "model-b", nullptr, &err));
+  EXPECT_EQ(err.code, kErrReaderSidecarMismatch);
+  SidecarContent otherKey = loaded;
+  otherKey.documentKey = "another-file";
+  EXPECT_FALSE(reg.AttachRecognition(id, otherKey, "", nullptr, &err));
+  EXPECT_EQ(err.code, kErrReaderSidecarMismatch);
+  SidecarContent otherPage = loaded;
+  otherPage.pages[0].parentBlockId = "s9.b0";
+  EXPECT_FALSE(reg.AttachRecognition(id, otherPage, "", nullptr, &err));
+  EXPECT_EQ(err.code, kErrReaderSidecarMismatch);
+  EXPECT_EQ(reg.Snapshot(id)->revision, 2) << "nothing attached on a mismatch";
+
+  // Truncated, wrong magic, empty.
+  EXPECT_FALSE(DecodeSidecar(bytes.data(), bytes.size() - 3, &loaded, &error));
+  auto bad = bytes;
+  bad[0] = 'X';
+  EXPECT_FALSE(DecodeSidecar(bad.data(), bad.size(), &loaded, &error));
+  EXPECT_FALSE(DecodeSidecar(nullptr, 0, &loaded, &error));
   reg.Release(id);
 }
 

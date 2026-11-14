@@ -214,6 +214,33 @@ bool BridgeCreateTextSlice(const std::string& documentId, const std::string& fro
   return true;
 }
 
+bool BridgeEncodeRecognition(const std::string& documentId, const std::string& modelId,
+                             std::vector<uint8_t>* bytes, int* pages, ReaderError* err) {
+  std::shared_ptr<const ReaderSnapshot> snap;
+  if (!SnapshotOrError(documentId, &snap, err)) return false;
+  const SidecarContent content = CollectRecognition(*snap, modelId);
+  if (pages) *pages = static_cast<int>(content.pages.size());
+  *bytes = EncodeSidecar(content);
+  return true;
+}
+
+bool BridgeLoadRecognition(const std::string& documentId, const uint8_t* data, size_t size,
+                           const std::string& modelId, std::string* json, ReaderError* err) {
+  SidecarContent content;
+  std::string error;
+  if (!DecodeSidecar(data, size, &content, &error)) {
+    err->code = kErrReaderSidecarInvalid;
+    err->message = error;
+    return false;
+  }
+  if (!ReaderRegistry::Instance().AttachRecognition(documentId, std::move(content), modelId,
+                                                    nullptr, err)) {
+    return false;
+  }
+  *json = SnapshotSummaryJson(*ReaderRegistry::Instance().Snapshot(documentId));
+  return true;
+}
+
 bool BridgeGetToc(const std::string& documentId, std::string* json, ReaderError* err) {
   std::shared_ptr<const ReaderSnapshot> snap;
   if (!SnapshotOrError(documentId, &snap, err)) return false;

@@ -67,6 +67,17 @@ bool BridgeCreateTextSlice(const std::string& documentId, const std::string& fro
                            int fromOffset, const std::string& toBlockId, int maxLength,
                            std::string* json, ReaderError* err);
 
+/**
+ * Sidecar bytes with the document's recognized pages (ReaderSidecar.h);
+ * `modelId` (optional) is stored and checked on load. `pages` = pages saved.
+ */
+bool BridgeEncodeRecognition(const std::string& documentId, const std::string& modelId,
+                             std::vector<uint8_t>* bytes, int* pages, ReaderError* err);
+
+/** Decodes sidecar bytes and attaches them to the same pages; new summary JSON. */
+bool BridgeLoadRecognition(const std::string& documentId, const uint8_t* data, size_t size,
+                           const std::string& modelId, std::string* json, ReaderError* err);
+
 /** Contents JSON (see TocJson). */
 bool BridgeGetToc(const std::string& documentId, std::string* json, ReaderError* err);
 
