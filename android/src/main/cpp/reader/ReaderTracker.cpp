@@ -75,7 +75,8 @@ std::vector<TrackerEvent> ReaderTracker::Sample(int first, int last, ScrollPhase
     v.kind = TrackerEvent::Kind::VisibleRange;
     v.first = first;
     v.last = last;
-    v.settled = phase == ScrollPhase::Idle;
+    // Layout changes (reflow, theme, data) happen at rest, so they are settled too.
+    v.settled = phase == ScrollPhase::Idle || phase == ScrollPhase::Layout;
     out.push_back(v);
   }
 

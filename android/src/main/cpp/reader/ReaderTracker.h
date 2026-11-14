@@ -33,8 +33,8 @@ struct TrackerEvent {
  * Reading-progress rules shared by the iOS and Android ReaderView
  * (docs/reader.md, "Events"). Indices are flat block indices (inserts excluded).
  *
- * - Visible range: emitted when first/last change, and on every idle sample
- *   with `settled = true`.
+ * - Visible range: emitted when first/last change (`settled` for idle and
+ *   layout samples), and on every idle sample.
  * - Jump: a move of more than N blocks without continuous visibility —
  *   while dragging ("scroll"), a fling that lands further than N blocks from
  *   where the finger lifted ("fling"), or any programmatic scroll ("scrollTo").
