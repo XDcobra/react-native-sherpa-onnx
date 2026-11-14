@@ -131,7 +131,7 @@ describe('reader api', () => {
     );
     const doc = await insertSection(SUMMARY as never, {
       after: 's0',
-      id: 'app:path-a',
+      id: 'app:guide',
       title: 'Path',
       blocks: [
         { key: 'h', type: 'heading', text: 'Path', level: 2 },
@@ -141,7 +141,7 @@ describe('reader api', () => {
     expect(mockNative.insertReaderSection).toHaveBeenCalledWith(
       'rdr_1',
       's0',
-      'app:path-a',
+      'app:guide',
       'Path',
       ['h', 'p1'],
       ['heading', 'paragraph'],
@@ -154,7 +154,7 @@ describe('reader api', () => {
   it('rejects invalid app ids and keys before native', async () => {
     const doc = SUMMARY as never;
     await expect(
-      insertSection(doc, { after: 's0', id: 'path-a', blocks: [] })
+      insertSection(doc, { after: 's0', id: 'guide', blocks: [] })
     ).rejects.toMatchObject({ code: ReaderErrorCode.INVALID_ARGUMENT });
     await expect(
       insertSection(doc, {
@@ -296,8 +296,8 @@ describe('reader api', () => {
       sectionIndex: 11,
       blockIndex: 42,
     });
-    expect(parseBlockId('app:path-a.intro')).toEqual({
-      sectionId: 'app:path-a',
+    expect(parseBlockId('app:guide.intro')).toEqual({
+      sectionId: 'app:guide',
       key: 'intro',
     });
     expect(parseBlockId('nope')).toBeNull();

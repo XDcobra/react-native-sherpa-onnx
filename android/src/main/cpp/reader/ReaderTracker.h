@@ -27,12 +27,12 @@ struct TrackerEvent {
   int from = -1;  // Jump
   int to = -1;
   int distance = 0;
-  std::string cause;  // "scroll" | "fling" | "scrollTo"
+  std::string cause;  // "scroll" | "fling" | "scrollTo" | "follow"
 };
 
 /**
  * Reading-progress rules shared by the iOS and Android ReaderView
- * (docs/reader.md, "Events"). Indices are flat block indices (inserts excluded).
+ * (docs/reader.md, "JS Events"). Indices are flat block indices (inserts excluded).
  *
  * - Visible range: emitted when first/last change (`settled` for idle and
  *   layout samples), and on every idle sample.

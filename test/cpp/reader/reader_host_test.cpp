@@ -111,7 +111,7 @@ TEST(ReaderDocument, AppSectionsInsertRemoveAndRevision) {
   auto& reg = ReaderRegistry::Instance();
   ReaderAppSectionInput in;
   in.after = "s0";
-  in.id = "app:path-a";
+  in.id = "app:guide";
   in.title = "Another way";
   in.blocks = {{"title", ReaderBlockType::Heading, "Another way", 2},
                {"p1", ReaderBlockType::Paragraph, "A new road opens.", 0}};
@@ -120,9 +120,9 @@ TEST(ReaderDocument, AppSectionsInsertRemoveAndRevision) {
   auto snap = reg.Snapshot(id);
   EXPECT_EQ(snap->revision, 2);
   ASSERT_EQ(snap->sections.size(), 4u);
-  EXPECT_EQ(snap->sections[1].id, "app:path-a");
+  EXPECT_EQ(snap->sections[1].id, "app:guide");
   EXPECT_EQ(snap->sections[1].titleSource, "app");
-  const int p1 = snap->BlockIndex("app:path-a.p1");
+  const int p1 = snap->BlockIndex("app:guide.p1");
   ASSERT_GE(p1, 0);
   EXPECT_EQ(p1, snap->sections[0].blockCount + 1);
   EXPECT_EQ(snap->BlockText(p1), "A new road opens.");
@@ -141,11 +141,11 @@ TEST(ReaderDocument, AppSectionsInsertRemoveAndRevision) {
   EXPECT_FALSE(reg.InsertSection(id, bad, &err));
   EXPECT_FALSE(reg.RemoveSection(id, "s0", &err));
 
-  ASSERT_TRUE(reg.RemoveSection(id, "app:path-a", &err));
+  ASSERT_TRUE(reg.RemoveSection(id, "app:guide", &err));
   snap = reg.Snapshot(id);
   EXPECT_EQ(snap->revision, 3);
   EXPECT_EQ(snap->sections.size(), 3u);
-  EXPECT_LT(snap->BlockIndex("app:path-a.p1"), 0);
+  EXPECT_LT(snap->BlockIndex("app:guide.p1"), 0);
   reg.Release(id);
 }
 

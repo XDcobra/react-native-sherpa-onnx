@@ -18,7 +18,7 @@ enum class ReaderBlockType : int { Paragraph = 0, Heading = 1, Image = 2, Separa
 const char* ReaderBlockTypeName(ReaderBlockType t);
 
 struct ReaderBlock {
-  std::string id;  // "s3.b12" | "app:path-a.intro"
+  std::string id;  // "s3.b12" | "app:guide.intro"
   int section = 0;  // index into ReaderSnapshot::sections
   ReaderBlockType type = ReaderBlockType::Paragraph;
   int headingLevel = 0;
@@ -34,7 +34,7 @@ struct ReaderBlock {
 };
 
 struct ReaderSection {
-  std::string id;  // "s3" | "app:path-a"
+  std::string id;  // "s3" | "app:guide"
   int sectionIndex = -1;  // file sections; -1 for app sections
   bool app = false;
   std::string kind;  // "text" | "image"
