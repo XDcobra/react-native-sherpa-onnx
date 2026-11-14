@@ -91,7 +91,35 @@ bool CheckEncryption(ArchiveReader& ar, std::string* err_code,
 struct ManifestItem {
   std::string href;
   std::string media_type;
+  std::string properties;
 };
+
+/** OPF data beyond manifest + spine (reader structure). */
+struct PackageMeta {
+  std::string toc_ncx_id;  // spine@toc (EPUB 2)
+  std::string title;
+  std::string creator;
+  std::string language;
+};
+
+/** Collapsed text content of an XML node (whitespace runs → one space, trimmed). */
+std::string CollapsedText(pugi::xml_node n) {
+  std::string raw;
+  if (!n) return raw;
+  for (pugi::xpath_node xn : n.select_nodes(".//text()")) {
+    raw += xn.node().value();
+  }
+  std::string out;
+  for (char c : raw) {
+    const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+    if (ws) {
+      if (!out.empty() && out.back() != ' ') out.push_back(' ');
+    } else {
+      out.push_back(c);
+    }
+  }
+  return TrimWs(out);
+}
 
 struct SpineItem {
   std::string idref;
@@ -101,7 +129,7 @@ struct SpineItem {
 bool LoadPackage(ArchiveReader& ar, std::string* opf_path,
                  std::map<std::string, ManifestItem>* manifest,
                  std::vector<SpineItem>* spine, std::string* err_code,
-                 std::string* err_message) {
+                 std::string* err_message, PackageMeta* meta = nullptr) {
   std::vector<uint8_t> container;
   if (!ar.ReadNamed("META-INF/container.xml", &container, err_code,
                     err_message)) {
@@ -149,6 +177,7 @@ bool LoadPackage(ArchiveReader& ar, std::string* opf_path,
     ManifestItem mi;
     mi.href = XmlAttr(item, "href");
     mi.media_type = XmlAttr(item, "media-type");
+    mi.properties = XmlAttr(item, "properties");
     const std::string id = XmlAttr(item, "id");
     if (!id.empty()) (*manifest)[id] = std::move(mi);
   }
@@ -160,29 +189,188 @@ bool LoadPackage(ArchiveReader& ar, std::string* opf_path,
     si.linear = !(lin == "no" || lin == "NO");
     if (!si.idref.empty()) spine->push_back(std::move(si));
   }
+  if (meta) {
+    meta->toc_ncx_id = XmlAttr(sp, "toc");
+    pugi::xml_node md = XmlSelect(pkg, "metadata");
+    if (md) {
+      meta->title = CollapsedText(XmlSelect(md, "title"));
+      meta->creator = CollapsedText(XmlSelect(md, "creator"));
+      meta->language = CollapsedText(XmlSelect(md, "language"));
+    }
+  }
   return true;
 }
 
-void AppendBlocks(ExtractTextResult* r, const HtmlExtract& hx, int section_index,
-                  const std::string& href, int* utf16_off) {
-  for (const auto& block : hx.blocks) {
-    if (*utf16_off > 0) {
-      r->text += "\n\n";
-      *utf16_off += 2;
-    }
-    const int start = *utf16_off;
-    r->text += block;
-    const int len = Utf16LengthOfUtf8(block);
-    *utf16_off += len;
-    DocTextSpan span;
-    span.utf16_start = start;
-    span.utf16_end = start + len;
-    span.level = "block";
-    span.section_index = section_index;
-    span.href = href;
-    r->spans.push_back(std::move(span));
+bool HasProperty(const std::string& props, const char* name) {
+  size_t i = 0;
+  const std::string want = name;
+  while (i < props.size()) {
+    while (i < props.size() && props[i] == ' ') ++i;
+    size_t j = i;
+    while (j < props.size() && props[j] != ' ') ++j;
+    if (props.compare(i, j - i, want) == 0) return true;
+    i = j;
   }
+  return false;
 }
+
+/**
+ * Section titles from the table of contents: EPUB 3 nav document
+ * (nav[epub:type~=toc], else the first nav) or the EPUB 2 NCX. Keyed by archive
+ * path without fragment; the first entry per file wins.
+ */
+std::map<std::string, std::string> LoadTocTitles(
+    ArchiveReader& ar, const std::string& opf_dir,
+    const std::map<std::string, ManifestItem>& manifest, const PackageMeta& meta) {
+  std::map<std::string, std::string> titles;
+  auto add = [&](const std::string& base_dir, const std::string& href,
+                 const std::string& label) {
+    if (label.empty()) return;
+    const std::string path = JoinHref(base_dir, href);
+    if (!path.empty() && titles.find(path) == titles.end()) titles[path] = label;
+  };
+  std::string err_code;
+  std::string err_msg;
+  for (const auto& kv : manifest) {
+    if (!HasProperty(kv.second.properties, "nav")) continue;
+    const std::string nav_path = JoinHref(opf_dir, kv.second.href);
+    std::vector<uint8_t> bytes;
+    if (!ar.ReadNamed(nav_path, &bytes, &err_code, &err_msg)) break;
+    pugi::xml_document doc;
+    if (LoadXml(bytes, &doc) != pugi::status_ok) break;
+    pugi::xml_node toc_nav;
+    for (pugi::xpath_node xn : doc.select_nodes("//*[local-name()='nav']")) {
+      const std::string type = XmlAttr(xn.node(), "type");
+      if (HasProperty(type, "toc")) {
+        toc_nav = xn.node();
+        break;
+      }
+      if (!toc_nav) toc_nav = xn.node();
+    }
+    if (toc_nav) {
+      const std::string nav_dir = DirnameOf(nav_path);
+      for (pugi::xpath_node xa : toc_nav.select_nodes(".//*[local-name()='a']")) {
+        add(nav_dir, XmlAttr(xa.node(), "href"), CollapsedText(xa.node()));
+      }
+    }
+    break;
+  }
+  if (!titles.empty()) return titles;
+  auto ncx = manifest.find(meta.toc_ncx_id);
+  if (ncx == manifest.end()) {
+    for (auto it = manifest.begin(); it != manifest.end(); ++it) {
+      if (it->second.media_type == "application/x-dtbncx+xml") {
+        ncx = it;
+        break;
+      }
+    }
+  }
+  if (ncx == manifest.end()) return titles;
+  const std::string ncx_path = JoinHref(opf_dir, ncx->second.href);
+  std::vector<uint8_t> bytes;
+  if (!ar.ReadNamed(ncx_path, &bytes, &err_code, &err_msg)) return titles;
+  pugi::xml_document doc;
+  if (LoadXml(bytes, &doc) != pugi::status_ok) return titles;
+  const std::string ncx_dir = DirnameOf(ncx_path);
+  for (pugi::xpath_node xn : doc.select_nodes("//*[local-name()='navPoint']")) {
+    pugi::xml_node label = XmlSelect(XmlChild(xn.node(), "navLabel"), "text");
+    pugi::xml_node content = XmlChild(xn.node(), "content");
+    add(ncx_dir, XmlAttr(content, "src"), CollapsedText(label));
+  }
+  return titles;
+}
+
+/** Builds the reading structure for one section and appends its text + spans. */
+void AppendSection(ExtractTextResult* r, TxtStructure* st, const HtmlExtract* hx,
+                   int section_index, const std::string& href, const std::string& kind,
+                   const std::string& raw_image_href,
+                   const std::map<std::string, std::string>& toc, int* utf16_off) {
+  TxtStructSection sec;
+  sec.sectionIndex = section_index;
+  sec.href = href;
+  sec.kind = kind;
+  sec.firstBlock = static_cast<int>(st->blocks.size());
+  sec.utf16Start = *utf16_off;
+  sec.utf16End = *utf16_off;
+  bool has_text = false;
+  std::string first_heading;
+  const std::string base_dir = DirnameOf(href);
+
+  auto push_block = [&](TxtStructBlock b) {
+    b.sectionIndex = section_index;
+    b.blockIndex = static_cast<int>(st->blocks.size()) - sec.firstBlock;
+    st->blocks.push_back(std::move(b));
+  };
+
+  if (!raw_image_href.empty()) {
+    TxtStructBlock b;
+    b.type = TxtBlockType::Image;
+    b.imageHref = raw_image_href;
+    b.utf16Start = b.utf16End = *utf16_off;
+    push_block(std::move(b));
+  } else if (hx) {
+    for (const HtmlBlock& item : hx->items) {
+      TxtStructBlock b;
+      if (item.kind == HtmlBlockKind::Image || item.kind == HtmlBlockKind::Separator) {
+        if (item.kind == HtmlBlockKind::Image) {
+          b.type = TxtBlockType::Image;
+          b.imageHref = JoinHref(base_dir, item.image_src);
+          if (b.imageHref.empty()) continue;  // remote or empty src
+          b.alt = item.alt;
+          b.hasAlt = item.has_alt;
+        } else {
+          b.type = TxtBlockType::Separator;
+        }
+        b.utf16Start = b.utf16End = *utf16_off;
+        push_block(std::move(b));
+        continue;
+      }
+      if (*utf16_off > 0) {
+        r->text += "\n\n";
+        *utf16_off += 2;
+      }
+      const int start = *utf16_off;
+      r->text += item.text;
+      const int len = Utf16LengthOfUtf8(item.text);
+      *utf16_off += len;
+      DocTextSpan span;
+      span.utf16_start = start;
+      span.utf16_end = start + len;
+      span.level = "block";
+      span.section_index = section_index;
+      span.href = href;
+      r->spans.push_back(std::move(span));
+
+      b.type = item.kind == HtmlBlockKind::Heading ? TxtBlockType::Heading
+                                                   : TxtBlockType::Paragraph;
+      b.headingLevel = item.level;
+      b.utf16Start = start;
+      b.utf16End = start + len;
+      if (!has_text) sec.utf16Start = start;
+      sec.utf16End = start + len;
+      has_text = true;
+      if (first_heading.empty() && b.type == TxtBlockType::Heading) {
+        first_heading = item.text;
+      }
+      push_block(std::move(b));
+    }
+  }
+  if (!has_text) sec.utf16Start = sec.utf16End = *utf16_off;
+  sec.blockCount = static_cast<int>(st->blocks.size()) - sec.firstBlock;
+
+  auto t = toc.find(href);
+  if (t != toc.end()) {
+    sec.title = t->second;
+    sec.titleSource = "toc";
+  } else if (!first_heading.empty()) {
+    std::string h = first_heading;
+    std::replace(h.begin(), h.end(), '\n', ' ');
+    sec.title = h;
+    sec.titleSource = "heading";
+  }
+  st->sections.push_back(std::move(sec));
+}
+
 
 }  // namespace
 
@@ -207,13 +395,21 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
   std::string opf_path;
   std::map<std::string, ManifestItem> manifest;
   std::vector<SpineItem> spine;
-  if (!LoadPackage(ar, &opf_path, &manifest, &spine, &err_code, &err_msg)) {
+  PackageMeta meta;
+  if (!LoadPackage(ar, &opf_path, &manifest, &spine, &err_code, &err_msg,
+                   &meta)) {
     r.error_code = err_code.empty() ? kErrParseFailed : err_code;
     r.error_message = err_msg;
     return r;
   }
   const std::string opf_dir = DirnameOf(opf_path);
   DOC_LOGI("epub spine=%zu opf=%s", spine.size(), opf_path.c_str());
+  const std::map<std::string, std::string> toc =
+      LoadTocTitles(ar, opf_dir, manifest, meta);
+  auto structure = std::make_shared<TxtStructure>();
+  structure->title = meta.title;
+  structure->creator = meta.creator;
+  structure->language = meta.language;
 
   int utf16 = 0;
   int section_index = 0;
@@ -246,6 +442,8 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
       sec.kind = "image";
       r.sections.push_back(sec);
       r.image_only_sections.push_back(sec);
+      AppendSection(&r, structure.get(), nullptr, section_index, href, "image", href,
+                    toc, &utf16);
       ++section_index;
       continue;
     }
@@ -266,11 +464,14 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
       sec.kind = "image";
       r.sections.push_back(sec);
       r.image_only_sections.push_back(sec);
+      AppendSection(&r, structure.get(), &hx, section_index, href, "image", "", toc,
+                    &utf16);
       DOC_LOGI("image-only section=%d href=%s", section_index, href.c_str());
     } else {
       sec.kind = "text";
       r.sections.push_back(sec);
-      AppendBlocks(&r, hx, section_index, href, &utf16);
+      AppendSection(&r, structure.get(), &hx, section_index, href, "text", "", toc,
+                    &utf16);
     }
     ++section_index;
   }
@@ -283,6 +484,7 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
       return r;
     }
   }
+  r.structure = std::move(structure);
   r.ok = true;
   return r;
 }

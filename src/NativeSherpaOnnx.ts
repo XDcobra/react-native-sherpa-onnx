@@ -1358,6 +1358,23 @@ export interface Spec extends TurboModule {
       kind: string;
     }>;
     spatialSpanCount: number;
+    /** EPUB reading structure summary (blocks stay native on the text buffer). */
+    structure?: {
+      version: number;
+      blockCount: number;
+      sections: Array<{
+        sectionIndex: number;
+        href: string;
+        kind: string;
+        title?: string;
+        titleSource: string;
+        utf16Start: number;
+        utf16End: number;
+        firstBlock: number;
+        blockCount: number;
+      }>;
+      metadata: { title?: string; creator?: string; language?: string };
+    };
   }>;
 
   /**

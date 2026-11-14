@@ -429,6 +429,186 @@ def make_mobi(
     return bytes(pdb)
 
 
+# ---------------------------------------------------------------------------
+# Reader structure fixtures (python3 gen_fixtures.py --reader writes only these).
+# Fixed zip timestamps keep the bytes (and so the SHA-256 documentKey) stable.
+
+FIXED_ZIP_TIME = (2026, 1, 1, 0, 0, 0)
+
+
+def write_epub_fixed(path: Path, files: list[tuple[str, bytes]]) -> None:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        info = zipfile.ZipInfo("mimetype", date_time=FIXED_ZIP_TIME)
+        info.compress_type = zipfile.ZIP_STORED
+        zf.writestr(info, "application/epub+zip")
+        for name, data in files:
+            info = zipfile.ZipInfo(name, date_time=FIXED_ZIP_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, data)
+    path.write_bytes(buf.getvalue())
+
+
+def reader_opf(items: str, spine: str, toc_attr: str = "") -> str:
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:uuid:reader-fixture</dc:identifier>
+    <dc:title>  The   Reader
+      Fixture </dc:title>
+    <dc:creator>Ada Example</dc:creator>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+{items}
+  </manifest>
+  <spine{toc_attr}>
+{spine}
+  </spine>
+</package>
+"""
+
+
+STRUCT_NAV = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body>
+  <nav epub:type="landmarks"><ol><li><a href="text/ch1.xhtml">Landmark, not a title</a></li></ol></nav>
+  <nav epub:type="toc"><ol>
+    <li><a href="text/ch1.xhtml#start">Chapter   One</a></li>
+    <li><a href="text/ch1.xhtml#later">Ignored second entry</a></li>
+    <li><a href="images/plate.png">The Plate</a></li>
+  </ol></nav>
+</body></html>
+"""
+
+STRUCT_CH1 = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>ch1</title></head>
+<body>
+  <section>
+    <hgroup>
+      <h1 id="start">Chapter One</h1>
+      <h2>In which things begin</h2>
+    </hgroup>
+    <p>
+      It was a   bright cold day,
+      and the clocks were <em>striking</em> thirteen.
+    </p>
+    <p>A map: <img src="../images/map.png" alt="Map of the island"/> drawn by hand.</p>
+    <hr/>
+    <pre>  keep   this
+  spacing</pre>
+    <p id="later">Roses are red,<br/>
+      violets are blue.</p>
+  </section>
+</body></html>
+"""
+
+STRUCT_CH2 = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>ch2</title></head>
+<body>
+  <h3>A section without a TOC entry</h3>
+  <p>Second chapter text.</p>
+  <figure><img src="../images/map.png" alt=""/><figcaption>Same map again</figcaption></figure>
+</body></html>
+"""
+
+
+def structure_files() -> list[tuple[str, bytes]]:
+    items = """    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="plate" href="images/plate.png" media-type="image/png"/>
+    <item id="ch2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="map" href="images/map.png" media-type="image/png"/>"""
+    spine = """    <itemref idref="ch1"/>
+    <itemref idref="nav" linear="no"/>
+    <itemref idref="plate"/>
+    <itemref idref="ch2"/>"""
+    return [
+        ("META-INF/container.xml", CONTAINER.encode()),
+        ("OEBPS/content.opf", reader_opf(items, spine).encode()),
+        ("OEBPS/nav.xhtml", STRUCT_NAV.encode()),
+        ("OEBPS/text/ch1.xhtml", STRUCT_CH1.encode()),
+        ("OEBPS/text/ch2.xhtml", STRUCT_CH2.encode()),
+        ("OEBPS/images/plate.png", PNG),
+        ("OEBPS/images/map.png", PNG),
+    ]
+
+
+NCX = """<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="p1" playOrder="1"><navLabel><text>Opening</text></navLabel><content src="a.xhtml"/>
+      <navPoint id="p1a" playOrder="2"><navLabel><text>Nested</text></navLabel><content src="a.xhtml#n"/></navPoint>
+    </navPoint>
+    <navPoint id="p2" playOrder="3"><navLabel><text>Closing</text></navLabel><content src="b.xhtml"/></navPoint>
+  </navMap>
+</ncx>
+"""
+
+
+def ncx_files() -> list[tuple[str, bytes]]:
+    items = """    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>
+    <item id="b" href="b.xhtml" media-type="application/xhtml+xml"/>"""
+    spine = """    <itemref idref="a"/>
+    <itemref idref="b"/>"""
+    page = lambda body: f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>"""
+    return [
+        ("META-INF/container.xml", CONTAINER.encode()),
+        ("OEBPS/content.opf", reader_opf(items, spine, ' toc="ncx"').encode()),
+        ("OEBPS/toc.ncx", NCX.encode()),
+        ("OEBPS/a.xhtml", page("<p>First.</p>").encode()),
+        ("OEBPS/b.xhtml", page("<p>Last.</p>").encode()),
+    ]
+
+
+def long_files(chapters: int = 40, paragraphs: int = 150) -> list[tuple[str, bytes]]:
+    """A deterministic long book for virtualization / jump tests."""
+    words = (
+        "the sea was calm and the light moved slowly over the water while the "
+        "travellers watched the coast fade into a thin grey line"
+    ).split()
+    items = ['    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
+             '    <item id="fig" href="images/figure.png" media-type="image/png"/>']
+    spine = []
+    nav = []
+    files: list[tuple[str, bytes]] = []
+    for c in range(1, chapters + 1):
+        name = f"ch{c:02d}.xhtml"
+        items.append(f'    <item id="c{c}" href="{name}" media-type="application/xhtml+xml"/>')
+        spine.append(f'    <itemref idref="c{c}"/>')
+        nav.append(f'<li><a href="{name}">Chapter {c}</a></li>')
+        body = [f"<h1>Chapter {c}</h1>"]
+        for p in range(1, paragraphs + 1):
+            n = 8 + (c * 7 + p * 13) % 40
+            text = " ".join(words[(c + p + k) % len(words)] for k in range(n))
+            body.append(f"<p>{c}.{p} {text.capitalize()}.</p>")
+            if p % 50 == 0:
+                body.append('<p><img src="images/figure.png" alt="Figure"/></p>')
+        files.append((f"OEBPS/{name}", (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>\n'
+            + "\n".join(body) + "\n</body></html>\n").encode()))
+    nav_doc = ('<?xml version="1.0" encoding="utf-8"?>\n'
+               '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+               '<body><nav epub:type="toc"><ol>' + "".join(nav) + "</ol></nav></body></html>")
+    return [
+        ("META-INF/container.xml", CONTAINER.encode()),
+        ("OEBPS/content.opf", reader_opf("\n".join(items), "\n".join(spine)).encode()),
+        ("OEBPS/nav.xhtml", nav_doc.encode()),
+        ("OEBPS/images/figure.png", PNG),
+    ] + files
+
+
+def write_reader_fixtures() -> None:
+    write_epub_fixed(HERE / "structure.epub", structure_files())
+    write_epub_fixed(HERE / "structure-ncx.epub", ncx_files())
+    write_epub_fixed(HERE / "long.epub", long_files())
+
+
 def main() -> None:
     write_epub(HERE / "mixed.epub", mixed_files())
     write_epub(
@@ -546,4 +726,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if "--reader" in sys.argv:
+        write_reader_fixtures()
+    else:
+        main()
+        write_reader_fixtures()

@@ -315,6 +315,7 @@ set(SOURCES
     document/DocFb2.cpp
     document/DocComic.cpp
     document/DocMobi.cpp
+    document/DocTextPopulate.cpp
     ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
     jni/document/sherpa-onnx-document-jni.cpp
     codec/CodecTypes.cpp

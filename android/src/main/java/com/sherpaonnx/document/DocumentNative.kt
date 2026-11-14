@@ -6,13 +6,17 @@ internal object DocumentNative {
   }
 
   /**
+   * Extracts text into the native offline text buffer [bufferId] (text, markup
+   * spans and, for EPUB, the reading structure).
    * [path] filesystem path, or empty when using [fd].
    * [fd] seekable descriptor (>=0) or -1.
-   * Returns HashMap: ok, errorCode?, errorMessage?, format, text, sections, imageOnly, spans.
+   * Returns HashMap: ok, errorCode?, errorMessage?, format, sectionCount,
+   * spatialSpanCount, sections, imageOnlySections, structure?.
    */
-  external fun nativeExtractText(
+  external fun nativeExtractTextInto(
     path: String,
     fd: Int,
+    bufferId: String,
     progress: NativeDocProgress?,
   ): HashMap<String, Any>
 

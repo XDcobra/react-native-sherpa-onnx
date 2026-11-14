@@ -22,6 +22,8 @@ import {
   DocumentErrorCode,
   type DocumentImageFormat,
   type DocumentSectionInfo,
+  type DocumentStructure,
+  type DocumentStructureSection,
   type DocumentTextFormat,
   type ExtractDocumentImagesOptions,
   type ExtractDocumentImagesResult,
@@ -106,6 +108,46 @@ function mapSection(raw: unknown, index: number): DocumentSectionInfo {
   return section;
 }
 
+function mapStructure(raw: unknown): DocumentStructure | undefined {
+  if (raw == null || typeof raw !== 'object') {
+    return undefined;
+  }
+  const r = raw as Record<string, unknown>;
+  const sections = Array.isArray(r.sections) ? r.sections : [];
+  const meta = (r.metadata ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) =>
+    typeof v === 'string' && v.length > 0 ? v : undefined;
+  const metadata: DocumentStructure['metadata'] = {};
+  if (str(meta.title)) metadata.title = str(meta.title);
+  if (str(meta.creator)) metadata.creator = str(meta.creator);
+  if (str(meta.language)) metadata.language = str(meta.language);
+  return {
+    version: Number(r.version ?? 1),
+    blockCount: Number(r.blockCount ?? 0),
+    sections: sections.map((item) => {
+      const s = (item ?? {}) as Record<string, unknown>;
+      const titleSource = s.titleSource;
+      const section: DocumentStructureSection = {
+        sectionIndex: Number(s.sectionIndex ?? 0),
+        href: String(s.href ?? ''),
+        kind: s.kind === 'image' ? 'image' : 'text',
+        titleSource:
+          titleSource === 'toc' || titleSource === 'heading'
+            ? titleSource
+            : 'none',
+        utf16Start: Number(s.utf16Start ?? 0),
+        utf16End: Number(s.utf16End ?? 0),
+        firstBlock: Number(s.firstBlock ?? 0),
+        blockCount: Number(s.blockCount ?? 0),
+      };
+      const title = str(s.title);
+      if (title) section.title = title;
+      return section;
+    }),
+    metadata,
+  };
+}
+
 function mapSections(raw: unknown): DocumentSectionInfo[] {
   if (!Array.isArray(raw)) {
     return [];
@@ -169,6 +211,7 @@ export async function extractDocumentText(
       sections,
       imageOnlySections,
       spatialSpanCount: Number(raw.spatialSpanCount ?? 0),
+      ...(raw.structure ? { structure: mapStructure(raw.structure) } : {}),
     };
   } catch (err: unknown) {
     return mapDocNativeError(err);
@@ -250,6 +293,8 @@ export type {
   DocumentImageFormat,
   DocumentSectionInfo,
   DocumentSectionKind,
+  DocumentStructure,
+  DocumentStructureSection,
   DocumentTextFormat,
   ExtractDocumentImagesOptions,
   ExtractDocumentImagesResult,

@@ -14,7 +14,6 @@ import com.sherpaonnx.fileio.FileIOHelper
 import com.sherpaonnx.fileio.SeekableOpenedSource
 import com.sherpaonnx.image.ImageBufferService
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
-import com.sherpaonnx.text.pipeline.TextSpatialSpan
 import java.util.concurrent.Executors
 
 class SherpaOnnxDocumentHelper(
@@ -80,7 +79,7 @@ class SherpaOnnxDocumentHelper(
     }
     val raw =
       try {
-        DocumentNative.nativeExtractText(opened.path, opened.fd, progress)
+        DocumentNative.nativeExtractTextInto(opened.path, opened.fd, textOutBufferId, progress)
       } finally {
         opened.close()
       }
@@ -92,35 +91,47 @@ class SherpaOnnxDocumentHelper(
       return
     }
 
-    val text = raw["text"] as? String ?: ""
-    val spanMaps = raw["spans"] as? List<*> ?: emptyList<Any>()
-    val spans = spanMaps.mapNotNull { item ->
-      (item as? Map<*, *>)?.let { mapSpan(it) }
-    }
-    try {
-      textEntry.populate(
-        text = text,
-        tokens = emptyArray(),
-        timestamps = floatArrayOf(),
-        durations = floatArrayOf(),
-        lang = "",
-        emotion = "",
-        event = "",
-        spatialSpans = spans,
-      )
-    } catch (e: IllegalStateException) {
-      promise.reject(ERR_INVALID, e.message, e)
-      return
-    }
-
     emitProgress(1, 1, "done")
     val result = Arguments.createMap()
     result.putString("format", raw["format"] as? String ?: "")
     result.putInt("sectionCount", (raw["sectionCount"] as? Number)?.toInt() ?: 0)
-    result.putInt("spatialSpanCount", spans.size)
+    result.putInt("spatialSpanCount", (raw["spatialSpanCount"] as? Number)?.toInt() ?: 0)
     result.putArray("sections", sectionArray(raw["sections"]))
     result.putArray("imageOnlySections", sectionArray(raw["imageOnlySections"]))
+    (raw["structure"] as? Map<*, *>)?.let { result.putMap("structure", toWritableMap(it)) }
     promise.resolve(result)
+  }
+
+  /** Plain JNI maps / lists (String, Number, Boolean) → React writables. */
+  private fun toWritableMap(raw: Map<*, *>): WritableMap {
+    val out = Arguments.createMap()
+    for ((k, v) in raw) {
+      val key = k as? String ?: continue
+      when (v) {
+        is String -> out.putString(key, v)
+        is Boolean -> out.putBoolean(key, v)
+        is Int -> out.putInt(key, v)
+        is Number -> out.putDouble(key, v.toDouble())
+        is Map<*, *> -> out.putMap(key, toWritableMap(v))
+        is List<*> -> out.putArray(key, toWritableArray(v))
+      }
+    }
+    return out
+  }
+
+  private fun toWritableArray(raw: List<*>): WritableArray {
+    val out = Arguments.createArray()
+    for (v in raw) {
+      when (v) {
+        is String -> out.pushString(v)
+        is Boolean -> out.pushBoolean(v)
+        is Int -> out.pushInt(v)
+        is Number -> out.pushDouble(v.toDouble())
+        is Map<*, *> -> out.pushMap(toWritableMap(v))
+        is List<*> -> out.pushArray(toWritableArray(v))
+      }
+    }
+    return out
   }
 
   private fun doExtractImages(
@@ -161,29 +172,6 @@ class SherpaOnnxDocumentHelper(
 
   private fun openSeekable(source: ReadableMap, promise: Promise): SeekableOpenedSource? =
     fileIO.openSeekableSourceOrReject(source, promise, ERR_OPEN, TAG)
-
-  private fun mapSpan(raw: Map<*, *>): TextSpatialSpan? {
-    val start = (raw["utf16Start"] as? Number)?.toInt() ?: return null
-    val end = (raw["utf16End"] as? Number)?.toInt() ?: start
-    val href = raw["href"] as? String
-    val sectionIndex = (raw["sectionIndex"] as? Number)?.toInt()
-    return TextSpatialSpan(
-      utf16Start = start,
-      utf16End = end,
-      level = raw["level"] as? String ?: "block",
-      sourceImageBufferId = "",
-      frameIndex = 0,
-      quad = FloatArray(8),
-      confidence = null,
-      origin = "markup",
-      pageNumber = null,
-      ptsMs = null,
-      pageWidth = null,
-      pageHeight = null,
-      sectionIndex = sectionIndex,
-      href = href?.takeIf { it.isNotEmpty() },
-    )
-  }
 
   private fun sectionArray(raw: Any?): WritableArray {
     val arr = Arguments.createArray()

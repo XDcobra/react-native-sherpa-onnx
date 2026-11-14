@@ -5,8 +5,10 @@
  */
 
 #include "TxtLiveEntry.h"  // TxtSpatialSpan
+#include "TxtStructure.h"
 #include "TxtUtf16.h"
 
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -22,6 +24,8 @@ struct TxtOfflineEntry {
   std::string emotion;
   std::string event;
   bool populated = false;
+  /** Reading structure (sections / blocks), set once after populate. */
+  std::shared_ptr<const TxtStructure> structure;
   /** Serialize tryPopulate so work can run outside g_txt_mutex.
    * Perf keep: docs/internal/textbuffer/performance/textbuffer-perf-plan.md (C5). */
   std::mutex populateMutex;
@@ -41,6 +45,19 @@ struct TxtOfflineEntry {
                 const std::string &l, const std::string &em, const std::string &ev,
                 const std::vector<TxtSpatialSpan> &spans = {}) {
     (void)tryPopulate(t, tok, ts, dur, l, em, ev, spans);
+  }
+
+  /** @return false unless populated and without a structure yet. */
+  bool trySetStructure(std::shared_ptr<const TxtStructure> s) {
+    std::lock_guard<std::mutex> lock(populateMutex);
+    if (!populated || structure || !s) return false;
+    structure = std::move(s);
+    return true;
+  }
+
+  std::shared_ptr<const TxtStructure> getStructure() {
+    std::lock_guard<std::mutex> lock(populateMutex);
+    return structure;
   }
 
   /** @return false if already populated (concurrent second caller). */

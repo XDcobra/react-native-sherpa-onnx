@@ -43,6 +43,33 @@ export type ExtractDocumentTextOptions = {
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };
 
+/** One section of the reading structure (reader structure v1, docs/reader.md). */
+export type DocumentStructureSection = {
+  sectionIndex: number;
+  href: string;
+  kind: DocumentSectionKind;
+  /** From the table of contents, else the first heading. */
+  title?: string;
+  titleSource: 'toc' | 'heading' | 'none';
+  /** UTF-16 range of the section's text in the buffer (empty if it has none). */
+  utf16Start: number;
+  utf16End: number;
+  /** Index of the section's first block in the structure. */
+  firstBlock: number;
+  blockCount: number;
+};
+
+/**
+ * Reading structure attached to the text buffer (EPUB). Blocks stay in native
+ * memory; read them through the reader API (`react-native-sherpa-onnx/reader`).
+ */
+export type DocumentStructure = {
+  version: number;
+  blockCount: number;
+  sections: DocumentStructureSection[];
+  metadata: { title?: string; creator?: string; language?: string };
+};
+
 export type ExtractDocumentTextResult = {
   /** Same handle as `textOut`. */
   buffer: OfflineTextBufferHandle;
@@ -51,6 +78,8 @@ export type ExtractDocumentTextResult = {
   sections: DocumentSectionInfo[];
   imageOnlySections: DocumentSectionInfo[];
   spatialSpanCount: number;
+  /** EPUB only: reading structure summary (sections, titles, metadata). */
+  structure?: DocumentStructure;
 };
 
 export type ExtractDocumentImagesOptions = {

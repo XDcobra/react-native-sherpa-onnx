@@ -230,6 +230,116 @@ TEST(DocumentExtract, EpubTextDisabledWithoutLexbor) {
 }
 #else
 
+#if defined(SHERPA_ONNX_HAS_LEXBOR) && SHERPA_ONNX_HAS_LEXBOR && defined(HAVE_LIBARCHIVE)
+namespace {
+std::string BlockText(const sherpa_onnx::document::ExtractTextResult& r,
+                      const TxtStructBlock& b) {
+  // Fixture text is ASCII, so UTF-16 offsets equal byte offsets.
+  return r.text.substr(b.utf16Start, b.utf16End - b.utf16Start);
+}
+}  // namespace
+
+TEST(DocumentStructure, EpubSectionsBlocksTitlesAndMetadata) {
+  const auto path = FixturePath("structure.epub");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  const TxtStructure& st = *r.structure;
+  EXPECT_EQ(st.version, 1);
+  EXPECT_EQ(st.title, "The Reader Fixture");
+  EXPECT_EQ(st.creator, "Ada Example");
+  EXPECT_EQ(st.language, "en");
+
+  // nav.xhtml is linear="no" and gets no index.
+  ASSERT_EQ(st.sections.size(), 3u);
+  EXPECT_EQ(st.sections[0].href, "OEBPS/text/ch1.xhtml");
+  EXPECT_EQ(st.sections[0].title, "Chapter One");  // nav toc, first entry, collapsed
+  EXPECT_EQ(st.sections[0].titleSource, "toc");
+  EXPECT_EQ(st.sections[1].kind, "image");
+  EXPECT_EQ(st.sections[1].title, "The Plate");
+  EXPECT_EQ(st.sections[2].title, "A section without a TOC entry");
+  EXPECT_EQ(st.sections[2].titleSource, "heading");
+
+  // Section 0: h1, h2, p, p, img (after its paragraph), hr, pre, p.
+  const auto& s0 = st.sections[0];
+  ASSERT_EQ(s0.blockCount, 8);
+  const auto b = [&](int i) { return st.blocks[s0.firstBlock + i]; };
+  EXPECT_EQ(b(0).type, TxtBlockType::Heading);
+  EXPECT_EQ(b(0).headingLevel, 1);
+  EXPECT_EQ(BlockText(r, b(0)), "Chapter One");
+  EXPECT_EQ(b(1).headingLevel, 2);
+  EXPECT_EQ(BlockText(r, b(2)),
+            "It was a bright cold day, and the clocks were striking thirteen.");
+  EXPECT_EQ(BlockText(r, b(3)), "A map: drawn by hand.");
+  EXPECT_EQ(b(4).type, TxtBlockType::Image);
+  EXPECT_EQ(b(4).imageHref, "OEBPS/images/map.png");
+  EXPECT_EQ(b(4).alt, "Map of the island");
+  EXPECT_EQ(b(4).utf16Start, b(4).utf16End);
+  EXPECT_EQ(b(5).type, TxtBlockType::Separator);
+  EXPECT_EQ(BlockText(r, b(6)), "keep   this\n  spacing");
+  EXPECT_EQ(BlockText(r, b(7)), "Roses are red,\nviolets are blue.");
+  for (int i = 0; i < s0.blockCount; ++i) {
+    EXPECT_EQ(b(i).blockIndex, i);
+    EXPECT_EQ(b(i).sectionIndex, 0);
+  }
+  EXPECT_EQ(s0.utf16Start, b(0).utf16Start);
+  EXPECT_EQ(s0.utf16End, b(7).utf16End);
+
+  // Raw image spine item: one image block, empty text range.
+  const auto& s1 = st.sections[1];
+  ASSERT_EQ(s1.blockCount, 1);
+  EXPECT_EQ(st.blocks[s1.firstBlock].imageHref, "OEBPS/images/plate.png");
+  EXPECT_EQ(s1.utf16Start, s1.utf16End);
+
+  // figure/figcaption are not block tags: img, then the caption as loose text.
+  const auto& s2 = st.sections[2];
+  ASSERT_EQ(s2.blockCount, 4);
+  EXPECT_EQ(st.blocks[s2.firstBlock + 2].type, TxtBlockType::Image);
+  EXPECT_TRUE(st.blocks[s2.firstBlock + 2].hasAlt);
+  EXPECT_EQ(st.blocks[s2.firstBlock + 2].alt, "");
+  EXPECT_EQ(BlockText(r, st.blocks[s2.firstBlock + 3]), "Same map again");
+
+  // Text blocks are exactly the markup spans.
+  int text_blocks = 0;
+  for (const auto& blk : st.blocks) {
+    if (blk.type == TxtBlockType::Paragraph || blk.type == TxtBlockType::Heading) ++text_blocks;
+  }
+  EXPECT_EQ(text_blocks, static_cast<int>(r.spans.size()));
+}
+
+TEST(DocumentStructure, Epub2NcxTitles) {
+  const auto path = FixturePath("structure-ncx.epub");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  ASSERT_EQ(r.structure->sections.size(), 2u);
+  EXPECT_EQ(r.structure->sections[0].title, "Opening");  // nested point does not override
+  EXPECT_EQ(r.structure->sections[1].title, "Closing");
+}
+
+TEST(DocumentStructure, LongEpubBlockCount) {
+  const auto path = FixturePath("long.epub");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  ASSERT_EQ(r.structure->sections.size(), 40u);
+  // Per chapter: heading + 150 paragraphs + 3 figures.
+  EXPECT_EQ(r.structure->blocks.size(), 40u * 154u);
+  EXPECT_EQ(r.structure->sections[39].title, "Chapter 40");
+}
+
+TEST(DocumentStructure, OnlyEpubCarriesStructure) {
+  const auto path = FixturePath("north-wind.fb2");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code;
+  EXPECT_FALSE(r.structure);
+}
+#endif
+
 TEST(DocumentExtract, MixedEpubTextAndImages) {
   const auto path = FixturePath("mixed.epub");
   RequireFixture(path);

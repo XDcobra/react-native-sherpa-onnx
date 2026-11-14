@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "DocTextPopulate.h"
 #include "DocumentExtractor.h"
 #include "ImageMmapThreshold.h"
 #include "ImageRegistry.h"
@@ -64,6 +65,51 @@ void PutBool(JNIEnv* env, jobject map, jmethodID put, const char* key,
   env->DeleteLocalRef(boolClass);
 }
 
+void PutObject(JNIEnv* env, jobject map, jmethodID put, const char* key,
+               jobject value) {
+  jstring jkey = env->NewStringUTF(key);
+  env->CallObjectMethod(map, put, jkey, value);
+  env->DeleteLocalRef(jkey);
+}
+
+/** Structure summary for JS (sections + metadata; blocks stay native). */
+jobject StructureSummary(JNIEnv* env, const TxtStructure& st) {
+  jmethodID put = nullptr;
+  jobject out = NewHashMap(env, &put);
+  PutInt(env, out, put, "version", st.version);
+  PutInt(env, out, put, "blockCount", static_cast<jint>(st.blocks.size()));
+  jclass listCls = env->FindClass("java/util/ArrayList");
+  jmethodID listInit = env->GetMethodID(listCls, "<init>", "()V");
+  jmethodID add = env->GetMethodID(listCls, "add", "(Ljava/lang/Object;)Z");
+  jobject sections = env->NewObject(listCls, listInit);
+  for (const auto& sec : st.sections) {
+    jmethodID sput = nullptr;
+    jobject m = NewHashMap(env, &sput);
+    PutInt(env, m, sput, "sectionIndex", sec.sectionIndex);
+    PutString(env, m, sput, "href", sec.href);
+    PutString(env, m, sput, "kind", sec.kind);
+    PutString(env, m, sput, "titleSource", sec.titleSource);
+    if (!sec.title.empty()) PutString(env, m, sput, "title", sec.title);
+    PutInt(env, m, sput, "utf16Start", sec.utf16Start);
+    PutInt(env, m, sput, "utf16End", sec.utf16End);
+    PutInt(env, m, sput, "firstBlock", sec.firstBlock);
+    PutInt(env, m, sput, "blockCount", sec.blockCount);
+    env->CallBooleanMethod(sections, add, m);
+    env->DeleteLocalRef(m);
+  }
+  PutObject(env, out, put, "sections", sections);
+  env->DeleteLocalRef(sections);
+  env->DeleteLocalRef(listCls);
+  jmethodID mput = nullptr;
+  jobject meta = NewHashMap(env, &mput);
+  if (!st.title.empty()) PutString(env, meta, mput, "title", st.title);
+  if (!st.creator.empty()) PutString(env, meta, mput, "creator", st.creator);
+  if (!st.language.empty()) PutString(env, meta, mput, "language", st.language);
+  PutObject(env, out, put, "metadata", meta);
+  env->DeleteLocalRef(meta);
+  return out;
+}
+
 jobject SectionList(JNIEnv* env, const std::vector<sherpa_onnx::document::DocSection>& secs) {
   jclass arrayListCls = env->FindClass("java/util/ArrayList");
   jmethodID init = env->GetMethodID(arrayListCls, "<init>", "()V");
@@ -107,8 +153,9 @@ void BindProgress(JNIEnv* env, jobject listener,
 extern "C" {
 
 JNIEXPORT jobject JNICALL
-Java_com_sherpaonnx_document_DocumentNative_nativeExtractText(
-    JNIEnv* env, jclass, jstring jpath, jint fd, jobject progress) {
+Java_com_sherpaonnx_document_DocumentNative_nativeExtractTextInto(
+    JNIEnv* env, jclass, jstring jpath, jint fd, jstring jbufferId,
+    jobject progress) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   const auto src =
@@ -116,56 +163,42 @@ Java_com_sherpaonnx_document_DocumentNative_nativeExtractText(
   sherpa_onnx::document::ExtractOptions opt;
   BindProgress(env, progress, &opt);
   const auto result = sherpa_onnx::document::ExtractDocumentText(src, opt);
-  PutBool(env, map, put, "ok", result.ok ? JNI_TRUE : JNI_FALSE);
-  if (!result.error_code.empty()) PutString(env, map, put, "errorCode", result.error_code);
-  if (!result.error_message.empty()) {
-    PutString(env, map, put, "errorMessage", result.error_message);
+  if (!result.ok) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    if (!result.error_code.empty()) PutString(env, map, put, "errorCode", result.error_code);
+    if (!result.error_message.empty()) {
+      PutString(env, map, put, "errorMessage", result.error_message);
+    }
+    return map;
   }
+  // Text, markup spans and structure go straight into the native text buffer
+  // (same path as iOS); only a summary crosses JNI.
+  std::string popErr;
+  if (!sherpa_onnx::document::PopulateTextBufferFromDocument(
+          JstringToStd(env, jbufferId), result, &popErr)) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    PutString(env, map, put, "errorCode", "ERR_DOC_INVALID_ARGUMENT");
+    PutString(env, map, put, "errorMessage",
+              popErr.empty() ? "Failed to populate text buffer" : popErr);
+    return map;
+  }
+  PutBool(env, map, put, "ok", JNI_TRUE);
   PutString(env, map, put, "format", result.format);
-  PutString(env, map, put, "text", result.text);
   PutInt(env, map, put, "sectionCount",
          static_cast<jint>(result.sections.size()));
   PutInt(env, map, put, "spatialSpanCount",
          static_cast<jint>(result.spans.size()));
-
-  jclass arrayListCls = env->FindClass("java/util/ArrayList");
-  jmethodID add =
-      env->GetMethodID(arrayListCls, "add", "(Ljava/lang/Object;)Z");
   jobject sections = SectionList(env, result.sections);
   jobject imageOnly = SectionList(env, result.image_only_sections);
-  {
-    jstring k = env->NewStringUTF("sections");
-    env->CallObjectMethod(map, put, k, sections);
-    env->DeleteLocalRef(k);
-  }
-  {
-    jstring k = env->NewStringUTF("imageOnlySections");
-    env->CallObjectMethod(map, put, k, imageOnly);
-    env->DeleteLocalRef(k);
-  }
-
-  jobject spans = env->NewObject(
-      arrayListCls, env->GetMethodID(arrayListCls, "<init>", "()V"));
-  for (const auto& s : result.spans) {
-    jmethodID sput = nullptr;
-    jobject sm = NewHashMap(env, &sput);
-    PutInt(env, sm, sput, "utf16Start", s.utf16_start);
-    PutInt(env, sm, sput, "utf16End", s.utf16_end);
-    PutString(env, sm, sput, "level", s.level);
-    PutInt(env, sm, sput, "sectionIndex", s.section_index);
-    if (!s.href.empty()) PutString(env, sm, sput, "href", s.href);
-    env->CallBooleanMethod(spans, add, sm);
-    env->DeleteLocalRef(sm);
-  }
-  {
-    jstring k = env->NewStringUTF("spans");
-    env->CallObjectMethod(map, put, k, spans);
-    env->DeleteLocalRef(k);
-  }
-  env->DeleteLocalRef(arrayListCls);
+  PutObject(env, map, put, "sections", sections);
+  PutObject(env, map, put, "imageOnlySections", imageOnly);
   env->DeleteLocalRef(sections);
   env->DeleteLocalRef(imageOnly);
-  env->DeleteLocalRef(spans);
+  if (result.structure) {
+    jobject summary = StructureSummary(env, *result.structure);
+    PutObject(env, map, put, "structure", summary);
+    env->DeleteLocalRef(summary);
+  }
   return map;
 }
 

@@ -122,6 +122,78 @@ describe('document offline api', () => {
     );
   });
 
+  it('extractDocumentText maps the EPUB structure summary', async () => {
+    mockNative.extractDocumentText.mockResolvedValue({
+      format: 'epub',
+      sectionCount: 2,
+      sections: [],
+      imageOnlySections: [],
+      spatialSpanCount: 3,
+      structure: {
+        version: 1,
+        blockCount: 4,
+        sections: [
+          {
+            sectionIndex: 0,
+            href: 'OEBPS/ch1.xhtml',
+            kind: 'text',
+            title: 'Chapter One',
+            titleSource: 'toc',
+            utf16Start: 0,
+            utf16End: 42,
+            firstBlock: 0,
+            blockCount: 3,
+          },
+          {
+            sectionIndex: 1,
+            href: 'OEBPS/plate.png',
+            kind: 'image',
+            titleSource: 'bogus',
+            utf16Start: 42,
+            utf16End: 42,
+            firstBlock: 3,
+            blockCount: 1,
+          },
+        ],
+        metadata: { title: 'Book', creator: '', language: 'en' },
+      },
+    });
+    const r = await extractDocumentText(
+      { kind: 'fs', path: '/tmp/book.epub' },
+      TEXT_OUT
+    );
+    expect(r.structure?.blockCount).toBe(4);
+    expect(r.structure?.sections[0]).toEqual({
+      sectionIndex: 0,
+      href: 'OEBPS/ch1.xhtml',
+      kind: 'text',
+      title: 'Chapter One',
+      titleSource: 'toc',
+      utf16Start: 0,
+      utf16End: 42,
+      firstBlock: 0,
+      blockCount: 3,
+    });
+    expect(r.structure?.sections[1]?.titleSource).toBe('none');
+    expect(r.structure?.sections[1]?.title).toBeUndefined();
+    expect(r.structure?.metadata).toEqual({ title: 'Book', language: 'en' });
+  });
+
+  it('extractDocumentText has no structure for other formats', async () => {
+    mockNative.extractDocumentText.mockResolvedValue({
+      format: 'fb2',
+      sectionCount: 1,
+      sections: [],
+      imageOnlySections: [],
+      spatialSpanCount: 1,
+    });
+    const r = await extractDocumentText(
+      { kind: 'fs', path: '/tmp/book.fb2' },
+      TEXT_OUT
+    );
+    expect(r.structure).toBeUndefined();
+  });
+
   it('extractDocumentText maps mobi format', async () => {
     mockNative.extractDocumentText.mockResolvedValue({
       format: 'mobi',

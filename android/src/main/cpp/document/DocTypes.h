@@ -2,10 +2,12 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "ImageTypes.h"
+#include "../textbuffer/TxtStructure.h"
 #include "../fileio/SeekableSource.h"
 
 namespace sherpa_onnx {
@@ -79,6 +81,8 @@ struct ExtractTextResult {
   std::vector<DocSection> sections;
   std::vector<DocSection> image_only_sections;
   std::vector<DocTextSpan> spans;
+  /** Reading structure (EPUB only; null for other formats). */
+  std::shared_ptr<TxtStructure> structure;
 };
 
 struct DocImageFrame {

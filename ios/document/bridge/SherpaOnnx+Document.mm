@@ -3,6 +3,7 @@
 #import "../../fileio/FileIOSeekable.h"
 #include "TextRegistry.h"
 
+#include "DocTextPopulate.h"
 #include "DocumentExtractor.h"
 #include "ImageRegistry.h"
 
@@ -42,6 +43,40 @@ dispatch_queue_t DocQueue() {
 }
 
 }  // namespace
+
+
+static NSString *SherpaDocNS(const std::string &s) {
+  return [NSString stringWithUTF8String:s.c_str()] ?: @"";
+}
+
+/** Structure summary for JS (sections + metadata; blocks stay native). */
+static NSDictionary *SherpaDocStructureSummary(const TxtStructure &st) {
+  NSMutableArray *sections = [NSMutableArray arrayWithCapacity:st.sections.size()];
+  for (const auto &sec : st.sections) {
+    NSMutableDictionary *m = [@{
+      @"sectionIndex" : @(sec.sectionIndex),
+      @"href" : SherpaDocNS(sec.href),
+      @"kind" : SherpaDocNS(sec.kind),
+      @"titleSource" : SherpaDocNS(sec.titleSource),
+      @"utf16Start" : @(sec.utf16Start),
+      @"utf16End" : @(sec.utf16End),
+      @"firstBlock" : @(sec.firstBlock),
+      @"blockCount" : @(sec.blockCount),
+    } mutableCopy];
+    if (!sec.title.empty()) m[@"title"] = SherpaDocNS(sec.title);
+    [sections addObject:m];
+  }
+  NSMutableDictionary *metadata = [NSMutableDictionary dictionary];
+  if (!st.title.empty()) metadata[@"title"] = SherpaDocNS(st.title);
+  if (!st.creator.empty()) metadata[@"creator"] = SherpaDocNS(st.creator);
+  if (!st.language.empty()) metadata[@"language"] = SherpaDocNS(st.language);
+  return @{
+    @"version" : @(st.version),
+    @"blockCount" : @((NSInteger)st.blocks.size()),
+    @"sections" : sections,
+    @"metadata" : metadata,
+  };
+}
 
 @implementation SherpaOnnx (Document)
 
@@ -109,27 +144,9 @@ RCT_EXPORT_METHOD(extractDocumentText : (NSDictionary *)source textOutBufferId :
       return;
     }
 
-    std::vector<TxtSpatialSpan> spans;
-    spans.reserve(result.spans.size());
-    for (const auto &s : result.spans) {
-      TxtSpatialSpan t;
-      t.utf16Start = s.utf16_start;
-      t.utf16End = s.utf16_end;
-      t.level = s.level.empty() ? "block" : s.level;
-      t.sourceImageBufferId = "";
-      t.frameIndex = 0;
-      t.origin = "markup";
-      t.hasSectionIndex = true;
-      t.sectionIndex = s.section_index;
-      t.href = s.href;
-      spans.push_back(t);
-    }
-
     std::string popErr;
-    const bool ok = txt_populate_offline_if_empty(
-        [textOutBufferId UTF8String], result.text, {}, {}, {}, "", "", "",
-        spans, &popErr);
-    if (!ok) {
+    if (!sherpa_onnx::document::PopulateTextBufferFromDocument(
+            [textOutBufferId UTF8String], result, &popErr)) {
       reject(@"ERR_DOC_INVALID_ARGUMENT",
              popErr.empty()
                  ? @"Failed to populate text buffer"
@@ -159,13 +176,17 @@ RCT_EXPORT_METHOD(extractDocumentText : (NSDictionary *)source textOutBufferId :
       [imageOnly addObject:m];
     }
 
-    resolve(@{
+    NSMutableDictionary *out = [@{
       @"format" : [NSString stringWithUTF8String:result.format.c_str()] ?: @"",
       @"sectionCount" : @((NSInteger)result.sections.size()),
       @"sections" : sections,
       @"imageOnlySections" : imageOnly,
       @"spatialSpanCount" : @((NSInteger)result.spans.size()),
-    });
+    } mutableCopy];
+    if (result.structure) {
+      out[@"structure"] = SherpaDocStructureSummary(*result.structure);
+    }
+    resolve(out);
   });
 }
 
