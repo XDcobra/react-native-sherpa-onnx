@@ -21,6 +21,7 @@ Maintainer notes, plans, and evidence. Public API guides live one level up (`doc
 | [speaker-embedding/](./speaker-embedding/) | Shared extractor / SID / diarization core |
 | [kws/](./kws/) | Keyword spotting plan |
 | [tts/](./tts/) | Pocket TTS / EOS investigation |
+| [reader/](./reader/) | Reader API implementation plan, insert spike notes |
 
 ## Cross-cutting
 

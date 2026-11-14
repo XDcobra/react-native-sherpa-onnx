@@ -118,6 +118,14 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 ---
 
+## Reader
+
+| Guide | Description |
+|-------|-------------|
+| [reader.md](./reader.md) | Reader API (in development): EPUB structure → `ReaderDocument` with stable block IDs → native Fabric `ReaderView` with inserts and reading events |
+
+---
+
 ## Speaker Identification & Diarization
 
 | Guide | Description |
