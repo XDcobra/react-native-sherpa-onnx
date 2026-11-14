@@ -205,6 +205,8 @@ dependencies {
   // Gradle's dependency resolution picks the app's react-android version (typically higher).
   implementation "com.facebook.react:react-android:0.83.10"
   implementation "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+  // ReaderView: native virtualized list of reader blocks.
+  implementation "androidx.recyclerview:recyclerview:1.3.2"
 
   // Versions from prebuilt-versions.gradle; AARs used by prebuilt-download.gradle tasks.
   // sherpa-onnx: native-only default (@aar) — jni + c-api; Kotlin/Java APIs are :kotlin@aar / :java@aar.

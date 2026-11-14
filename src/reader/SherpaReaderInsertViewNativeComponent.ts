@@ -12,6 +12,8 @@ export interface NativeProps extends ViewProps {
   insertKey: string;
 }
 
-export default codegenNativeComponent<NativeProps>(
-  'SherpaReaderInsertView'
-) as HostComponent<NativeProps>;
+// interfaceOnly: the shadow node is hand-written (cpp/fabric/…/SherpaReaderInsertShadowNode)
+// so the host can report its on-screen offset to `measure`.
+export default codegenNativeComponent<NativeProps>('SherpaReaderInsertView', {
+  interfaceOnly: true,
+}) as HostComponent<NativeProps>;

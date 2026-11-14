@@ -7,6 +7,8 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.module.model.ReactModuleInfo
 import com.facebook.react.module.model.ReactModuleInfoProvider
 import com.sherpaonnx.image.OfflineImageBufferFrameViewManager
+import com.sherpaonnx.reader.SherpaReaderInsertViewManager
+import com.sherpaonnx.reader.SherpaReaderViewManager
 import com.sherpaonnx.video.preview.VideoPreviewTextureViewManager
 import com.sherpaonnx.video.preview.VideoPreviewViewManager
 import java.util.HashMap
@@ -31,6 +33,12 @@ class SherpaOnnxPackage : BaseReactPackage() {
       ),
       ModuleSpec.viewManagerSpec(
         Provider { VideoPreviewTextureViewManager() }
+      ),
+      ModuleSpec.viewManagerSpec(
+        Provider { SherpaReaderViewManager() }
+      ),
+      ModuleSpec.viewManagerSpec(
+        Provider { SherpaReaderInsertViewManager() }
       ),
     )
   }

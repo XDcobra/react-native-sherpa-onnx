@@ -30,6 +30,7 @@ import OCRScreen from '../screens/ocr/OCRScreen';
 import VideoPreviewScreen from '../screens/video-preview/VideoPreviewScreen';
 import VideoOcrPipelineScreen from '../screens/video-ocr-pipeline/VideoOcrPipelineScreen';
 import DocumentsScreen from '../screens/documents/DocumentsScreen';
+import ReaderScreen from '../screens/reader/ReaderScreen';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
@@ -248,6 +249,13 @@ export default function RootNavigator() {
         component={DocumentsScreen}
         options={{
           title: 'Read aloud',
+        }}
+      />
+      <Stack.Screen
+        name="Reader"
+        component={ReaderScreen}
+        options={{
+          title: 'Reader',
         }}
       />
     </Stack.Navigator>

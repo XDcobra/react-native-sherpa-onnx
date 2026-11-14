@@ -141,6 +141,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Read documents aloud',
     body: 'This screen shows document-to-speech with the SDK: extract text, then speak it with offline TTS. Supported formats are EPUB, FB2, MOBI, AZW3, PDF, and image-based mixed EPUB or CBZ via OCR.',
   },
+  Reader: {
+    title: 'Native reader',
+    body: 'This screen shows the reader API: an EPUB becomes a ReaderDocument with stable block IDs and is shown in the native ReaderView. Your own React Native views (inserts) sit in the reading flow, and the log lists the reading events (visible range, furthest position, section end, jumps).',
+  },
 };
 
 const STORAGE_FILE = `${DocumentDirectoryPath}/example-screen-intros.json`;

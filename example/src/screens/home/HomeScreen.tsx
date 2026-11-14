@@ -111,6 +111,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'reader',
+    sectionTitle: 'Documents (EPUB, MOBI, PDF, …)',
+    title: 'Reader',
+    description:
+      'Open an EPUB in the native ReaderView: stable block IDs, inserts in the reading flow, reading events',
+    icon: 'reader-outline',
+    screen: 'Reader',
+    implemented: true,
+  },
+  {
     id: 'offline_pipeline_showcase',
     sectionTitle: 'Pipelines & Demos',
     title: 'Offline Pipeline',
