@@ -294,7 +294,11 @@ export type ReadAloudHighlightOptions = {
   sentenceStyle?: Pick<ReaderHighlight, 'style' | 'color'>;
   /** Overrides for the word highlight (default: underline in the accent). */
   wordStyle?: Pick<ReaderHighlight, 'style' | 'color'>;
-  /** Which highlight follow scrolling keeps in view. Default `'sentence'`. */
+  /**
+   * Which highlight follow scrolling keeps in view. Default: the word when
+   * words are shown (so it never runs out of view inside a long sentence),
+   * else the sentence.
+   */
   follow?: 'sentence' | 'word' | false;
   /** ID prefix (default `readAloud`): IDs are `<prefix>:sentence` / `<prefix>:word`. */
   idPrefix?: string;
@@ -317,7 +321,7 @@ export function useReadAloudHighlights(
   const sentence = at.sentence;
   const word = at.word;
   const show = options.show ?? 'both';
-  const follow = options.follow ?? 'sentence';
+  const follow = options.follow ?? (show === 'sentence' ? 'sentence' : 'word');
   const prefix = options.idPrefix ?? 'readAloud';
   const styleKey = JSON.stringify([options.sentenceStyle, options.wordStyle]);
 

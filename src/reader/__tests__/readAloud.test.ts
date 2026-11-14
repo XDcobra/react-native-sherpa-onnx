@@ -146,9 +146,12 @@ describe('read aloud timeline', () => {
     const t = await createReadAloudTimeline(DOC, { text: 'txt', tts: TTS });
     const hs = useReadAloudHighlights(t, 100);
     expect(hs.map((h) => [h.id, h.style, h.follow])).toEqual([
-      ['readAloud:sentence', 'background', true],
-      ['readAloud:word', 'underline', false],
+      ['readAloud:sentence', 'background', false],
+      ['readAloud:word', 'underline', true],
     ]);
+    const sentenceOnly = useReadAloudHighlights(t, 100, { show: 'sentence' });
+    expect(sentenceOnly).toHaveLength(1);
+    expect(sentenceOnly[0]!.follow).toBe(true);
     const words = useReadAloudHighlights(t, 100, {
       show: 'word',
       wordStyle: { style: 'textColor', color: 'red' },
@@ -158,7 +161,7 @@ describe('read aloud timeline', () => {
       id: 'readAloud:word',
       style: 'textColor',
       color: 'red',
-      follow: true, // sentence not shown: follow the word
+      follow: true,
     });
     expect(useReadAloudHighlights(t, null)).toEqual([]);
     expect(useReadAloudHighlights(null, 100)).toEqual([]);

@@ -167,6 +167,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   private var followedOffset = 0
   private var followPaused = false
   private var followScroll = false
+  private var followPlaceAfter = false
   private var reportedInvalid: List<String> = emptyList()
 
   init {
@@ -535,9 +536,10 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
   /**
    * Keeps the followed highlight in view. `force` re-checks even if the
-   * highlight did not move (mode change, resume, reflow).
+   * highlight did not move (mode change, reflow); `place` moves it to the
+   * anchor even when it is already in the comfort zone (resumeFollow).
    */
-  private fun follow(animated: Boolean, force: Boolean) {
+  private fun follow(animated: Boolean, force: Boolean, place: Boolean = false) {
     if (snapshot == 0L || followBlock < 0) {
       followedBlock = -1
       return
@@ -561,6 +563,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       programmaticScroll = false
       followScroll = false
       pendingScroll = PendingScroll(row, followOffset, sampleAfter = false, followAfter = true)
+      followPlaceAfter = place
       layoutManager.scrollToPositionWithOffset(row, 0)
       return
     }
@@ -569,7 +572,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       if (followMode == "center") {
         line[0] + line[1] / 2 - h / 2
       } else {
-        if (line[0] >= 0.10f * h && line[0] + line[1] <= 0.85f * h) {
+        if (!place && line[0] >= 0.10f * h && line[0] + line[1] <= 0.85f * h) {
           if (!animated) sample(ReaderViewNative.PHASE_FOLLOW)
           return
         }
@@ -595,7 +598,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       followPaused = false
       dispatchFollowChange(true, "command")
     }
-    follow(animated = true, force = true)
+    follow(animated = true, force = true, place = true)
   }
 
   /** Text with highlight spans (colors default to the theme accent). */
@@ -960,7 +963,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
           // Far follow move: counts as follow (a jump if far), then place it at the anchor.
           sample(ReaderViewNative.PHASE_FOLLOW)
           sample(ReaderViewNative.PHASE_IDLE)
-          follow(animated = false, force = true)
+          follow(animated = false, force = true, place = followPlaceAfter)
+          followPlaceAfter = false
         }
       }
       if (pendingLayoutSample) {

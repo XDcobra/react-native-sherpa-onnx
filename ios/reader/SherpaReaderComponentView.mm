@@ -476,11 +476,17 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   return y >= 0.10 * h && y + line.size.height <= 0.85 * h;
 }
 
+- (void)followAnimated:(BOOL)animated force:(BOOL)force
+{
+  [self followAnimated:animated force:force place:NO];
+}
+
 /**
  * Keeps the followed highlight in view. `force` re-checks even if the
- * highlight did not move (mode change, resume, reflow).
+ * highlight did not move (mode change, reflow); `place` moves it to the
+ * anchor even when it is already in the comfort zone (resumeFollow).
  */
-- (void)followAnimated:(BOOL)animated force:(BOOL)force
+- (void)followAnimated:(BOOL)animated force:(BOOL)force place:(BOOL)place
 {
   if (!_snap || _resolved.followBlock < 0) {
     _followedBlock = -1;
@@ -512,7 +518,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   if (_followMode == "center") {
     target = line.origin.y + line.size.height / 2 - h / 2;
   } else {
-    if (y >= 0.10 * h && y + line.size.height <= 0.85 * h) {
+    if (!place && y >= 0.10 * h && y + line.size.height <= 0.85 * h) {
       if (!animated) {
         [self sampleWithPhase:rdr::ScrollPhase::Follow];
       }
@@ -546,7 +552,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     _followPaused = NO;
     [self emitFollowChange:YES reason:"command"];
   }
-  [self followAnimated:YES force:YES];
+  [self followAnimated:YES force:YES place:YES];
 }
 
 - (void)contentSizeCategoryChanged
