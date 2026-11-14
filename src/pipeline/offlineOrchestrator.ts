@@ -121,9 +121,24 @@ export interface AudioToTextOrchestrationResult
   segmentMappings: AudioToTextSegmentMapping[];
 }
 
+/** Where one text segment landed in the synthesized audio. */
+export interface TextToAudioTimelineSegment {
+  segmentIndex: number;
+  /** UTF-16 range of the segment in the input text buffer. */
+  utf16Start: number;
+  utf16End: number;
+  /** First sample of the segment's audio in the output buffer. */
+  startSample: number;
+  numSamples: number;
+  /** The segment failed and was replaced by a short silence. */
+  skipped: boolean;
+}
+
 export interface TextToAudioOrchestrationResult
   extends OrchestrationResult<OfflineAudioBufferRef> {
   segmentMappings: TextToAudioSegmentMapping[];
+  /** Per-segment text and sample ranges (completed and skipped segments). */
+  timeline: TextToAudioTimelineSegment[];
 }
 
 type SessionState =
@@ -1105,6 +1120,7 @@ export async function runOfflineTextToAudioPipeline(
 
   const session = new OrchestrationSession(nextSessionId('text_audio'));
   const segmentMappings: TextToAudioSegmentMapping[] = [];
+  const timeline: TextToAudioTimelineSegment[] = [];
 
   let accumulator: LiveAudioBufferRef | undefined;
   let totalSamplesAppended = 0;
@@ -1125,6 +1141,7 @@ export async function runOfflineTextToAudioPipeline(
       processingTimeMs: Date.now() - session.startedAtMs,
       linkMap: config.linkMap,
       segmentMappings,
+      timeline,
     };
   }
 
@@ -1144,6 +1161,7 @@ export async function runOfflineTextToAudioPipeline(
       processingTimeMs: Date.now() - session.startedAtMs,
       linkMap: config.linkMap,
       segmentMappings,
+      timeline,
     };
   }
 
@@ -1167,6 +1185,7 @@ export async function runOfflineTextToAudioPipeline(
         processingTimeMs: Date.now() - session.startedAtMs,
         linkMap: config.linkMap,
         segmentMappings,
+        timeline,
       };
     }
 
@@ -1197,6 +1216,9 @@ export async function runOfflineTextToAudioPipeline(
     for (const [i, seg] of segments.entries()) {
       const segLength = Math.max(0, seg.endOffset - seg.startOffset);
       reportProgress(session, config, i, totalSegments, segLength);
+      const segStartSample = totalSamplesAppended;
+      let segSkipped = false;
+      let segFailed = false;
 
       let attempts = 0;
       let completed = false;
@@ -1280,6 +1302,7 @@ export async function runOfflineTextToAudioPipeline(
               );
               totalSamplesAppended += skipSilenceSamples;
             }
+            segSkipped = true;
             session.addSkippedSegment({
               segmentIndex: seg.segmentIndex,
               segmentId: seg.segmentId,
@@ -1288,6 +1311,7 @@ export async function runOfflineTextToAudioPipeline(
             });
             completed = true;
           } else if (exhaustedFallback === 'partial_result') {
+            segFailed = true;
             session.setFailedSegment({
               segmentIndex: seg.segmentIndex,
               segmentId: seg.segmentId,
@@ -1309,6 +1333,17 @@ export async function runOfflineTextToAudioPipeline(
           await cleanupTextTemporaries(tempIn, undefined);
           await cleanupAudioTemporaries(undefined, tempOut);
         }
+      }
+
+      if (!segFailed && session.state !== 'failed') {
+        timeline.push({
+          segmentIndex: seg.segmentIndex,
+          utf16Start: seg.startOffset,
+          utf16End: seg.endOffset,
+          startSample: segStartSample,
+          numSamples: totalSamplesAppended - segStartSample,
+          skipped: segSkipped,
+        });
       }
 
       if (session.state === 'failed') {
@@ -1336,6 +1371,7 @@ export async function runOfflineTextToAudioPipeline(
         processingTimeMs: Date.now() - session.startedAtMs,
         linkMap: config.linkMap,
         segmentMappings,
+        timeline,
       };
     }
 
@@ -1361,6 +1397,7 @@ export async function runOfflineTextToAudioPipeline(
       processingTimeMs: Date.now() - session.startedAtMs,
       linkMap: config.linkMap,
       segmentMappings,
+      timeline,
     };
   } catch (err) {
     if (accumulator) {
@@ -1385,6 +1422,7 @@ export async function runOfflineTextToAudioPipeline(
       processingTimeMs: Date.now() - session.startedAtMs,
       linkMap: config.linkMap,
       segmentMappings,
+      timeline,
     };
   }
 }
