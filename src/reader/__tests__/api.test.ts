@@ -5,6 +5,7 @@ const mockNative = {
   removeReaderSection: jest.fn(),
   getReaderBlocks: jest.fn(),
   findReaderBlockByHash: jest.fn(),
+  mapReaderTextRanges: jest.fn(),
   releaseReaderDocument: jest.fn(),
 };
 
@@ -54,6 +55,8 @@ import {
   getReaderBlocks,
   insertSection,
   loadReaderDocument,
+  locatorAtTextOffset,
+  mapTextRanges,
   parseBlockId,
   ReaderErrorCode,
   releaseReaderDocument,
@@ -256,6 +259,32 @@ describe('reader api', () => {
       'txt_off_8',
       '',
       'feed'
+    );
+  });
+
+  it('maps text-buffer ranges to reader ranges in one call', async () => {
+    const from = { sectionId: 's0', blockId: 's0.b1', offset: 3 };
+    const to = { sectionId: 's0', blockId: 's0.b2', offset: 5 };
+    mockNative.mapReaderTextRanges.mockResolvedValue(
+      JSON.stringify([{ from, to }, null])
+    );
+    await expect(
+      mapTextRanges(SUMMARY as never, [
+        [10, 40.7],
+        [100, 101],
+      ])
+    ).resolves.toEqual([{ from, to }, null]);
+    expect(mockNative.mapReaderTextRanges).toHaveBeenCalledWith(
+      'rdr_1',
+      [10, 100],
+      [40, 101]
+    );
+    await expect(mapTextRanges(SUMMARY as never, [])).resolves.toEqual([]);
+    mockNative.mapReaderTextRanges.mockResolvedValue(
+      JSON.stringify([{ from, to: from }])
+    );
+    await expect(locatorAtTextOffset(SUMMARY as never, 13)).resolves.toEqual(
+      from
     );
   });
 

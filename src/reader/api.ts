@@ -23,6 +23,7 @@ import type {
   ReaderBlock,
   ReaderDocument,
   ReaderLocator,
+  ReaderRange,
   ReaderSectionInfo,
 } from './types';
 
@@ -292,6 +293,34 @@ export async function remapLocator(
         offset: stored.offset,
       }
     : { sectionId: found.sectionId, blockId: found.blockId };
+}
+
+/**
+ * Maps UTF-16 ranges of the document's text buffer (e.g. sentences that were
+ * read aloud) onto reader ranges, in one native call. A range start in the gap
+ * between two blocks moves to the next block, an end moves back to the
+ * previous one; ranges that cover no file text block resolve to `null`.
+ */
+export async function mapTextRanges(
+  doc: ReaderDocument,
+  ranges: ReadonlyArray<readonly [number, number]>
+): Promise<Array<ReaderRange | null>> {
+  if (ranges.length === 0) return [];
+  const starts = ranges.map((r) => Math.trunc(r[0]));
+  const ends = ranges.map((r) => Math.trunc(r[1]));
+  const json = await callNative(() =>
+    getNative().mapReaderTextRanges(doc.id, starts, ends)
+  );
+  return JSON.parse(json) as Array<ReaderRange | null>;
+}
+
+/** Locator of a single text-buffer UTF-16 offset (`null` if it is in no block). */
+export async function locatorAtTextOffset(
+  doc: ReaderDocument,
+  offset: number
+): Promise<ReaderLocator | null> {
+  const [range] = await mapTextRanges(doc, [[offset, offset + 1]]);
+  return range ? range.from : null;
 }
 
 /** Frees the native document (and the image buffer `loadReaderDocument` made). */

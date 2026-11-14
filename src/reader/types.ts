@@ -67,7 +67,15 @@ export type ReaderBlock = {
   imageHref?: string;
   imageFrameIndex?: number;
   alt?: string;
+  /**
+   * UTF-16 range of the block in the document's text buffer (file text blocks
+   * only). The shown text is exactly this slice.
+   */
+  textRange?: { start: number; end: number };
 };
+
+/** A range in the reading flow: `from` inclusive, `to` exclusive. */
+export type ReaderRange = { from: ReaderLocator; to: ReaderLocator };
 
 export type ReaderAppBlock = {
   /** Unique within the section, `[A-Za-z0-9_-]+`. */

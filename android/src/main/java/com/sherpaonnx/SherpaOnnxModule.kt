@@ -4080,6 +4080,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise,
   ) = readerHelper.findReaderBlockByHash(documentId, textHash, hintBlockId, promise)
 
+  override fun mapReaderTextRanges(
+    documentId: String,
+    starts: ReadableArray,
+    ends: ReadableArray,
+    promise: Promise,
+  ) = readerHelper.mapReaderTextRanges(documentId, starts, ends, promise)
+
   override fun releaseReaderDocument(documentId: String, promise: Promise) =
     readerHelper.releaseReaderDocument(documentId, promise)
 

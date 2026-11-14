@@ -115,6 +115,21 @@ bool BridgeFindBlockByHash(const std::string& documentId, const std::string& tex
   return true;
 }
 
+bool BridgeMapTextRanges(const std::string& documentId, const std::vector<int>& starts,
+                         const std::vector<int>& ends, std::string* json, ReaderError* err) {
+  std::shared_ptr<const ReaderSnapshot> snap;
+  if (!SnapshotOrError(documentId, &snap, err)) return false;
+  if (starts.size() != ends.size()) {
+    if (err) {
+      err->code = kErrReaderInvalidArgument;
+      err->message = "starts and ends differ in length";
+    }
+    return false;
+  }
+  *json = TextRangesJson(*snap, starts, ends);
+  return true;
+}
+
 bool BridgeReleaseDocument(const std::string& documentId) {
   return ReaderRegistry::Instance().Release(documentId);
 }

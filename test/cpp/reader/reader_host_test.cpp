@@ -1,6 +1,7 @@
 #include "DocumentExtractor.h"
 
 #include "ReaderFileHash.h"
+#include "ReaderHighlights.h"
 #include "ReaderJson.h"
 #include "ReaderRegistry.h"
 #include "ReaderTextHash.h"
@@ -310,4 +311,154 @@ TEST(ReaderFileHash, MatchesFixtureSha256) {
   if (expected) EXPECT_EQ(hex, expected);
   src.path = "/nonexistent/file.epub";
   EXPECT_FALSE(Sha256HexOfSource(src, &hex, &err));
+}
+
+// ---- Text ranges, highlights, follow ------------------------------------
+
+TEST(ReaderDocument, MapTextRangeSnapsOverGapsAndSkipsImages) {
+  const std::string id = CreateDoc("structure.epub");
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  const ReaderBlock& b0 = snap->blocks[snap->BlockIndex("s0.b0")];  // "Chapter One"
+  const ReaderBlock& b1 = snap->blocks[snap->BlockIndex("s0.b1")];
+  int a, ao, z, zo;
+  // Inside one block.
+  ASSERT_TRUE(snap->MapTextRange(b0.utf16Start + 2, b0.utf16Start + 7, &a, &ao, &z, &zo));
+  EXPECT_EQ(snap->blocks[a].id, "s0.b0");
+  EXPECT_EQ(ao, 2);
+  EXPECT_EQ(z, a);
+  EXPECT_EQ(zo, 7);
+  // Start in the "\n\n" gap snaps forward; end in the gap snaps back.
+  ASSERT_TRUE(snap->MapTextRange(b0.utf16End + 1, b1.utf16Start + 3, &a, &ao, &z, &zo));
+  EXPECT_EQ(snap->blocks[a].id, "s0.b1");
+  EXPECT_EQ(ao, 0);
+  ASSERT_TRUE(snap->MapTextRange(b0.utf16Start, b0.utf16End + 1, &a, &ao, &z, &zo));
+  EXPECT_EQ(snap->blocks[z].id, "s0.b0");
+  EXPECT_EQ(zo, b0.utf16End - b0.utf16Start);
+  // Range only inside a gap: nothing.
+  EXPECT_FALSE(snap->MapTextRange(b0.utf16End, b0.utf16End + 2, &a, &ao, &z, &zo));
+  // Across the image s0.b4: ends land on text blocks.
+  const ReaderBlock& b3 = snap->blocks[snap->BlockIndex("s0.b3")];
+  const ReaderBlock& b6 = snap->blocks[snap->BlockIndex("s0.b6")];
+  ASSERT_TRUE(snap->MapTextRange(b3.utf16Start, b6.utf16Start + 1, &a, &ao, &z, &zo));
+  EXPECT_EQ(snap->blocks[a].id, "s0.b3");
+  EXPECT_EQ(snap->blocks[z].id, "s0.b6");
+  EXPECT_EQ(zo, 1);
+
+  const std::string json =
+      TextRangesJson(*snap, {b0.utf16Start, b0.utf16End}, {b0.utf16Start + 4, b0.utf16End + 2});
+  EXPECT_EQ(json,
+            "[{\"from\":{\"sectionId\":\"s0\",\"blockId\":\"s0.b0\",\"offset\":0},"
+            "\"to\":{\"sectionId\":\"s0\",\"blockId\":\"s0.b0\",\"offset\":4}},null]");
+  const std::string blocks = BlocksJson(*snap, 0, 1, false);
+  EXPECT_NE(blocks.find("\"textRange\":{\"start\":" + std::to_string(b0.utf16Start) + ",\"end\":" +
+                        std::to_string(b0.utf16End) + "}"),
+            std::string::npos);
+  EXPECT_EQ(BlocksJson(*snap, snap->BlockIndex("s0.b4"), 1, false).find("textRange"), std::string::npos);
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderDocument, MapTextRangeIgnoresAppSections) {
+  const std::string id = CreateDoc("structure.epub");
+  auto& reg = ReaderRegistry::Instance();
+  ReaderAppSectionInput in;
+  in.after = "s0";
+  in.id = "app:x";
+  in.blocks = {{"p", ReaderBlockType::Paragraph, "App text", 0}};
+  ReaderError err;
+  ASSERT_TRUE(reg.InsertSection(id, in, &err));
+  auto snap = reg.Snapshot(id);
+  const ReaderBlock& last0 = snap->blocks[snap->BlockIndex("s0.b7")];
+  const ReaderBlock& s2b0 = snap->blocks[snap->BlockIndex("s2.b0")];
+  int a, ao, z, zo;
+  ASSERT_TRUE(snap->MapTextRange(last0.utf16Start, s2b0.utf16End, &a, &ao, &z, &zo));
+  EXPECT_EQ(snap->blocks[a].id, "s0.b7");
+  EXPECT_EQ(snap->blocks[z].id, "s2.b0");
+  EXPECT_EQ(snap->BlockLength(snap->BlockIndex("app:x.p")), 8);
+  reg.Release(id);
+}
+
+TEST(ReaderHighlights, ResolvesAcrossBlocksOverlapsAndFollow) {
+  const std::string id = CreateDoc("structure.epub");
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  std::vector<HighlightInput> in(4);
+  in[0].id = "sentence";  // s0.b3 offset 2 .. s0.b6 offset 3, crossing the image and separator
+  in[0].fromBlockId = "s0.b3";
+  in[0].fromOffset = 2;
+  in[0].toBlockId = "s0.b6";
+  in[0].toOffset = 3;
+  in[1].id = "word";
+  in[1].fromBlockId = "s0.b3";
+  in[1].fromOffset = 4;
+  in[1].toBlockId = "s0.b3";
+  in[1].toOffset = 8;
+  in[1].style = HighlightStyle::Underline;
+  in[1].color = 0xFF112233;
+  in[1].hasColor = true;
+  in[1].follow = true;
+  in[2].id = "whole";  // offsets omitted: whole block
+  in[2].fromBlockId = "s0.b0";
+  in[2].toBlockId = "s0.b0";
+  in[2].toOffset = 999;  // clamped
+  in[3].id = "bad";
+  in[3].fromBlockId = "s9.b9";
+  in[3].toBlockId = "s0.b0";
+  auto r = ResolveHighlights(*snap, in);
+  ASSERT_EQ(r.invalidIds.size(), 1u);
+  EXPECT_EQ(r.invalidIds[0], "bad");
+  const int b3 = snap->BlockIndex("s0.b3");
+  ASSERT_EQ(r.byBlock[b3].size(), 2u);
+  EXPECT_EQ(r.byBlock[b3][0].start, 2);
+  EXPECT_EQ(r.byBlock[b3][0].end, snap->BlockLength(b3));
+  EXPECT_EQ(r.byBlock[b3][1].style, HighlightStyle::Underline);
+  EXPECT_EQ(r.byBlock[b3][1].color, 0xFF112233u);
+  EXPECT_EQ(r.byBlock.count(snap->BlockIndex("s0.b4")), 0u);  // image
+  EXPECT_EQ(r.byBlock.count(snap->BlockIndex("s0.b5")), 0u);  // separator
+  ASSERT_EQ(r.byBlock[snap->BlockIndex("s0.b6")].size(), 1u);
+  EXPECT_EQ(r.byBlock[snap->BlockIndex("s0.b6")][0].end, 3);
+  EXPECT_EQ(r.byBlock[0][0].start, 0);
+  EXPECT_EQ(r.byBlock[0][0].end, 11);  // "Chapter One"
+  EXPECT_EQ(r.followBlock, b3);
+  EXPECT_EQ(r.followOffset, 4);
+  EXPECT_EQ(r.followEndOffset, 8);
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderHighlights, OffsetsNeverSplitSurrogatePairs) {
+  const std::string id = CreateDoc("structure.epub");
+  auto& reg = ReaderRegistry::Instance();
+  ReaderAppSectionInput in;
+  in.after = "s0";
+  in.id = "app:emoji";
+  in.blocks = {{"p", ReaderBlockType::Paragraph, "a\xF0\x9F\x98\x80" "b", 0}};  // a 😀 b = 4 units
+  ReaderError err;
+  ASSERT_TRUE(reg.InsertSection(id, in, &err));
+  auto snap = reg.Snapshot(id);
+  HighlightInput h;
+  h.id = "h";
+  h.fromBlockId = h.toBlockId = "app:emoji.p";
+  h.fromOffset = 2;  // inside the pair → moves back to 1
+  h.toOffset = 4;
+  auto r = ResolveHighlights(*snap, {h});
+  const int p = snap->BlockIndex("app:emoji.p");
+  ASSERT_EQ(r.byBlock[p].size(), 1u);
+  EXPECT_EQ(r.byBlock[p][0].start, 1);
+  EXPECT_EQ(r.byBlock[p][0].end, 4);
+  reg.Release(id);
+}
+
+TEST(ReaderTracker, FollowReadsContinuouslyAndOnlyFarMovesJump) {
+  ReaderTracker t({9, 19, 29}, 20);
+  t.Sample(0, 4, ScrollPhase::Layout);
+  auto ev = t.Sample(3, 9, ScrollPhase::Follow);
+  EXPECT_EQ(Count(ev, Kind::Jump), 0);
+  ASSERT_TRUE(Find(ev, Kind::SectionEnd));
+  EXPECT_EQ(t.Frontier(), 9);
+  ev = t.Sample(8, 13, ScrollPhase::Follow);
+  EXPECT_EQ(Count(ev, Kind::Jump), 0);
+  EXPECT_EQ(t.Frontier(), 13);
+  // Read-aloud restarted far ahead: a jump, frontier stays.
+  ev = t.Sample(60, 64, ScrollPhase::Follow);
+  ASSERT_TRUE(Find(ev, Kind::Jump));
+  EXPECT_EQ(Find(ev, Kind::Jump)->cause, "follow");
+  EXPECT_EQ(t.Frontier(), 13);
 }

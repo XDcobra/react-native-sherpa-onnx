@@ -27,6 +27,34 @@ std::string ReaderSnapshot::BlockText(int index) const {
   return txt_utf16_slice(text->text, b.utf16Start, b.utf16End - b.utf16Start);
 }
 
+int ReaderSnapshot::BlockLength(int index) const {
+  if (index < 0 || index >= static_cast<int>(blocks.size())) return 0;
+  const ReaderBlock& b = blocks[index];
+  if (!b.fromFile) return txt_utf16_length(b.appText);
+  return std::max(0, b.utf16End - b.utf16Start);
+}
+
+bool ReaderSnapshot::MapTextRange(int start, int end, int* fromBlock, int* fromOffset,
+                                  int* toBlock, int* toOffset) const {
+  if (textBlocks.empty() || end <= start) return false;
+  // First block that ends after `start`.
+  auto lo = std::partition_point(textBlocks.begin(), textBlocks.end(),
+                                 [&](int i) { return blocks[i].utf16End <= start; });
+  // Last block that starts before `end`.
+  auto hi = std::partition_point(textBlocks.begin(), textBlocks.end(),
+                                 [&](int i) { return blocks[i].utf16Start < end; });
+  if (lo == textBlocks.end() || hi == textBlocks.begin()) return false;
+  --hi;
+  if (hi < lo) return false;  // the range lies entirely in a gap
+  const ReaderBlock& a = blocks[*lo];
+  const ReaderBlock& z = blocks[*hi];
+  *fromBlock = *lo;
+  *fromOffset = std::max(0, start - a.utf16Start);
+  *toBlock = *hi;
+  *toOffset = std::min(end, z.utf16End) - z.utf16Start;
+  return true;
+}
+
 int ReaderSnapshot::BlockIndex(const std::string& blockId) const {
   auto it = blockIndexById.find(blockId);
   return it == blockIndexById.end() ? -1 : it->second;
@@ -49,9 +77,16 @@ void ReindexSnapshot(ReaderSnapshot* snap) {
     cursor += sec.blockCount;
     snap->sectionIndexById[sec.id] = s;
   }
+  snap->textBlocks.clear();
   for (int i = 0; i < static_cast<int>(snap->blocks.size()); ++i) {
-    snap->blockIndexById[snap->blocks[i].id] = i;
+    const ReaderBlock& b = snap->blocks[i];
+    snap->blockIndexById[b.id] = i;
+    if (b.fromFile && b.utf16End > b.utf16Start) snap->textBlocks.push_back(i);
   }
+  // Buffer order equals reading order for file blocks; sort defensively.
+  std::stable_sort(snap->textBlocks.begin(), snap->textBlocks.end(), [&](int x, int y) {
+    return snap->blocks[x].utf16Start < snap->blocks[y].utf16Start;
+  });
 }
 
 std::shared_ptr<const ReaderSnapshot> MakePlaceholderSnapshot(int rows) {

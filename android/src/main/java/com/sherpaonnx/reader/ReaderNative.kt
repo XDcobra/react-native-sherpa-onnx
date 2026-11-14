@@ -40,5 +40,7 @@ internal object ReaderNative {
     hintBlockId: String,
   ): Array<String>
 
+  @JvmStatic external fun nativeMapTextRanges(documentId: String, starts: IntArray, ends: IntArray): Array<String>
+
   @JvmStatic external fun nativeReleaseDocument(documentId: String): Boolean
 }

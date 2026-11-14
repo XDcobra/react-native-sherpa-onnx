@@ -126,6 +126,24 @@ Java_com_sherpaonnx_reader_ReaderNative_nativeFindBlockByHash(JNIEnv* env, jclas
   return Result(env, ok, json, err);
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeMapTextRanges(JNIEnv* env, jclass, jstring docId,
+                                                            jintArray starts, jintArray ends) {
+  auto read = [env](jintArray a) {
+    std::vector<int> v;
+    if (a) {
+      v.resize(env->GetArrayLength(a));
+      env->GetIntArrayRegion(a, 0, static_cast<jsize>(v.size()), v.data());
+    }
+    return v;
+  };
+  std::string json;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeMapTextRanges(Std(env, docId), read(starts),
+                                                          read(ends), &json, &err);
+  return Result(env, ok, json, err);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_reader_ReaderNative_nativeReleaseDocument(JNIEnv* env, jclass,
                                                               jstring docId) {

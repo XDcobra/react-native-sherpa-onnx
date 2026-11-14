@@ -139,6 +139,24 @@ RCT_EXPORT_METHOD(findReaderBlockByHash : (NSString *)documentId textHash : (NSS
   });
 }
 
+RCT_EXPORT_METHOD(mapReaderTextRanges : (NSString *)documentId starts : (NSArray *)
+                      starts ends : (NSArray *)ends resolve : (RCTPromiseResolveBlock)
+                          resolve reject : (RCTPromiseRejectBlock)reject) {
+  std::vector<int> s;
+  std::vector<int> e;
+  s.reserve(starts.count);
+  e.reserve(ends.count);
+  for (id v in starts) s.push_back([v respondsToSelector:@selector(intValue)] ? [v intValue] : 0);
+  for (id v in ends) e.push_back([v respondsToSelector:@selector(intValue)] ? [v intValue] : 0);
+  dispatch_async(ReaderQueue(), ^{
+    std::string json;
+    sherpa_onnx::reader::ReaderError err;
+    const bool ok =
+        sherpa_onnx::reader::BridgeMapTextRanges(Std(documentId), s, e, &json, &err);
+    Finish(ok, json, err, resolve, reject);
+  });
+}
+
 RCT_EXPORT_METHOD(releaseReaderDocument : (NSString *)documentId resolve : (
                       RCTPromiseResolveBlock)resolve reject : (RCTPromiseRejectBlock)reject) {
   resolve(@(sherpa_onnx::reader::BridgeReleaseDocument(Std(documentId))));

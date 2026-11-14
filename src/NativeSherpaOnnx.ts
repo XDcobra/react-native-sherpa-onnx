@@ -1423,6 +1423,16 @@ export interface Spec extends TurboModule {
     hintBlockId: string
   ): Promise<string>;
 
+  /**
+   * Maps text-buffer UTF-16 ranges onto reader locators. Resolves a JSON array
+   * with `{from, to}` locators or `null` per range.
+   */
+  mapReaderTextRanges(
+    documentId: string,
+    starts: number[],
+    ends: number[]
+  ): Promise<string>;
+
   releaseReaderDocument(documentId: string): Promise<boolean>;
 
   /**

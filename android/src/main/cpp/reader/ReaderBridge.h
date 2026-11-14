@@ -36,6 +36,14 @@ bool BridgeGetBlocks(const std::string& documentId, int start, int max, bool inc
 bool BridgeFindBlockByHash(const std::string& documentId, const std::string& textHash,
                            const std::string& hintBlockId, std::string* json, ReaderError* err);
 
+/**
+ * Maps text-buffer UTF-16 ranges [starts[i], ends[i]) onto reader locators:
+ * a JSON array with {"from":{sectionId,blockId,offset},"to":{...}} or null per
+ * range (null when the range covers no file text block).
+ */
+bool BridgeMapTextRanges(const std::string& documentId, const std::vector<int>& starts,
+                         const std::vector<int>& ends, std::string* json, ReaderError* err);
+
 bool BridgeReleaseDocument(const std::string& documentId);
 
 }  // namespace reader

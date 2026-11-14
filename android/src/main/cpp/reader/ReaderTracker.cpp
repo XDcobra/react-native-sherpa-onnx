@@ -146,6 +146,21 @@ std::vector<TrackerEvent> ReaderTracker::Sample(int first, int last, ScrollPhase
       break;
     }
 
+    case ScrollPhase::Follow: {
+      // Auto-scroll along a highlight: continuous reading unless it moves far
+      // (e.g. read-aloud restarted elsewhere), which is a jump like scrollTo.
+      inFling_ = false;
+      const bool far = first > prevLast_ + threshold_ || last < prevFirst_ - threshold_;
+      if (far) {
+        jump(prevFirst_, first, "follow");
+        StartSegment(first, last);
+        if (first <= frontier_ + 1) Extend(first, last, &out);
+      } else {
+        Extend(first, last, &out);
+      }
+      break;
+    }
+
     case ScrollPhase::Layout:
       seenFirst_ = first;
       seenLast_ = last;

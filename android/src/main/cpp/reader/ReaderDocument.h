@@ -59,11 +59,24 @@ struct ReaderSnapshot {
   std::string title;
   std::string creator;
   std::string language;
+  /** File text blocks (non-empty buffer range) in buffer order, for offset lookups. */
+  std::vector<int> textBlocks;
 
   /** UTF-8 text of a block ("" for images / separators). */
   std::string BlockText(int index) const;
+  /** Length of a block's text in UTF-16 units. */
+  int BlockLength(int index) const;
   int BlockIndex(const std::string& blockId) const;
   int SectionIndex(const std::string& sectionId) const;
+
+  /**
+   * Maps a text-buffer UTF-16 range [start, end) onto file text blocks.
+   * The start snaps forward and the end backward over the gaps between blocks
+   * (the "\n\n" joins), so the result covers only shown text. Returns false
+   * when the range touches no file text block.
+   */
+  bool MapTextRange(int start, int end, int* fromBlock, int* fromOffset, int* toBlock,
+                    int* toOffset) const;
 };
 
 struct ReaderAppBlockInput {

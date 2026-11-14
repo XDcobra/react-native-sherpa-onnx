@@ -13,6 +13,7 @@ enum class ScrollPhase : int {
   Idle = 2,  // scrolling stopped
   Programmatic = 3,  // scrollTo / initial locator
   Layout = 4,  // size / theme / data change without user scrolling
+  Follow = 5,  // the view scrolls along with a followed highlight (read-aloud)
 };
 
 struct TrackerEvent {
@@ -40,6 +41,8 @@ struct TrackerEvent {
  *   where the finger lifted ("fling"), or any programmatic scroll ("scrollTo").
  * - Furthest position: the end of the continuously read stretch, advanced only
  *   while that stretch starts at or before the current frontier + 1.
+ * - Follow: scrolling along a highlight reads like continuous reading (no
+ *   jump); only a move of more than N blocks is a jump ("follow").
  * - Section end: the last block of a section becomes visible while reading
  *   continuously (once per transition).
  */

@@ -120,6 +120,10 @@ std::string BlocksJson(const ReaderSnapshot& snap, int start, int max, bool incl
     Field(&out, "type", ReaderBlockTypeName(b.type), &f);
     if (b.headingLevel > 0) Field(&out, "headingLevel", b.headingLevel, &f);
     Field(&out, "textHash", b.textHash, &f);
+    if (b.fromFile && b.utf16End > b.utf16Start) {
+      out += ",\"textRange\":{\"start\":" + std::to_string(b.utf16Start) +
+             ",\"end\":" + std::to_string(b.utf16End) + "}";
+    }
     if (b.type == ReaderBlockType::Image) {
       Field(&out, "imageHref", b.imageHref, &f);
       if (b.imageFrame >= 0) Field(&out, "imageFrameIndex", b.imageFrame, &f);
@@ -129,6 +133,29 @@ std::string BlocksJson(const ReaderSnapshot& snap, int start, int max, bool incl
       Field(&out, "text", snap.BlockText(i), &f);
     }
     out.push_back('}');
+  }
+  out.push_back(']');
+  return out;
+}
+
+std::string TextRangesJson(const ReaderSnapshot& snap, const std::vector<int>& starts,
+                           const std::vector<int>& ends) {
+  auto locator = [&](int block, int offset) {
+    return "{\"sectionId\":" + JsonEscape(snap.sections[snap.blocks[block].section].id) +
+           ",\"blockId\":" + JsonEscape(snap.blocks[block].id) +
+           ",\"offset\":" + std::to_string(offset) + "}";
+  };
+  const size_t n = std::min(starts.size(), ends.size());
+  std::string out = "[";
+  out.reserve(n * 96);
+  for (size_t i = 0; i < n; ++i) {
+    if (i > 0) out.push_back(',');
+    int a = -1, ao = 0, z = -1, zo = 0;
+    if (!snap.MapTextRange(starts[i], ends[i], &a, &ao, &z, &zo)) {
+      out += "null";
+      continue;
+    }
+    out += "{\"from\":" + locator(a, ao) + ",\"to\":" + locator(z, zo) + "}";
   }
   out.push_back(']');
   return out;
