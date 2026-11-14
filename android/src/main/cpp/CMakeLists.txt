@@ -322,6 +322,8 @@ set(SOURCES
     document/DocComic.cpp
     document/DocMobi.cpp
     document/DocTextPopulate.cpp
+    document/DocImagePopulate.cpp
+    document/DocArchiveSource.cpp
     reader/ReaderTextHash.cpp
     reader/ReaderRegistry.cpp
     reader/ReaderTracker.cpp

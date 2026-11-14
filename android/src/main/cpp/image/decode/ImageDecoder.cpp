@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -199,6 +200,25 @@ ImageProbeResult ImageDecoder::ProbeFile(const std::string& path) {
     return ProbeFail("ERR_IMAGE_DECODE_FAILED", "read failed: " + path);
   }
   return ProbeBytes(buf.data(), buf.size());
+}
+
+bool ImageDecoder::ExpectedDecodedSize(const uint8_t* data, size_t size,
+                                       const DecodeOptions& opts, int* width, int* height) {
+  const ImageProbeResult probe = ProbeBytes(data, size);
+  if (!probe.ok || probe.codedWidth <= 0 || probe.codedHeight <= 0) return false;
+  int w = probe.codedWidth;
+  int h = probe.codedHeight;
+  if (probe.format == DecodeFormat::Jpeg && ReadJpegExifOrientation(data, size) >= 5) {
+    std::swap(w, h);  // 5..8 rotate by 90 degrees
+  }
+  if (opts.maxSide > 0 && std::max(w, h) > opts.maxSide) {
+    const float scale = static_cast<float>(opts.maxSide) / static_cast<float>(std::max(w, h));
+    w = std::max(1, static_cast<int>(std::lround(static_cast<float>(w) * scale)));
+    h = std::max(1, static_cast<int>(std::lround(static_cast<float>(h) * scale)));
+  }
+  if (width) *width = w;
+  if (height) *height = h;
+  return true;
 }
 
 DecodeFormat ImageDecoder::DetectFormat(const uint8_t* data, size_t size) {

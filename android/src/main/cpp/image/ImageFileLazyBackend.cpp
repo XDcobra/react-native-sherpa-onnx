@@ -20,7 +20,26 @@ void ImageFileLazyBackend::AddPath(std::string path) {
 void ImageFileLazyBackend::AddBytes(std::vector<uint8_t> bytes) {
   Slot slot;
   slot.bytes = std::move(bytes);
+  ImageDecoder::ExpectedDecodedSize(slot.bytes.data(), slot.bytes.size(), opts_,
+                                    &slot.expectedWidth, &slot.expectedHeight);
   slots_.push_back(std::move(slot));
+}
+
+void ImageFileLazyBackend::AddLoader(Loader loader, int expectedWidth, int expectedHeight) {
+  Slot slot;
+  slot.loader = std::move(loader);
+  slot.expectedWidth = expectedWidth;
+  slot.expectedHeight = expectedHeight;
+  slots_.push_back(std::move(slot));
+}
+
+bool ImageFileLazyBackend::ExpectedSize(int index, int* width, int* height) const {
+  if (index < 0 || index >= static_cast<int>(slots_.size())) return false;
+  const Slot& slot = slots_[static_cast<size_t>(index)];
+  if (slot.expectedWidth <= 0 || slot.expectedHeight <= 0) return false;
+  if (width) *width = slot.expectedWidth;
+  if (height) *height = slot.expectedHeight;
+  return true;
 }
 
 int ImageFileLazyBackend::frame_count() const {
@@ -60,6 +79,15 @@ bool ImageFileLazyBackend::DecodeFrame(int index, RgbFrame* out,
     owned.resize(static_cast<size_t>(len));
     if (!in.read(reinterpret_cast<char*>(owned.data()), len)) {
       return fail("ERR_IMAGE_DECODE_FAILED", "read failed: " + slot.path);
+    }
+    data = owned.data();
+    size = owned.size();
+  } else if (slot.loader) {
+    std::string code;
+    std::string msg;
+    if (!slot.loader(&owned, &code, &msg) || owned.empty()) {
+      return fail(code.empty() ? "ERR_IMAGE_DECODE_FAILED" : code.c_str(),
+                  msg.empty() ? "image bytes unavailable" : msg);
     }
     data = owned.data();
     size = owned.size();

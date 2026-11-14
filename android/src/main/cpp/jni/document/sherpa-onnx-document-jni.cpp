@@ -6,6 +6,7 @@
 
 #include "jni/document/doc_structure_summary_jni.h"
 
+#include "DocImagePopulate.h"
 #include "DocTextPopulate.h"
 #include "DocumentExtractor.h"
 #include "ImageMmapThreshold.h"
@@ -169,12 +170,13 @@ Java_com_sherpaonnx_document_DocumentNative_nativeExtractTextInto(
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_document_DocumentNative_nativeExtractImages(
     JNIEnv* env, jclass, jstring jpath, jint fd, jint maxSide,
-    jboolean allImages, jobject progress) {
+    jboolean allImages, jboolean lazy, jint hotFrames, jobject progress) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   sherpa_onnx::document::ExtractOptions opt;
   opt.max_side = maxSide;
   opt.all_images = allImages == JNI_TRUE;
+  opt.lazy = lazy == JNI_TRUE;
   BindProgress(env, progress, &opt);
   const auto src =
       sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd);
@@ -189,16 +191,10 @@ Java_com_sherpaonnx_document_DocumentNative_nativeExtractImages(
     PutInt(env, map, put, "frameCount", 0);
     return map;
   }
-  std::vector<sherpa_onnx::image::RgbFrame> frames;
-  frames.reserve(result.frames.size());
-  for (auto& fr : result.frames) {
-    fr.rgb.sectionIndex = fr.section_index;
-    fr.rgb.href = fr.href;
-    fr.rgb.pageNumber = fr.page_number;
-    frames.push_back(std::move(fr.rgb));
-  }
-  auto created = sherpa_onnx::image::ImageRegistry::Instance().CreateFromRgbFrames(
-      std::move(frames), sherpa_onnx::image::ImageThresholdPathType::FileOrigin);
+  // Lazy comic pages keep their archive open (own dup of the fd) until the
+  // buffer is released.
+  auto created =
+      sherpa_onnx::document::CreateImageBufferFromDocument(result, maxSide, hotFrames);
   if (!created.ok) {
     PutBool(env, map, put, "ok", JNI_FALSE);
     PutString(env, map, put, "errorCode",

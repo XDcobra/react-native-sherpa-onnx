@@ -2,6 +2,7 @@
 #include "DocHtmlText.h"
 #include "DocPath.h"
 #include "DocSniff.h"
+#include "decode/ImageDecoder.h"
 #include "../textbuffer/TxtUtf16.h"
 
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 namespace {
@@ -582,6 +584,82 @@ TEST(DocumentExtract, CbrRar3NaturalSortAndNoText) {
   EXPECT_EQ(sherpa_onnx::document::SniffFormat(Src(path), nullptr, nullptr, nullptr),
             sherpa_onnx::document::DocFormat::Cbr);
   ExpectComicNoTextAndSortedPages(path, "cbr");
+}
+
+namespace {
+
+/** Lazy comic pages: no RGB yet, sizes from the headers, bytes on demand. */
+void ExpectLazyComicMatchesEager(const sherpa_onnx::document::DocumentSource& src) {
+  sherpa_onnx::document::ExtractOptions lazy_opt;
+  lazy_opt.lazy = true;
+  auto lazy = sherpa_onnx::document::ExtractDocumentImages(src, lazy_opt);
+  ASSERT_TRUE(lazy.ok) << lazy.error_code << " " << lazy.error_message;
+  auto eager = sherpa_onnx::document::ExtractDocumentImages(src);
+  ASSERT_TRUE(eager.ok);
+  ASSERT_EQ(lazy.frames.size(), eager.frames.size());
+  for (size_t i = 0; i < lazy.frames.size(); ++i) {
+    auto& fr = lazy.frames[i];
+    EXPECT_TRUE(fr.rgb.rgb.empty()) << "nothing decoded up front";
+    ASSERT_TRUE(fr.load);
+    EXPECT_EQ(fr.href, eager.frames[i].href);
+    EXPECT_EQ(fr.page_number, eager.frames[i].page_number);
+    EXPECT_EQ(fr.expected_width, eager.frames[i].rgb.width);
+    EXPECT_EQ(fr.expected_height, eager.frames[i].rgb.height);
+    std::vector<uint8_t> bytes;
+    std::string code;
+    std::string msg;
+    ASSERT_TRUE(fr.load(&bytes, &code, &msg)) << code << " " << msg;
+    auto decoded = sherpa_onnx::image::ImageDecoder::DecodeBytes(bytes.data(), bytes.size(), {});
+    ASSERT_TRUE(decoded.ok);
+    EXPECT_EQ(decoded.frame.width, fr.expected_width);
+    EXPECT_EQ(decoded.frame.rgb, eager.frames[i].rgb.rgb);
+  }
+}
+
+}  // namespace
+
+TEST(DocumentExtract, CbzLazyPagesDecodeOnDemand) {
+  const auto path = FixturePath("comic.cbz");
+  RequireFixture(path);
+  ExpectLazyComicMatchesEager(Src(path));
+}
+
+TEST(DocumentExtract, CbrLazyPagesDecodeOnDemand) {
+  const auto path = FixturePath("tiny-comic.cbr");
+  RequireFixture(path);
+  ExpectLazyComicMatchesEager(Src(path));
+}
+
+TEST(DocumentExtract, LazyComicKeepsItsOwnFd) {
+  const auto path = FixturePath("comic.cbz");
+  RequireFixture(path);
+  const int fd = ::open(path.c_str(), O_RDONLY);
+  ASSERT_GE(fd, 0);
+  sherpa_onnx::document::DocumentSource src;
+  src.fd = fd;
+  sherpa_onnx::document::ExtractOptions opt;
+  opt.lazy = true;
+  auto lazy = sherpa_onnx::document::ExtractDocumentImages(src, opt);
+  ::close(fd);  // the caller's fd goes away, like a closed Android PFD
+  ASSERT_TRUE(lazy.ok) << lazy.error_message;
+  ASSERT_FALSE(lazy.frames.empty());
+  std::vector<uint8_t> bytes;
+  std::string code;
+  std::string msg;
+  EXPECT_TRUE(lazy.frames.back().load(&bytes, &code, &msg)) << code << " " << msg;
+  EXPECT_FALSE(bytes.empty());
+}
+
+TEST(DocumentExtract, LazyIsIgnoredOutsideComics) {
+  const auto path = FixturePath("mixed.epub");
+  RequireFixture(path);
+  sherpa_onnx::document::ExtractOptions opt;
+  opt.lazy = true;
+  auto images = sherpa_onnx::document::ExtractDocumentImages(Src(path), opt);
+  ASSERT_TRUE(images.ok) << images.error_message;
+  ASSERT_FALSE(images.frames.empty());
+  EXPECT_FALSE(images.frames[0].load);
+  EXPECT_FALSE(images.frames[0].rgb.rgb.empty());
 }
 
 TEST(DocumentExtract, CbrTruncatedIsOpenFailed) {

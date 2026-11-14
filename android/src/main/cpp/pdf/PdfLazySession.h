@@ -44,6 +44,8 @@ class PdfLazySession final : public PdfLazyBackend {
       std::string* err_code,
       std::string* err_message) override;
 
+  bool PageSize(int page_1based, int* width, int* height) override;
+
  private:
   PdfLazySession(PdfDocument doc, int page_count, int dpi, int max_side);
 

@@ -102,6 +102,16 @@ export type ExtractDocumentImagesOptions = {
    * reader for image blocks.
    */
   scope?: 'imageSections' | 'all';
+  /**
+   * `'decode-all'` (default): every image is decoded now. `'lazy-lru'`: comic
+   * pages (CBZ / CBR) stay in the archive and are decoded when a frame is
+   * needed, at most `hotFrames` at a time; frame sizes are known up front
+   * (`expectedWidth` / `expectedHeight`). The file stays open until the buffer
+   * is released. Other formats decode as with `'decode-all'`.
+   */
+  strategy?: 'decode-all' | 'lazy-lru';
+  /** `'lazy-lru'` only: decoded frames kept in memory (default 8, clamped 1..32). */
+  hotFrames?: number;
   signal?: AbortSignal;
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };

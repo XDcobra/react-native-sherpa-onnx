@@ -494,6 +494,10 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeGetFrameInfo(
   PutInt(env, map, put, "index", info.index);
   PutInt(env, map, put, "width", info.width);
   PutInt(env, map, put, "height", info.height);
+  if (info.expectedWidth > 0 && info.expectedHeight > 0) {
+    PutInt(env, map, put, "expectedWidth", info.expectedWidth);
+    PutInt(env, map, put, "expectedHeight", info.expectedHeight);
+  }
   PutLong(env, map, put, "byteSize", info.byteSize);
   PutString(env, map, put, "storageKind",
             sherpa_onnx::image::StorageKindName(info.storageKind));

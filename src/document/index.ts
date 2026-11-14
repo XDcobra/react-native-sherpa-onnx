@@ -210,12 +210,32 @@ export async function extractDocumentImages(
     );
   }
 
-  const nativeOptions: { maxSide?: number; scope?: string } = {};
+  const nativeOptions: {
+    maxSide?: number;
+    scope?: string;
+    strategy?: string;
+    hotFrames?: number;
+  } = {};
   if (options?.scope === 'all') {
     nativeOptions.scope = 'all';
   }
   if (options?.maxSide != null) {
     nativeOptions.maxSide = Math.trunc(options.maxSide);
+  }
+  const strategy = options?.strategy;
+  if (strategy !== undefined) {
+    if (strategy !== 'decode-all' && strategy !== 'lazy-lru') {
+      throw Object.assign(
+        new Error(
+          `${DocumentErrorCode.INVALID_ARGUMENT}: strategy must be 'decode-all' or 'lazy-lru'`
+        ),
+        { code: DocumentErrorCode.INVALID_ARGUMENT }
+      );
+    }
+    nativeOptions.strategy = strategy;
+  }
+  if (options?.hotFrames != null) {
+    nativeOptions.hotFrames = Math.trunc(options.hotFrames);
   }
 
   const progressSub = subscribeDocProgress(options?.onProgress);

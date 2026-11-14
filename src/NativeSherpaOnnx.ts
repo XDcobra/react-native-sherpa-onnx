@@ -1152,6 +1152,8 @@ export interface Spec extends TurboModule {
     index: number;
     width: number;
     height: number;
+    expectedWidth?: number;
+    expectedHeight?: number;
     byteSize: number;
     storageKind: string;
     pageNumber?: number;

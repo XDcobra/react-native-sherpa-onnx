@@ -4,6 +4,8 @@
 #include "TextRegistry.h"
 
 #import "SherpaDocStructureSummary.h"
+#import "../../pdf/bridge/PdfLazyIo.h"
+#include "DocImagePopulate.h"
 #include "DocTextPopulate.h"
 #include "DocumentExtractor.h"
 #include "ImageRegistry.h"
@@ -202,6 +204,14 @@ RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
     if ([scopeVal isKindOfClass:NSString.class] && [scopeVal isEqualToString:@"all"]) {
       opt.all_images = true;
     }
+    id strategyVal = options[@"strategy"];
+    opt.lazy = [strategyVal isKindOfClass:NSString.class] &&
+               [strategyVal isEqualToString:@"lazy-lru"];
+    int hotFrames = 0;
+    id hotVal = options[@"hotFrames"];
+    if ([hotVal respondsToSelector:@selector(intValue)]) {
+      hotFrames = [hotVal intValue];
+    }
     opt.on_progress = [strongSelf](int done, int total, const char *phase) {
       if (![strongSelf respondsToSelector:@selector(sendEventWithName:body:)]) {
         return;
@@ -216,8 +226,12 @@ RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
     };
 
     auto result = sherpa_onnx::document::ExtractDocumentImages(src, opt);
-    [handle cleanup];
+    const bool lazyResult = !result.frames.empty() && result.frames.front().load;
+    // Lazy pages read from the file later: keep the (security-scoped) handle
+    // until the buffer is released.
+    if (!lazyResult) [handle cleanup];
     if (!result.ok) {
+      if (lazyResult) [handle cleanup];
       NSString *code =
           result.error_code.empty()
               ? @"ERR_DOC_OPEN_FAILED"
@@ -230,16 +244,16 @@ RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
       return;
     }
 
-    std::vector<sherpa_onnx::image::RgbFrame> frames;
-    frames.reserve(result.frames.size());
-    for (auto &fr : result.frames) {
-      fr.rgb.sectionIndex = fr.section_index;
-      fr.rgb.href = fr.href;
-      fr.rgb.pageNumber = fr.page_number;
-      frames.push_back(std::move(fr.rgb));
+    auto created = sherpa_onnx::document::CreateImageBufferFromDocument(result, opt.max_side,
+                                                                        hotFrames);
+    if (lazyResult) {
+      if (created.ok) {
+        SherpaOnnxPdfRetainLazyHandle(
+            [NSString stringWithUTF8String:created.info.bufferId.c_str()], handle);
+      } else {
+        [handle cleanup];
+      }
     }
-    auto created = ImageRegistry::Instance().CreateFromRgbFrames(
-        std::move(frames), ImageThresholdPathType::FileOrigin);
     if (!created.ok) {
       NSString *code = created.errorCode.empty()
                            ? @"ERR_DOC_OPEN_FAILED"

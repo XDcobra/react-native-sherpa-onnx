@@ -184,6 +184,47 @@ TEST_F(LazyLruFixture, Release_InvalidatesEnsure) {
   EXPECT_FALSE(ensured.ok);
 }
 
+namespace {
+
+/** Like FakePdfLazyBackend, but knows its page sizes up front. */
+class SizedFakePdfLazyBackend final : public sherpa_onnx::pdf::PdfLazyBackend {
+ public:
+  explicit SizedFakePdfLazyBackend(int pages) : inner_(pages, 144, 4096) {}
+  int page_count() const override { return inner_.page_count(); }
+  int dpi() const override { return inner_.dpi(); }
+  int max_side() const override { return inner_.max_side(); }
+  bool RasterizePage(int page, RgbFrame* out, std::string* c, std::string* m) override {
+    return inner_.RasterizePage(page, out, c, m);
+  }
+  bool PageSize(int page, int* w, int* h) override {
+    *w = 8 + page;
+    *h = 6 + page;
+    return true;
+  }
+
+ private:
+  FakePdfLazyBackend inner_;
+};
+
+}  // namespace
+
+TEST_F(LazyLruFixture, CreateLazySlots_ExpectedSizesBeforeRaster) {
+  auto& reg = ImageRegistry::Instance();
+  auto created = reg.CreateLazyPdfSlots(std::make_unique<SizedFakePdfLazyBackend>(3), {}, 1);
+  ASSERT_TRUE(created.ok);
+  for (int i = 0; i < 3; ++i) {
+    ImageFrameInfo f;
+    ASSERT_TRUE(reg.GetFrameInfo(created.bufferId, i, f));
+    EXPECT_EQ(f.width, 0) << "still cold";
+    EXPECT_EQ(f.expectedWidth, 9 + i);
+    EXPECT_EQ(f.expectedHeight, 7 + i);
+  }
+  auto ensured = reg.EnsureFrame(created.bufferId, 2);
+  ASSERT_TRUE(ensured.ok);
+  EXPECT_EQ(ensured.info.width, ensured.info.expectedWidth);
+  EXPECT_TRUE(reg.Release(created.bufferId));
+}
+
 TEST_F(LazyLruFixture, EvictFrame_DropsRgbKeepsMetadata) {
   auto& reg = ImageRegistry::Instance();
   auto created = reg.CreateLazyPdfSlots(

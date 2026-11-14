@@ -300,6 +300,28 @@ TEST(PdfBookHost, ParallelExtractAndRasterAreSerialized) {
   EXPECT_EQ(failures.load(), 0);
 }
 
+TEST(PdfBookHost, LazyPageSizeMatchesRaster) {
+  if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) GTEST_SKIP() << "PDFium not linked";
+  std::string code;
+  std::string msg;
+  auto session =
+      sherpa_onnx::pdf::PdfLazySession::Open(Src(FixturePath("book.pdf")), 100, 600, &code, &msg);
+  ASSERT_TRUE(session) << code << " " << msg;
+  for (int page = 1; page <= session->page_count(); ++page) {
+    int w = 0;
+    int h = 0;
+    ASSERT_TRUE(session->PageSize(page, &w, &h));
+    sherpa_onnx::image::RgbFrame frame;
+    ASSERT_TRUE(session->RasterizePage(page, &frame, &code, &msg)) << msg;
+    EXPECT_EQ(w, frame.width) << page;
+    EXPECT_EQ(h, frame.height) << page;
+  }
+  int w = 0;
+  int h = 0;
+  EXPECT_FALSE(session->PageSize(0, &w, &h));
+  EXPECT_FALSE(session->PageSize(7, &w, &h));
+}
+
 // ---- layout "paragraphs": reading structure from the text layer ----------
 
 namespace {

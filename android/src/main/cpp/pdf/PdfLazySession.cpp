@@ -96,5 +96,10 @@ bool PdfLazySession::RasterizePage(
   return ok;
 }
 
+bool PdfLazySession::PageSize(int page_1based, int* width, int* height) {
+  std::lock_guard<std::mutex> lock(mu_);
+  return PdfPagePixelSize(doc_, page_1based, dpi_, max_side_, width, height);
+}
+
 }  // namespace pdf
 }  // namespace sherpa_onnx

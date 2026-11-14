@@ -117,13 +117,30 @@ class SherpaOnnxDocumentHelper(
     val allImages =
       options != null && options.hasKey("scope") && !options.isNull("scope") &&
         options.getString("scope") == "all"
+    val lazy =
+      options != null && options.hasKey("strategy") && !options.isNull("strategy") &&
+        options.getString("strategy") == "lazy-lru"
+    val hotFrames =
+      if (options != null && options.hasKey("hotFrames") && !options.isNull("hotFrames")) {
+        options.getDouble("hotFrames").toInt()
+      } else {
+        0 // native default 8
+      }
     val opened = openSeekable(source, promise) ?: return
     val progress = NativeDocProgress { done, total, phase ->
       emitProgress(done, total, phase)
     }
     val raw =
       try {
-        DocumentNative.nativeExtractImages(opened.path, opened.fd, maxSide, allImages, progress)
+        DocumentNative.nativeExtractImages(
+          opened.path,
+          opened.fd,
+          maxSide,
+          allImages,
+          lazy,
+          hotFrames,
+          progress,
+        )
       } finally {
         opened.close()
       }

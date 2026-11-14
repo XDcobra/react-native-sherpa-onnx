@@ -203,6 +203,8 @@ type ExtractDocumentImagesResult = {
 |--------|---------|--------|
 | `maxSide` | `4096` | longest-edge cap after decode; `<= 0` disables |
 | `scope` | `'imageSections'` | `'all'` (EPUB): also the images inside text sections, one frame per unique image path, in reading order (frame `href` = archive path). Used by the reader for image blocks. |
+| `strategy` | `'decode-all'` | `'lazy-lru'`: comic pages (CBZ / CBR) stay in the archive and are decoded when a frame is needed. Frame sizes are known up front (`expectedWidth` / `expectedHeight` in the frame info), and the file stays open until the buffer is released. Other formats decode as with `'decode-all'`. |
+| `hotFrames` | `8` | `'lazy-lru'` only: decoded pages kept in memory, clamped **1..32** |
 | `signal` / `onProgress` | — | cancel / progress |
 
 | Input | Frames |

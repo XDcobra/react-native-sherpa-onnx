@@ -209,6 +209,8 @@ void ImageRegistry::FillFrameInfoLocked(const Frame& f, int frameIndex,
   out.index = frameIndex;
   out.width = f.width;
   out.height = f.height;
+  out.expectedWidth = f.width > 0 ? f.width : f.expectedWidth;
+  out.expectedHeight = f.height > 0 ? f.height : f.expectedHeight;
   out.byteSize = static_cast<int64_t>(f.width) * static_cast<int64_t>(f.height) * 3;
   out.storageKind = f.kind;
   out.pageNumber = f.pageNumber;
@@ -438,14 +440,16 @@ ImageRegistry::CreateResult ImageRegistry::CreateLazyPdfSlots(
   e.pathType = ImageThresholdPathType::FileOrigin;
   e.state = ImageBufferState::Lazy;
   e.hotFramesLimit = limit;
-  e.pdfLazy = std::move(backend);
   e.frames.reserve(pages.size());
   for (int page : pages) {
     Frame f;
     f.pageNumber = page;
     f.dpi = dpi;
+    // Page size without rendering, so viewers can lay out cold pages.
+    backend->PageSize(page, &f.expectedWidth, &f.expectedHeight);
     e.frames.push_back(std::move(f));
   }
+  e.pdfLazy = std::move(backend);
 
   PDF_LAZY_LOGI(
       "createLazy bufferId=%s frames=%zu hotFrames=%d pageCount=%d",
@@ -714,10 +718,14 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrameImpl(const std::string& bu
       Frame& f = entry.frames[static_cast<size_t>(frameIndex)];
       f.width = rgb.width;
       f.height = rgb.height;
+      // Keep the real size for later cold phases (eviction resets width).
+      f.expectedWidth = rgb.width;
+      f.expectedHeight = rgb.height;
       f.kind = ImageStorageKind::Ram;
       f.ram = std::move(rgb.rgb);
-      f.pageNumber = rgb.pageNumber;
-      f.dpi = rgb.dpi;
+      // Decoded files carry no page number / dpi: keep the slot's metadata.
+      if (rgb.pageNumber > 0) f.pageNumber = rgb.pageNumber;
+      if (rgb.dpi > 0) f.dpi = rgb.dpi;
       if (fileLazy) {
         f.decoderProvider = fileLazy->lastProvider();
         f.decoderTier = fileLazy->lastTier();
@@ -805,8 +813,12 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromFiles(
   e.pathType = ImageThresholdPathType::FileOrigin;
   e.state = ImageBufferState::Lazy;
   e.hotFramesLimit = limit;
-  e.fileLazy = std::move(backend);
   e.frames.resize(static_cast<size_t>(total));
+  for (int i = 0; i < total; ++i) {
+    Frame& f = e.frames[static_cast<size_t>(i)];
+    backend->ExpectedSize(i, &f.expectedWidth, &f.expectedHeight);
+  }
+  e.fileLazy = std::move(backend);
   IMG_LOGI("[SherpaOnnx:image] createFromFiles lazy bufferId=%s frames=%d hotFrames=%d",
            e.bufferId.c_str(), total, limit);
   r.info.bufferId = e.bufferId;
@@ -856,9 +868,54 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromBytesList(
   e.pathType = pathType;
   e.state = ImageBufferState::Lazy;
   e.hotFramesLimit = limit;
-  e.fileLazy = std::move(backend);
   e.frames.resize(static_cast<size_t>(total));
+  for (int i = 0; i < total; ++i) {
+    Frame& f = e.frames[static_cast<size_t>(i)];
+    backend->ExpectedSize(i, &f.expectedWidth, &f.expectedHeight);
+  }
+  e.fileLazy = std::move(backend);
   IMG_LOGI("[SherpaOnnx:image] createFromBytes lazy bufferId=%s frames=%d hotFrames=%d",
+           e.bufferId.c_str(), total, limit);
+  r.info.bufferId = e.bufferId;
+  r.info.frameCount = total;
+  r.info.totalBytes = 0;
+  r.info.storageKind = ImageStorageKind::Ram;
+  r.info.state = ImageBufferState::Lazy;
+  r.bufferId = e.bufferId;
+  r.ok = true;
+  entries_[e.bufferId] = std::move(e);
+  return r;
+}
+
+ImageRegistry::CreateResult ImageRegistry::CreateLazyFromBackend(
+    std::shared_ptr<ImageFileLazyBackend> backend, const std::vector<LazyFrameMeta>& meta,
+    ImageThresholdPathType pathType, int hotFrames) {
+  CreateResult r;
+  if (!backend || backend->frame_count() <= 0) {
+    r.errorCode = "ERR_IMAGE_INVALID_ARGUMENT";
+    r.errorMessage = "no frames";
+    return r;
+  }
+  const int total = backend->frame_count();
+  const int limit = ClampHotFrames(hotFrames);
+  std::lock_guard<std::mutex> lock(mu_);
+  Entry e;
+  e.bufferId = NewBufferId();
+  e.pathType = pathType;
+  e.state = ImageBufferState::Lazy;
+  e.hotFramesLimit = limit;
+  e.frames.resize(static_cast<size_t>(total));
+  for (int i = 0; i < total; ++i) {
+    Frame& f = e.frames[static_cast<size_t>(i)];
+    backend->ExpectedSize(i, &f.expectedWidth, &f.expectedHeight);
+    if (i < static_cast<int>(meta.size())) {
+      f.sectionIndex = meta[static_cast<size_t>(i)].sectionIndex;
+      f.href = meta[static_cast<size_t>(i)].href;
+      f.pageNumber = meta[static_cast<size_t>(i)].pageNumber;
+    }
+  }
+  e.fileLazy = std::move(backend);
+  IMG_LOGI("[SherpaOnnx:image] createLazyFromBackend bufferId=%s frames=%d hotFrames=%d",
            e.bufferId.c_str(), total, limit);
   r.info.bufferId = e.bufferId;
   r.info.frameCount = total;

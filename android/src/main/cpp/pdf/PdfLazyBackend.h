@@ -20,6 +20,17 @@ class PdfLazyBackend {
   virtual int max_side() const = 0;
 
   /**
+   * Pixel size RasterizePage will produce for a 1-based page, without
+   * rendering it. False when unknown (frames then report no expected size).
+   */
+  virtual bool PageSize(int page_1based, int* width, int* height) {
+    (void)page_1based;
+    (void)width;
+    (void)height;
+    return false;
+  }
+
+  /**
    * Rasterize one 1-based page into packed RGB8.
    * Sets pageNumber / dpi on the frame on success.
    */

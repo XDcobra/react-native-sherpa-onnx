@@ -89,6 +89,22 @@ class ImageRegistry {
       const std::vector<int>& pages_1based,
       int hotFrames);
 
+  /** Per-frame metadata of a lazy buffer created from a backend. */
+  struct LazyFrameMeta {
+    int sectionIndex = -1;
+    std::string href;
+    int pageNumber = 0;
+  };
+
+  /**
+   * Lazy-lru buffer over an encoded-image backend (paths, bytes or loaders,
+   * e.g. archive entries): one cold slot per backend slot, with `meta[i]` and
+   * the backend's expected sizes. hotFrames clamped to 1..32.
+   */
+  CreateResult CreateLazyFromBackend(std::shared_ptr<ImageFileLazyBackend> backend,
+                                     const std::vector<LazyFrameMeta>& meta,
+                                     ImageThresholdPathType pathType, int hotFrames);
+
   struct EnsureResult {
     bool ok = false;
     std::string errorCode;
@@ -189,6 +205,9 @@ class ImageRegistry {
   struct Frame {
     int width = 0;
     int height = 0;
+    // Size once decoded, known before decoding (lazy PDF page, archive image); 0 = unknown.
+    int expectedWidth = 0;
+    int expectedHeight = 0;
     ImageStorageKind kind = ImageStorageKind::Ram;
     std::vector<uint8_t> ram;  // empty when mmap or cold
     MmapFrame mmap;

@@ -216,3 +216,118 @@ TEST_F(FileLazyFixture, WebpMaxSide_ScaledOnEnsure) {
   EXPECT_TRUE(reg.Release(result.bufferId));
 #endif
 }
+
+// ---- Expected sizes and loader slots (archive images) ----------------------
+
+TEST(ImageDecoderExpectedSize, HeadersExifAndMaxSide) {
+  const auto jpg = ReadFileBytes(FixturePath("green_512x256.jpg"));
+  ASSERT_FALSE(jpg.empty());
+  int w = 0;
+  int h = 0;
+  DecodeOptions opts;
+  opts.maxSide = 0;
+  ASSERT_TRUE(ImageDecoder::ExpectedDecodedSize(jpg.data(), jpg.size(), opts, &w, &h));
+  EXPECT_EQ(w, 512);
+  EXPECT_EQ(h, 256);
+  opts.maxSide = 128;
+  ASSERT_TRUE(ImageDecoder::ExpectedDecodedSize(jpg.data(), jpg.size(), opts, &w, &h));
+  EXPECT_EQ(w, 128);
+  EXPECT_EQ(h, 64);
+  // EXIF orientation 6 rotates: 40x20 coded → 20x40 decoded, like DecodeBytes.
+  const auto rot = ReadFileBytes(FixturePath("exif_orient6_40x20.jpg"));
+  opts.maxSide = 4096;
+  ASSERT_TRUE(ImageDecoder::ExpectedDecodedSize(rot.data(), rot.size(), opts, &w, &h));
+  const auto decoded = ImageDecoder::DecodeBytes(rot.data(), rot.size(), opts);
+  ASSERT_TRUE(decoded.ok);
+  EXPECT_EQ(w, decoded.frame.width);
+  EXPECT_EQ(h, decoded.frame.height);
+  // A prefix with the headers is enough.
+  ASSERT_TRUE(ImageDecoder::ExpectedDecodedSize(jpg.data(), std::min<size_t>(jpg.size(), 2048),
+                                                opts, &w, &h));
+  EXPECT_EQ(w, 512);
+}
+
+TEST_F(FileLazyFixture, LazyFromBackend_LoaderSlotsDecodeOnDemandWithMeta) {
+  auto backend = std::make_shared<ImageFileLazyBackend>(DecodeOptions{});
+  int loads = 0;
+  const std::vector<std::string> names = {"solid_red_64x48.jpg", "solid_blue_64x48.png"};
+  for (const auto& name : names) {
+    const auto bytes = ReadFileBytes(FixturePath(name.c_str()));
+    int w = 0;
+    int h = 0;
+    ASSERT_TRUE(ImageDecoder::ExpectedDecodedSize(bytes.data(), bytes.size(), DecodeOptions{}, &w,
+                                                  &h));
+    backend->AddLoader(
+        [bytes, &loads](std::vector<uint8_t>* out, std::string*, std::string*) {
+          ++loads;
+          *out = bytes;
+          return true;
+        },
+        w, h);
+  }
+  auto& reg = ImageRegistry::Instance();
+  std::vector<ImageRegistry::LazyFrameMeta> meta(2);
+  meta[0].href = "p1.jpg";
+  meta[0].pageNumber = 1;
+  meta[0].sectionIndex = 0;
+  meta[1].href = "p2.png";
+  meta[1].pageNumber = 2;
+  meta[1].sectionIndex = 1;
+  auto created =
+      reg.CreateLazyFromBackend(backend, meta, ImageThresholdPathType::FileOrigin, 1);
+  ASSERT_TRUE(created.ok) << created.errorMessage;
+  EXPECT_EQ(created.info.frameCount, 2);
+  EXPECT_EQ(loads, 0) << "nothing is read before a frame is needed";
+
+  ImageFrameInfo cold;
+  ASSERT_TRUE(reg.GetFrameInfo(created.bufferId, 1, cold));
+  EXPECT_EQ(cold.width, 0);
+  EXPECT_EQ(cold.expectedWidth, 64);
+  EXPECT_EQ(cold.expectedHeight, 48);
+  EXPECT_EQ(cold.href, "p2.png");
+  EXPECT_EQ(cold.pageNumber, 2);
+
+  auto ensured = reg.EnsureFrame(created.bufferId, 1);
+  ASSERT_TRUE(ensured.ok) << ensured.errorMessage;
+  EXPECT_EQ(ensured.info.width, 64);
+  EXPECT_EQ(ensured.info.href, "p2.png");
+  EXPECT_EQ(ensured.info.pageNumber, 2) << "decoding keeps the slot's metadata";
+  EXPECT_GE(loads, 1);
+  EXPECT_TRUE(reg.EvictFrame(created.bufferId, 1));
+  ImageFrameInfo evicted;
+  ASSERT_TRUE(reg.GetFrameInfo(created.bufferId, 1, evicted));
+  EXPECT_EQ(evicted.width, 0);
+  EXPECT_EQ(evicted.expectedWidth, 64);
+  EXPECT_TRUE(reg.Release(created.bufferId));
+}
+
+TEST_F(FileLazyFixture, LazyFromBackend_FailingLoaderReportsError) {
+  auto backend = std::make_shared<ImageFileLazyBackend>(DecodeOptions{});
+  backend->AddLoader(
+      [](std::vector<uint8_t>*, std::string* code, std::string* msg) {
+        *code = "ERR_DOC_OPEN_FAILED";
+        *msg = "gone";
+        return false;
+      },
+      10, 10);
+  auto& reg = ImageRegistry::Instance();
+  auto created = reg.CreateLazyFromBackend(backend, {}, ImageThresholdPathType::FileOrigin, 2);
+  ASSERT_TRUE(created.ok);
+  auto ensured = reg.EnsureFrame(created.bufferId, 0);
+  EXPECT_FALSE(ensured.ok);
+  EXPECT_EQ(ensured.errorCode, "ERR_DOC_OPEN_FAILED");
+  EXPECT_TRUE(reg.Release(created.bufferId));
+}
+
+TEST_F(FileLazyFixture, CreateFromBytes_KnowsExpectedSizes) {
+  auto& reg = ImageRegistry::Instance();
+  auto created = reg.CreateFromBytesList({ReadFileBytes(FixturePath("solid_blue_64x48.png"))},
+                                         DecodeOptions{}, ImageThresholdPathType::HeapOrigin);
+  ASSERT_TRUE(created.ok);
+  ImageFrameInfo f;
+  ASSERT_TRUE(reg.GetFrameInfo(created.bufferId, 0, f));
+  EXPECT_EQ(f.width, 0);
+  EXPECT_EQ(f.expectedWidth, 64);
+  EXPECT_EQ(f.expectedHeight, 48);
+  EXPECT_TRUE(reg.Release(created.bufferId));
+}

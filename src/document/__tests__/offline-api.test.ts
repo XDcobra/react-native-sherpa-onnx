@@ -229,6 +229,28 @@ describe('document offline api', () => {
     );
   });
 
+  it('extractDocumentImages forwards the lazy strategy', async () => {
+    mockNative.extractDocumentImages.mockResolvedValue({
+      bufferId: 'img_off_00000000-0000-0000-0000-0000000000ac',
+      format: 'cbz',
+      frameCount: 200,
+    });
+    await extractDocumentImages(
+      { kind: 'fs', path: '/tmp/a.cbz' },
+      { strategy: 'lazy-lru', hotFrames: 6 }
+    );
+    expect(mockNative.extractDocumentImages).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/a.cbz' },
+      { strategy: 'lazy-lru', hotFrames: 6 }
+    );
+    await expect(
+      extractDocumentImages(
+        { kind: 'fs', path: '/tmp/a.cbz' },
+        { strategy: 'stream' as unknown as 'lazy-lru' }
+      )
+    ).rejects.toMatchObject({ code: 'ERR_DOC_INVALID_ARGUMENT' });
+  });
+
   it('extractDocumentImages forwards scope all', async () => {
     mockNative.extractDocumentImages.mockResolvedValue({
       bufferId: 'img_off_00000000-0000-0000-0000-0000000000ab',

@@ -31,6 +31,14 @@ class ImageDecoder {
   static ImageProbeResult ProbeFile(const std::string& path);
 
   /**
+   * Size DecodeBytes will produce (EXIF orientation, maxSide), from the
+   * headers only; `data` may be a prefix of the file. False if unknown (HEIC,
+   * headers not in the prefix).
+   */
+  static bool ExpectedDecodedSize(const uint8_t* data, size_t size, const DecodeOptions& opts,
+                                  int* width, int* height);
+
+  /**
    * Apply EXIF orientation 1..8 in-place on an RGB8 buffer.
    * Returns the orientation that was applied (1 if none/invalid).
    */

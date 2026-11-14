@@ -59,6 +59,11 @@ struct ExtractOptions {
    * true = also images inside text sections (EPUB), one frame per unique path.
    */
   bool all_images = false;
+  /**
+   * Images of comic archives (CBZ / CBR): keep the pages in the archive and
+   * decode on demand (DocImageFrame::load). Other formats decode as usual.
+   */
+  bool lazy = false;
   std::function<bool()> is_cancelled;
   std::function<void(int done, int total, const char* phase)> on_progress;
 };
@@ -91,10 +96,19 @@ struct ExtractTextResult {
 };
 
 struct DocImageFrame {
-  sherpa_onnx::image::RgbFrame rgb;
+  sherpa_onnx::image::RgbFrame rgb;  // empty when `load` is set
   int section_index = 0;
   std::string href;
   int page_number = 0;  // 1-based comic display index; 0 unset
+  /**
+   * Lazy extraction: reads the frame's encoded bytes (thread-safe; keeps its
+   * archive open). `expected_*` is the decoded size from the headers, 0 = unknown.
+   */
+  std::function<bool(std::vector<uint8_t>* bytes, std::string* err_code,
+                     std::string* err_message)>
+      load;
+  int expected_width = 0;
+  int expected_height = 0;
 };
 
 struct ExtractImagesResult {

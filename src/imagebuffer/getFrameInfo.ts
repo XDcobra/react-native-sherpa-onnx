@@ -39,6 +39,8 @@ function mapFrameInfo(raw: {
   index: number;
   width: number;
   height: number;
+  expectedWidth?: number;
+  expectedHeight?: number;
   byteSize: number;
   storageKind: string;
   pageNumber?: number;
@@ -59,6 +61,15 @@ function mapFrameInfo(raw: {
     byteSize: raw.byteSize,
     storageKind: raw.storageKind === 'mmap' ? 'mmap' : 'ram',
   };
+  if (
+    raw.expectedWidth != null &&
+    raw.expectedHeight != null &&
+    raw.expectedWidth > 0 &&
+    raw.expectedHeight > 0
+  ) {
+    frame.expectedWidth = Math.trunc(raw.expectedWidth);
+    frame.expectedHeight = Math.trunc(raw.expectedHeight);
+  }
   if (
     raw.pageNumber != null &&
     Number.isFinite(raw.pageNumber) &&

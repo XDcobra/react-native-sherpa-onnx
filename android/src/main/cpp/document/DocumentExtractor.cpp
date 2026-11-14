@@ -150,7 +150,7 @@ ExtractImagesResult ExtractDocumentImages(const DocumentSource& src,
     if (!have_ar) {
       return FailImg(kErrOpenFailed, "Comic archive is not seekable");
     }
-    return ExtractComicImages(ar, FormatName(fmt), opt);
+    return ExtractComicImages(src, ar, FormatName(fmt), opt);
   }
   if (fmt == DocFormat::Epub) {
     if (!have_ar) {
