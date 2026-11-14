@@ -107,6 +107,81 @@ TEST(DocHtml, BlocksAndRuby) {
   EXPECT_NE(hx.text.find("World"), std::string::npos);
   EXPECT_EQ(hx.text.find("kan"), std::string::npos);
 }
+
+namespace {
+sherpa_onnx::document::HtmlExtract Html(const char* html) {
+  return sherpa_onnx::document::ExtractHtmlText(
+      reinterpret_cast<const uint8_t*>(html), std::strlen(html));
+}
+using sherpa_onnx::document::HtmlBlockKind;
+}  // namespace
+
+TEST(DocHtml, CollapsesWhitespaceInsideBlocks) {
+  auto hx = Html(
+      "<p>\n    The   quick\n\tbrown <em>fox</em>\n    jumps.\n  </p>");
+  ASSERT_EQ(hx.blocks.size(), 1u);
+  EXPECT_EQ(hx.blocks[0], "The quick brown fox jumps.");
+}
+
+TEST(DocHtml, LineBreakKeepsNewlineWithoutSurroundingSpaces) {
+  auto hx = Html("<p>Roses are red, <br/>\n   violets are blue.</p>");
+  ASSERT_EQ(hx.blocks.size(), 1u);
+  EXPECT_EQ(hx.blocks[0], "Roses are red,\nviolets are blue.");
+}
+
+TEST(DocHtml, PreKeepsWhitespace) {
+  auto hx = Html("<pre>a  b\n  c</pre><p>x   y</p>");
+  ASSERT_EQ(hx.blocks.size(), 2u);
+  EXPECT_EQ(hx.blocks[0], "a  b\n  c");
+  EXPECT_EQ(hx.blocks[1], "x y");
+}
+
+TEST(DocHtml, HeadingLevelsAndKinds) {
+  auto hx = Html("<h1>Title</h1><p>Body</p><h3>Sub</h3>");
+  ASSERT_EQ(hx.items.size(), 3u);
+  EXPECT_EQ(hx.items[0].kind, HtmlBlockKind::Heading);
+  EXPECT_EQ(hx.items[0].level, 1);
+  EXPECT_EQ(hx.items[1].kind, HtmlBlockKind::Paragraph);
+  EXPECT_EQ(hx.items[2].level, 3);
+  EXPECT_EQ(hx.text, "Title\n\nBody\n\nSub");
+}
+
+TEST(DocHtml, ImageInsideParagraphComesAfterIt) {
+  auto hx = Html(
+      "<p>Before <img src='../img/a.png' alt=' A map '/> after.</p>"
+      "<img src='b.jpg'/><p>Next</p>");
+  ASSERT_EQ(hx.items.size(), 4u);
+  EXPECT_EQ(hx.items[0].kind, HtmlBlockKind::Paragraph);
+  EXPECT_EQ(hx.items[0].text, "Before after.");
+  EXPECT_EQ(hx.items[1].kind, HtmlBlockKind::Image);
+  EXPECT_EQ(hx.items[1].image_src, "../img/a.png");
+  EXPECT_TRUE(hx.items[1].has_alt);
+  EXPECT_EQ(hx.items[1].alt, "A map");
+  EXPECT_EQ(hx.items[2].image_src, "b.jpg");
+  EXPECT_FALSE(hx.items[2].has_alt);
+  EXPECT_EQ(hx.items[3].text, "Next");
+  // Images never add text.
+  EXPECT_EQ(hx.text, "Before after.\n\nNext");
+}
+
+TEST(DocHtml, SeparatorAndSvgImage) {
+  auto hx = Html(
+      "<p>One</p><hr/><svg xmlns='http://www.w3.org/2000/svg' "
+      "xmlns:xlink='http://www.w3.org/1999/xlink'>"
+      "<image xlink:href='cover.jpg'/></svg><p>Two</p>");
+  ASSERT_EQ(hx.items.size(), 4u);
+  EXPECT_EQ(hx.items[1].kind, HtmlBlockKind::Separator);
+  EXPECT_EQ(hx.items[2].kind, HtmlBlockKind::Image);
+  EXPECT_EQ(hx.items[2].image_src, "cover.jpg");
+}
+
+TEST(DocHtml, LooseTextBeforeBlockIsItsOwnParagraph) {
+  auto hx = Html("<div>Intro text <p>Para</p> tail</div>");
+  ASSERT_EQ(hx.blocks.size(), 3u);
+  EXPECT_EQ(hx.blocks[0], "Intro text");
+  EXPECT_EQ(hx.blocks[1], "Para");
+  EXPECT_EQ(hx.blocks[2], "tail");
+}
 #else
 TEST(DocHtml, DisabledWithoutLexbor) {
   const char* html = "<p>Hello</p>";

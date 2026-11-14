@@ -4,6 +4,7 @@
 
 ### BREAKING CHANGES
 
+* **document:** EPUB / FB2-in-XHTML / MOBI text extraction now collapses whitespace inside blocks (runs of spaces, tabs and newlines from pretty-printed XHTML become one space), drops spaces around `<br>` line breaks, and keeps `<pre>` text unchanged. Extracted text, UTF-16 offsets and markup spans can differ from earlier builds for the same file. This is part of the reader structure v1 rules (`docs/reader.md`).
 * **textbuffer:** LiveText segment `meta` is now a Fabric-safe **JSON tree** (`Record<string, JsonValue>`). Nested objects/arrays round-trip through Android emit, iOS passthrough, JS `sanitizeJsonMeta`, and `getLiveTextBufferSegments({ includeMeta })`. Soft limits: depth ≤ 4, array length ≤ 64, keys/level ≤ 64 (excess dropped). Apps that relied on silent dropping of nested keys will now see those keys. **KWS** and other scalar-only producers need no change.
 * **audio-tagging:** Live overload `meta.events` is a nested array of `{ name, index, prob }`. The previous JSON-string workaround is removed (no string parse).
 * **tts:** `startPcmPlayer`, `writePcmChunk`, `stopPcmPlayer` removed from `StreamingTtsEngine`. Use standalone `createPcmPlayer` from `react-native-sherpa-onnx/pcm` or `playback: true` on streaming options.
