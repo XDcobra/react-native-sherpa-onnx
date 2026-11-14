@@ -4,7 +4,9 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <memory>
+#include <thread>
 #include <string>
 #include <vector>
 
@@ -198,4 +200,117 @@ TEST_F(LazyLruFixture, EvictFrame_DropsRgbKeepsMetadata) {
   EXPECT_EQ(f.dpi, 200);
 
   EXPECT_TRUE(reg.Release(created.bufferId));
+}
+
+// ---- FramePin: a reader's frame survives eviction, mmap upgrade and Release ----
+
+TEST_F(LazyLruFixture, PinFrame_SurvivesEvictionOfColdNeighbours) {
+  auto& reg = ImageRegistry::Instance();
+  auto created = reg.CreateLazyPdfSlots(
+      std::make_unique<FakePdfLazyBackend>(6, 72, 1024), {}, 1);
+  ASSERT_TRUE(created.ok);
+  const std::string id = created.bufferId;
+
+  auto pin = reg.PinFrame(id, 0);
+  ASSERT_TRUE(pin);
+  EXPECT_EQ(pin.width(), 9);
+  EXPECT_EQ(pin.height(), 7);
+  const uint8_t first = pin.data()[0];
+  EXPECT_EQ(reg.FramePinCount(id, 0), 1);
+
+  // hotFrames = 1: every ensure would normally evict frame 0.
+  for (int i = 1; i < 6; ++i) ASSERT_TRUE(reg.EnsureFrame(id, i).ok);
+  EXPECT_EQ(pin.data()[0], first);
+  ImageFrameInfo f0;
+  ASSERT_TRUE(reg.GetFrameInfo(id, 0, f0));
+  EXPECT_GT(f0.width, 0) << "pinned frame stays hot";
+  EXPECT_FALSE(reg.EvictFrame(id, 0)) << "explicit evict refuses a pinned frame";
+
+  pin.reset();
+  EXPECT_EQ(reg.FramePinCount(id, 0), 0);
+  // Unpinning brings the buffer back under its hot limit.
+  EXPECT_LE(CountHot(id, 6), 1);
+  EXPECT_TRUE(reg.Release(id));
+}
+
+TEST_F(LazyLruFixture, PinFrame_ReleaseIsDeferredUntilLastUnpin) {
+  auto& reg = ImageRegistry::Instance();
+  auto created = reg.CreateLazyPdfSlots(
+      std::make_unique<FakePdfLazyBackend>(3, 72, 1024), {}, 2);
+  ASSERT_TRUE(created.ok);
+  const std::string id = created.bufferId;
+
+  auto a = reg.PinFrame(id, 2);
+  auto b = reg.PinFrame(id, 2);
+  ASSERT_TRUE(a && b);
+  EXPECT_EQ(reg.FramePinCount(id, 2), 2);
+  const uint8_t value = a.data()[0];
+
+  EXPECT_TRUE(reg.Release(id));
+  ImageBufferInfo info;
+  EXPECT_FALSE(reg.GetInfo(id, info)) << "released for callers";
+  // The pixels are still readable through the pins.
+  EXPECT_EQ(a.data()[0], value);
+  EXPECT_EQ(reg.FramePinCount(id, 2), 2);
+
+  a.reset();
+  EXPECT_EQ(b.data()[0], value);
+  EXPECT_EQ(reg.FramePinCount(id, 2), 1);
+  b.reset();
+  EXPECT_EQ(reg.FramePinCount(id, 2), 0);
+  EXPECT_FALSE(reg.PinFrame(id, 2)) << "nothing to pin after release";
+}
+
+TEST_F(LazyLruFixture, PinFrame_MoveTransfersOwnership) {
+  auto& reg = ImageRegistry::Instance();
+  auto created = reg.CreateLazyPdfSlots(
+      std::make_unique<FakePdfLazyBackend>(2, 72, 1024), {}, 2);
+  ASSERT_TRUE(created.ok);
+  ImageRegistry::FramePin outer;
+  {
+    auto inner = reg.PinFrame(created.bufferId, 1);
+    ASSERT_TRUE(inner);
+    outer = std::move(inner);
+    EXPECT_FALSE(inner);
+  }
+  EXPECT_TRUE(outer);
+  EXPECT_EQ(reg.FramePinCount(created.bufferId, 1), 1);
+  outer.reset();
+  EXPECT_EQ(reg.FramePinCount(created.bufferId, 1), 0);
+  EXPECT_TRUE(reg.Release(created.bufferId));
+}
+
+TEST_F(LazyLruFixture, PinFrame_ConcurrentReadersAndEnsure) {
+  auto& reg = ImageRegistry::Instance();
+  auto created = reg.CreateLazyPdfSlots(
+      std::make_unique<FakePdfLazyBackend>(8, 72, 1024), {}, 2);
+  ASSERT_TRUE(created.ok);
+  const std::string id = created.bufferId;
+  std::atomic<int> bad{0};
+  std::vector<std::thread> threads;
+  for (int t = 0; t < 4; ++t) {
+    threads.emplace_back([&, t]() {
+      for (int i = 0; i < 200; ++i) {
+        const int frame = (t * 3 + i) % 8;
+        auto pin = reg.PinFrame(id, frame);
+        if (!pin) {
+          ++bad;
+          continue;
+        }
+        // FakePdfLazyBackend fills page p with red = p * 40.
+        const uint8_t expected = static_cast<uint8_t>((frame + 1) * 40);
+        for (int k = 0; k < pin.width() * pin.height(); k += 7) {
+          if (pin.data()[k * 3] != expected) {
+            ++bad;
+            break;
+          }
+        }
+        if (i % 5 == 0) (void)reg.EnsureFrame(id, (frame + 4) % 8);
+      }
+    });
+  }
+  for (auto& th : threads) th.join();
+  EXPECT_EQ(bad.load(), 0);
+  for (int i = 0; i < 8; ++i) EXPECT_EQ(reg.FramePinCount(id, i), 0);
+  EXPECT_TRUE(reg.Release(id));
 }

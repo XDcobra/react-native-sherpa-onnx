@@ -232,10 +232,12 @@ OcrEngine::RecognizeOutcome OcrEngine::RecognizeMulti(
       return out;
     }
 
-    int width = 0;
-    int height = 0;
-    const uint8_t* rgb = image::ImageRegistry::Instance().GetFrameRgbPtr(
-        image_buffer_id, frame_index, &width, &height);
+    // Pinned for the whole recognition: a reader or prefetch on the same lazy
+    // buffer must not evict or move the pixels underneath the model.
+    auto pin = image::ImageRegistry::Instance().PinFrame(image_buffer_id, frame_index);
+    const uint8_t* rgb = pin.data();
+    const int width = pin.width();
+    const int height = pin.height();
     if (!rgb || width <= 0 || height <= 0) {
       out.errorCode = "OCR_FRAME_READ_FAILED";
       out.errorMessage =

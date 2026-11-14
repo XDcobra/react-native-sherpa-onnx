@@ -702,9 +702,10 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFrameBitmap(
   const uint8_t* rgb = nullptr;
   int width = 0;
   int height = 0;
+  sherpa_onnx::image::ImageRegistry::FramePin pin;
   if (!sherpa_onnx::image::ResolveFrameRgb(JstringToStd(env, jBufferId),
                                            frameIndex, maxSide, scratch, &rgb,
-                                           &width, &height) ||
+                                           &width, &height, &pin) ||
       !rgb || width <= 0 || height <= 0) {
     return nullptr;
   }

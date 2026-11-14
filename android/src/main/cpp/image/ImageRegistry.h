@@ -6,7 +6,9 @@
 #include "decode/ImageDecoder.h"
 #include "live/LiveImageEntry.h"
 
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -100,6 +102,8 @@ class ImageRegistry {
    * No-op success for already-hot / non-lazy frames (returns frame info).
    */
   EnsureResult EnsureFrame(const std::string& bufferId, int frameIndex);
+  /** EnsureFrame without scheduling neighbour prefetch (used by the prefetcher). */
+  EnsureResult EnsureFrameNoPrefetch(const std::string& bufferId, int frameIndex);
 
   /** Drop RGB for a hot frame; keep pageNumber/dpi metadata. */
   bool EvictFrame(const std::string& bufferId, int frameIndex);
@@ -109,11 +113,48 @@ class ImageRegistry {
                     ImageFrameInfo& out) const;
 
   /**
-   * Zero-copy RGB pointer for OCR (mmap or RAM). Valid until Release/evict.
-   * On cold lazy frames: sync EnsureFrame first.
+   * Zero-copy RGB pointer (mmap or RAM). Valid only until the frame is
+   * evicted, upgraded to mmap or released — prefer PinFrame for anything that
+   * reads while other threads use the buffer. On cold lazy frames: sync
+   * EnsureFrame first.
    */
   const uint8_t* GetFrameRgbPtr(const std::string& bufferId, int frameIndex,
                                 int* outWidth, int* outHeight);
+
+  /**
+   * Zero-copy RGB that stays valid while the pin lives. A pinned frame is not
+   * evicted, not moved to mmap, and not freed by Release (the buffer's memory
+   * is kept until the last pin goes away). Cold lazy frames are ensured first.
+   * Live buffers return an unpinned pointer (their ring has its own rules).
+   */
+  class FramePin {
+   public:
+    FramePin() = default;
+    FramePin(const FramePin&) = delete;
+    FramePin& operator=(const FramePin&) = delete;
+    FramePin(FramePin&& other) noexcept;
+    FramePin& operator=(FramePin&& other) noexcept;
+    ~FramePin();
+
+    const uint8_t* data() const { return data_; }
+    int width() const { return width_; }
+    int height() const { return height_; }
+    explicit operator bool() const { return data_ != nullptr; }
+    void reset();
+
+   private:
+    friend class ImageRegistry;
+    std::string bufferId_;
+    int frameIndex_ = -1;  // -1: nothing to unpin
+    const uint8_t* data_ = nullptr;
+    int width_ = 0;
+    int height_ = 0;
+  };
+
+  FramePin PinFrame(const std::string& bufferId, int frameIndex);
+
+  /** Host-test helper: pins currently held on a frame (released buffers included). */
+  int FramePinCount(const std::string& bufferId, int frameIndex) const;
 
   bool Release(const std::string& bufferId);
 
@@ -162,6 +203,7 @@ class ImageRegistry {
     std::string decoderTier;
     std::string decoderOrigin;
     uint64_t lruTick = 0;
+    int pins = 0;  // FramePin holders; pinned RGB is never cleared or moved
   };
 
   struct Entry {
@@ -190,6 +232,8 @@ class ImageRegistry {
 
   mutable std::mutex mu_;
   std::unordered_map<std::string, Entry> entries_;
+  // Released buffers that still had pinned frames; freed on the last unpin.
+  std::unordered_map<std::string, Entry> released_;
   std::unordered_map<std::string, std::shared_ptr<LiveImageEntry>> liveEntries_;
   std::string cacheDir_;
   ImageThresholdPlatform platform_ = ImageThresholdPlatform::Android;
@@ -206,8 +250,27 @@ class ImageRegistry {
   void TouchLruLocked(Entry& entry, int frameIndex);
   void EvictUntilUnderLimitLocked(Entry& entry);
   void FillFrameInfoLocked(const Frame& f, int frameIndex, ImageFrameInfo& out) const;
+  void Unpin(const std::string& bufferId, int frameIndex);
   void ScheduleNeighborPrefetch(const std::string& bufferId, int frameIndex,
                                 uint64_t generation, int frameCount);
+  void PrefetchWorkerLoop();
+  EnsureResult EnsureFrameImpl(const std::string& bufferId, int frameIndex,
+                               bool prefetchNeighbours, FramePin* pinOut = nullptr);
+  /** Pins a hot frame of entries_[bufferId] (mu_ held). */
+  void PinLocked(Entry& entry, int frameIndex, FramePin* pin);
+
+  // One worker thread for neighbour prefetch; short, de-duplicated queue
+  // (a scrolling reader calls EnsureFrame per row, so one thread per call
+  // would pile up).
+  struct PrefetchJob {
+    std::string bufferId;
+    int frameIndex = 0;
+    uint64_t generation = 0;
+  };
+  std::mutex prefetchMu_;
+  std::condition_variable prefetchCv_;
+  std::deque<PrefetchJob> prefetchQueue_;
+  bool prefetchWorkerStarted_ = false;
 };
 
 }  // namespace image
