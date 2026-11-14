@@ -1,5 +1,7 @@
 #include "DocumentExtractor.h"
 
+#include "ReaderFileHash.h"
+#include "ReaderJson.h"
 #include "ReaderRegistry.h"
 #include "ReaderTextHash.h"
 #include "ReaderTracker.h"
@@ -274,4 +276,38 @@ TEST(ReaderTracker, FrontierFromAppAndReadingBack) {
   ev = t.Sample(20, 24, ScrollPhase::Drag);  // reading back
   EXPECT_EQ(Count(ev, Kind::Furthest), 0);
   EXPECT_EQ(t.Frontier(), 33);
+}
+
+// ---- Bridge helpers -------------------------------------------------------
+
+TEST(ReaderJson, SummaryAndBlocks) {
+  const std::string id = CreateDoc("structure.epub");
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  const std::string summary = SnapshotSummaryJson(*snap);
+  EXPECT_NE(summary.find("\"id\":\"" + id + "\""), std::string::npos);
+  EXPECT_NE(summary.find("\"structureVersion\":1"), std::string::npos);
+  EXPECT_NE(summary.find("\"title\":\"Chapter One\""), std::string::npos);
+  EXPECT_NE(summary.find("\"firstBlockId\":\"s0.b0\""), std::string::npos);
+  EXPECT_NE(summary.find("\"lastBlockId\":\"s0.b7\""), std::string::npos);
+  const int roses = snap->BlockIndex("s0.b7");
+  const std::string blocks = BlocksJson(*snap, roses, 1, true);
+  EXPECT_NE(blocks.find("\"text\":\"Roses are red,\\nviolets are blue.\""), std::string::npos);
+  const std::string img = BlocksJson(*snap, snap->BlockIndex("s0.b4"), 1, true);
+  EXPECT_NE(img.find("\"imageHref\":\"OEBPS/images/map.png\""), std::string::npos);
+  EXPECT_EQ(img.find("\"text\""), std::string::npos);
+  EXPECT_EQ(BlocksJson(*snap, 9999, 5, false), "[]");
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderFileHash, MatchesFixtureSha256) {
+  sherpa_onnx::fileio::SeekableSource src;
+  src.path = RepoPath("test/fixtures/document/structure.epub");
+  std::string hex;
+  std::string err;
+  ASSERT_TRUE(Sha256HexOfSource(src, &hex, &err)) << err;
+  EXPECT_EQ(hex.size(), 64u);
+  const char* expected = std::getenv("STRUCTURE_EPUB_SHA256");
+  if (expected) EXPECT_EQ(hex, expected);
+  src.path = "/nonexistent/file.epub";
+  EXPECT_FALSE(Sha256HexOfSource(src, &hex, &err));
 }

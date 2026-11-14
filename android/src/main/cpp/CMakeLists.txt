@@ -319,6 +319,10 @@ set(SOURCES
     reader/ReaderTextHash.cpp
     reader/ReaderRegistry.cpp
     reader/ReaderTracker.cpp
+    reader/ReaderJson.cpp
+    reader/ReaderFileHash.cpp
+    reader/ReaderBridge.cpp
+    jni/reader/sherpa-onnx-reader-jni.cpp
     ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
     jni/document/sherpa-onnx-document-jni.cpp
     codec/CodecTypes.cpp

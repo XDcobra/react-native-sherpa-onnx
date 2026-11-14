@@ -991,6 +991,8 @@ add_executable(reader_host_test
   "${READER_CPP_ROOT}/reader/ReaderTextHash.cpp"
   "${READER_CPP_ROOT}/reader/ReaderRegistry.cpp"
   "${READER_CPP_ROOT}/reader/ReaderTracker.cpp"
+  "${READER_CPP_ROOT}/reader/ReaderJson.cpp"
+  "${READER_CPP_ROOT}/reader/ReaderFileHash.cpp"
   "${READER_CPP_ROOT}/crypto/sha256.cpp"
   "${DOC_CPP_ROOT}/DocumentExtractor.cpp"
   "${DOC_CPP_ROOT}/DocArchive.cpp"

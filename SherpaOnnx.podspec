@@ -150,6 +150,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/ocr/**/*",
     "android/src/main/cpp/jni/pdf/**/*",
     "android/src/main/cpp/jni/document/**/*",
+    "android/src/main/cpp/jni/reader/**/*",
     # stb is included from ImageDecoder.cpp; do not compile as a separate TU.
     "android/src/main/cpp/image/decode/vendor/**/*"
   ]

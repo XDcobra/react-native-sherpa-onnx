@@ -1377,6 +1377,54 @@ export interface Spec extends TurboModule {
     };
   }>;
 
+  // ========== Reader (react-native-sherpa-onnx/reader) ==========
+
+  /** Lowercase hex SHA-256 of a FileSource (reader `documentKey`). */
+  computeFileSourceSha256(source: Object): Promise<string>;
+
+  /**
+   * Native reader document from a text buffer with a reading structure (+
+   * optional image buffer from `extractDocumentImages({ scope: 'all' })`).
+   * Resolves the document summary as JSON.
+   */
+  createReaderDocument(
+    textBufferId: string,
+    imageBufferId: string,
+    documentKey: string
+  ): Promise<string>;
+
+  /** Inserts an app section; block arrays are parallel. Resolves the new summary JSON. */
+  insertReaderSection(
+    documentId: string,
+    after: string,
+    sectionId: string,
+    title: string,
+    keys: Array<string>,
+    types: Array<string>,
+    texts: Array<string>,
+    levels: Array<number>
+  ): Promise<string>;
+
+  /** Removes an app section. Resolves the new summary JSON. */
+  removeReaderSection(documentId: string, sectionId: string): Promise<string>;
+
+  /** Blocks [start, start + maxCount) as JSON (max 4096 per call). */
+  getReaderBlocks(
+    documentId: string,
+    start: number,
+    maxCount: number,
+    includeText: boolean
+  ): Promise<string>;
+
+  /** Nearest block with `textHash` (JSON `{blockId, sectionId}` or `null`). */
+  findReaderBlockByHash(
+    documentId: string,
+    textHash: string,
+    hintBlockId: string
+  ): Promise<string>;
+
+  releaseReaderDocument(documentId: string): Promise<boolean>;
+
   /**
    * Extract image-only sections / CBZ / CBR into a new OfflineImageBuffer.
    * Progress events: `SherpaOnnxDocProgress` `{ done, total, phase }`.

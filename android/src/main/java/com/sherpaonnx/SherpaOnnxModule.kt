@@ -285,6 +285,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   private val pdfHelper = com.sherpaonnx.pdf.facade.SherpaOnnxPdfHelper(reactApplicationContext)
   private val documentHelper =
     com.sherpaonnx.document.facade.SherpaOnnxDocumentHelper(reactApplicationContext)
+  private val readerHelper =
+    com.sherpaonnx.reader.facade.SherpaOnnxReaderHelper(reactApplicationContext)
   private val onlinePunctuationHelper = SherpaOnnxOnlinePunctuationHelper(
     reactApplicationContext,
     { modelDir, assetName, modelType, quantization ->
@@ -440,6 +442,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     ocrHelper.shutdown()
     pdfHelper.shutdown()
     documentHelper.shutdown()
+    readerHelper.shutdown()
     vadHelper.shutdown()
     pcmPlayerService.shutdown()
     com.sherpaonnx.audio.session.PaAudioSessionCoordinator.resetAll()
@@ -4034,6 +4037,51 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   ) {
     documentHelper.extractDocumentImages(source, options, promise)
   }
+
+  // ========== Reader ==========
+
+  override fun computeFileSourceSha256(source: ReadableMap, promise: Promise) =
+    readerHelper.computeFileSourceSha256(source, promise)
+
+  override fun createReaderDocument(
+    textBufferId: String,
+    imageBufferId: String,
+    documentKey: String,
+    promise: Promise,
+  ) = readerHelper.createReaderDocument(textBufferId, imageBufferId, documentKey, promise)
+
+  override fun insertReaderSection(
+    documentId: String,
+    after: String,
+    sectionId: String,
+    title: String,
+    keys: ReadableArray,
+    types: ReadableArray,
+    texts: ReadableArray,
+    levels: ReadableArray,
+    promise: Promise,
+  ) = readerHelper.insertReaderSection(documentId, after, sectionId, title, keys, types, texts, levels, promise)
+
+  override fun removeReaderSection(documentId: String, sectionId: String, promise: Promise) =
+    readerHelper.removeReaderSection(documentId, sectionId, promise)
+
+  override fun getReaderBlocks(
+    documentId: String,
+    start: Double,
+    maxCount: Double,
+    includeText: Boolean,
+    promise: Promise,
+  ) = readerHelper.getReaderBlocks(documentId, start, maxCount, includeText, promise)
+
+  override fun findReaderBlockByHash(
+    documentId: String,
+    textHash: String,
+    hintBlockId: String,
+    promise: Promise,
+  ) = readerHelper.findReaderBlockByHash(documentId, textHash, hintBlockId, promise)
+
+  override fun releaseReaderDocument(documentId: String, promise: Promise) =
+    readerHelper.releaseReaderDocument(documentId, promise)
 
   override fun createEmptyLiveImageBuffer(options: ReadableMap?, promise: Promise) {
     try {

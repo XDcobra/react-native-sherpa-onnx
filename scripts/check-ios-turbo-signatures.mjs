@@ -194,7 +194,9 @@ function parseImplMethods(iosDir) {
         walk(full);
       } else if (ent.isFile() && ent.name.endsWith('.mm')) {
         const text = fs.readFileSync(full, 'utf8');
-        if (!text.includes('@implementation') || !text.includes('SherpaOnnx')) {
+        // Only the TurboModule class and its categories; Fabric component
+        // views (e.g. reader/) also mention SherpaOnnx but are not the module.
+        if (!/@implementation\s+SherpaOnnx\b/.test(text)) {
           continue;
         }
         const rel = path.relative(iosDir, full);
