@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
+#include <utility>
 
 #if defined(__ANDROID__)
 #include <android/log.h>
@@ -489,6 +491,50 @@ ExtractTextResult ExtractEpubText(ArchiveReader& ar, const ExtractOptions& opt) 
   return r;
 }
 
+namespace {
+
+/**
+ * Every image of the book in reading order (raw image spine items, images in
+ * text and image-only sections), one entry per unique archive path; the
+ * section is where the image first appears. Used with `all_images`.
+ */
+void CollectAllEpubImages(ArchiveReader& ar, const std::string& opf_dir,
+                          const std::map<std::string, ManifestItem>& manifest,
+                          const std::vector<SpineItem>& spine,
+                          const ExtractOptions& opt,
+                          std::vector<std::pair<std::string, int>>* out) {
+  std::set<std::string> seen;
+  auto add = [&](const std::string& path, int section) {
+    if (!path.empty() && seen.insert(path).second) out->push_back({path, section});
+  };
+  std::string err_code;
+  std::string err_msg;
+  int section_index = 0;
+  for (const SpineItem& si : spine) {
+    if (Cancelled(opt)) return;
+    if (!si.linear) continue;
+    auto it = manifest.find(si.idref);
+    if (it == manifest.end()) continue;
+    const std::string href = JoinHref(opf_dir, it->second.href);
+    if (LooksLikeImageType(it->second.media_type) || LooksLikeImageName(href)) {
+      add(href, section_index++);
+      continue;
+    }
+    std::vector<uint8_t> xhtml;
+    if (ar.ReadNamed(href, &xhtml, &err_code, &err_msg)) {
+      const HtmlExtract hx = ExtractHtmlText(xhtml.data(), xhtml.size());
+      for (const HtmlBlock& item : hx.items) {
+        if (item.kind == HtmlBlockKind::Image) {
+          add(JoinHref(DirnameOf(href), item.image_src), section_index);
+        }
+      }
+    }
+    ++section_index;
+  }
+}
+
+}  // namespace
+
 ExtractImagesResult ExtractEpubImages(ArchiveReader& ar,
                                       const ExtractOptions& opt) {
   ExtractImagesResult r;
@@ -514,6 +560,46 @@ ExtractImagesResult ExtractEpubImages(ArchiveReader& ar,
   int section_index = 0;
   sherpa_onnx::image::DecodeOptions dec;
   dec.maxSide = opt.max_side;
+
+  if (opt.all_images) {
+    std::vector<std::pair<std::string, int>> images;
+    CollectAllEpubImages(ar, opf_dir, manifest, spine, opt, &images);
+    const int count = static_cast<int>(images.size());
+    for (int i = 0; i < count; ++i) {
+      if (Cancelled(opt)) {
+        r.error_code = kErrCancelled;
+        r.error_message = "cancelled";
+        return r;
+      }
+      Progress(opt, i, count, "image");
+      std::vector<uint8_t> bytes;
+      if (!ar.ReadNamed(images[i].first, &bytes, &err_code, &err_msg)) {
+        DOC_LOGI("decode skip missing image %s", images[i].first.c_str());
+        continue;
+      }
+      auto decoded = sherpa_onnx::image::ImageDecoder::DecodeBytes(
+          bytes.data(), bytes.size(), dec);
+      if (!decoded.ok) {
+        // e.g. SVG: the reader keeps the block, without a frame.
+        DOC_LOGI("decode skip %s code=%s", images[i].first.c_str(),
+                 decoded.errorCode.c_str());
+        continue;
+      }
+      DocImageFrame fr;
+      fr.rgb = std::move(decoded.frame);
+      fr.section_index = images[i].second;
+      fr.href = images[i].first;
+      r.frames.push_back(std::move(fr));
+    }
+    Progress(opt, count, count, "done");
+    if (r.frames.empty()) {
+      r.error_code = kErrNoImages;
+      r.error_message = "No decodable images";
+      return r;
+    }
+    r.ok = true;
+    return r;
+  }
 
   for (size_t i = 0; i < spine.size(); ++i) {
     if (Cancelled(opt)) {

@@ -226,6 +226,10 @@ RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
     if ([maxSideVal respondsToSelector:@selector(intValue)]) {
       opt.max_side = [maxSideVal intValue];
     }
+    id scopeVal = options[@"scope"];
+    if ([scopeVal isKindOfClass:NSString.class] && [scopeVal isEqualToString:@"all"]) {
+      opt.all_images = true;
+    }
     opt.on_progress = [strongSelf](int done, int total, const char *phase) {
       if (![strongSelf respondsToSelector:@selector(sendEventWithName:body:)]) {
         return;

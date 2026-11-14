@@ -204,11 +204,13 @@ Java_com_sherpaonnx_document_DocumentNative_nativeExtractTextInto(
 
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_document_DocumentNative_nativeExtractImages(
-    JNIEnv* env, jclass, jstring jpath, jint fd, jint maxSide, jobject progress) {
+    JNIEnv* env, jclass, jstring jpath, jint fd, jint maxSide,
+    jboolean allImages, jobject progress) {
   jmethodID put = nullptr;
   jobject map = NewHashMap(env, &put);
   sherpa_onnx::document::ExtractOptions opt;
   opt.max_side = maxSide;
+  opt.all_images = allImages == JNI_TRUE;
   BindProgress(env, progress, &opt);
   const auto src =
       sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd);

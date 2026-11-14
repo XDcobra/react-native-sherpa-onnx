@@ -229,6 +229,22 @@ describe('document offline api', () => {
     );
   });
 
+  it('extractDocumentImages forwards scope all', async () => {
+    mockNative.extractDocumentImages.mockResolvedValue({
+      bufferId: 'img_off_00000000-0000-0000-0000-0000000000ab',
+      format: 'epub',
+      frameCount: 2,
+    });
+    await extractDocumentImages(
+      { kind: 'fs', path: '/tmp/a.epub' },
+      { scope: 'all', maxSide: 2048 }
+    );
+    expect(mockNative.extractDocumentImages).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/a.epub' },
+      { scope: 'all', maxSide: 2048 }
+    );
+  });
+
   it('maps no-images native error', async () => {
     mockNative.extractDocumentImages.mockRejectedValue(
       new Error('ERR_DOC_NO_IMAGES: no image-only sections')

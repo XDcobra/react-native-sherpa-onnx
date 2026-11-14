@@ -249,7 +249,10 @@ export async function extractDocumentImages(
     );
   }
 
-  const nativeOptions: { maxSide?: number } = {};
+  const nativeOptions: { maxSide?: number; scope?: string } = {};
+  if (options?.scope === 'all') {
+    nativeOptions.scope = 'all';
+  }
   if (options?.maxSide != null) {
     nativeOptions.maxSide = Math.trunc(options.maxSide);
   }

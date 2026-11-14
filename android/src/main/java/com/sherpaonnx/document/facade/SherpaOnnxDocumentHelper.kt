@@ -145,13 +145,16 @@ class SherpaOnnxDocumentHelper(
     } else {
       4096
     }
+    val allImages =
+      options != null && options.hasKey("scope") && !options.isNull("scope") &&
+        options.getString("scope") == "all"
     val opened = openSeekable(source, promise) ?: return
     val progress = NativeDocProgress { done, total, phase ->
       emitProgress(done, total, phase)
     }
     val raw =
       try {
-        DocumentNative.nativeExtractImages(opened.path, opened.fd, maxSide, progress)
+        DocumentNative.nativeExtractImages(opened.path, opened.fd, maxSide, allImages, progress)
       } finally {
         opened.close()
       }

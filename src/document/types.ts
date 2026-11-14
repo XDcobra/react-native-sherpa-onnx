@@ -85,6 +85,13 @@ export type ExtractDocumentTextResult = {
 export type ExtractDocumentImagesOptions = {
   /** Longest-edge cap after decode (default 4096). <= 0 disables. */
   maxSide?: number;
+  /**
+   * `'imageSections'` (default): image-only sections / comic pages.
+   * `'all'` (EPUB): also images inside text sections, one frame per unique
+   * image path, in reading order (frame `href` = archive path). Used by the
+   * reader for image blocks.
+   */
+  scope?: 'imageSections' | 'all';
   signal?: AbortSignal;
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };

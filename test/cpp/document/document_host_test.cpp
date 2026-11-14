@@ -331,6 +331,27 @@ TEST(DocumentStructure, LongEpubBlockCount) {
   EXPECT_EQ(r.structure->sections[39].title, "Chapter 40");
 }
 
+TEST(DocumentStructure, AllImagesScopeCollectsInlineImagesOncePerPath) {
+  const auto path = FixturePath("structure.epub");
+  RequireFixture(path);
+  sherpa_onnx::document::ExtractOptions opt;
+  opt.all_images = true;
+  auto r = sherpa_onnx::document::ExtractDocumentImages(Src(path), opt);
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  // map.png appears twice (ch1, ch2) → one frame; plate.png is a spine item.
+  ASSERT_EQ(r.frames.size(), 2u);
+  EXPECT_EQ(r.frames[0].href, "OEBPS/images/map.png");
+  EXPECT_EQ(r.frames[0].section_index, 0);
+  EXPECT_EQ(r.frames[1].href, "OEBPS/images/plate.png");
+  EXPECT_EQ(r.frames[1].section_index, 1);
+
+  // Default scope: only image-only sections (here the plate).
+  auto def = sherpa_onnx::document::ExtractDocumentImages(Src(path));
+  ASSERT_TRUE(def.ok) << def.error_code;
+  ASSERT_EQ(def.frames.size(), 1u);
+  EXPECT_EQ(def.frames[0].href, "OEBPS/images/plate.png");
+}
+
 TEST(DocumentStructure, OnlyEpubCarriesStructure) {
   const auto path = FixturePath("north-wind.fb2");
   RequireFixture(path);

@@ -22,11 +22,13 @@ internal object DocumentNative {
 
   /**
    * Creates an OfflineImageBuffer. Returns HashMap with ok, bufferId, format, frameCount.
+   * [allImages]: also images inside text sections (EPUB), one frame per path.
    */
   external fun nativeExtractImages(
     path: String,
     fd: Int,
     maxSide: Int,
+    allImages: Boolean,
     progress: NativeDocProgress?,
   ): HashMap<String, Any>
 }

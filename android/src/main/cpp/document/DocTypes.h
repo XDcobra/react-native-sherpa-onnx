@@ -54,6 +54,11 @@ using DocumentSource = fileio::SeekableSource;
 
 struct ExtractOptions {
   int max_side = 4096;
+  /**
+   * Images: false = image-only sections / comic pages (default);
+   * true = also images inside text sections (EPUB), one frame per unique path.
+   */
+  bool all_images = false;
   std::function<bool()> is_cancelled;
   std::function<void(int done, int total, const char* phase)> on_progress;
 };
