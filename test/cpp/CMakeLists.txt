@@ -880,7 +880,99 @@ set_tests_properties(segengine_host_test PROPERTIES
 
 
 
-# PDF text-layer host test (disabled path by default; no PDFium required)
+# --- PDFium for host tests (pdfium-binaries, same chromium/<N> pin as the app prebuilts) ---
+# ON by default so the PDF text layer, rasterizer, lazy session and the reader PDF paths run
+# against real PDFium. -DSHERPA_ONNX_HOST_ENABLE_PDFIUM=OFF exercises ERR_PDF_PDFIUM_DISABLED.
+# SHERPA_ONNX_HOST_PDFIUM_ROOT: optional pre-extracted package (include/ + lib/).
+option(SHERPA_ONNX_HOST_ENABLE_PDFIUM "Link real PDFium for PDF / reader host tests" ON)
+set(SHERPA_ONNX_HOST_PDFIUM_ROOT "" CACHE PATH "Optional: pre-extracted pdfium-binaries root (include/ + lib/)")
+set(SHERPA_HOST_PDFIUM_TARGET "")
+set(SHERPA_HOST_PDFIUM_LIBDIR "")
+if(SHERPA_ONNX_HOST_ENABLE_PDFIUM)
+  set(_PDFIUM_ROOT "")
+  if(SHERPA_ONNX_HOST_PDFIUM_ROOT AND EXISTS "${SHERPA_ONNX_HOST_PDFIUM_ROOT}/include/fpdfview.h")
+    set(_PDFIUM_ROOT "${SHERPA_ONNX_HOST_PDFIUM_ROOT}")
+  else()
+    set(_PDFIUM_TAG_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG")
+    file(READ "${_PDFIUM_TAG_FILE}" _pdfium_tag)
+    string(STRIP "${_pdfium_tag}" _pdfium_tag)
+    # pdfium-android-v8100-1 → 8100 (trailing -N is our rebuild counter)
+    if(NOT _pdfium_tag MATCHES "-v([0-9]+)")
+      message(FATAL_ERROR "Cannot read the PDFium chromium version from ${_PDFIUM_TAG_FILE}")
+    endif()
+    set(_PDFIUM_CHROMIUM "${CMAKE_MATCH_1}")
+    set(_PDFIUM_PKG "")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      set(_PDFIUM_PKG "pdfium-linux-x64")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+      if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+        set(_PDFIUM_PKG "pdfium-mac-arm64")
+      else()
+        set(_PDFIUM_PKG "pdfium-mac-x64")
+      endif()
+    endif()
+    if(_PDFIUM_PKG)
+      set(_PDFIUM_ROOT "${CMAKE_BINARY_DIR}/${_PDFIUM_PKG}-${_PDFIUM_CHROMIUM}")
+      if(NOT EXISTS "${_PDFIUM_ROOT}/include/fpdfview.h")
+        set(_PDFIUM_TGZ "${CMAKE_BINARY_DIR}/${_PDFIUM_PKG}-${_PDFIUM_CHROMIUM}.tgz")
+        set(_PDFIUM_URL "https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${_PDFIUM_CHROMIUM}/${_PDFIUM_PKG}.tgz")
+        message(STATUS "Downloading PDFium ${_PDFIUM_PKG} (chromium/${_PDFIUM_CHROMIUM}) for host tests...")
+        file(DOWNLOAD "${_PDFIUM_URL}" "${_PDFIUM_TGZ}" TLS_VERIFY ON STATUS _pdfium_dl)
+        list(GET _pdfium_dl 0 _pdfium_dl_code)
+        file(MAKE_DIRECTORY "${_PDFIUM_ROOT}")
+        if(_pdfium_dl_code EQUAL 0)
+          execute_process(
+            COMMAND ${CMAKE_COMMAND} -E tar xzf "${_PDFIUM_TGZ}"
+            WORKING_DIRECTORY "${_PDFIUM_ROOT}"
+            RESULT_VARIABLE _pdfium_untar
+          )
+        endif()
+        if(NOT _pdfium_dl_code EQUAL 0 OR NOT EXISTS "${_PDFIUM_ROOT}/include/fpdfview.h")
+          file(REMOVE_RECURSE "${_PDFIUM_ROOT}")
+          message(FATAL_ERROR "Failed to download or extract PDFium from ${_PDFIUM_URL}. "
+                              "Pass -DSHERPA_ONNX_HOST_ENABLE_PDFIUM=OFF to build without it.")
+        endif()
+        # pdfium-binaries ships install name ./libpdfium.dylib (relative to the cwd).
+        if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+          execute_process(COMMAND install_name_tool -id "@rpath/libpdfium.dylib"
+                                  "${_PDFIUM_ROOT}/lib/libpdfium.dylib")
+        endif()
+      endif()
+    endif()
+  endif()
+  if(_PDFIUM_ROOT)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+      set(_PDFIUM_LIB "${_PDFIUM_ROOT}/lib/libpdfium.dylib")
+    else()
+      set(_PDFIUM_LIB "${_PDFIUM_ROOT}/lib/libpdfium.so")
+    endif()
+    add_library(sherpa_host_pdfium SHARED IMPORTED GLOBAL)
+    set_target_properties(sherpa_host_pdfium PROPERTIES
+      IMPORTED_LOCATION "${_PDFIUM_LIB}"
+      IMPORTED_SONAME "@rpath/libpdfium.dylib"
+      INTERFACE_INCLUDE_DIRECTORIES "${_PDFIUM_ROOT}/include"
+      INTERFACE_COMPILE_DEFINITIONS "HAVE_PDFIUM=1"
+    )
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+      set_target_properties(sherpa_host_pdfium PROPERTIES IMPORTED_SONAME "libpdfium.so")
+    endif()
+    set(SHERPA_HOST_PDFIUM_TARGET sherpa_host_pdfium)
+    set(SHERPA_HOST_PDFIUM_LIBDIR "${_PDFIUM_ROOT}/lib")
+    message(STATUS "PDF host tests: PDFium from ${_PDFIUM_ROOT}")
+  else()
+    message(STATUS "PDF host tests: no PDFium package for ${CMAKE_SYSTEM_NAME}; disabled path only")
+  endif()
+endif()
+
+# Links PDFium (when available) into a host test target.
+function(sherpa_host_link_pdfium target)
+  if(SHERPA_HOST_PDFIUM_TARGET)
+    target_link_libraries(${target} PRIVATE ${SHERPA_HOST_PDFIUM_TARGET})
+    set_target_properties(${target} PROPERTIES BUILD_RPATH "${SHERPA_HOST_PDFIUM_LIBDIR}")
+  endif()
+endfunction()
+
+# PDF text-layer host test (real PDFium by default; disabled path with -DSHERPA_ONNX_HOST_ENABLE_PDFIUM=OFF)
 set(PDF_TEST_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 if(TARGET gtest AND TARGET gtest_main)
   set(PDF_GTEST_LIBS gtest_main)
@@ -906,10 +998,10 @@ target_include_directories(pdf_text_layer_host_test PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/image"
 )
 target_link_libraries(pdf_text_layer_host_test PRIVATE ${PDF_GTEST_LIBS})
+sherpa_host_link_pdfium(pdf_text_layer_host_test)
 target_compile_definitions(pdf_text_layer_host_test PRIVATE
   SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
-# Default host builds leave HAVE_PDFIUM undefined (disabled stub).
 add_test(NAME pdf_text_layer_host_test COMMAND $<TARGET_FILE:pdf_text_layer_host_test>)
 set_tests_properties(pdf_text_layer_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."

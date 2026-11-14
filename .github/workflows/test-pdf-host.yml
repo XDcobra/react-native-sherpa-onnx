@@ -1,0 +1,77 @@
+# Host PDF tests (C++ GTest) against real PDFium (pdfium-binaries, same chromium/<N>
+# pin as the app prebuilts), plus the disabled path (-DSHERPA_ONNX_HOST_ENABLE_PDFIUM=OFF).
+# Also runs the lazy image buffer tests (frame pinning, prefetch) that PDF pages use.
+
+name: Test – PDF host (C++)
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/pdf/**'
+      - 'android/src/main/cpp/image/**'
+      - 'test/cpp/pdf_text_layer_host_test.cpp'
+      - 'test/cpp/imagebuffer/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/pdf/**'
+      - 'third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG'
+      - '.github/workflows/test-pdf-host.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/src/main/cpp/pdf/**'
+      - 'android/src/main/cpp/image/**'
+      - 'test/cpp/pdf_text_layer_host_test.cpp'
+      - 'test/cpp/imagebuffer/**'
+      - 'test/cpp/CMakeLists.txt'
+      - 'test/fixtures/pdf/**'
+      - 'third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG'
+      - '.github/workflows/test-pdf-host.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-pdf-host
+  cancel-in-progress: true
+
+jobs:
+  pdf-host:
+    name: PDF host tests (${{ matrix.os }}, PDFium ${{ matrix.pdfium }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            pdfium: 'ON'
+          - os: ubuntu-24.04
+            pdfium: 'OFF'
+          - os: macos-15
+            pdfium: 'ON'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install build deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgtest-dev libwebp-dev pkg-config
+
+      - name: Cache PDFium package
+        if: matrix.pdfium == 'ON'
+        uses: actions/cache@v4
+        with:
+          path: test/cpp/build/pdfium-*
+          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG') }}
+
+      - name: Configure and build
+        run: |
+          cmake -S test/cpp -B test/cpp/build -DCMAKE_BUILD_TYPE=Release \
+            -DSHERPA_ONNX_HOST_ENABLE_PDFIUM=${{ matrix.pdfium }}
+          cmake --build test/cpp/build --target pdf_text_layer_host_test imagebuffer_host_test
+
+      - name: Run PDF and lazy image buffer host tests
+        run: |
+          ctest --test-dir test/cpp/build -R "pdf_text_layer_host_test|imagebuffer_host_test" --output-on-failure
