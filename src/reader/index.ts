@@ -4,6 +4,19 @@
  */
 export { ReaderView } from './ReaderView';
 export {
+  createReadAloudTimeline,
+  splitWords,
+  useReadAloudHighlights,
+} from './readAloud';
+export type {
+  CreateReadAloudTimelineOptions,
+  ReadAloudAlignedWord,
+  ReadAloudHighlightOptions,
+  ReadAloudPosition,
+  ReadAloudTimeline,
+  ReadAloudUnit,
+} from './readAloud';
+export {
   compareLocators,
   computeDocumentKey,
   createReaderDocument,
