@@ -58,6 +58,12 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
                    frameIndex:(NSInteger)frameIndex
                           alt:(nullable NSString *)alt
                         theme:(SherpaReaderTheme *)theme;
+/** `page`: a page image, full width without margins. */
+- (void)configureWithBufferId:(nullable NSString *)bufferId
+                   frameIndex:(NSInteger)frameIndex
+                          alt:(nullable NSString *)alt
+                        theme:(SherpaReaderTheme *)theme
+                         page:(BOOL)page;
 @end
 
 @interface SherpaReaderSeparatorCell : UITableViewCell

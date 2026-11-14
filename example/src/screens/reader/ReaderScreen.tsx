@@ -25,6 +25,7 @@ import {
   type ReaderHighlight,
   type ReaderInsert,
   type ReaderLocator,
+  type ReaderPageDisplay,
   type ReaderSectionInfo,
   type ReaderTheme,
   type ReaderViewHandle,
@@ -162,6 +163,7 @@ export default function ReaderScreen() {
   const [lineName, setLineName] = useState<LineName>('1.5');
   const [alignName, setAlignName] = useState<AlignName>('start');
   const [marginName, setMarginName] = useState<MarginName>('normal');
+  const [pageDisplay, setPageDisplay] = useState<ReaderPageDisplay>('auto');
   const [panel, setPanel] = useState<Panel>('none');
   const [showContents, setShowContents] = useState(false);
 
@@ -674,6 +676,14 @@ export default function ReaderScreen() {
                   value={marginName}
                   onChange={setMarginName}
                 />
+                {doc.sections.some((s) => s.kind === 'page') ? (
+                  <OcrChoiceRow
+                    label="Pages"
+                    options={['auto', 'text', 'image', 'imageAndText'] as const}
+                    value={pageDisplay}
+                    onChange={setPageDisplay}
+                  />
+                ) : null}
               </View>
             ) : null}
 
@@ -744,6 +754,7 @@ export default function ReaderScreen() {
                 inserts={inserts}
                 renderInsert={renderInsert}
                 highlights={highlights}
+                pageDisplay={pageDisplay}
                 style={styles.reader}
                 onVisibleRangeChange={(r) => {
                   setChapterId(r.first.sectionId);

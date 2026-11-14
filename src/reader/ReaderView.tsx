@@ -106,6 +106,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       jumpThreshold,
       highlights,
       follow,
+      pageDisplay,
       style,
       testID,
       onReady,
@@ -230,6 +231,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       [onFollowChange]
     );
 
+    // `auto`: page images for page documents (comics), text for everything else.
+    const resolvedPageDisplay =
+      pageDisplay && pageDisplay !== 'auto'
+        ? pageDisplay
+        : document?.format === 'pages'
+        ? 'image'
+        : 'text';
+
     const fontScale =
       theme?.fontScale == null || theme.fontScale === 'system'
         ? -1
@@ -271,6 +280,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         followMode={follow?.mode ?? 'keepVisible'}
         followAnchor={Math.min(1, Math.max(0, follow?.anchor ?? 0.3))}
         followPauseOnUserScroll={follow?.pauseOnUserScroll ?? true}
+        pageDisplay={resolvedPageDisplay}
         debugRowCount={__debugRowCount ?? 0}
         onReaderReady={handleReady}
         onVisibleRangeChange={handleVisible}

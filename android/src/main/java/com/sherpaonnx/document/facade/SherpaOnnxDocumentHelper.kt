@@ -39,6 +39,29 @@ class SherpaOnnxDocumentHelper(
     }
   }
 
+  fun detectDocumentFormat(source: ReadableMap, promise: Promise) {
+    executor.execute {
+      try {
+        val opened = openSeekable(source, promise) ?: return@execute
+        val raw =
+          try {
+            DocumentNative.nativeDetectFormat(opened.path, opened.fd)
+          } finally {
+            opened.close()
+          }
+        if (raw["ok"] as? Boolean != true) {
+          val code = raw["errorCode"] as? String ?: ERR_OPEN
+          promise.reject(code, "$code: ${raw["errorMessage"] as? String ?: "cannot read the file"}")
+          return@execute
+        }
+        promise.resolve(raw["format"] as? String ?: "")
+      } catch (e: Exception) {
+        Log.e(TAG, "detectDocumentFormat failed", e)
+        promise.reject(ERR_OPEN, e.message, e)
+      }
+    }
+  }
+
   fun extractDocumentImages(
     source: ReadableMap,
     options: ReadableMap?,

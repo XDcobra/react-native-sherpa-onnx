@@ -1,6 +1,7 @@
 /**
  * Reader documents: native `rdr_*` handles built from a text buffer's reading
- * structure (EPUB via `extractDocumentText`). See docs/reader.md.
+ * structure (EPUB, FB2, MOBI via `extractDocumentText`, PDF via
+ * `extractPdfTextLayer`) or from page images (comics). See docs/reader.md.
  */
 import { TurboModuleRegistry } from 'react-native';
 
@@ -10,8 +11,10 @@ import {
   extractDocumentText,
   DocumentErrorCode,
 } from '../document';
+import { detectDocumentFormat } from '../document/detect';
 import type { FileSource } from '../fileio/types';
 import { releaseOfflineImageBuffer } from '../imagebuffer';
+import { extractPdfTextLayer, rasterizePdfPages } from '../pdf';
 import {
   createEmptyOfflineTextBuffer,
   releasePipelineTextBuffer,
@@ -143,53 +146,140 @@ export function computeDocumentKey(source: FileSource): Promise<string> {
   );
 }
 
+/** Options of {@link createReaderDocument}. */
+export type CreateReaderDocumentOptions =
+  | {
+      /**
+       * Text buffer with a reading structure: `extractDocumentText` (EPUB,
+       * FB2, MOBI) or `extractPdfTextLayer(…, { layout: 'paragraphs' })`.
+       */
+      text: OfflineTextBufferIdSource;
+      /**
+       * Image buffer for image and page blocks:
+       * `extractDocumentImages(source, { scope: 'all' })`, or for a PDF
+       * `rasterizePdfPages(source, { strategy: 'lazy-lru' })` (all pages).
+       */
+      images?: string | { bufferId: string } | null;
+      documentKey: string;
+    }
+  | {
+      /**
+       * Page images (comic pages, scans): one page section per frame, e.g.
+       * `extractDocumentImages(cbz, { strategy: 'lazy-lru' })`. The pages have
+       * no text until OCR text is attached.
+       */
+      pages: string | { bufferId: string };
+      documentKey: string;
+    };
+
+function bufferIdOf(
+  v: string | { bufferId: string } | null | undefined
+): string {
+  return v == null ? '' : typeof v === 'string' ? v : v.bufferId;
+}
+
 /**
- * Reader document from a text buffer filled by `extractDocumentText` (EPUB)
- * and, optionally, the image buffer from
- * `extractDocumentImages(source, { scope: 'all' })` for image blocks.
- * The document keeps the text alive; the caller may release its text handle.
+ * Reader document from a text buffer with a reading structure (and optionally
+ * its image buffer), or from page images. The document keeps the text alive;
+ * the caller may release its text handle. Image buffers stay owned by the
+ * caller and must outlive the document.
  */
-export async function createReaderDocument(options: {
-  text: OfflineTextBufferIdSource;
-  images?: string | { bufferId: string } | null;
-  documentKey: string;
-}): Promise<ReaderDocument> {
+export async function createReaderDocument(
+  options: CreateReaderDocumentOptions
+): Promise<ReaderDocument> {
+  if ('pages' in options) {
+    const pagesId = bufferIdOf(options.pages);
+    if (!pagesId) {
+      throw readerError(
+        ReaderErrorCode.INVALID_ARGUMENT,
+        'pages must be an image buffer'
+      );
+    }
+    const json = await callNative(() =>
+      getNative().createReaderPagesDocument(pagesId, options.documentKey)
+    );
+    return parseReaderDocument(json);
+  }
   const textId = resolveOfflineTextBufferId(options.text);
-  const imageId =
-    options.images == null
-      ? ''
-      : typeof options.images === 'string'
-      ? options.images
-      : options.images.bufferId;
+  const imageId = bufferIdOf(options.images);
   const json = await callNative(() =>
     getNative().createReaderDocument(textId, imageId, options.documentKey)
   );
   return parseReaderDocument(json);
 }
 
+/** Options of {@link loadReaderDocument}. */
+export type LoadReaderDocumentOptions = {
+  /** Longest side of decoded images and pages, px (default 2048). */
+  imagesMaxSide?: number;
+  /** PDF page render resolution (default 144 dpi), capped by `imagesMaxSide`. */
+  pdfDpi?: number;
+  /** PDF password (standard encryption). */
+  password?: string;
+};
+
 /**
- * Extract an EPUB, its images (`scope: 'all'`) and its key, and build a reader
- * document in one call. Release it with {@link releaseReaderDocument}.
+ * Opens a book file as a reader document in one call, by its content:
+ * - EPUB, FB2, MOBI / AZW3: text, structure and images.
+ * - PDF: reading text from the text layer (`layout: 'paragraphs'`) and every
+ *   page as a lazily rendered image; pages without text show their image.
+ * - CBZ / CBR: a page document over lazily decoded pages.
+ * Image buffers created here are released with the document
+ * ({@link releaseReaderDocument}).
  */
 export async function loadReaderDocument(
   source: FileSource,
-  options?: { imagesMaxSide?: number }
+  options?: LoadReaderDocumentOptions
 ): Promise<ReaderDocument> {
+  const maxSide = options?.imagesMaxSide ?? 2048;
+  const format = await detectDocumentFormat(source);
+  if (format === 'cbz' || format === 'cbr') {
+    const pages = await extractDocumentImages(source, {
+      strategy: 'lazy-lru',
+      maxSide,
+    });
+    try {
+      const doc = await createReaderDocument({
+        pages: pages.buffer,
+        documentKey: await computeDocumentKey(source),
+      });
+      ownedImageBuffers.set(doc.id, pages.buffer);
+      return doc;
+    } catch (err: unknown) {
+      await releaseOfflineImageBuffer(pages.buffer).catch(() => {});
+      throw err;
+    }
+  }
   const text = await createEmptyOfflineTextBuffer();
   let imageBufferId: string | null = null;
   try {
-    await extractDocumentText(source, text);
-    try {
-      const images = await extractDocumentImages(source, {
-        scope: 'all',
-        maxSide: options?.imagesMaxSide ?? 2048,
+    if (format === 'pdf') {
+      await extractPdfTextLayer(source, text, {
+        layout: 'paragraphs',
+        password: options?.password,
       });
-      imageBufferId = images.buffer;
-    } catch (err: unknown) {
-      if (
-        (err as { code?: string } | null)?.code !== DocumentErrorCode.NO_IMAGES
-      ) {
-        throw err;
+      const pages = await rasterizePdfPages(source, {
+        strategy: 'lazy-lru',
+        dpi: options?.pdfDpi ?? 144,
+        maxSide,
+        password: options?.password,
+      });
+      imageBufferId = pages.bufferId;
+    } else {
+      await extractDocumentText(source, text);
+      try {
+        const images = await extractDocumentImages(source, {
+          scope: 'all',
+          maxSide,
+        });
+        imageBufferId = images.buffer;
+      } catch (err: unknown) {
+        if (
+          (err as { code?: string } | null)?.code !==
+          DocumentErrorCode.NO_IMAGES
+        ) {
+          throw err;
+        }
       }
     }
     const documentKey = await computeDocumentKey(source);

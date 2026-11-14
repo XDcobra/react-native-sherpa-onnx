@@ -16,6 +16,31 @@ internal object ReaderViewNative {
 
   @JvmStatic external fun nativeSectionTable(handle: Long): IntArray
 
+  /** 4 ints per row: block, coverFirst, coverLast, page (see reader/ReaderLayout.h). */
+  @JvmStatic external fun nativePlanRows(handle: Long, pageDisplay: String): IntArray
+
+  /** [first, last] visible blocks of a row, or an empty array. */
+  @JvmStatic external fun nativeRowVisibleBlocks(
+    handle: Long,
+    block: Int,
+    coverFirst: Int,
+    coverLast: Int,
+    page: Boolean,
+    visibleTop: Float,
+    visibleBottom: Float,
+    rowHeight: Float,
+    viewport: Float,
+  ): IntArray
+
+  /** Px from a row's top where [target] starts (a block's place on a page image; else 0). */
+  @JvmStatic external fun nativeBlockOffsetInRow(
+    handle: Long,
+    block: Int,
+    page: Boolean,
+    target: Int,
+    rowHeight: Float,
+  ): Float
+
   @JvmStatic external fun nativeBlockId(handle: Long, index: Int): String?
 
   @JvmStatic external fun nativeSectionId(handle: Long, index: Int): String?

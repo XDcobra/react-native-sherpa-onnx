@@ -327,6 +327,7 @@ set(SOURCES
     reader/ReaderTextHash.cpp
     reader/ReaderRegistry.cpp
     reader/ReaderTracker.cpp
+    reader/ReaderLayout.cpp
     reader/ReaderHighlights.cpp
     reader/ReaderJson.cpp
     reader/ReaderFileHash.cpp

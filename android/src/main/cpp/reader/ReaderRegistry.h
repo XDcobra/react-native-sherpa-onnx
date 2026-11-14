@@ -35,6 +35,20 @@ class ReaderRegistry {
                      const std::vector<std::string>& frameHrefs, const std::string& documentKey,
                      ReaderError* err);
 
+  /** One frame of a page document. */
+  struct PageInput {
+    std::string href;  // archive path; empty → "page:N"
+    int pageNumber = 0;  // printed as the section label when > 0
+  };
+
+  /**
+   * Page document (`format: "pages"`) over an image buffer: one section per
+   * frame (`kind: "page"`) whose only block `s{n}.b0` is the page. Text can
+   * be attached later (OCR).
+   */
+  std::string CreatePages(const std::string& imageBufferId, const std::vector<PageInput>& pages,
+                          const std::string& documentKey, ReaderError* err);
+
   bool InsertSection(const std::string& documentId, const ReaderAppSectionInput& section,
                      ReaderError* err);
   bool RemoveSection(const std::string& documentId, const std::string& sectionId,

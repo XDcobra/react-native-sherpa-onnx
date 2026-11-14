@@ -180,11 +180,20 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
                    frameIndex:(NSInteger)frameIndex
                           alt:(NSString *)alt
                         theme:(SherpaReaderTheme *)theme {
+  [self configureWithBufferId:bufferId frameIndex:frameIndex alt:alt theme:theme page:NO];
+}
+
+- (void)configureWithBufferId:(NSString *)bufferId
+                   frameIndex:(NSInteger)frameIndex
+                          alt:(NSString *)alt
+                        theme:(SherpaReaderTheme *)theme
+                         page:(BOOL)page {
   [_frameView removeFromSuperview];
   [self.contentView addSubview:_frameView];
   Pin(_frameView, self.contentView,
-      UIEdgeInsetsMake(theme.paragraphSpacing / 2, theme.marginHorizontal, theme.paragraphSpacing,
-                       theme.marginHorizontal));
+      page ? UIEdgeInsetsZero
+           : UIEdgeInsetsMake(theme.paragraphSpacing / 2, theme.marginHorizontal,
+                              theme.paragraphSpacing, theme.marginHorizontal));
   _frameView.maxSide = 2048;
   _frameView.bufferId = bufferId;
   _frameView.frameIndex = frameIndex;

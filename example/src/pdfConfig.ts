@@ -9,6 +9,7 @@ export const TEST_PDF_FILES = {
   DIGITAL_MULTIPAGE: 'test_pdfs/digital_multipage.pdf',
   SCAN_ONLY_PAGE: 'test_pdfs/scan_only_page.pdf',
   SCAN_ONLY_MULTIPAGE: 'test_pdfs/scan_only_multipage.pdf',
+  BOOK: 'test_pdfs/book.pdf',
 } as const;
 
 export type PdfFileId = (typeof TEST_PDF_FILES)[keyof typeof TEST_PDF_FILES];

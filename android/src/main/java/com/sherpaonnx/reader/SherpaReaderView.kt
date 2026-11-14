@@ -56,7 +56,14 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
   private sealed class Row {
     /** `index` is the flat block index in the current snapshot. */
-    data class Block(val id: String, val index: Int) : Row()
+    /** Shows block [index]; stands for blocks [coverFirst, coverLast] (see ReaderLayout.h). */
+    data class Block(
+      val id: String,
+      val index: Int,
+      val coverFirst: Int = index,
+      val coverLast: Int = index,
+      val page: Boolean = false,
+    ) : Row()
 
     data class Insert(val key: String) : Row()
   }
@@ -128,6 +135,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   private var followMode = "keepVisible"
   private var followAnchor = 0.3f
   private var followPauseOnUser = true
+  private var pageDisplay = "text"
 
   /** Logical React children, in Fabric's order. Not attached to this view. */
   internal val hosts = mutableListOf<SherpaReaderInsertView>()
@@ -415,6 +423,14 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
   internal fun setFollowPauseOnUserScroll(v: Boolean) {
     followPauseOnUser = v
+  }
+
+  internal fun setPageDisplay(v: String?) {
+    val mode = if (v == "image" || v == "imageAndText") v else "text"
+    if (mode == pageDisplay) return
+    if (pendingAnchor == null) pendingAnchor = readingAnchor()
+    pageDisplay = mode
+    scheduleRebuild()
   }
 
   /** Called once per Fabric props transaction. */
@@ -859,14 +875,30 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     recycler.setPadding(0, theme.marginVerticalPx, 0, theme.marginVerticalPx)
     val next = ArrayList<Row>(blockCount + inserts.size)
     if (snapshot != 0L) {
-      for (s in 0 until sectionCount) {
-        for (i in sectionFirstBlock(s) until sectionFirstBlock(s) + sectionBlockCount(s)) {
-          val id = ReaderViewNative.nativeBlockId(snapshot, i) ?: continue
-          appendInserts("beforeBlock", id, next)
-          next += Row.Block(id, i)
-          appendInserts("afterBlock", id, next)
+      // Rows per display mode; a row stands for the blocks it covers, and
+      // inserts at covered blocks go before / after that row.
+      val plan = ReaderViewNative.nativePlanRows(snapshot, pageDisplay)
+      var k = 0
+      while (k + 3 < plan.size) {
+        val block = plan[k]
+        val cf = plan[k + 1]
+        val cl = plan[k + 2]
+        val page = plan[k + 3] == 1
+        k += 4
+        val id = ReaderViewNative.nativeBlockId(snapshot, block) ?: continue
+        for (i in cf..cl) ReaderViewNative.nativeBlockId(snapshot, i)?.let { appendInserts("beforeBlock", it, next) }
+        next += Row.Block(id, block, cf, cl, page)
+        for (i in cf..cl) ReaderViewNative.nativeBlockId(snapshot, i)?.let { appendInserts("afterBlock", it, next) }
+        val s = blockSection(cl)
+        if (cl == sectionFirstBlock(s) + sectionBlockCount(s) - 1) {
+          ReaderViewNative.nativeSectionId(snapshot, s)?.let { appendInserts("sectionEnd", it, next) }
         }
-        ReaderViewNative.nativeSectionId(snapshot, s)?.let { appendInserts("sectionEnd", it, next) }
+      }
+      // Empty sections still get their sectionEnd inserts.
+      for (s in 0 until sectionCount) {
+        if (sectionBlockCount(s) == 0) {
+          ReaderViewNative.nativeSectionId(snapshot, s)?.let { appendInserts("sectionEnd", it, next) }
+        }
       }
     }
     val old = rows
@@ -892,7 +924,9 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       false,
     ).dispatchUpdatesTo(adapter)
     rowByBlock = IntArray(blockCount) { -1 }
-    for ((pos, row) in next.withIndex()) if (row is Row.Block) rowByBlock[row.index] = pos
+    for ((pos, row) in next.withIndex()) {
+      if (row is Row.Block) for (i in row.coverFirst..row.coverLast) rowByBlock[i] = pos
+    }
     if (!themeChanged) {
       for (block in highlightChanges) {
         val row = rowByBlock.getOrElse(block) { -1 }
@@ -931,8 +965,10 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       else -> false
     }
 
+  /** Row that shows or covers [block]. */
   private fun rowOfBlock(block: Int): Int =
-    rowByBlock.getOrElse(block) { -1 }.takeIf { it >= 0 } ?: rows.indexOfFirst { it is Row.Block && it.index == block }
+    rowByBlock.getOrElse(block) { -1 }.takeIf { it >= 0 }
+      ?: rows.indexOfFirst { it is Row.Block && block >= it.coverFirst && block <= it.coverLast }
 
   private fun blockText(i: Int): String =
     textCache.get(i) ?: (ReaderViewNative.nativeBlockText(snapshot, i) ?: "").also { textCache.put(i, it) }
@@ -996,17 +1032,35 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         if (shown > 0) insertKeys += row.key
         continue
       }
-      if (child.height <= 0 || shown < 0.5f * min(child.height, viewport)) continue
-      val idx = (row as Row.Block).index
-      if (first < 0 || idx < first) first = idx
-      if (idx > last) last = idx
+      if (child.height <= 0 || shown <= 0) continue
+      val r = row as Row.Block
+      // Shared rule (half of min(height, viewport); blocks on a page image by
+      // their rectangle); covered blocks count with their row.
+      val range =
+        ReaderViewNative.nativeRowVisibleBlocks(
+          snapshot,
+          r.index,
+          r.coverFirst,
+          r.coverLast,
+          r.page,
+          max(0, -child.top).toFloat(),
+          min(child.height, viewport - child.top).toFloat(),
+          child.height.toFloat(),
+          viewport.toFloat(),
+        )
+      if (range.size < 2) continue
+      if (first < 0 || range[0] < first) first = range[0]
+      if (range[1] > last) last = range[1]
     }
     return if (first >= 0) intArrayOf(first, last) else null
   }
 
   /** UTF-16 offset of the first visible character in the first visible block. */
   private fun firstVisibleOffset(block: Int): Int {
-    val holder = recycler.findViewHolderForAdapterPosition(rowOfBlock(block)) as? TextHolder ?: return 0
+    val row = rowOfBlock(block)
+    // Only the block's own text row has offsets (not a row that covers it).
+    if ((rows.getOrNull(row) as? Row.Block)?.index != block) return 0
+    val holder = recycler.findViewHolderForAdapterPosition(row) as? TextHolder ?: return 0
     val tv = holder.text
     val layout = tv.layout ?: return 0
     // Measured from the reading top (below the vertical margin), where
@@ -1096,8 +1150,25 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     if (row < 0) return
     recycler.stopScroll()
     programmaticScroll = false
+    val r = rows[row] as? Row.Block
+    if (r != null && r.index != block) {
+      // A covered block: its place on the page image, else the row's top.
+      val px = ReaderViewNative.nativeBlockOffsetInRow(snapshot, r.index, r.page, block, rowHeightOf(r).toFloat())
+      pendingScroll = PendingScroll(row, 0, sampleAfter)
+      layoutManager.scrollToPositionWithOffset(row, -px.toInt())
+      return
+    }
     pendingScroll = PendingScroll(row, offset, sampleAfter)
     layoutManager.scrollToPositionWithOffset(row, 0)
+  }
+
+  /** Height of an image or page row (0 when unknown); text rows are measured by the layout. */
+  private fun rowHeightOf(r: Row.Block): Int {
+    val w = blockTable[r.index * BLOCK_STRIDE + 4]
+    val h = blockTable[r.index * BLOCK_STRIDE + 5]
+    if (w <= 0 || h <= 0) return 0
+    val avail = if (recycler.width > 0) recycler.width else resources.displayMetrics.widthPixels
+    return if (r.page) ceil(avail.toFloat() * h / w).toInt() else 0
   }
 
   internal fun scrollToLocator(sectionId: String, blockId: String, offset: Int, animated: Boolean) {
@@ -1267,7 +1338,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         is Row.Insert -> VIEW_INSERT
         is Row.Block ->
           when (blockType(r.index)) {
-            TYPE_IMAGE -> VIEW_IMAGE
+            TYPE_IMAGE, TYPE_PAGE -> VIEW_IMAGE
             TYPE_SEPARATOR -> VIEW_SEPARATOR
             else -> VIEW_TEXT
           }
@@ -1313,7 +1384,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         is Row.Block ->
           when (holder) {
             is TextHolder -> bindText(holder, r.index, t)
-            is ImageHolder -> bindImage(holder, r.index, t)
+            is ImageHolder -> bindImage(holder, r.index, t, r.page)
             is SeparatorHolder -> {
               holder.line.setLineColor(t.textColor)
               holder.line.layoutParams.height = ceil(t.fontSizePx * 1.2f * 1.5f).toInt()
@@ -1348,17 +1419,23 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       ViewCompat.setAccessibilityHeading(tv, level > 0)
     }
 
-    private fun bindImage(holder: ImageHolder, index: Int, t: Theme) {
+    private fun bindImage(holder: ImageHolder, index: Int, t: Theme, page: Boolean) {
       val v = holder.frame
       val frame = blockFrame(index)
       val w = blockTable[index * BLOCK_STRIDE + 4]
       val h = blockTable[index * BLOCK_STRIDE + 5]
       val avail = if (recycler.width > 0) recycler.width else resources.displayMetrics.widthPixels
       val viewport = if (recycler.height > 0) recycler.height else resources.displayMetrics.heightPixels
-      val width = max(1, avail - 2 * t.marginHorizontalPx)
-      val height = if (frame >= 0 && w > 0 && h > 0) min(width.toFloat() * h / w, viewport * 0.9f) else 0f
-      v.layoutParams.height = if (height > 0) ceil(height + 1.5f * t.paragraphSpacingPx).toInt() else 0
-      v.setPadding(t.marginHorizontalPx, t.paragraphSpacingPx / 2, t.marginHorizontalPx, t.paragraphSpacingPx)
+      if (page) {
+        // A page: full width, no margins, its own height (pages follow each other).
+        v.layoutParams.height = if (frame >= 0 && w > 0 && h > 0) ceil(avail.toFloat() * h / w).toInt() else 0
+        v.setPadding(0, 0, 0, 0)
+      } else {
+        val width = max(1, avail - 2 * t.marginHorizontalPx)
+        val height = if (frame >= 0 && w > 0 && h > 0) min(width.toFloat() * h / w, viewport * 0.9f) else 0f
+        v.layoutParams.height = if (height > 0) ceil(height + 1.5f * t.paragraphSpacingPx).toInt() else 0
+        v.setPadding(t.marginHorizontalPx, t.paragraphSpacingPx / 2, t.marginHorizontalPx, t.paragraphSpacingPx)
+      }
       v.setMaxSide(2048)
       v.setFrameIndex(max(0, frame))
       v.setBufferId(if (frame >= 0) imageBufferId else null)
@@ -1411,6 +1488,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     private const val TYPE_HEADING = 1
     private const val TYPE_IMAGE = 2
     private const val TYPE_SEPARATOR = 3
+    private const val TYPE_PAGE = 4
 
     private const val VIEW_TEXT = 0
     private const val VIEW_IMAGE = 1

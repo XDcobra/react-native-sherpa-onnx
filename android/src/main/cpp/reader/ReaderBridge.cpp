@@ -47,6 +47,30 @@ bool BridgeCreateDocument(const std::string& textBufferId, const std::string& im
   return true;
 }
 
+bool BridgeCreatePagesDocument(const std::string& imageBufferId, const std::string& documentKey,
+                               std::string* json, ReaderError* err) {
+  auto& images = image::ImageRegistry::Instance();
+  image::ImageBufferInfo info;
+  if (imageBufferId.empty() || !images.GetInfo(imageBufferId, info) || info.frameCount <= 0) {
+    err->code = kErrReaderInvalidArgument;
+    err->message = "Image buffer not found or empty: " + imageBufferId;
+    return false;
+  }
+  std::vector<ReaderRegistry::PageInput> pages(static_cast<size_t>(info.frameCount));
+  for (int i = 0; i < info.frameCount; ++i) {
+    image::ImageFrameInfo fi;
+    if (images.GetFrameInfo(imageBufferId, i, fi)) {
+      pages[static_cast<size_t>(i)].href = fi.href;
+      pages[static_cast<size_t>(i)].pageNumber = fi.pageNumber;
+    }
+  }
+  const std::string id =
+      ReaderRegistry::Instance().CreatePages(imageBufferId, pages, documentKey, err);
+  if (id.empty()) return false;
+  *json = SnapshotSummaryJson(*ReaderRegistry::Instance().Snapshot(id));
+  return true;
+}
+
 bool BridgeInsertSection(const std::string& documentId, const std::string& after,
                          const std::string& sectionId, const std::string& title,
                          const std::vector<std::string>& keys,

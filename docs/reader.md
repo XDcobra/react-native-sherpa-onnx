@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Show an EPUB in a native, virtualized reading view and build a reading app around it: positions that stay valid, your own React Native views inside the text, highlights, search, progress and read-aloud with sentence and word highlighting.
+Show a book (EPUB, FB2, MOBI / AZW3, PDF) or a comic in a native, virtualized reading view and build a reading app around it: positions that stay valid, your own React Native views inside the text, highlights, search, progress and read-aloud with sentence and word highlighting.
 
 Import from `react-native-sherpa-onnx/reader`.
 
@@ -14,7 +14,7 @@ The screenshots are from the [example app](../example/README.md#reader) (`Reader
 
 What the SDK gives you:
 
-- **`ReaderDocument`**: an EPUB as sections and blocks (paragraphs, headings, images, separators) with **stable IDs**. The same file gives the same IDs on every device, so stored positions, notes and analytics match.
+- **`ReaderDocument`**: a book as sections and blocks (paragraphs, headings, images, separators, pages) with **stable IDs**. The same file gives the same IDs on every device, so stored positions, notes and analytics match.
 - **`ReaderView`**: a native list (`UITableView` on iOS, `RecyclerView` on Android) that reads the book text from native memory. Book text does not cross the JS bridge unless you ask for it.
 - **Inserts**: any React Native view placed between blocks, for example chapter-end cards, notes, quizzes or ads. They scroll with the text and stay interactive.
 - **App sections**: text that is not in the file (a preface, a reading guide, generated content), inserted between the book's sections.
@@ -25,8 +25,8 @@ What the SDK gives you:
 Requirements:
 
 - **New Architecture (Fabric) only.** `ReaderView` is a Fabric component.
-- **EPUB needs lexbor:** `sherpaOnnxEnableLexbor=true` (Android `gradle.properties`) and `SHERPA_ONNX_ENABLE_LEXBOR=1` (iOS), the same as `extractDocumentText` ([document-offline.md](document-offline.md)).
-- EPUB files in scroll mode. PDF, TXT and OCR pages are not shown in the reader.
+- **EPUB and MOBI need lexbor:** `sherpaOnnxEnableLexbor=true` (Android `gradle.properties`) and `SHERPA_ONNX_ENABLE_LEXBOR=1` (iOS), the same as `extractDocumentText` ([document-offline.md](document-offline.md)). **PDF needs PDFium** ([pdf-offline.md](pdf-offline.md)).
+- Scroll mode. Scanned pages and comics are shown as page images; text for them (OCR) is not attached yet.
 
 ## Quick start
 
@@ -101,6 +101,16 @@ EPUB ──extractDocumentText──▶ text buffer + structure ─┐
 
 `loadReaderDocument(source)` runs all three steps. Use `createReaderDocument` when you already extracted the text, for example to synthesize it as well.
 
+PDFs and comics are page-based:
+
+```
+PDF ──extractPdfTextLayer(layout: 'paragraphs')──▶ text buffer + structure ─┐
+    ──rasterizePdfPages(strategy: 'lazy-lru')──▶ page images ───────────────┼─▶ ReaderDocument
+CBZ ──extractDocumentImages(strategy: 'lazy-lru')──▶ page images ──▶ createReaderDocument({ pages })
+```
+
+Each page is a section (`kind: 'page'`) whose first block, `s{n}.b0`, is the page image (`type: 'page'`); the page's text blocks follow. `pageDisplay` on the view chooses what is shown: the text, the page images, or both ([Pages](#pages)).
+
 ### Stable IDs and locators
 
 | Field | Example | Purpose |
@@ -133,7 +143,7 @@ A **locator** is `{ sectionId, blockId, offset? }`. `offset` is a UTF-16 offset 
 ```ts
 function loadReaderDocument(
   source: FileSource,
-  options?: { imagesMaxSide?: number }
+  options?: { imagesMaxSide?: number; pdfDpi?: number; password?: string }
 ): Promise<ReaderDocument>;
 ```
 
@@ -141,16 +151,16 @@ function loadReaderDocument(
 const doc = await loadReaderDocument({ kind: 'fs', path: '/books/frankenstein.epub' });
 ```
 
-Opens an EPUB in one call: extracts text, images (`scope: 'all'`, longest side 2048 by default) and `documentKey`. The document owns the image buffer; release it with `releaseReaderDocument`.
+Opens a book in one call, by the file's content. EPUB, FB2 and MOBI / AZW3: text, images (`scope: 'all'`) and `documentKey`. PDF: reading text from the text layer and every page as a lazily rendered image (`pdfDpi`, default 144; `password` for encrypted files). CBZ / CBR: a page document over lazily decoded pages. `imagesMaxSide` caps images and pages (default 2048). The document owns the image buffer; release it with `releaseReaderDocument`.
 
 #### `createReaderDocument(options)`
 
 ```ts
-function createReaderDocument(options: {
-  text: OfflineTextBufferIdSource;
-  images?: string | { bufferId: string } | null;
-  documentKey: string;
-}): Promise<ReaderDocument>;
+function createReaderDocument(
+  options:
+    | { text: OfflineTextBufferIdSource; images?: string | { bufferId: string } | null; documentKey: string }
+    | { pages: string | { bufferId: string }; documentKey: string }
+): Promise<ReaderDocument>;
 ```
 
 ```ts
@@ -158,7 +168,7 @@ await extractDocumentText(source, textBuffer);
 const doc = await createReaderDocument({ text: textBuffer, documentKey: await computeDocumentKey(source) });
 ```
 
-Builds a document from a text buffer that `extractDocumentText` filled from an EPUB. Use it when the app keeps the text buffer, for example to read it aloud. The document keeps the text alive; your image buffer stays yours.
+Builds a document from a text buffer with a reading structure (`extractDocumentText`, or `extractPdfTextLayer(…, { layout: 'paragraphs' })` with the PDF's page buffer as `images`), or with `pages` from an image buffer: one page section per frame (`format: 'pages'`). Use it when the app keeps the buffers, for example to read the text aloud. The document keeps the text alive; your image buffers stay yours and must outlive the document.
 
 #### `computeDocumentKey(source)`
 
@@ -317,6 +327,7 @@ The native reading view. All props:
 | `highlights` | `ReaderHighlight[]` | `[]` | Marked ranges; see [Highlights](#highlights). |
 | `follow` | `ReaderFollowOptions` | `{ mode: 'keepVisible' }` | Keeps the highlight with `follow: true` in view; see [Follow scrolling](#follow-scrolling). |
 | `jumpThreshold` | `number` | `20` | Blocks; a larger move is reported as `onJump`. |
+| `pageDisplay` | `'auto' \| 'text' \| 'image' \| 'imageAndText'` | `'auto'` | How pages of PDFs, comics and scans are shown; see [Pages](#pages). |
 | `mode` | `'scroll'` | `'scroll'` | Layout mode. |
 | `style`, `testID` | | | As for `View`. |
 | `onReady`, `onVisibleRangeChange`, `onFurthestPositionChange`, `onSectionEnd`, `onJump`, `onTap`, `onFollowChange`, `onError` | | | See [JS Events](#js-events). |
@@ -508,6 +519,19 @@ Limits:
 - The default word splitter needs spaces between words. For Chinese, Japanese or Thai pass `words.split`; otherwise each sentence is one unit.
 - `result.timeline.exact` is `false` when a segmentation policy rewrote the text (`overlapChars > 0`, `text_punctuation_assisted`); ranges may then be off by a few characters.
 
+## Pages
+
+Page sections (PDF pages, comic pages) start with their page image; `pageDisplay` decides what the view shows. Other sections are not affected.
+
+| `pageDisplay` | Shows | Hidden |
+| --- | --- | --- |
+| `'text'` | The page's text; the page image only when the page has no text (a scan, a plate) | Running headers, footers and page numbers, the page image of pages with text |
+| `'image'` | One full-width page image per page | The page's text blocks: they count as visible where they are on the page |
+| `'imageAndText'` | The page image, then its text | Running headers, footers and page numbers |
+| `'auto'` (default) | `'image'` for page documents (`format: 'pages'`), else `'text'` | |
+
+Hidden blocks still count for reading progress: they belong to the row that shows them (the page, or the nearest text row), so `onFurthestPositionChange` and `onSectionEnd` see every block. In `'image'`, a block counts as visible when at least half of it (or of the viewport) is on screen, from its rectangle on the page; `scrollTo` a block puts its place on the page at the top. Pages are full width without margins, and their height comes from the page size before the page is rendered.
+
 ## Structure rules
 
 `structureVersion` describes how an EPUB is split into sections and blocks. The rules below change only together with that number; a golden file in the native tests guards them.
@@ -587,7 +611,8 @@ SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 
 ## Limits
 
-- EPUB only, scroll mode only; no zoom and no text selection (use `onTap` and highlights for paragraph-level selection).
+- Scroll mode only; no zoom and no text selection (use `onTap` and highlights for paragraph-level selection).
+- Highlights are drawn in text only; on page images they are not drawn yet.
 - Inline formatting (italics, bold, links) is not kept; each block has one text style.
 - An image is scaled to the text width and is at most 90 % of the viewport high.
 
@@ -596,8 +621,8 @@ SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 ```ts
 import {
   ReaderView, // native reading view (Fabric)
-  loadReaderDocument, // EPUB → ReaderDocument in one call
-  createReaderDocument, // ReaderDocument from an extracted text buffer
+  loadReaderDocument, // book file → ReaderDocument in one call
+  createReaderDocument, // ReaderDocument from a text buffer or page images
   computeDocumentKey, // SHA-256 of a file
   insertSection, // add an app section
   removeSection, // remove an app section
@@ -621,7 +646,8 @@ import type {
   ReaderDocument, ReaderSectionInfo, ReaderDocumentMetadata, ReaderBlock, ReaderBlockType,
   ReaderLocator, ReaderRange, ReaderAppSection, ReaderAppBlock, ReaderInsert, ReaderInsertTarget,
   ReaderTheme, ReaderHighlight, ReaderHighlightStyle, ReaderFollowOptions, ReaderFollowChange,
-  ReaderVisibleRange, ReaderJump, ReaderJumpCause, ReaderViewProps, ReaderViewHandle,
+  ReaderVisibleRange, ReaderJump, ReaderJumpCause, ReaderViewProps, ReaderViewHandle, ReaderPageDisplay,
+  CreateReaderDocumentOptions, LoadReaderDocumentOptions,
   ReadAloudTimeline, ReadAloudUnit, ReadAloudPosition, ReadAloudAlignedWord,
   CreateReadAloudTimelineOptions, ReadAloudHighlightOptions, ReaderErrorCodeValue,
 } from 'react-native-sherpa-onnx/reader';
@@ -629,11 +655,11 @@ import type {
 
 | Type | Description |
 | --- | --- |
-| `ReaderDocument` | `{ id, revision, documentKey, structureVersion, textHashVersion, blockCount, sections, metadata }` (immutable value) |
-| `ReaderSectionInfo` | `{ id, sectionIndex?, origin: 'file' \| 'app', kind: 'text' \| 'image', href?, title?, titleSource, blockCount, firstBlockId, lastBlockId }` |
+| `ReaderDocument` | `{ id, revision, documentKey, format, structureVersion, textHashVersion, blockCount, sections, metadata }` (immutable value); `format`: `'epub' \| 'fb2' \| 'mobi' \| 'pdf' \| 'pages'` |
+| `ReaderSectionInfo` | `{ id, sectionIndex?, origin: 'file' \| 'app', kind: 'text' \| 'image' \| 'page', href?, title?, titleSource, label?, blockCount, firstBlockId, lastBlockId }`; `label`: printed PDF page label |
 | `ReaderDocumentMetadata` | `{ title?, creator?, language? }` |
 | `ReaderBlock` | `{ id, sectionId, index, type, headingLevel?, textHash, text?, imageHref?, imageFrameIndex?, alt?, textRange? }` |
-| `ReaderBlockType` | `'paragraph' \| 'heading' \| 'image' \| 'separator'` |
+| `ReaderBlockType` | `'paragraph' \| 'heading' \| 'image' \| 'separator' \| 'page'` |
 | `ReaderLocator` | `{ sectionId, blockId, offset? }` |
 | `ReaderRange` | `{ from, to }` (`to` exclusive) |
 | `ReaderAppSection` / `ReaderAppBlock` | `{ after, id, title?, blocks }` / `{ key, type: 'paragraph' \| 'heading' \| 'separator', text?, level? }` |
@@ -645,6 +671,8 @@ import type {
 | `ReaderVisibleRange` | `{ first, last, firstOffset, settled, visibleInserts }` |
 | `ReaderJump` / `ReaderJumpCause` | `{ from, to, distance, cause }` / `'scroll' \| 'fling' \| 'scrollTo' \| 'follow'` |
 | `ReaderViewProps` / `ReaderViewHandle` | View props / ref: `scrollTo`, `resumeFollow` |
+| `ReaderPageDisplay` | `'auto' \| 'text' \| 'image' \| 'imageAndText'` ([Pages](#pages)) |
+| `CreateReaderDocumentOptions` / `LoadReaderDocumentOptions` | Options of `createReaderDocument` / `loadReaderDocument` |
 | `ReadAloudTimeline` | `{ durationMs, sentences, words, at(ms) }` |
 | `ReadAloudUnit` | `{ kind, index, sentenceIndex, range, textStart, textEnd, startMs, endMs }` |
 | `ReadAloudPosition` | `{ sentence, word }` (each `ReadAloudUnit \| null`) |

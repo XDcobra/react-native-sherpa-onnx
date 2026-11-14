@@ -5,6 +5,7 @@
 #include "ReaderFileHash.h"
 #include "ReaderHighlights.h"
 #include "ReaderJson.h"
+#include "ReaderLayout.h"
 #include "ReaderRegistry.h"
 #include "ReaderTextHash.h"
 #include "ReaderTracker.h"
@@ -308,6 +309,155 @@ TEST(ReaderDocument, PdfPagesTocAndSummary) {
   const std::string json = SnapshotSummaryJson(*snap);
   EXPECT_NE(json.find("\"label\":\"ii\""), std::string::npos) << json;
   EXPECT_NE(json.find("\"kind\":\"page\""), std::string::npos) << json;
+  ReaderRegistry::Instance().Release(id);
+}
+
+// ---- Rows per page display (ReaderLayout) ----------------------------------
+
+namespace {
+
+std::string RowsText(const ReaderSnapshot& snap, const std::vector<ReaderRow>& rows, int section) {
+  std::string out;
+  for (const auto& r : rows) {
+    if (snap.blocks[r.block].section != section) continue;
+    if (!out.empty()) out += ' ';
+    out += snap.blocks[r.block].id.substr(snap.blocks[r.block].id.find('.') + 1);
+    out += '[' + std::to_string(r.coverFirst - snap.sections[section].firstBlock) + '-' +
+           std::to_string(r.coverLast - snap.sections[section].firstBlock) + ']';
+    if (r.page) out += 'P';
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST(ReaderLayout, PdfRowsPerDisplayMode) {
+  if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) GTEST_SKIP() << "PDFium not linked";
+  const std::string id = CreatePdfDoc();
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  ASSERT_TRUE(snap);
+
+  // Text: the page image only for the plate (no text), running header and
+  // page number hidden but covered by the first row of the page.
+  auto text = PlanRows(*snap, PageDisplay::kText);
+  EXPECT_EQ(RowsText(*snap, text, 2), "b3[0-3] b4[4-4] b5[5-5] b6[6-6] b7[7-7]");
+  EXPECT_EQ(RowsText(*snap, text, 0), "b1[0-1] b2[2-2]");
+  EXPECT_EQ(RowsText(*snap, text, 5), "b0[0-0]P");
+
+  // Image: one full-width page per page, standing for all its blocks.
+  auto image = PlanRows(*snap, PageDisplay::kImage);
+  ASSERT_EQ(image.size(), 6u);
+  EXPECT_EQ(RowsText(*snap, image, 2), "b0[0-7]P");
+
+  // Image and text: the page, then its text; furniture joins the page row.
+  auto both = PlanRows(*snap, PageDisplay::kImageAndText);
+  EXPECT_EQ(RowsText(*snap, both, 2), "b0[0-2]P b3[3-3] b4[4-4] b5[5-5] b6[6-6] b7[7-7]");
+
+  // Every block is covered exactly once, in order.
+  for (const auto* rows : {&text, &image, &both}) {
+    int next = 0;
+    for (const auto& r : *rows) {
+      EXPECT_EQ(r.coverFirst, next);
+      EXPECT_LE(r.coverFirst, r.block);
+      EXPECT_LE(r.block, r.coverLast);
+      next = r.coverLast + 1;
+    }
+    EXPECT_EQ(next, static_cast<int>(snap->blocks.size()));
+  }
+
+  // Hidden blocks find the row that stands for them.
+  const int header = snap->BlockIndex("s2.b1");
+  const int heading = snap->BlockIndex("s2.b3");
+  EXPECT_EQ(text[RowOfBlock(text, header)].block, heading);
+  EXPECT_EQ(image[RowOfBlock(image, heading)].block, snap->BlockIndex("s2.b0"));
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderLayout, VisibleBlocksOnAPageImageFollowTheirRectangles) {
+  if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) GTEST_SKIP() << "PDFium not linked";
+  const std::string id = CreatePdfDoc();
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  auto rows = PlanRows(*snap, PageDisplay::kImage);
+  const ReaderRow& page3 = rows[RowOfBlock(rows, snap->BlockIndex("s2.b0"))];
+  int first = -1;
+  int last = -1;
+  // Top 80 % of the page on screen: the page itself through the last paragraph.
+  ASSERT_TRUE(RowVisibleBlocks(*snap, page3, 0, 800, 1000, 800, &first, &last));
+  EXPECT_EQ(snap->blocks[first].id, "s2.b0");
+  EXPECT_EQ(snap->blocks[last].id, "s2.b7");
+  // Scrolled into the page: the heading is off screen, the page top too.
+  ASSERT_TRUE(RowVisibleBlocks(*snap, page3, 250, 1050, 1000, 800, &first, &last));
+  EXPECT_EQ(snap->blocks[first].id, "s2.b2") << "the page number at the bottom";
+  EXPECT_EQ(snap->blocks[last].id, "s2.b7");
+  // Only empty space of the page on screen (between the text and the footer):
+  // the page itself counts.
+  ASSERT_TRUE(RowVisibleBlocks(*snap, page3, 500, 900, 1000, 400, &first, &last));
+  EXPECT_EQ(snap->blocks[first].id, "s2.b0");
+  EXPECT_EQ(first, last);
+  // A sliver of the page: nothing.
+  EXPECT_FALSE(RowVisibleBlocks(*snap, page3, 990, 1000, 1000, 400, &first, &last));
+  // Offsets for scrollTo.
+  EXPECT_NEAR(BlockOffsetInRow(*snap, page3, snap->BlockIndex("s2.b5"), 1000), 196, 2);
+  EXPECT_EQ(BlockOffsetInRow(*snap, page3, snap->BlockIndex("s2.b0"), 1000), 0);
+
+  // Plain rows: the half rule over the whole row, covering hidden blocks.
+  auto text = PlanRows(*snap, PageDisplay::kText);
+  const ReaderRow& heading = text[RowOfBlock(text, snap->BlockIndex("s2.b3"))];
+  ASSERT_TRUE(RowVisibleBlocks(*snap, heading, 0, 40, 40, 800, &first, &last));
+  EXPECT_EQ(snap->blocks[first].id, "s2.b0");
+  EXPECT_EQ(snap->blocks[last].id, "s2.b3");
+  EXPECT_FALSE(RowVisibleBlocks(*snap, heading, 30, 40, 40, 800, &first, &last));
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderDocument, PageDocumentOneSectionPerFrame) {
+  ReaderError err;
+  std::vector<ReaderRegistry::PageInput> pages(3);
+  pages[0].href = "001.jpg";
+  pages[0].pageNumber = 1;
+  pages[1].href = "002.jpg";
+  pages[1].pageNumber = 2;
+  // pages[2]: no href → page:3
+  const std::string id =
+      ReaderRegistry::Instance().CreatePages("img_off_pages", pages, "comic", &err);
+  ASSERT_FALSE(id.empty()) << err.message;
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  EXPECT_EQ(snap->format, "pages");
+  EXPECT_EQ(snap->structureVersion, 1);
+  ASSERT_EQ(snap->sections.size(), 3u);
+  ASSERT_EQ(snap->blocks.size(), 3u);
+  EXPECT_EQ(snap->sections[1].kind, "page");
+  EXPECT_EQ(snap->sections[1].label, "2");
+  EXPECT_EQ(snap->sections[2].href, "page:3");
+  EXPECT_EQ(snap->blocks[2].id, "s2.b0");
+  EXPECT_EQ(snap->blocks[2].type, ReaderBlockType::Page);
+  EXPECT_EQ(snap->blocks[2].imageFrame, 2);
+  EXPECT_EQ(snap->blocks[0].textHash, ImageHashV1("001.jpg")) << "stable per archive path";
+  // Without text, every mode shows the page images.
+  for (auto mode : {PageDisplay::kText, PageDisplay::kImage, PageDisplay::kImageAndText}) {
+    auto rows = PlanRows(*snap, mode);
+    ASSERT_EQ(rows.size(), 3u);
+    for (const auto& r : rows) EXPECT_TRUE(r.page);
+  }
+  const std::string json = SnapshotSummaryJson(*snap);
+  EXPECT_NE(json.find("\"format\":\"pages\""), std::string::npos) << json;
+  ReaderRegistry::Instance().Release(id);
+
+  EXPECT_TRUE(ReaderRegistry::Instance().CreatePages("img_off_x", {}, "k", &err).empty());
+  EXPECT_EQ(err.code, kErrReaderInvalidArgument);
+}
+
+TEST(ReaderLayout, NonPageSectionsKeepOneRowPerBlock) {
+  const std::string id = CreateDoc("structure.epub");
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  for (auto mode : {PageDisplay::kText, PageDisplay::kImage, PageDisplay::kImageAndText}) {
+    auto rows = PlanRows(*snap, mode);
+    ASSERT_EQ(rows.size(), snap->blocks.size());
+    for (size_t i = 0; i < rows.size(); ++i) {
+      EXPECT_EQ(rows[i].block, static_cast<int>(i));
+      EXPECT_FALSE(rows[i].page);
+    }
+  }
   ReaderRegistry::Instance().Release(id);
 }
 

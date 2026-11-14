@@ -77,6 +77,16 @@ Java_com_sherpaonnx_reader_ReaderNative_nativeCreateDocument(JNIEnv* env, jclass
 }
 
 JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeCreatePagesDocument(JNIEnv* env, jclass,
+                                                                  jstring imageId, jstring key) {
+  std::string json;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeCreatePagesDocument(Std(env, imageId), Std(env, key),
+                                                                &json, &err);
+  return Result(env, ok, json, err);
+}
+
+JNIEXPORT jobjectArray JNICALL
 Java_com_sherpaonnx_reader_ReaderNative_nativeInsertSection(
     JNIEnv* env, jclass, jstring docId, jstring after, jstring sectionId, jstring title,
     jobjectArray keys, jobjectArray types, jobjectArray texts, jintArray levels) {

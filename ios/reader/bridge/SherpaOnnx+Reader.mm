@@ -82,6 +82,18 @@ RCT_EXPORT_METHOD(createReaderDocument : (NSString *)textBufferId imageBufferId 
   });
 }
 
+RCT_EXPORT_METHOD(createReaderPagesDocument : (NSString *)imageBufferId documentKey : (
+                      NSString *)documentKey resolve : (RCTPromiseResolveBlock)
+                      resolve reject : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(ReaderQueue(), ^{
+    std::string json;
+    sherpa_onnx::reader::ReaderError err;
+    const bool ok = sherpa_onnx::reader::BridgeCreatePagesDocument(Std(imageBufferId),
+                                                                  Std(documentKey), &json, &err);
+    Finish(ok, json, err, resolve, reject);
+  });
+}
+
 RCT_EXPORT_METHOD(insertReaderSection : (NSString *)documentId after : (NSString *)
                       after sectionId : (NSString *)sectionId title : (NSString *)
                           title keys : (NSArray *)keys types : (NSArray *)types texts : (

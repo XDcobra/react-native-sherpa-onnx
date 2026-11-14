@@ -1,6 +1,7 @@
 /**
- * Reader API: EPUB structure → ReaderDocument with stable block IDs →
- * native, virtualized ReaderView (Fabric only). See docs/reader.md.
+ * Reader API: reading structure (EPUB, FB2, MOBI, PDF) or page images →
+ * ReaderDocument with stable block IDs → native, virtualized ReaderView
+ * (Fabric only). See docs/reader.md.
  */
 export { ReaderView } from './ReaderView';
 export {
@@ -33,7 +34,11 @@ export {
   remapLocator,
   removeSection,
 } from './api';
-export type { ReaderErrorCodeValue } from './api';
+export type {
+  CreateReaderDocumentOptions,
+  LoadReaderDocumentOptions,
+  ReaderErrorCodeValue,
+} from './api';
 export { READER_STRUCTURE_VERSION, READER_TEXT_HASH_VERSION } from './types';
 export type {
   ReaderAppBlock,
@@ -52,6 +57,7 @@ export type {
   ReaderJump,
   ReaderJumpCause,
   ReaderLocator,
+  ReaderPageDisplay,
   ReaderRange,
   ReaderSectionInfo,
   ReaderTocEntry,

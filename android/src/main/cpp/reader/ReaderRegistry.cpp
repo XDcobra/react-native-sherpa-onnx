@@ -316,6 +316,51 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
   return id;
 }
 
+std::string ReaderRegistry::CreatePages(const std::string& imageBufferId,
+                                        const std::vector<PageInput>& pages,
+                                        const std::string& documentKey, ReaderError* err) {
+  if (imageBufferId.empty() || pages.empty()) {
+    SetErr(err, kErrReaderInvalidArgument, "A page document needs an image buffer with frames");
+    return {};
+  }
+  auto snap = std::make_shared<ReaderSnapshot>();
+  snap->documentKey = documentKey;
+  snap->format = "pages";
+  snap->structureVersion = SupportedStructureVersion("pages");
+  snap->imageBufferId = imageBufferId;
+  // An empty text buffer: OCR text is attached as its own source later.
+  snap->text = std::make_shared<TxtOfflineEntry>();
+  snap->text->tryPopulate("", {}, {}, {}, "", "", "");
+  snap->sections.reserve(pages.size());
+  snap->blocks.reserve(pages.size());
+  for (int i = 0; i < static_cast<int>(pages.size()); ++i) {
+    ReaderSection sec;
+    sec.id = "s" + std::to_string(i);
+    sec.sectionIndex = i;
+    sec.kind = "page";
+    sec.href = pages[i].href.empty() ? "page:" + std::to_string(i + 1) : pages[i].href;
+    sec.titleSource = "none";
+    if (pages[i].pageNumber > 0) sec.label = std::to_string(pages[i].pageNumber);
+    sec.blockCount = 1;
+    ReaderBlock b;
+    b.id = sec.id + ".b0";
+    b.type = ReaderBlockType::Page;
+    b.imageHref = sec.href;
+    b.imageFrame = i;
+    b.textHash = ImageHashV1(sec.href);
+    snap->blocks.push_back(std::move(b));
+    snap->sections.push_back(std::move(sec));
+  }
+  ReindexSnapshot(snap.get());
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  snap->documentId = "rdr_" + std::to_string(nextId_++);
+  snap->revision = 1;
+  const std::string id = snap->documentId;
+  docs_[id] = std::move(snap);
+  return id;
+}
+
 bool ReaderRegistry::InsertSection(const std::string& documentId,
                                    const ReaderAppSectionInput& input, ReaderError* err) {
   if (input.id.rfind("app:", 0) != 0 || !ValidKeyChars(input.id.substr(4))) {

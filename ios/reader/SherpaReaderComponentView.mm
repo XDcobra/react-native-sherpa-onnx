@@ -14,6 +14,7 @@
 #import <react/renderer/components/SherpaOnnxSpec/RCTComponentViewHelpers.h>
 
 #include "ImageRegistry.h"
+#include "ReaderLayout.h"
 #include "ReaderHighlights.h"
 #include "ReaderRegistry.h"
 #include "ReaderTracker.h"
@@ -32,8 +33,12 @@ enum class RowKind { Block, Insert };
 
 struct ReaderRow {
   RowKind kind;
-  int blockIndex;  // Block rows
+  int blockIndex;  // Block rows: the block shown
   std::string insertKey;  // Insert rows
+  // Block rows: blocks the row stands for (see reader/ReaderLayout.h).
+  int coverFirst = -1;
+  int coverLast = -1;
+  bool page = false;  // a full-width page image
 };
 
 bool SameInserts(const std::vector<SherpaReaderViewInsertsStruct> &a,
@@ -161,6 +166,7 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
   rdr::ResolvedHighlights _resolved;
   std::vector<std::string> _reportedInvalid;
   std::string _followMode;
+  std::string _pageDisplay;
   CGFloat _followAnchor;
   BOOL _followPauseOnUser;
   BOOL _followPaused;
@@ -320,6 +326,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   }
   if (!SameInserts(_inserts, newP.inserts)) {
     _inserts = newP.inserts;
+    rowsChanged = YES;
+  }
+  if (_pageDisplay != newP.pageDisplay) {
+    _pageDisplay = newP.pageDisplay;
     rowsChanged = YES;
   }
   if (!_initialApplied) {
@@ -639,7 +649,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 {
   for (const auto &ins : _inserts) {
     if (ins.kind == kind && ins.target == target && _hostsByKey[ToNS(ins.key)] != nil) {
-      rows.push_back({RowKind::Insert, -1, ins.key});
+      rows.push_back({RowKind::Insert, -1, ins.key, -1, -1, false});
     }
   }
 }
@@ -682,15 +692,24 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   std::vector<ReaderRow> rows;
   if (_snap) {
     rows.reserve(_snap->blocks.size() + _inserts.size());
-    for (const auto &sec : _snap->sections) {
-      for (int k = 0; k < sec.blockCount; ++k) {
-        const int i = sec.firstBlock + k;
-        const std::string &blockId = _snap->blocks[i].id;
-        [self appendInsertsOfKind:"beforeBlock" target:blockId to:rows];
-        rows.push_back({RowKind::Block, i, {}});
-        [self appendInsertsOfKind:"afterBlock" target:blockId to:rows];
+    // Rows per display mode; a row stands for the blocks it covers, and
+    // inserts at covered blocks go before / after that row.
+    const auto plan = rdr::PlanRows(*_snap, rdr::PageDisplayFromName(_pageDisplay.c_str()));
+    for (const auto &p : plan) {
+      for (int i = p.coverFirst; i <= p.coverLast; ++i) {
+        [self appendInsertsOfKind:"beforeBlock" target:_snap->blocks[i].id to:rows];
       }
-      [self appendInsertsOfKind:"sectionEnd" target:sec.id to:rows];
+      rows.push_back({RowKind::Block, p.block, {}, p.coverFirst, p.coverLast, p.page});
+      for (int i = p.coverFirst; i <= p.coverLast; ++i) {
+        [self appendInsertsOfKind:"afterBlock" target:_snap->blocks[i].id to:rows];
+      }
+      const auto &sec = _snap->sections[_snap->blocks[p.coverLast].section];
+      if (p.coverLast == sec.firstBlock + sec.blockCount - 1) {
+        [self appendInsertsOfKind:"sectionEnd" target:sec.id to:rows];
+      }
+    }
+    for (const auto &sec : _snap->sections) {
+      if (sec.blockCount == 0) [self appendInsertsOfKind:"sectionEnd" target:sec.id to:rows];
     }
   }
   _tableView.contentInset = UIEdgeInsetsMake(_theme.marginVertical, 0, _theme.marginVertical, 0);
@@ -739,10 +758,12 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   return NSNotFound;
 }
 
+/** Row that shows or covers `blockIndex`. */
 - (NSInteger)rowForBlock:(int)blockIndex
 {
   for (NSInteger i = 0; i < (NSInteger)_rows.size(); ++i) {
-    if (_rows[i].kind == RowKind::Block && _rows[i].blockIndex == blockIndex) return i;
+    const auto &r = _rows[i];
+    if (r.kind == RowKind::Block && blockIndex >= r.coverFirst && blockIndex <= r.coverLast) return i;
   }
   return NSNotFound;
 }
@@ -794,13 +815,14 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     return cell;
   }
   const rdr::ReaderBlock &b = _snap->blocks[row.blockIndex];
-  if (b.type == rdr::ReaderBlockType::Image) {
+  if (b.type == rdr::ReaderBlockType::Image || b.type == rdr::ReaderBlockType::Page) {
     auto *cell = (SherpaReaderImageCell *)[tableView dequeueReusableCellWithIdentifier:kImageCellId
                                                                           forIndexPath:indexPath];
     [cell configureWithBufferId:(b.imageFrame >= 0 ? ToNS(_snap->imageBufferId) : nil)
                      frameIndex:b.imageFrame
                             alt:(b.hasAlt ? ToNS(b.alt) : nil)
-                          theme:_theme];
+                          theme:_theme
+                           page:row.page];
     return cell;
   }
   if (b.type == rdr::ReaderBlockType::Separator) {
@@ -818,16 +840,22 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   return cell;
 }
 
-- (CGFloat)imageRowHeight:(const rdr::ReaderBlock &)b
+- (CGFloat)imageRowHeight:(const rdr::ReaderBlock &)b page:(bool)page
 {
   if (b.imageFrame < 0 || !_snap) return 0;
   sherpa_onnx::image::ImageFrameInfo info;
+  // Expected size: lazy pages are laid out before they are decoded.
   if (!sherpa_onnx::image::ImageRegistry::Instance().GetFrameInfo(_snap->imageBufferId, b.imageFrame, info) ||
-      info.width <= 0 || info.height <= 0) {
+      info.expectedWidth <= 0 || info.expectedHeight <= 0) {
     return 0;
   }
+  if (page) {
+    // A page: full width, its own height (pages follow each other).
+    return ceil(_tableView.bounds.size.width * info.expectedHeight / (CGFloat)info.expectedWidth);
+  }
   const CGFloat width = MAX(1, _tableView.bounds.size.width - 2 * _theme.marginHorizontal);
-  const CGFloat height = MIN(width * info.height / (CGFloat)info.width, _tableView.bounds.size.height * 0.9);
+  const CGFloat height =
+      MIN(width * info.expectedHeight / (CGFloat)info.expectedWidth, _tableView.bounds.size.height * 0.9);
   return ceil(height + 1.5 * _theme.paragraphSpacing);
 }
 
@@ -839,7 +867,9 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     return host ? MAX(0, host.yogaHeight) : 0;
   }
   const rdr::ReaderBlock &b = _snap->blocks[row.blockIndex];
-  if (b.type == rdr::ReaderBlockType::Image) return [self imageRowHeight:b];
+  if (b.type == rdr::ReaderBlockType::Image || b.type == rdr::ReaderBlockType::Page) {
+    return [self imageRowHeight:b page:row.page];
+  }
   if (b.type == rdr::ReaderBlockType::Separator) return ceil(_theme.bodyFont.lineHeight * 1.5);
   return UITableViewAutomaticDimension;
 }
@@ -854,7 +884,9 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   const rdr::ReaderBlock &b = _snap->blocks[row.blockIndex];
   NSNumber *measured = _blockHeights[ToNS(b.id)];
   if (measured) return measured.doubleValue;
-  if (b.type == rdr::ReaderBlockType::Image) return MAX(1, [self imageRowHeight:b]);
+  if (b.type == rdr::ReaderBlockType::Image || b.type == rdr::ReaderBlockType::Page) {
+    return MAX(1, [self imageRowHeight:b page:row.page]);
+  }
   if (b.type == rdr::ReaderBlockType::Separator) return ceil(_theme.bodyFont.lineHeight * 1.5);
   // Rough guess from the text length: ~0.5 em per character.
   const CGFloat width = MAX(1, tableView.bounds.size.width - 2 * _theme.marginHorizontal);
@@ -934,9 +966,19 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
       if (shown > 0 && inserts) inserts->push_back(row.insertKey);
       continue;
     }
-    if (r.size.height <= 0 || shown < 0.5 * MIN(r.size.height, viewport)) continue;
-    if (*first < 0) *first = row.blockIndex;
-    *last = row.blockIndex;
+    if (r.size.height <= 0 || shown <= 0) continue;
+    // Shared rule (half of min(height, viewport); blocks on a page image by
+    // their rectangle); covered blocks count with their row.
+    const rdr::ReaderRow plan{row.blockIndex, row.coverFirst, row.coverLast, row.page};
+    int f = -1;
+    int l = -1;
+    if (!rdr::RowVisibleBlocks(*_snap, plan, (float)MAX(0, top - CGRectGetMinY(r)),
+                               (float)(MIN(CGRectGetMaxY(r), bottom) - CGRectGetMinY(r)),
+                               (float)r.size.height, (float)viewport, &f, &l)) {
+      continue;
+    }
+    if (*first < 0 || f < *first) *first = f;
+    if (l > *last) *last = l;
   }
   return *first >= 0;
 }
@@ -945,7 +987,8 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 - (int)firstVisibleOffset:(int)firstBlock
 {
   const NSInteger row = [self rowForBlock:firstBlock];
-  if (row == NSNotFound) return 0;
+  // Only the block's own text row has offsets (not a row that covers it).
+  if (row == NSNotFound || _rows[row].blockIndex != firstBlock) return 0;
   UITableViewCell *cell = [_tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];
   if (![cell isKindOfClass:SherpaReaderTextCell.class]) return 0;
   const CGPoint top = [_tableView convertPoint:CGPointMake(_theme.marginHorizontal + 1,
@@ -1130,7 +1173,17 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   [_tableView layoutIfNeeded];
   [_tableView scrollToRowAtIndexPath:path atScrollPosition:UITableViewScrollPositionTop animated:NO];
   [_tableView layoutIfNeeded];
-  if (offset > 0) {
+  const auto &target = _rows[row];
+  if (target.blockIndex != block) {
+    // A covered block: its place on the page image, else the row's top.
+    const CGRect r = [_tableView rectForRowAtIndexPath:path];
+    const rdr::ReaderRow plan{target.blockIndex, target.coverFirst, target.coverLast, target.page};
+    const CGFloat dy = rdr::BlockOffsetInRow(*_snap, plan, block, (float)r.size.height);
+    const CGFloat maxY = MAX(-_tableView.contentInset.top,
+                             _tableView.contentSize.height + _tableView.contentInset.bottom -
+                                 _tableView.bounds.size.height);
+    _tableView.contentOffset = CGPointMake(0, MIN(maxY, r.origin.y + dy));
+  } else if (offset > 0) {
     UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
     if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
       const CGFloat lineTop = [(SherpaReaderTextCell *)cell lineTopForCharacterOffset:offset];

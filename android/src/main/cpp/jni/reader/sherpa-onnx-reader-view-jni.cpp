@@ -10,6 +10,7 @@
 
 #include "image/ImageRegistry.h"
 #include "reader/ReaderHighlights.h"
+#include "reader/ReaderLayout.h"
 #include "reader/ReaderRegistry.h"
 #include "reader/ReaderTracker.h"
 
@@ -74,14 +75,60 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeBlockTable(JNIEnv* env, jclass
     if (b.imageFrame >= 0) {
       sherpa_onnx::image::ImageFrameInfo fi;
       if (images.GetFrameInfo(s->imageBufferId, b.imageFrame, fi)) {
-        w = fi.width;
-        hgt = fi.height;
+        // Lazy pages are laid out before they are decoded.
+        w = fi.expectedWidth;
+        hgt = fi.expectedHeight;
       }
     }
     out.insert(out.end(), {static_cast<jint>(b.type), b.headingLevel, b.section, b.imageFrame, w,
                            hgt, static_cast<jint>(b.flags)});
   }
   return Ints(env, out);
+}
+
+/** 4 ints per row: block, coverFirst, coverLast, page (1 = full-width page image). */
+JNIEXPORT jintArray JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativePlanRows(JNIEnv* env, jclass, jlong h,
+                                                           jstring mode) {
+  const auto* s = Snap(h);
+  std::vector<jint> out;
+  if (!s) return Ints(env, out);
+  const std::string m = Std(env, mode);
+  const auto rows = rdr::PlanRows(*s, rdr::PageDisplayFromName(m.c_str()));
+  out.reserve(rows.size() * 4);
+  for (const auto& r : rows) out.insert(out.end(), {r.block, r.coverFirst, r.coverLast, r.page ? 1 : 0});
+  return Ints(env, out);
+}
+
+/** [first, last] visible blocks of a row (see RowVisibleBlocks), or an empty array. */
+JNIEXPORT jintArray JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativeRowVisibleBlocks(
+    JNIEnv* env, jclass, jlong h, jint block, jint coverFirst, jint coverLast, jboolean page,
+    jfloat visibleTop, jfloat visibleBottom, jfloat rowHeight, jfloat viewport) {
+  const auto* s = Snap(h);
+  std::vector<jint> out;
+  const int n = s ? static_cast<int>(s->blocks.size()) : 0;
+  if (!s || coverFirst < 0 || coverLast >= n || block < coverFirst || block > coverLast) {
+    return Ints(env, out);
+  }
+  const rdr::ReaderRow row{block, coverFirst, coverLast, page == JNI_TRUE};
+  int first = -1;
+  int last = -1;
+  if (rdr::RowVisibleBlocks(*s, row, visibleTop, visibleBottom, rowHeight, viewport, &first, &last)) {
+    out = {first, last};
+  }
+  return Ints(env, out);
+}
+
+/** Offset in px from a row's top where `target` starts (page images; else 0). */
+JNIEXPORT jfloat JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativeBlockOffsetInRow(JNIEnv*, jclass, jlong h,
+                                                                   jint block, jboolean page,
+                                                                   jint target, jfloat rowHeight) {
+  const auto* s = Snap(h);
+  if (!s) return 0;
+  const rdr::ReaderRow row{block, block, block, page == JNI_TRUE};
+  return rdr::BlockOffsetInRow(*s, row, target, rowHeight);
 }
 
 /** 2 ints per section: firstBlock, blockCount. */

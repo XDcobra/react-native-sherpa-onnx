@@ -226,6 +226,20 @@ export type ReaderJump = {
   cause: ReaderJumpCause;
 };
 
+/**
+ * How page sections (PDF pages, comic and scanned pages) are shown.
+ * - `'text'`: the page's text; the page image only when the page has no text.
+ *   Running headers, footers and page numbers are hidden.
+ * - `'image'`: one full-width page image per page. It stands for the page's
+ *   text: visible range, furthest position and `scrollTo` use the blocks'
+ *   positions on the page.
+ * - `'imageAndText'`: the page image, then its text.
+ * - `'auto'` (default): `'image'` for page documents (`format: 'pages'`),
+ *   else `'text'`.
+ * Other sections (EPUB, FB2, MOBI chapters, app sections) are not affected.
+ */
+export type ReaderPageDisplay = 'auto' | 'text' | 'image' | 'imageAndText';
+
 export type ReaderViewProps = {
   document: ReaderDocument | null;
   initialLocator?: ReaderLocator | null;
@@ -241,6 +255,8 @@ export type ReaderViewProps = {
   highlights?: ReaderHighlight[];
   /** Follow scrolling for the highlight with `follow: true`. */
   follow?: ReaderFollowOptions;
+  /** How pages of PDFs, comics and scans are shown. Default `'auto'`. */
+  pageDisplay?: ReaderPageDisplay;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   onReady?: (info: { blockCount: number; sectionCount: number }) => void;

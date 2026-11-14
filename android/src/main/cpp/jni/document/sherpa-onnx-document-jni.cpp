@@ -167,6 +167,23 @@ Java_com_sherpaonnx_document_DocumentNative_nativeExtractTextInto(
   return map;
 }
 
+/** HashMap: ok, format ("" when unrecognized), errorCode?, errorMessage?. */
+JNIEXPORT jobject JNICALL
+Java_com_sherpaonnx_document_DocumentNative_nativeDetectFormat(JNIEnv* env, jclass, jstring jpath,
+                                                              jint fd) {
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  std::string code;
+  std::string msg;
+  const std::string format = sherpa_onnx::document::DetectDocumentFormat(
+      sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd), &code, &msg);
+  PutBool(env, map, put, "ok", code.empty() ? JNI_TRUE : JNI_FALSE);
+  PutString(env, map, put, "format", format);
+  if (!code.empty()) PutString(env, map, put, "errorCode", code);
+  if (!msg.empty()) PutString(env, map, put, "errorMessage", msg);
+  return map;
+}
+
 JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_document_DocumentNative_nativeExtractImages(
     JNIEnv* env, jclass, jstring jpath, jint fd, jint maxSide,

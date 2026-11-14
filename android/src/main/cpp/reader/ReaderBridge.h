@@ -15,6 +15,10 @@ namespace reader {
 bool BridgeCreateDocument(const std::string& textBufferId, const std::string& imageBufferId,
                           const std::string& documentKey, std::string* json, ReaderError* err);
 
+/** Page document over an image buffer (one page per frame; see ReaderRegistry::CreatePages). */
+bool BridgeCreatePagesDocument(const std::string& imageBufferId, const std::string& documentKey,
+                               std::string* json, ReaderError* err);
+
 /** App section from parallel arrays (types: paragraph | heading | separator). */
 bool BridgeInsertSection(const std::string& documentId, const std::string& after,
                          const std::string& sectionId, const std::string& title,

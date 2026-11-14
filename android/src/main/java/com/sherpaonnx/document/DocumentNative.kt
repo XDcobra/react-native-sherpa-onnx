@@ -26,6 +26,9 @@ internal object DocumentNative {
    * [lazy]: comic pages stay in the archive and decode on demand (lazy-lru,
    * [hotFrames] clamped 1..32); the archive stays open until the buffer is released.
    */
+  /** Container format by content; HashMap with ok, format ("" = unrecognized), errorCode?, errorMessage?. */
+  external fun nativeDetectFormat(path: String, fd: Int): HashMap<String, Any>
+
   external fun nativeExtractImages(
     path: String,
     fd: Int,

@@ -4038,6 +4038,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     documentHelper.extractDocumentImages(source, options, promise)
   }
 
+  override fun detectDocumentFormat(source: ReadableMap, promise: Promise) {
+    documentHelper.detectDocumentFormat(source, promise)
+  }
+
   // ========== Reader ==========
 
   override fun computeFileSourceSha256(source: ReadableMap, promise: Promise) =
@@ -4049,6 +4053,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     documentKey: String,
     promise: Promise,
   ) = readerHelper.createReaderDocument(textBufferId, imageBufferId, documentKey, promise)
+
+  override fun createReaderPagesDocument(
+    imageBufferId: String,
+    documentKey: String,
+    promise: Promise,
+  ) = readerHelper.createReaderPagesDocument(imageBufferId, documentKey, promise)
 
   override fun insertReaderSection(
     documentId: String,

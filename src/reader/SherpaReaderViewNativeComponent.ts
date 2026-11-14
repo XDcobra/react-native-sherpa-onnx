@@ -112,6 +112,8 @@ export interface NativeProps extends ViewProps {
   followMode?: CodegenTypes.WithDefault<string, 'keepVisible'>;
   followAnchor?: CodegenTypes.WithDefault<CodegenTypes.Float, 0.3>;
   followPauseOnUserScroll?: CodegenTypes.WithDefault<boolean, true>;
+  /** `text` | `image` | `imageAndText` (`auto` is resolved in ReaderView). */
+  pageDisplay?: CodegenTypes.WithDefault<string, 'text'>;
   /** Spike/testing only: placeholder rows when there is no document. */
   debugRowCount?: CodegenTypes.WithDefault<CodegenTypes.Int32, 0>;
   onReaderReady?: CodegenTypes.DirectEventHandler<ReadyEvent>;

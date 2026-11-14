@@ -164,6 +164,38 @@ RCT_EXPORT_METHOD(extractDocumentText : (NSDictionary *)source textOutBufferId :
   });
 }
 
+RCT_EXPORT_METHOD(detectDocumentFormat : (NSDictionary *)source resolve : (
+                      RCTPromiseResolveBlock)resolve reject : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(DocQueue(), ^{
+    NSString *ioErr = nil;
+    NSString *ioMsg = nil;
+    FileIOReadHandle *handle = [FileIOResolver resolveSource:source error:&ioErr message:&ioMsg];
+    if (!handle) {
+      reject(ioErr ?: @"ERR_DOC_OPEN_FAILED", ioMsg ?: @"Failed to resolve FileSource", nil);
+      return;
+    }
+    NSString *seekErr = nil;
+    NSString *seekMsg = nil;
+    const auto src = SherpaOnnxSeekableSourceFromHandle(handle, @"ERR_DOC_OPEN_FAILED",
+                                                        @"SherpaOnnx:doc", &seekErr, &seekMsg);
+    if (src.path.empty()) {
+      [handle cleanup];
+      reject(seekErr ?: @"ERR_DOC_OPEN_FAILED", seekMsg ?: @"Source is not seekable", nil);
+      return;
+    }
+    std::string code;
+    std::string msg;
+    const std::string format = sherpa_onnx::document::DetectDocumentFormat(src, &code, &msg);
+    [handle cleanup];
+    if (!code.empty()) {
+      NSString *c = SherpaDocNS(code);
+      reject(c, [NSString stringWithFormat:@"%@: %@", c, SherpaDocNS(msg)], nil);
+      return;
+    }
+    resolve(SherpaDocNS(format));
+  });
+}
+
 RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
                       NSDictionary *)options resolve : (RCTPromiseResolveBlock)
                           resolve reject : (RCTPromiseRejectBlock)reject) {

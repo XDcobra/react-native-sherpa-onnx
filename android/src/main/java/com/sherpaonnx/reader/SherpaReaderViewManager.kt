@@ -106,6 +106,8 @@ class SherpaReaderViewManager :
   override fun setFollowPauseOnUserScroll(view: SherpaReaderView, value: Boolean) =
     view.setFollowPauseOnUserScroll(value)
 
+  override fun setPageDisplay(view: SherpaReaderView, value: String?) = view.setPageDisplay(value)
+
   override fun setJumpThreshold(view: SherpaReaderView, value: Int) = view.setJumpThreshold(value)
 
   override fun onAfterUpdateTransaction(view: SherpaReaderView) {

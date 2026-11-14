@@ -1418,6 +1418,12 @@ export interface Spec extends TurboModule {
     documentKey: string
   ): Promise<string>;
 
+  /** Page document over an image buffer (one page per frame). Resolves the summary JSON. */
+  createReaderPagesDocument(
+    imageBufferId: string,
+    documentKey: string
+  ): Promise<string>;
+
   /** Inserts an app section; block arrays are parallel. Resolves the new summary JSON. */
   insertReaderSection(
     documentId: string,
@@ -1461,6 +1467,9 @@ export interface Spec extends TurboModule {
   getReaderToc(documentId: string): Promise<string>;
 
   releaseReaderDocument(documentId: string): Promise<boolean>;
+
+  /** Container format by content ("epub", "fb2", "mobi", "cbz", "cbr", "pdf"; "" = unknown). */
+  detectDocumentFormat(source: Object): Promise<string>;
 
   /**
    * Extract image-only sections / CBZ / CBR into a new OfflineImageBuffer.

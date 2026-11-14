@@ -1,6 +1,7 @@
 const mockNative = {
   computeFileSourceSha256: jest.fn(),
   createReaderDocument: jest.fn(),
+  createReaderPagesDocument: jest.fn(),
   insertReaderSection: jest.fn(),
   removeReaderSection: jest.fn(),
   getReaderBlocks: jest.fn(),
@@ -11,8 +12,13 @@ const mockNative = {
 };
 
 const mockDocument = {
+  detectDocumentFormat: jest.fn(),
   extractDocumentText: jest.fn(),
   extractDocumentImages: jest.fn(),
+};
+const mockPdf = {
+  extractPdfTextLayer: jest.fn(),
+  rasterizePdfPages: jest.fn(),
 };
 const mockText = {
   createEmptyOfflineTextBuffer: jest.fn(),
@@ -27,12 +33,22 @@ jest.mock('react-native', () => ({
   codegenNativeCommands: () => ({ scrollToLocator: jest.fn() }),
 }));
 
+jest.mock('../../document/detect', () => ({
+  detectDocumentFormat: (...a: unknown[]) =>
+    mockDocument.detectDocumentFormat(...a),
+}));
+
 jest.mock('../../document', () => ({
   extractDocumentText: (...a: unknown[]) =>
     mockDocument.extractDocumentText(...a),
   extractDocumentImages: (...a: unknown[]) =>
     mockDocument.extractDocumentImages(...a),
   DocumentErrorCode: { NO_IMAGES: 'ERR_DOC_NO_IMAGES' },
+}));
+
+jest.mock('../../pdf', () => ({
+  extractPdfTextLayer: (...a: unknown[]) => mockPdf.extractPdfTextLayer(...a),
+  rasterizePdfPages: (...a: unknown[]) => mockPdf.rasterizePdfPages(...a),
 }));
 
 jest.mock('../../textbuffer', () => ({
@@ -94,6 +110,7 @@ describe('reader api', () => {
     jest.clearAllMocks();
     mockText.releasePipelineTextBuffer.mockResolvedValue(undefined);
     mockImages.releaseOfflineImageBuffer.mockResolvedValue(undefined);
+    mockDocument.detectDocumentFormat.mockResolvedValue('epub');
   });
 
   it('creates a document from a text buffer and parses the summary', async () => {
@@ -244,6 +261,83 @@ describe('reader api', () => {
     expect(mockImages.releaseOfflineImageBuffer).toHaveBeenCalledWith(
       'img_off_9'
     );
+  });
+
+  it('loadReaderDocument opens a PDF with paragraphs and lazy pages', async () => {
+    mockDocument.detectDocumentFormat.mockResolvedValue('pdf');
+    mockText.createEmptyOfflineTextBuffer.mockResolvedValue({
+      bufferId: 'txt_off_7',
+    });
+    mockPdf.extractPdfTextLayer.mockResolvedValue({ pageCount: 3 });
+    mockPdf.rasterizePdfPages.mockResolvedValue({ bufferId: 'img_off_7' });
+    mockNative.computeFileSourceSha256.mockResolvedValue('feed');
+    mockNative.createReaderDocument.mockResolvedValue(
+      JSON.stringify({ ...SUMMARY, format: 'pdf' })
+    );
+    const source = { kind: 'fs', path: '/tmp/a.pdf' } as const;
+    const doc = await loadReaderDocument(source, { password: 'pw' });
+    expect(doc.format).toBe('pdf');
+    expect(mockPdf.extractPdfTextLayer).toHaveBeenCalledWith(
+      source,
+      { bufferId: 'txt_off_7' },
+      { layout: 'paragraphs', password: 'pw' }
+    );
+    expect(mockPdf.rasterizePdfPages).toHaveBeenCalledWith(source, {
+      strategy: 'lazy-lru',
+      dpi: 144,
+      maxSide: 2048,
+      password: 'pw',
+    });
+    expect(mockNative.createReaderDocument).toHaveBeenCalledWith(
+      'txt_off_7',
+      'img_off_7',
+      'feed'
+    );
+    expect(mockDocument.extractDocumentText).not.toHaveBeenCalled();
+    mockNative.releaseReaderDocument.mockResolvedValue(true);
+    await releaseReaderDocument(doc);
+    expect(mockImages.releaseOfflineImageBuffer).toHaveBeenCalledWith(
+      'img_off_7'
+    );
+  });
+
+  it('loadReaderDocument opens a comic as a page document', async () => {
+    mockDocument.detectDocumentFormat.mockResolvedValue('cbz');
+    mockDocument.extractDocumentImages.mockResolvedValue({
+      buffer: 'img_off_6',
+    });
+    mockNative.computeFileSourceSha256.mockResolvedValue('feed');
+    mockNative.createReaderPagesDocument.mockResolvedValue(
+      JSON.stringify({ ...SUMMARY, format: 'pages' })
+    );
+    const doc = await loadReaderDocument({ kind: 'fs', path: '/tmp/a.cbz' });
+    expect(doc.format).toBe('pages');
+    expect(mockDocument.extractDocumentImages).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/a.cbz' },
+      { strategy: 'lazy-lru', maxSide: 2048 }
+    );
+    expect(mockNative.createReaderPagesDocument).toHaveBeenCalledWith(
+      'img_off_6',
+      'feed'
+    );
+    expect(mockText.createEmptyOfflineTextBuffer).not.toHaveBeenCalled();
+  });
+
+  it('createReaderDocument builds a page document from an image buffer', async () => {
+    mockNative.createReaderPagesDocument.mockResolvedValue(
+      JSON.stringify({ ...SUMMARY, format: 'pages' })
+    );
+    await createReaderDocument({
+      pages: { bufferId: 'img_off_5' },
+      documentKey: 'k',
+    });
+    expect(mockNative.createReaderPagesDocument).toHaveBeenCalledWith(
+      'img_off_5',
+      'k'
+    );
+    await expect(
+      createReaderDocument({ pages: '', documentKey: 'k' })
+    ).rejects.toMatchObject({ code: ReaderErrorCode.INVALID_ARGUMENT });
   });
 
   it('loadReaderDocument works without images', async () => {
