@@ -8,6 +8,8 @@ export const TEST_EDOC_FILES = {
   DRM_MOBI: 'test_edocs/drm.mobi',
   MIXED_EPUB: 'test_edocs/mixed.epub',
   MANGA_CBZ: 'test_edocs/manga.cbz',
+  STRUCTURE_EPUB: 'test_edocs/structure.epub',
+  LONG_EPUB: 'test_edocs/long.epub',
 } as const;
 
 export type DocumentExtractKind = 'document' | 'pdf';
@@ -117,5 +119,42 @@ export const DOCUMENT_FILES: DocumentFileInfo[] = [
     extract: 'pdf',
     expect: 'noTextLayer',
     section: 'PDF no text layer',
+  },
+];
+
+/** EPUBs for the Reader screen (native ReaderView). */
+export const READER_FILES: DocumentFileInfo[] = [
+  {
+    id: TEST_EDOC_FILES.STRUCTURE_EPUB,
+    name: 'Structure — EPUB',
+    description:
+      'Headings, inline image, separator, pre text, image spine item, nav TOC titles',
+    extract: 'document',
+    expect: 'text',
+    section: 'Reader samples',
+  },
+  {
+    id: TEST_EDOC_FILES.LONG_EPUB,
+    name: 'Long book — EPUB',
+    description: '40 chapters, 6160 blocks: virtualization, flings and jumps',
+    extract: 'document',
+    expect: 'text',
+    section: 'Reader samples',
+  },
+  {
+    id: TEST_EDOC_FILES.MIXED_EPUB,
+    name: 'Mixed — EPUB',
+    description: 'Text chapters and an image-only page',
+    extract: 'document',
+    expect: 'mixed',
+    section: 'Reader samples',
+  },
+  {
+    id: TEST_EDOC_FILES.HELLO_EPUB,
+    name: 'Hello — EPUB',
+    description: 'Short text-only EPUB',
+    extract: 'document',
+    expect: 'text',
+    section: 'Reader samples',
   },
 ];
