@@ -1,4 +1,6 @@
 #include "DocumentExtractor.h"
+#include "PdfFeatureGuard.h"
+#include "PdfTextLayerExtractor.h"
 
 #include "ReaderFileHash.h"
 #include "ReaderHighlights.h"
@@ -7,6 +9,7 @@
 #include "ReaderTextHash.h"
 #include "ReaderTracker.h"
 
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -216,6 +219,97 @@ void ExpectGolden(const char* fixture, const char* golden, const std::vector<std
 }
 
 }  // namespace
+
+namespace {
+
+/** book.pdf, layout "paragraphs", as a populated text entry. */
+std::shared_ptr<TxtOfflineEntry> LoadPdfEntry() {
+  sherpa_onnx::pdf::PdfSource src;
+  src.path = RepoPath("test/fixtures/pdf/book.pdf");
+  sherpa_onnx::pdf::ExtractOptions opts;
+  opts.layout = sherpa_onnx::pdf::PdfTextLayout::kParagraphs;
+  auto r = sherpa_onnx::pdf::ExtractPdfTextLayer(src, opts);
+  EXPECT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  auto entry = std::make_shared<TxtOfflineEntry>();
+  entry->bufferId = "txt_off_pdf";
+  EXPECT_TRUE(entry->tryPopulate(r.text, {}, {}, {}, "", "", ""));
+  EXPECT_TRUE(entry->trySetStructure(r.structure));
+  return entry;
+}
+
+std::string CreatePdfDoc() {
+  ReaderError err;
+  const std::string id =
+      ReaderRegistry::Instance().Create(LoadPdfEntry(), "img_pdf_pages", {}, "book", &err);
+  EXPECT_FALSE(id.empty()) << err.code << " " << err.message;
+  return id;
+}
+
+}  // namespace
+
+/** Golden for book.pdf: sections with labels, blocks with flags, frames and rects. */
+TEST(ReaderDocument, PdfStructureGolden) {
+  if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) GTEST_SKIP() << "PDFium not linked";
+  const std::string id = CreatePdfDoc();
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  ASSERT_TRUE(snap);
+  std::ostringstream got;
+  got << "# " << snap->format << " structure v" << snap->structureVersion << ", textHash v"
+      << kTextHashVersion << ": id type level flags textHash frame rect\n";
+  got << "# title=" << snap->title << " creator=" << snap->creator
+      << " language=" << snap->language << "\n";
+  char rect[64];
+  for (const auto& sec : snap->sections) {
+    got << "# " << sec.id << " kind=" << sec.kind << " label=" << sec.label
+        << " title=" << sec.title << " (" << sec.titleSource << ")\n";
+    for (int k = 0; k < sec.blockCount; ++k) {
+      const auto& b = snap->blocks[sec.firstBlock + k];
+      got << b.id << ' ' << ReaderBlockTypeName(b.type) << ' ' << b.headingLevel << ' '
+          << b.flags << ' ' << b.textHash << ' ' << b.imageFrame;
+      if (b.hasRect) {
+        std::snprintf(rect, sizeof(rect), " %.3f,%.3f,%.3f,%.3f", b.rect[0], b.rect[1],
+                      b.rect[2], b.rect[3]);
+        got << rect;
+      }
+      got << '\n';
+    }
+  }
+  for (const auto& t : snap->toc) got << "toc " << t.level << ' ' << t.blockId << ' ' << t.title << '\n';
+  ReaderRegistry::Instance().Release(id);
+  const std::string path = RepoPath("test/fixtures/reader/book.pdf.reader-v1.txt");
+  if (std::getenv("SHERPA_UPDATE_GOLDEN")) {
+    std::ofstream(path) << got.str();
+  }
+  std::ifstream f(path);
+  ASSERT_TRUE(f.good()) << "missing golden " << path << " (run with SHERPA_UPDATE_GOLDEN=1)";
+  std::stringstream want;
+  want << f.rdbuf();
+  EXPECT_EQ(got.str(), want.str());
+}
+
+TEST(ReaderDocument, PdfPagesTocAndSummary) {
+  if (!sherpa_onnx::pdf::IsPdfiumCompiledIn()) GTEST_SKIP() << "PDFium not linked";
+  const std::string id = CreatePdfDoc();
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  ASSERT_TRUE(snap);
+  EXPECT_EQ(snap->format, "pdf");
+  ASSERT_EQ(snap->sections.size(), 6u);
+  for (int i = 0; i < 6; ++i) {
+    const auto& page = snap->blocks[snap->sections[i].firstBlock];
+    EXPECT_EQ(page.id, "s" + std::to_string(i) + ".b0");
+    EXPECT_EQ(page.type, ReaderBlockType::Page);
+    EXPECT_EQ(page.imageFrame, i) << "frame of the lazy page buffer";
+  }
+  EXPECT_EQ(snap->BlockText(snap->BlockIndex("s2.b3")), "Chapter One");
+  EXPECT_TRUE(snap->blocks[snap->BlockIndex("s2.b1")].flags & kBlockFurniture);
+  ASSERT_EQ(snap->toc.size(), 5u);
+  EXPECT_EQ(snap->toc[1].blockId, "s2.b3");
+  EXPECT_EQ(snap->toc[4].blockId, "s5.b0");
+  const std::string json = SnapshotSummaryJson(*snap);
+  EXPECT_NE(json.find("\"label\":\"ii\""), std::string::npos) << json;
+  EXPECT_NE(json.find("\"kind\":\"page\""), std::string::npos) << json;
+  ReaderRegistry::Instance().Release(id);
+}
 
 TEST(ReaderDocument, MobiStructureGolden) {
   ExpectGolden("structure.mobi", "structure.mobi.reader-v1.txt", {"recindex:2", "recindex:1"});

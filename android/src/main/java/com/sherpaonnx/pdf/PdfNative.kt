@@ -9,8 +9,10 @@ internal object PdfNative {
   external fun nativeIsPdfiumEnabled(): Boolean
 
   /**
-   * Returns Object[]:
-   * ok, errorCode, errorMessage, text, pageCount, pagesWithText, spans[]
+   * Extracts the text layer straight into the empty offline text buffer
+   * [textOutBufferId] (text, line spans, reading structure for [layout]
+   * `"paragraphs"`). Returns HashMap: ok, errorCode?, errorMessage?,
+   * pageCount, pagesWithText, utf16Length, spatialSpanCount, structure?.
    *
    * [path] filesystem path, or empty when [fd] is a borrowed ParcelFileDescriptor.
    */
@@ -19,7 +21,9 @@ internal object PdfNative {
     fd: Int,
     pages: IntArray?,
     password: String?,
-  ): Array<Any?>
+    layout: String?,
+    textOutBufferId: String,
+  ): HashMap<String, Any>
 
   /**
    * Rasterize pages into a new OfflineImageBuffer.

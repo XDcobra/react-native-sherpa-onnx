@@ -114,6 +114,7 @@ export function parseReaderDocument(json: string): ReaderDocument {
       if (typeof s.sectionIndex === 'number') out.sectionIndex = s.sectionIndex;
       if (typeof s.href === 'string') out.href = s.href;
       if (typeof s.title === 'string' && s.title) out.title = s.title;
+      if (typeof s.label === 'string' && s.label) out.label = s.label;
       return out;
     }
   );

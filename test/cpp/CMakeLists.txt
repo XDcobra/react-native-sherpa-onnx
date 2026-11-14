@@ -1009,6 +1009,7 @@ add_executable(pdf_text_layer_host_test
   "${PDF_CPP_ROOT}/PdfTextLayerExtractor.cpp"
   "${PDF_CPP_ROOT}/PdfPageRasterizer.cpp"
   "${PDF_CPP_ROOT}/PdfLazySession.cpp"
+  "${PDF_CPP_ROOT}/PdfStructureBuilder.cpp"
 )
 target_include_directories(pdf_text_layer_host_test PRIVATE
   "${PDF_CPP_ROOT}"
@@ -1117,16 +1118,21 @@ add_executable(reader_host_test
   "${DOC_CPP_ROOT}/DocMobi.cpp"
   "${DOC_REPO_ROOT}/third_party/pugixml/src/pugixml.cpp"
   "${DOC_IMAGE_ROOT}/decode/ImageDecoder.cpp"
+  "${PDF_CPP_ROOT}/PdfDocument.cpp"
+  "${PDF_CPP_ROOT}/PdfTextLayerExtractor.cpp"
+  "${PDF_CPP_ROOT}/PdfStructureBuilder.cpp"
 )
 target_include_directories(reader_host_test PRIVATE
   "${READER_CPP_ROOT}"
   "${READER_CPP_ROOT}/reader"
+  "${PDF_CPP_ROOT}"
   "${DOC_CPP_ROOT}"
   "${DOC_REPO_ROOT}/third_party/pugixml/src"
   "${DOC_IMAGE_ROOT}"
   "${DOC_IMAGE_ROOT}/decode"
 )
 target_link_libraries(reader_host_test PRIVATE ${PDF_GTEST_LIBS})
+sherpa_host_link_pdfium(reader_host_test)
 target_compile_definitions(reader_host_test PRIVATE
   SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )

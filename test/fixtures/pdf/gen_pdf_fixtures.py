@@ -35,15 +35,34 @@ def esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def wrap(text: str, width: int) -> list[str]:
+# Helvetica advance widths (AFM, 1/1000 em) for ASCII 32..126, standard encoding.
+HELVETICA_WIDTHS = [
+    278, 278, 355, 556, 556, 889, 667, 222, 333, 333, 389, 584, 278, 333, 278, 278,
+    556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+    1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+    667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+    222, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+    556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+]
+
+
+def text_width(s: str, size: float) -> float:
+    return sum(HELVETICA_WIDTHS[ord(c) - 32] if 32 <= ord(c) <= 126 else 556
+               for c in s) * size / 1000
+
+
+def wrap(text: str, width: float, size: float, first_indent: float = 0) -> list[str]:
+    """Greedy wrap by rendered width, like a typesetter (ragged right)."""
     lines: list[str] = []
     line = ""
     for word in text.split():
-        if line and len(line) + 1 + len(word) > width:
+        avail = width - (first_indent if not lines else 0)
+        candidate = f"{line} {word}" if line else word
+        if line and text_width(candidate, size) > avail:
             lines.append(line)
             line = word
         else:
-            line = f"{line} {word}" if line else word
+            line = candidate
     if line:
         lines.append(line)
     return lines
@@ -65,10 +84,10 @@ class Page:
         return y
 
     def paragraph(self, y: float, s: str, *, indent: bool = True,
-                  x: float = MARGIN, width: int = 80, size: float = 11,
-                  leading: float = 15, gap: float = 9,
+                  x: float = MARGIN, width: float = PAGE_W - 2 * MARGIN,
+                  size: float = 11, leading: float = 15, gap: float = 9,
                   last_line: str | None = None) -> float:
-        lines = wrap(s, width)
+        lines = wrap(s, width, size, 18 if indent else 0)
         if last_line is not None:
             lines.append(last_line)
         for i, ln in enumerate(lines):
@@ -137,14 +156,14 @@ def build_book() -> list[Page]:
 
     p = Page()
     p.running(3)
-    col_w = 36
+    col_w = 200
     left = ("The first column talks about the harbour. It is narrow and it "
             "ends before the middle of the page so that a reader can tell the "
             "columns apart.")
     right = ("The second column talks about the town. Its lines start on the "
              "right half of the page and run down next to the first column.")
-    p.lines(MARGIN, PAGE_H - 110, 11, wrap(left, col_w), 15)
-    p.lines(PAGE_W / 2 + 10, PAGE_H - 110, 11, wrap(right, col_w), 15)
+    p.lines(MARGIN, PAGE_H - 110, 11, wrap(left, col_w, 11), 15)
+    p.lines(PAGE_W / 2 + 10, PAGE_H - 110, 11, wrap(right, col_w, 11), 15)
     pages.append(p)
 
     p = Page()

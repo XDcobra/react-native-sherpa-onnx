@@ -3,6 +3,7 @@
 #import "../../fileio/FileIOSeekable.h"
 #include "TextRegistry.h"
 
+#import "SherpaDocStructureSummary.h"
 #include "DocTextPopulate.h"
 #include "DocumentExtractor.h"
 #include "ImageRegistry.h"
@@ -47,36 +48,6 @@ dispatch_queue_t DocQueue() {
 
 static NSString *SherpaDocNS(const std::string &s) {
   return [NSString stringWithUTF8String:s.c_str()] ?: @"";
-}
-
-/** Structure summary for JS (sections + metadata; blocks stay native). */
-static NSDictionary *SherpaDocStructureSummary(const TxtStructure &st) {
-  NSMutableArray *sections = [NSMutableArray arrayWithCapacity:st.sections.size()];
-  for (const auto &sec : st.sections) {
-    NSMutableDictionary *m = [@{
-      @"sectionIndex" : @(sec.sectionIndex),
-      @"href" : SherpaDocNS(sec.href),
-      @"kind" : SherpaDocNS(sec.kind),
-      @"titleSource" : SherpaDocNS(sec.titleSource),
-      @"utf16Start" : @(sec.utf16Start),
-      @"utf16End" : @(sec.utf16End),
-      @"firstBlock" : @(sec.firstBlock),
-      @"blockCount" : @(sec.blockCount),
-    } mutableCopy];
-    if (!sec.title.empty()) m[@"title"] = SherpaDocNS(sec.title);
-    [sections addObject:m];
-  }
-  NSMutableDictionary *metadata = [NSMutableDictionary dictionary];
-  if (!st.title.empty()) metadata[@"title"] = SherpaDocNS(st.title);
-  if (!st.creator.empty()) metadata[@"creator"] = SherpaDocNS(st.creator);
-  if (!st.language.empty()) metadata[@"language"] = SherpaDocNS(st.language);
-  return @{
-    @"format" : SherpaDocNS(st.format),
-    @"version" : @(st.version),
-    @"blockCount" : @((NSInteger)st.blocks.size()),
-    @"sections" : sections,
-    @"metadata" : metadata,
-  };
 }
 
 @implementation SherpaOnnx (Document)

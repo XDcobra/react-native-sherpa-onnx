@@ -73,6 +73,7 @@ struct ReaderSection {
   std::string href;
   std::string title;
   std::string titleSource;  // "toc" | "heading" | "app" | "none"
+  std::string label;        // printed page label (PDF), may be empty
   int firstBlock = 0;
   int blockCount = 0;
 };

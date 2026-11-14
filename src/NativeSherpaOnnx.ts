@@ -1310,6 +1310,7 @@ export interface Spec extends TurboModule {
    * Extract digital PDF text layer into an empty OfflineTextBuffer.
    * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
    * `options.password` is the user/owner password for standard PDF encryption.
+   * `options.layout`: `'lines'` (default) or `'paragraphs'` (reading structure).
    */
   extractPdfTextLayer(
     source: Object,
@@ -1320,6 +1321,25 @@ export interface Spec extends TurboModule {
     pagesWithText: number;
     utf16Length: number;
     spatialSpanCount: number;
+    /** Layout "paragraphs": reading structure summary (format "pdf"). */
+    structure?: {
+      format: string;
+      version: number;
+      blockCount: number;
+      sections: Array<{
+        sectionIndex: number;
+        href: string;
+        kind: string;
+        title?: string;
+        titleSource: string;
+        label?: string;
+        utf16Start: number;
+        utf16End: number;
+        firstBlock: number;
+        blockCount: number;
+      }>;
+      metadata: { title?: string; creator?: string; language?: string };
+    };
   }>;
 
   /**
@@ -1360,8 +1380,9 @@ export interface Spec extends TurboModule {
       kind: string;
     }>;
     spatialSpanCount: number;
-    /** EPUB reading structure summary (blocks stay native on the text buffer). */
+    /** Reading structure summary (blocks stay native on the text buffer). */
     structure?: {
+      format: string;
       version: number;
       blockCount: number;
       sections: Array<{

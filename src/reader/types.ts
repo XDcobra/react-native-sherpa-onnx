@@ -42,6 +42,8 @@ export type ReaderSectionInfo = {
   href?: string;
   title?: string;
   titleSource: 'toc' | 'heading' | 'app' | 'none';
+  /** Printed page label of a PDF page (`"iv"`, `"12"`), when the PDF has one. */
+  label?: string;
   blockCount: number;
   firstBlockId: string;
   lastBlockId: string;

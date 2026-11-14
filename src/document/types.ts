@@ -43,14 +43,21 @@ export type ExtractDocumentTextOptions = {
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };
 
+/** Format of a reading structure: the e-book formats and PDF (`extractPdfTextLayer`). */
+export type DocumentStructureFormat = DocumentTextFormat | 'pdf';
+
 /** One section of the reading structure (docs/reader.md). */
 export type DocumentStructureSection = {
   sectionIndex: number;
+  /** EPUB path / FB2 id / MOBI part; `page:N` for a PDF page. */
   href: string;
-  kind: DocumentSectionKind;
+  /** `'page'`: one PDF page (its page image is the section's first block). */
+  kind: DocumentSectionKind | 'page';
   /** From the table of contents, else the first heading. */
   title?: string;
   titleSource: 'toc' | 'heading' | 'none';
+  /** Printed page label of a PDF page (`"iv"`, `"12"`), when the PDF has one. */
+  label?: string;
   /** UTF-16 range of the section's text in the buffer (empty if it has none). */
   utf16Start: number;
   utf16End: number;
@@ -60,13 +67,13 @@ export type DocumentStructureSection = {
 };
 
 /**
- * Reading structure attached to the text buffer (EPUB, FB2, MOBI / AZW3).
- * Blocks stay in native memory; read them through the reader API
- * (`react-native-sherpa-onnx/reader`).
+ * Reading structure attached to the text buffer (EPUB, FB2, MOBI / AZW3, and
+ * PDF with `layout: 'paragraphs'`). Blocks stay in native memory; read them
+ * through the reader API (`react-native-sherpa-onnx/reader`).
  */
 export type DocumentStructure = {
   /** Source format; its structure rules are versioned on their own. */
-  format: DocumentTextFormat;
+  format: DocumentStructureFormat;
   version: number;
   blockCount: number;
   sections: DocumentStructureSection[];

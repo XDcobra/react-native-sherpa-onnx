@@ -15,6 +15,7 @@ import {
   TurboModuleRegistry,
 } from 'react-native';
 import type { Spec } from '../NativeSherpaOnnx';
+import { mapDocumentStructure } from '../document/structure';
 import type { FileSource } from '../fileio/types';
 import type { OfflineImageBufferHandle } from '../imagebuffer/types';
 import { resolveOfflineTextBufferId } from '../textbuffer';
@@ -142,17 +143,19 @@ export async function isPdfiumEnabled(): Promise<boolean> {
 /**
  * Extract PDF text layer into an empty OfflineTextBuffer.
  * Spans use `origin: 'textLayer'` with pageNumber / pageWidth / pageHeight.
+ * With `layout: 'paragraphs'` the buffer also gets a reading structure
+ * (`format: 'pdf'`) that `createReaderDocument` can open.
  *
  * Android `app:apkAsset` is allowed: the APK zip entry is copied into app cache
  * on first open (see {@link FileSource} / `apkAsset`).
  * Encrypted PDFs: pass {@link ExtractPdfTextLayerOptions.password}; missing or
  * wrong stays `ERR_PDF_ENCRYPTED`.
  *
- * @throws {Error} `ERR_PDF_INVALID_ARGUMENT` — `source` is not a `FileSource`, or `pages` / `password` is invalid.
+ * @throws {Error} `ERR_PDF_INVALID_ARGUMENT` — `source` is not a `FileSource`, or `pages` / `password` / `layout` is invalid.
  * @throws {Error} `ERR_PDF_CANCELLED` — `signal` aborted.
  * @throws {Error} `TEXT_INVALID_ARGUMENT` — missing or malformed `txt_off_*` / `txt_live_*` id.
  * @throws {Error} `ERR_PDF_PDFIUM_DISABLED` — PDFium is not linked.
- * @throws {Error} `ERR_PDF_NO_TEXT_LAYER` — selected pages have no extractable text layer.
+ * @throws {Error} `ERR_PDF_NO_TEXT_LAYER` — selected pages have no extractable text layer (layout `'lines'` only).
  * @throws {Error} `ERR_PDF_OPEN_FAILED` — PDF could not be opened.
  * @throws {Error} `ERR_PDF_ENCRYPTED` — missing or wrong password.
  */
@@ -170,7 +173,11 @@ export async function extractPdfTextLayer(
     });
   }
 
-  const nativeOptions: { pages?: number[]; password?: string } = {};
+  const nativeOptions: {
+    pages?: number[];
+    password?: string;
+    layout?: 'lines' | 'paragraphs';
+  } = {};
   const pages = buildPagesOption(options?.pages);
   if (pages) {
     nativeOptions.pages = pages;
@@ -178,6 +185,18 @@ export async function extractPdfTextLayer(
   const password = readPassword(options?.password);
   if (password) {
     nativeOptions.password = password;
+  }
+  const layout = options?.layout;
+  if (layout !== undefined) {
+    if (layout !== 'lines' && layout !== 'paragraphs') {
+      throw Object.assign(
+        new Error(
+          `${PdfErrorCode.INVALID_ARGUMENT}: layout must be 'lines' or 'paragraphs'`
+        ),
+        { code: PdfErrorCode.INVALID_ARGUMENT }
+      );
+    }
+    nativeOptions.layout = layout;
   }
 
   const progressSub = subscribePdfProgress(options?.onProgress);
@@ -195,11 +214,13 @@ export async function extractPdfTextLayer(
       textOutId,
       nativeOptions
     );
+    const structure = mapDocumentStructure(raw.structure);
     return {
       pageCount: Number(raw.pageCount ?? 0),
       pagesWithText: Number(raw.pagesWithText ?? 0),
       utf16Length: Number(raw.utf16Length ?? 0),
       spatialSpanCount: Number(raw.spatialSpanCount ?? 0),
+      ...(structure ? { structure } : {}),
     };
   } catch (err: unknown) {
     return mapPdfNativeError(err);

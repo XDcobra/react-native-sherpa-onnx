@@ -1,3 +1,4 @@
+import type { DocumentStructure } from '../document/types';
 import type { FileSource } from '../fileio/types';
 import type { OfflineImageBufferRef } from '../imagebuffer/types';
 import type { OfflineTextBufferIdSource } from '../textbuffer/types';
@@ -28,6 +29,16 @@ export type ExtractPdfTextLayerOptions = {
    * Missing or wrong → `ERR_PDF_ENCRYPTED`. Not logged.
    */
   password?: string;
+  /**
+   * `'lines'` (default): one line per text line, joined by `"\n"`.
+   * `'paragraphs'`: reading text for the reader. Paragraphs (separated by a
+   * blank line), headings from the font size, running headers / footers and
+   * page numbers flagged, one section per page, the outline as contents, page
+   * labels and document metadata; attached to the buffer as its reading
+   * structure. Pages without text become sections with only their page, so a
+   * scan-only PDF succeeds too (`pagesWithText: 0`).
+   */
+  layout?: 'lines' | 'paragraphs';
   signal?: AbortSignal;
   onProgress?: (event: { done: number; total: number; phase: string }) => void;
 };
@@ -37,6 +48,8 @@ export type ExtractPdfTextLayerResult = {
   pagesWithText: number;
   utf16Length: number;
   spatialSpanCount: number;
+  /** `layout: 'paragraphs'` only: summary of the reading structure (`format: 'pdf'`). */
+  structure?: DocumentStructure;
 };
 
 /** How PDF pages become OfflineImageBuffer frames. */

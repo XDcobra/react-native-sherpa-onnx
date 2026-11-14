@@ -8,6 +8,7 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.sherpaonnx.bridge.JniWritables
 import com.sherpaonnx.document.DocumentNative
 import com.sherpaonnx.document.NativeDocProgress
 import com.sherpaonnx.fileio.FileIOHelper
@@ -98,40 +99,8 @@ class SherpaOnnxDocumentHelper(
     result.putInt("spatialSpanCount", (raw["spatialSpanCount"] as? Number)?.toInt() ?: 0)
     result.putArray("sections", sectionArray(raw["sections"]))
     result.putArray("imageOnlySections", sectionArray(raw["imageOnlySections"]))
-    (raw["structure"] as? Map<*, *>)?.let { result.putMap("structure", toWritableMap(it)) }
+    (raw["structure"] as? Map<*, *>)?.let { result.putMap("structure", JniWritables.map(it)) }
     promise.resolve(result)
-  }
-
-  /** Plain JNI maps / lists (String, Number, Boolean) → React writables. */
-  private fun toWritableMap(raw: Map<*, *>): WritableMap {
-    val out = Arguments.createMap()
-    for ((k, v) in raw) {
-      val key = k as? String ?: continue
-      when (v) {
-        is String -> out.putString(key, v)
-        is Boolean -> out.putBoolean(key, v)
-        is Int -> out.putInt(key, v)
-        is Number -> out.putDouble(key, v.toDouble())
-        is Map<*, *> -> out.putMap(key, toWritableMap(v))
-        is List<*> -> out.putArray(key, toWritableArray(v))
-      }
-    }
-    return out
-  }
-
-  private fun toWritableArray(raw: List<*>): WritableArray {
-    val out = Arguments.createArray()
-    for (v in raw) {
-      when (v) {
-        is String -> out.pushString(v)
-        is Boolean -> out.pushBoolean(v)
-        is Int -> out.pushInt(v)
-        is Number -> out.pushDouble(v.toDouble())
-        is Map<*, *> -> out.pushMap(toWritableMap(v))
-        is List<*> -> out.pushArray(toWritableArray(v))
-      }
-    }
-    return out
   }
 
   private fun doExtractImages(

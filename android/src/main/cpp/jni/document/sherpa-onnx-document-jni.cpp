@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "jni/document/doc_structure_summary_jni.h"
+
 #include "DocTextPopulate.h"
 #include "DocumentExtractor.h"
 #include "ImageMmapThreshold.h"
@@ -70,45 +72,6 @@ void PutObject(JNIEnv* env, jobject map, jmethodID put, const char* key,
   jstring jkey = env->NewStringUTF(key);
   env->CallObjectMethod(map, put, jkey, value);
   env->DeleteLocalRef(jkey);
-}
-
-/** Structure summary for JS (sections + metadata; blocks stay native). */
-jobject StructureSummary(JNIEnv* env, const TxtStructure& st) {
-  jmethodID put = nullptr;
-  jobject out = NewHashMap(env, &put);
-  PutString(env, out, put, "format", st.format);
-  PutInt(env, out, put, "version", st.version);
-  PutInt(env, out, put, "blockCount", static_cast<jint>(st.blocks.size()));
-  jclass listCls = env->FindClass("java/util/ArrayList");
-  jmethodID listInit = env->GetMethodID(listCls, "<init>", "()V");
-  jmethodID add = env->GetMethodID(listCls, "add", "(Ljava/lang/Object;)Z");
-  jobject sections = env->NewObject(listCls, listInit);
-  for (const auto& sec : st.sections) {
-    jmethodID sput = nullptr;
-    jobject m = NewHashMap(env, &sput);
-    PutInt(env, m, sput, "sectionIndex", sec.sectionIndex);
-    PutString(env, m, sput, "href", sec.href);
-    PutString(env, m, sput, "kind", sec.kind);
-    PutString(env, m, sput, "titleSource", sec.titleSource);
-    if (!sec.title.empty()) PutString(env, m, sput, "title", sec.title);
-    PutInt(env, m, sput, "utf16Start", sec.utf16Start);
-    PutInt(env, m, sput, "utf16End", sec.utf16End);
-    PutInt(env, m, sput, "firstBlock", sec.firstBlock);
-    PutInt(env, m, sput, "blockCount", sec.blockCount);
-    env->CallBooleanMethod(sections, add, m);
-    env->DeleteLocalRef(m);
-  }
-  PutObject(env, out, put, "sections", sections);
-  env->DeleteLocalRef(sections);
-  env->DeleteLocalRef(listCls);
-  jmethodID mput = nullptr;
-  jobject meta = NewHashMap(env, &mput);
-  if (!st.title.empty()) PutString(env, meta, mput, "title", st.title);
-  if (!st.creator.empty()) PutString(env, meta, mput, "creator", st.creator);
-  if (!st.language.empty()) PutString(env, meta, mput, "language", st.language);
-  PutObject(env, out, put, "metadata", meta);
-  env->DeleteLocalRef(meta);
-  return out;
 }
 
 jobject SectionList(JNIEnv* env, const std::vector<sherpa_onnx::document::DocSection>& secs) {
@@ -196,7 +159,7 @@ Java_com_sherpaonnx_document_DocumentNative_nativeExtractTextInto(
   env->DeleteLocalRef(sections);
   env->DeleteLocalRef(imageOnly);
   if (result.structure) {
-    jobject summary = StructureSummary(env, *result.structure);
+    jobject summary = sherpaonnx::NewStructureSummary(env, *result.structure);
     PutObject(env, map, put, "structure", summary);
     env->DeleteLocalRef(summary);
   }

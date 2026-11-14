@@ -1,6 +1,8 @@
 # Host PDF tests (C++ GTest) against real PDFium (pdfium-binaries, same chromium/<N>
 # pin as the app prebuilts), plus the disabled path (-DSHERPA_ONNX_HOST_ENABLE_PDFIUM=OFF).
-# Also runs the lazy image buffer tests (frame pinning, prefetch) that PDF pages use.
+# Covers the text layer in both layouts (lines; paragraphs with headings, furniture,
+# outline, labels) and the structure builder on hand-made geometry. Also runs the lazy
+# image buffer tests (frame pinning, prefetch) that PDF pages use.
 
 name: Test – PDF host (C++)
 
@@ -11,6 +13,7 @@ on:
     paths:
       - 'android/src/main/cpp/pdf/**'
       - 'android/src/main/cpp/image/**'
+      - 'android/src/main/cpp/textbuffer/TxtStructure.h'
       - 'test/cpp/pdf_text_layer_host_test.cpp'
       - 'test/cpp/imagebuffer/**'
       - 'test/cpp/CMakeLists.txt'
@@ -23,6 +26,7 @@ on:
     paths:
       - 'android/src/main/cpp/pdf/**'
       - 'android/src/main/cpp/image/**'
+      - 'android/src/main/cpp/textbuffer/TxtStructure.h'
       - 'test/cpp/pdf_text_layer_host_test.cpp'
       - 'test/cpp/imagebuffer/**'
       - 'test/cpp/CMakeLists.txt'

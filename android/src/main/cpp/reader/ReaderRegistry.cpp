@@ -253,6 +253,7 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
     sec.href = ss.href;
     sec.title = ss.title;
     sec.titleSource = ss.titleSource.empty() ? "none" : ss.titleSource;
+    sec.label = ss.label;
     sec.blockCount = ss.blockCount;
     for (int k = 0; k < ss.blockCount; ++k) {
       const TxtStructBlock& sb = st->blocks[ss.firstBlock + k];

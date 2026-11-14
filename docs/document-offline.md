@@ -145,7 +145,7 @@ type ExtractDocumentTextResult = {
   sections: DocumentSectionInfo[];
   imageOnlySections: DocumentSectionInfo[];
   spatialSpanCount: number;
-  structure?: DocumentStructure; // EPUB only
+  structure?: DocumentStructure; // EPUB, FB2, MOBI / AZW3
 };
 
 type DocumentSectionInfo = {
@@ -157,14 +157,16 @@ type DocumentSectionInfo = {
 
 ```ts
 type DocumentStructure = {
-  version: number; // structure rules version (1)
+  format: 'epub' | 'fb2' | 'mobi' | 'pdf'; // each format versions its rules
+  version: number; // structure rules version of that format
   blockCount: number;
   sections: {
     sectionIndex: number;
     href: string;
-    kind: 'text' | 'image';
+    kind: 'text' | 'image' | 'page'; // 'page': PDF page
     title?: string; // TOC entry, else first heading
     titleSource: 'toc' | 'heading' | 'none';
+    label?: string; // printed PDF page label
     utf16Start: number;
     utf16End: number;
     firstBlock: number;
@@ -174,7 +176,7 @@ type DocumentStructure = {
 };
 ```
 
-For EPUB, the buffer also carries a **reading structure**: sections with TOC titles, and blocks (paragraph, heading, image, separator) with their text ranges. It stays in native memory next to the text; `structure` is its summary. The [reader API](reader.md) builds on it, and its decomposition rules (including whitespace handling) are described there as structure v1. Other formats have no `structure`.
+For EPUB, FB2 and MOBI / AZW3, the buffer also carries a **reading structure**: sections with TOC titles, and blocks (paragraph, heading, image, separator) with their text ranges. It stays in native memory next to the text; `structure` is its summary. The [reader API](reader.md) builds on it, and its decomposition rules (including whitespace handling) are described there, versioned per format. CBZ / CBR have no `structure`. PDFs get one from `extractPdfTextLayer(…, { layout: 'paragraphs' })` ([pdf-offline.md](pdf-offline.md#reading-text-and-structure)).
 
 `sectionCount` / `sections` are linear spine items (`linear="yes"` or missing). `imageOnlySections` is a subset. Whole document without markup → `ERR_DOC_NO_TEXT`. Mixed EPUB is not an error.
 

@@ -309,6 +309,8 @@ set(SOURCES
     pdf/PdfTextLayerExtractor.cpp
     pdf/PdfPageRasterizer.cpp
     pdf/PdfLazySession.cpp
+    pdf/PdfStructureBuilder.cpp
+    pdf/PdfTextPopulate.cpp
     jni/pdf/sherpa-onnx-pdf-jni.cpp
     document/DocumentExtractor.cpp
     document/DocArchive.cpp

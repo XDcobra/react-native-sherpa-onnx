@@ -91,6 +91,7 @@ std::string SnapshotSummaryJson(const ReaderSnapshot& snap) {
     if (!s.href.empty()) Field(&out, "href", s.href, &sf);
     if (!s.title.empty()) Field(&out, "title", s.title, &sf);
     Field(&out, "titleSource", s.titleSource, &sf);
+    if (!s.label.empty()) Field(&out, "label", s.label, &sf);
     Field(&out, "blockCount", s.blockCount, &sf);
     if (s.blockCount > 0) {
       Field(&out, "firstBlockId", snap.blocks[s.firstBlock].id, &sf);

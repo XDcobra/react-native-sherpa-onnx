@@ -10,14 +10,12 @@
 #include "pdf/PdfFeatureGuard.h"
 #include "pdf/PdfLazySession.h"
 #include "pdf/PdfPageRasterizer.h"
+#include "jni/document/doc_structure_summary_jni.h"
 #include "pdf/PdfTextLayerExtractor.h"
+#include "pdf/PdfTextPopulate.h"
 #include "pdf/PdfTypes.h"
 
 namespace {
-
-jstring JString(JNIEnv* env, const std::string& s) {
-  return sherpaonnx::NewJStringUtf8(env, s);
-}
 
 jobject NewHashMap(JNIEnv* env, jmethodID* outPut) {
   jclass mapClass = env->FindClass("java/util/HashMap");
@@ -101,39 +99,24 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeIsPdfiumEnabled(JNIEnv*, jclass) {
 }
 
 /**
- * Extract PDF text layer.
- * Returns a Java Object[]:
- *  [0] Boolean ok
- *  [1] String errorCode (nullable)
- *  [2] String errorMessage (nullable)
- *  [3] String text
- *  [4] Integer pageCount
- *  [5] Integer pagesWithText
- *  [6] Object[] spans — each Object[]:
- *      [0] utf16Start Int, [1] utf16End Int, [2] level String,
- *      [3] pageNumber Int, [4] pageWidth Float, [5] pageHeight Float,
- *      [6] frameIndex Int, [7] float[8] quad
+ * Extract the PDF text layer straight into an empty offline text buffer (text,
+ * line spans and, for layout "paragraphs", the reading structure; same path as
+ * iOS). Returns HashMap: ok, errorCode?, errorMessage?, pageCount,
+ * pagesWithText, utf16Length, spatialSpanCount, structure?.
  */
-JNIEXPORT jobjectArray JNICALL
+JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_pdf_PdfNative_nativeExtractTextLayer(
     JNIEnv* env,
     jclass,
     jstring jpath,
     jint fd,
     jintArray pagesOrNull,
-    jstring passwordOrNull) {
-  jclass objCls = env->FindClass("java/lang/Object");
-  jclass boolCls = env->FindClass("java/lang/Boolean");
-  jclass intCls = env->FindClass("java/lang/Integer");
-  jclass floatCls = env->FindClass("java/lang/Float");
-  jmethodID boolValueOf =
-      env->GetStaticMethodID(boolCls, "valueOf", "(Z)Ljava/lang/Boolean;");
-  jmethodID intValueOf =
-      env->GetStaticMethodID(intCls, "valueOf", "(I)Ljava/lang/Integer;");
-  jmethodID floatValueOf =
-      env->GetStaticMethodID(floatCls, "valueOf", "(F)Ljava/lang/Float;");
-
-  jobjectArray out = env->NewObjectArray(7, objCls, nullptr);
+    jstring passwordOrNull,
+    jstring layoutOrNull,
+    jstring textOutBufferId) {
+  jmethodID put = nullptr;
+  jobject map = NewHashMap(env, &put);
+  if (!map) return nullptr;
 
   sherpa_onnx::pdf::ExtractOptions opts;
   if (pagesOrNull != nullptr) {
@@ -144,65 +127,48 @@ Java_com_sherpaonnx_pdf_PdfNative_nativeExtractTextLayer(
     }
   }
   opts.password = JstringToStd(env, passwordOrNull);
+  if (JstringToStd(env, layoutOrNull) == "paragraphs") {
+    opts.layout = sherpa_onnx::pdf::PdfTextLayout::kParagraphs;
+  }
 
   const auto result = sherpa_onnx::pdf::ExtractPdfTextLayer(
       sherpa_onnx::fileio::MakeSeekableSource(JstringToStd(env, jpath), fd),
       opts);
-
-  env->SetObjectArrayElement(
-      out,
-      0,
-      env->CallStaticObjectMethod(
-          boolCls, boolValueOf, result.ok ? JNI_TRUE : JNI_FALSE));
-  if (!result.error_code.empty()) {
-    env->SetObjectArrayElement(out, 1, JString(env, result.error_code));
+  if (!result.ok) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    if (!result.error_code.empty()) PutString(env, map, put, "errorCode", result.error_code);
+    if (!result.error_message.empty()) {
+      PutString(env, map, put, "errorMessage", result.error_message);
+    }
+    return map;
   }
-  if (!result.error_message.empty()) {
-    env->SetObjectArrayElement(out, 2, JString(env, result.error_message));
+  std::string popErr;
+  if (!sherpa_onnx::pdf::PopulateTextFromPdf(JstringToStd(env, textOutBufferId), result,
+                                             &popErr)) {
+    PutBool(env, map, put, "ok", JNI_FALSE);
+    PutString(env, map, put, "errorCode", sherpa_onnx::pdf::kErrInvalidArgument);
+    PutString(env, map, put, "errorMessage",
+              popErr.empty() ? "Failed to populate text buffer" : popErr);
+    return map;
   }
-  env->SetObjectArrayElement(out, 3, JString(env, result.text));
-  env->SetObjectArrayElement(
-      out,
-      4,
-      env->CallStaticObjectMethod(intCls, intValueOf, result.page_count));
-  env->SetObjectArrayElement(
-      out,
-      5,
-      env->CallStaticObjectMethod(intCls, intValueOf, result.pages_with_text));
-
-  jobjectArray spansArr =
-      env->NewObjectArray(static_cast<jsize>(result.spans.size()), objCls, nullptr);
-  for (size_t i = 0; i < result.spans.size(); ++i) {
-    const auto& s = result.spans[i];
-    jobjectArray one = env->NewObjectArray(8, objCls, nullptr);
-    env->SetObjectArrayElement(
-        one, 0, env->CallStaticObjectMethod(intCls, intValueOf, s.utf16_start));
-    env->SetObjectArrayElement(
-        one, 1, env->CallStaticObjectMethod(intCls, intValueOf, s.utf16_end));
-    env->SetObjectArrayElement(one, 2, JString(env, s.level));
-    env->SetObjectArrayElement(
-        one,
-        3,
-        env->CallStaticObjectMethod(intCls, intValueOf, s.page_number));
-    env->SetObjectArrayElement(
-        one,
-        4,
-        env->CallStaticObjectMethod(floatCls, floatValueOf, s.page_width));
-    env->SetObjectArrayElement(
-        one,
-        5,
-        env->CallStaticObjectMethod(floatCls, floatValueOf, s.page_height));
-    env->SetObjectArrayElement(
-        one,
-        6,
-        env->CallStaticObjectMethod(intCls, intValueOf, s.frame_index));
-    jfloatArray quad = env->NewFloatArray(8);
-    env->SetFloatArrayRegion(quad, 0, 8, s.quad);
-    env->SetObjectArrayElement(one, 7, quad);
-    env->SetObjectArrayElement(spansArr, static_cast<jsize>(i), one);
+  int utf16 = 0;
+  for (size_t i = 0; i < result.text.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(result.text[i]);
+    if ((c & 0xC0u) != 0x80u) utf16 += c >= 0xF0 ? 2 : 1;
   }
-  env->SetObjectArrayElement(out, 6, spansArr);
-  return out;
+  PutBool(env, map, put, "ok", JNI_TRUE);
+  PutInt(env, map, put, "pageCount", result.page_count);
+  PutInt(env, map, put, "pagesWithText", result.pages_with_text);
+  PutInt(env, map, put, "utf16Length", utf16);
+  PutInt(env, map, put, "spatialSpanCount", static_cast<jint>(result.spans.size()));
+  if (result.structure) {
+    jobject summary = sherpaonnx::NewStructureSummary(env, *result.structure);
+    jstring jkey = env->NewStringUTF("structure");
+    env->CallObjectMethod(map, put, jkey, summary);
+    env->DeleteLocalRef(jkey);
+    env->DeleteLocalRef(summary);
+  }
+  return map;
 }
 
 /**

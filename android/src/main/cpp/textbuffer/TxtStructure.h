@@ -58,6 +58,8 @@ struct TxtStructSection {
   std::string kind;  // "text" | "image"
   std::string title;
   std::string titleSource = "none";  // "toc" | "heading" | "none"
+  /** Printed page label of a PDF page ("iv", "12"); empty otherwise. */
+  std::string label;
   int utf16Start = 0;
   int utf16End = 0;
   int firstBlock = 0;  // index into TxtStructure::blocks
