@@ -142,6 +142,8 @@ PdfTextLayerResult ExtractWithPdfium(
     }
 
     const int page_index = page_1based - 1;
+    // Per page, so a long extraction does not block the rasterizer.
+    std::lock_guard<std::recursive_mutex> page_lock(PdfiumMutex());
     FPDF_PAGE page = FPDF_LoadPage(raw, page_index);
     if (!page) {
       ++done;

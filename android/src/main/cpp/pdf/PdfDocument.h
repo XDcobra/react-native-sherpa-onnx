@@ -3,6 +3,7 @@
 #include "PdfTypes.h"
 
 #include <memory>
+#include <mutex>
 #include <string>
 
 #if defined(HAVE_PDFIUM) && HAVE_PDFIUM
@@ -11,6 +12,14 @@
 
 namespace sherpa_onnx {
 namespace pdf {
+
+/**
+ * PDFium is not thread-safe, not even across documents. Every PDFium call in
+ * the SDK runs under this process-wide lock. Take it per page (or per short
+ * document operation) so a long extraction does not starve the rasterizer.
+ * Recursive, so helpers that lock may call each other.
+ */
+std::recursive_mutex& PdfiumMutex();
 
 /**
  * RAII wrapper around FPDF_DOCUMENT.

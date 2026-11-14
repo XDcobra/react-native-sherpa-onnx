@@ -85,6 +85,7 @@ bool RasterizePageUnlocked(
   }
 
   const int page_index = page_1based - 1;
+  std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
   FPDF_PAGE page = FPDF_LoadPage(raw, page_index);
   if (!page) {
     if (err_code) *err_code = kErrRenderFailed;
