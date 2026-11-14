@@ -309,6 +309,16 @@ Home section **Documents (EPUB, MOBI, PDF, …)** → **Read aloud**. Extract EP
 
 Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/hello.mobi`, `test_edocs/hello.azw3`, `test_edocs/drm.mobi`, `test_edocs/mixed.epub`, `test_edocs/manga.cbz`, plus the digital and scan-only PDFs from `test_pdfs/`.
 
+Text EPUBs open in the native `ReaderView`:
+- Tap a paragraph to start reading there. Synthesis runs in chunks of whole paragraphs, and the next chunk is prepared while one plays.
+- The sentence and word being spoken are highlighted, from the TTS timeline (`createReadAloudTimeline`, `useReadAloudHighlights`).
+- Chips switch the granularity (sentence / word / both), the style of each (background / underline / text color) and follow scrolling (`keepVisible` / `center` / `off`).
+- Scrolling by hand pauses following; **Back to reading position** resumes it.
+- An optional demo marks every "the" to show several highlights at once.
+- The Reader samples (`structure.epub`, `long.epub`, `frankenstein.epub`) are listed here too.
+
+See [docs/reader.md](../docs/reader.md#4-read-aloud).
+
 1. Text EPUB / FB2 / DRM-free MOBI / AZW3 → `extractDocumentText` → OfflineTextBuffer (`origin: markup`) → `tts.synthesize` → playback. The current block span is highlighted from playback position.
 2. PDF with a text layer → `extractPdfTextLayer` → same TTS path (`origin: textLayer`).
 3. Scan-only PDF → `ERR_PDF_NO_TEXT_LAYER`. This screen does not rasterize, extract images, or run OCR; use Vision → OCR.

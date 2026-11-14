@@ -275,6 +275,22 @@ await tts.synthesize(textBuf, audioBuf, {
 
 `phonemeCodepoints` and `tokens` are exclusive on the TypeScript type. Runtime does not extra-guard a conflict — upstream then yields empty audio / `TTS_GENERATE_ERROR`.
 
+**Timeline.** With `timeline: true` the result also says where each text segment landed in the audio, for example to highlight the sentence being spoken:
+
+```ts
+const result = await tts.synthesize(textBuf, audioBuf, {
+  segmentation: { mode: 'auto' },
+  timeline: true,
+});
+// result.timeline: { sampleRate, exact, segments: [{ utf16Start, utf16End, startSample, numSamples, skipped }] }
+```
+
+- `utf16Start` / `utf16End` are offsets into `textIn`; `startSample` / `numSamples` into `audioOut`.
+- With `segmentation.mode: 'off'` there is one segment for the whole text.
+- Segments skipped by `errorRecovery: 'skip'` have `skipped: true` (their audio is a short silence).
+- `exact` is `false` when the spoken text differs from the buffer (`overlapChars > 0` or a text-rewriting policy such as `text_punctuation_assisted`); ranges are then approximate.
+- The reader turns a timeline into sentence and word highlights: see [reader.md](reader.md#4-read-aloud).
+
 ### `tts.updateParams(options)`
 
 Update noise/length scales without re-creating the engine. Pass `{}` for a no-op.

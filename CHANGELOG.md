@@ -24,7 +24,11 @@
   - `loadReaderDocument` / `createReaderDocument` turn an EPUB into a reader document with stable block IDs (`s11.b42`), `textHash` v1 and a `documentKey`.
   - `insertSection` / `removeSection` add app sections; `getReaderBlocks` and `remapLocator` read blocks and remap stored positions.
   - `<ReaderView>` is a native, virtualized Fabric list on iOS and Android with React Native inserts in the reading flow. It reports reading events (visible range, furthest position, section end, jump, tap) and has a `scrollTo` command.
+  - `highlights` marks any number of ranges at once (background, underline or text color, overlapping, across blocks); `follow` keeps one in view (`keepVisible`, `center`, `off`) and pauses while the user scrolls (`onFollowChange`, `resumeFollow()`).
+  - `mapTextRanges` / `locatorAtTextOffset` map text-buffer ranges onto reader locators; blocks report their `textRange`.
+  - `createReadAloudTimeline` + `useReadAloudHighlights` highlight the sentence / word being spoken from a TTS timeline (exact sentences, estimated or aligned words, custom word splitter).
   - See `docs/reader.md`.
+* **tts:** `synthesize(…, { timeline: true })` returns where each text segment landed in the output audio (UTF-16 range, start sample, sample count).
 * **document:** `extractDocumentText` attaches a reading structure (sections, blocks, TOC titles, `dc:` metadata) to EPUB text buffers and returns its summary as `structure`. `extractDocumentImages(source, { scope: 'all' })` also decodes the images inside EPUB text sections.
 * **diarization:** Opt-in per-segment silhouette `confidence` (`clustering.computeConfidence`, default **false**, upstream parity). Ported into the shared offline C++ core — not via Kotlin `OfflineSpeakerDiarization`.
 * **pcm:** Standalone PCM player: `createPcmPlayer({ sampleRate, feed, ttsInstanceId? })` — play any mono float PCM, not just TTS output. Import from `react-native-sherpa-onnx/pcm`.

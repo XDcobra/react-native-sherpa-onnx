@@ -14,7 +14,7 @@ Requirements and scope:
 - **EPUB needs lexbor** (`sherpaOnnxEnableLexbor=true` on Android, `SHERPA_ONNX_ENABLE_LEXBOR=1` on iOS), the same as `extractDocumentText`.
 - **v1 scope:**
   - EPUB only, in scroll mode, with simple image blocks.
-  - Not yet supported: paging, zoom, highlight, and PDF / TXT / OCR pages.
+  - Not yet supported: paging, zoom, and PDF / TXT / OCR pages.
 
 The example app has a **Reader** screen (`example/src/screens/reader/`) that demonstrates the whole API.
 
@@ -137,7 +137,9 @@ These rules are frozen as `structureVersion: 1`. Any change to them bumps the ve
 | `computeDocumentKey(source)` | SHA-256 (hex) of the file, computed natively. |
 | `insertSection(doc, { after, id, title?, blocks })` | Returns a **new** `ReaderDocument` value with a higher `revision`; pass it to the view. The old value stays readable until it is released. |
 | `removeSection(doc, sectionId)` | Removes an app section; returns a new value. |
-| `getReaderBlocks(doc, start?, count?, { includeText? })` | Blocks in reading order with `id`, `sectionId`, `type`, `textHash`, … The native side pages in chunks of 4096. |
+| `getReaderBlocks(doc, start?, count?, { includeText? })` | Blocks in reading order with `id`, `sectionId`, `type`, `textHash`, `textRange` (file text blocks: UTF-16 range in the text buffer), … The native side pages in chunks of 4096. |
+| `mapTextRanges(doc, [[start, end], …])` | Maps UTF-16 ranges of the document's text buffer onto `{ from, to }` reader ranges in one native call (`null` for a range that covers no file text block). Starts in the gap between two blocks move to the next block, ends move back. |
+| `locatorAtTextOffset(doc, offset)` | Locator of one text-buffer offset. |
 | `remapLocator(doc, { textHash, offset? }, hint?)` | The block with the same `textHash` nearest to `hint`, or `null`. Use it when `structureVersion` changed since a position was stored. |
 | `releaseReaderDocument(doc)` | Frees the native document and, when created by `loadReaderDocument`, its image buffer. |
 | `formatBlockId`, `parseBlockId`, `compareLocators` | Helpers. `compareLocators` returns `null` when the order is not defined, for example between an app section and a file section. |
@@ -225,6 +227,8 @@ The view is a native list: `UITableView` with TextKit 1 text cells on iOS, `Recy
 | `inserts` | `ReaderInsert[]` | `{ key, at: { sectionEnd } \| { beforeBlock } \| { afterBlock } }` |
 | `renderInsert` | `(key) => ReactNode` | A React Native view in the reading flow: full width, its own height (Yoga). Presses, height changes and accessibility work as usual. |
 | `jumpThreshold` | `number` | In blocks; default 20. |
+| `highlights` | `ReaderHighlight[]` | Marked ranges; see [Highlights](#highlights). |
+| `follow` | `ReaderFollowOptions` | Follow scrolling for the highlight with `follow: true`; see [Follow scrolling](#follow-scrolling). |
 
 `ReaderTheme` fields:
 
@@ -239,7 +243,7 @@ The view is a native list: `UITableView` with TextKit 1 text cells on iOS, `Recy
 | `margins` | `{ horizontal, vertical }`; default 20 / 24. |
 | `textAlign` | `'start'` or `'justify'`. |
 | `hyphenation` | Default `true`. Uses the book's `language`. |
-| `colors` | `{ background, text, accent }`; `accent` is reserved for highlights. |
+| `colors` | `{ background, text, accent }`; `accent` is the default highlight color. |
 
 When the theme changes, the first visible block stays in place. The same holds for a width change (rotation) and for a new `revision`.
 
@@ -253,7 +257,8 @@ When the theme changes, the first visible block stays in place. The same holds f
 | `onSectionEnd` | `{ sectionId, blockId }` | The last block of a section came into view while reading continuously. Fires once per transition into view; scrolling away and back fires it again. |
 | `onJump` | `{ from, to, distance, cause }` | The position moved more than `jumpThreshold` blocks. The app decides whether the jump counts as reading. |
 | `onTap` | `{ blockId }` | Tap on text, not on inserts; for example to toggle toolbars. |
-| `onError` | `{ code, message }` | For example `ERR_READER_NOT_FOUND` for a released document. |
+| `onError` | `{ code, message }` | For example `ERR_READER_NOT_FOUND` for a released document, or `ERR_READER_INVALID_ARGUMENT` for a highlight with unknown block IDs. |
+| `onFollowChange` | `{ following, reason }` | Follow scrolling paused (`reason: 'user'`) or resumed (`'resumed'`, `'command'`). |
 
 Event rules (shared C++ `ReaderTracker`, identical on both platforms):
 
@@ -263,11 +268,82 @@ Event rules (shared C++ `ReaderTracker`, identical on both platforms):
   - `'scroll'`: the visible range moved more than N blocks without continuous visibility, for example by dragging the scroll indicator.
   - `'fling'`: a fling landed more than N blocks away.
   - `'scrollTo'`: the jump came from the command; this cause is always reported.
+  - `'follow'`: follow scrolling moved more than N blocks (for example read-aloud restarted elsewhere). Smaller follow moves count as continuous reading: no jump, and the furthest position and section ends advance.
 
 ### Commands (ref)
 
 - `scrollTo(locator, { animated? })`: puts the block, and the line holding `offset`, at the top of the reading area. If `blockId` is unknown, `sectionId` is used. Restoring a stored `{ blockId, offset }` from a settled `onVisibleRangeChange` lands on the same line.
-- `highlight(range)`: reserved for read-aloud; it does nothing in v1 and warns in development.
+- `resumeFollow()`: resumes follow scrolling after the user paused it and places the followed highlight at the anchor.
+
+### Highlights
+
+`highlights` marks any number of ranges at the same time, for example the sentence and word being read aloud, search hits and notes.
+
+```ts
+type ReaderHighlight = {
+  id: string;            // stable; pass the same id with a new range to move it
+  from: ReaderLocator;   // inclusive; without offset: start of the block
+  to: ReaderLocator;     // exclusive; without offset: end of the block
+  style?: 'background' | 'underline' | 'textColor'; // default 'background'
+  color?: ColorValue;    // default: theme accent (background at 30 % opacity)
+  follow?: boolean;      // keep this one in view (the first with follow wins)
+};
+```
+
+- A range may span several blocks; blocks in between are marked whole. Image and separator blocks are skipped.
+- Highlights may overlap. They are drawn in array order, so later entries draw on top of earlier ones (a later `textColor` wins over an earlier one).
+- Offsets are clamped to the block and never split a surrogate pair. A highlight with an unknown block ID is ignored and reported through `onError`.
+- Updating highlights only redraws the affected rows; the text layout does not change, so the reading position stays.
+
+### Follow scrolling
+
+The highlight with `follow: true` is kept in view while it moves.
+
+| `follow` option | Default | Meaning |
+|---|---|---|
+| `mode` | `'keepVisible'` | `'keepVisible'`: scroll only when the highlight leaves the comfort zone (10 %–85 % of the height), then place its first line at `anchor`. `'center'`: keep it centered on every change. `'off'`: never scroll. |
+| `anchor` | `0.3` | 0..1: where `keepVisible` places the highlight. |
+| `pauseOnUserScroll` | `true` | A drag by the user pauses following (`onFollowChange({ following: false, reason: 'user' })`). It resumes when the highlight is back in the comfort zone, or with `resumeFollow()`. |
+
+Follow scrolling reads like continuous reading (see the jump cause `'follow'` above).
+
+## 4. Read aloud
+
+The SDK maps synthesized speech onto the reader, so an app can highlight the sentence or the word being spoken.
+
+1. Synthesize with a timeline: `tts.synthesize(textIn, audioOut, { segmentation: { mode: 'auto' }, timeline: true })`. The result's `timeline` lists each text segment (a sentence, or a part of a long sentence) with its UTF-16 range in `textIn` and its sample range in `audioOut` (see [tts-offline.md](tts-offline.md#ttssynthesizetextin-audioout-options)).
+2. `createReadAloudTimeline(doc, { text: textIn, tts: result.timeline, textOffset })` turns it into reader units:
+   - **Sentences** are the TTS segments. Their times are exact (from the sample counts).
+   - **Words** are estimated by default: each sentence's duration is spread over its words by length, with a pause after punctuation. With `words: { timing: { aligned } }` the times come from word alignment (for example `alignTextToAudio` with `granularity: 'word'`, mode `accurate`); words without a match keep their estimate.
+   - The default word splitter needs spaces between words. For languages without spaces (Chinese, Japanese, Thai) pass `words: { split }`; otherwise each sentence is one unit.
+   - `textOffset` is where `textIn` starts in the document's text buffer, when you synthesized a slice (for example from the paragraph the user tapped). Read the slice range from `getReaderBlocks(…).textRange`.
+3. Play the audio with a `PcmPlayer` and pass its position to `useReadAloudHighlights(timeline, positionMs, options)`. It returns the highlights for the unit being spoken; the array only changes when the sentence or word changes.
+
+```tsx
+const result = await tts.synthesize(textIn, audioOut, {
+  segmentation: { mode: 'auto' },
+  timeline: true,
+});
+const timeline = await createReadAloudTimeline(doc, {
+  text: textIn,
+  tts: result.timeline!,
+  textOffset: sliceStart,
+});
+const player = await createPcmPlayer(audioOut.bufferId, {
+  onPosition: (e) => setPositionMs(e.positionMs),
+});
+
+const highlights = useReadAloudHighlights(timeline, positionMs, {
+  show: 'both', // 'sentence' | 'word' | 'both'
+  sentenceStyle: { style: 'background' },
+  wordStyle: { style: 'underline' },
+  // follow: 'word' when words are shown, else 'sentence'
+});
+
+<ReaderView document={doc} highlights={[...searchHits, ...highlights]} />;
+```
+
+`timeline.at(ms)` returns the sentence and word at a playback position for your own logic. For long books, synthesize in chunks (for example whole paragraphs up to a section end) and prepare the next chunk while one plays. The example app's Read aloud screen does this (`example/src/screens/documents/ReaderReadAloudPanel.tsx`).
 
 ### Accessibility
 
@@ -278,6 +354,6 @@ Event rules (shared C++ `ReaderTracker`, identical on both platforms):
 
 ### Limits (v1)
 
-- EPUB only; scroll mode only; no zoom, no text selection, no highlight.
+- EPUB only; scroll mode only; no zoom, no text selection.
 - An image is scaled to the text width and is at most 90 % of the viewport high.
 - The text in a block has a single style; inline formatting such as italics is not kept yet.
