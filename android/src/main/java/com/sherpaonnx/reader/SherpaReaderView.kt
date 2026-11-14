@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.facebook.react.bridge.Arguments
@@ -68,7 +69,7 @@ class SherpaReaderView(context: Context) : FrameLayout(context) {
     recycler.addOnChildAttachStateChangeListener(
       object : RecyclerView.OnChildAttachStateChangeListener {
         override fun onChildViewAttachedToWindow(view: View) {
-          if (view is InsertContainer) post { syncInsertOrigins() }
+          if (view is InsertContainer) post(syncOrigins)
         }
 
         override fun onChildViewDetachedFromWindow(view: View) = Unit
@@ -152,13 +153,15 @@ class SherpaReaderView(context: Context) : FrameLayout(context) {
 
   override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
     super.onLayout(changed, left, top, right, bottom)
-    post { syncInsertOrigins() }
+    post(syncOrigins)
   }
+
+  private val syncOrigins = Runnable { if (isAttachedToWindow) syncInsertOrigins() }
 
   internal fun onInsertResized(host: SherpaReaderInsertView) {
     val pos = rows.indexOfFirst { it is Row.Insert && it.key == host.insertKey }
     if (pos >= 0) {
-      post { if (pos < rows.size) adapter.notifyItemChanged(pos) }
+      post { if (isAttachedToWindow && pos < rows.size) adapter.notifyItemChanged(pos) }
     }
   }
 
@@ -174,6 +177,8 @@ class SherpaReaderView(context: Context) : FrameLayout(context) {
       rebuildPosted = false
       rebuildRows()
     }
+    // rebuildRows runs even while detached (state is kept); the RecyclerView
+    // only lays out again once attached.
   }
 
   private fun appendInserts(kind: String, target: String, out: MutableList<Row>) {
@@ -194,9 +199,23 @@ class SherpaReaderView(context: Context) : FrameLayout(context) {
       val lastInSection = (i + 1) % BLOCKS_PER_SECTION == 0 || i + 1 == debugRowCount
       if (lastInSection) appendInserts("sectionEnd", debugSectionId(i), next)
     }
+    val old = rows
     rows = next
-    // Stable IDs let LinearLayoutManager keep the first visible row in place.
-    adapter.notifyDataSetChanged()
+    // Targeted updates (not notifyDataSetChanged): holders stay valid, the first
+    // visible row stays in place, and an unmount in the middle of a screen
+    // transition does not invalidate every holder before a forced layout.
+    DiffUtil.calculateDiff(
+      object : DiffUtil.Callback() {
+        override fun getOldListSize() = old.size
+
+        override fun getNewListSize() = next.size
+
+        override fun areItemsTheSame(o: Int, n: Int) = old[o] == next[n]
+
+        override fun areContentsTheSame(o: Int, n: Int) = old[o] == next[n]
+      },
+      false,
+    ).dispatchUpdatesTo(adapter)
     if (!readySent && debugRowCount > 0) {
       readySent = true
       ReaderEvents.dispatch(this, ReaderEvents.READY) {
@@ -262,10 +281,24 @@ class SherpaReaderView(context: Context) : FrameLayout(context) {
   // Fabric lays out this view; make sure the RecyclerView follows.
   override fun requestLayout() {
     super.requestLayout()
+    if (isAttachedToWindow) post(measureAndLayout)
+  }
+
+  override fun onAttachedToWindow() {
+    super.onAttachedToWindow()
     post(measureAndLayout)
   }
 
+  override fun onDetachedFromWindow() {
+    // A detached view (screen popped, activity recreated) must not lay out its
+    // RecyclerView from a pending callback.
+    removeCallbacks(measureAndLayout)
+    removeCallbacks(syncOrigins)
+    super.onDetachedFromWindow()
+  }
+
   private val measureAndLayout = Runnable {
+    if (!isAttachedToWindow || width == 0 || height == 0) return@Runnable
     measure(
       MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
       MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY),
@@ -279,6 +312,12 @@ class SherpaReaderView(context: Context) : FrameLayout(context) {
    */
   private class ReaderRecyclerView(context: Context) : RecyclerView(context) {
     private var nativeGesture = false
+
+    // react-native-screens calls startViewTransition on every descendant while a
+    // screen is popped. A RecyclerView must be able to remove its own rows
+    // (otherwise they stay "disappearing", keep their parent, and recycling
+    // throws), so rows never take part in such a transition.
+    override fun startViewTransition(view: View) = Unit
 
     override fun onInterceptTouchEvent(e: MotionEvent): Boolean {
       val intercept = super.onInterceptTouchEvent(e)
@@ -306,6 +345,9 @@ class SherpaReaderView(context: Context) : FrameLayout(context) {
   /** Row container that lays out its insert host with the size Yoga computed. */
   private class InsertContainer(context: Context) : FrameLayout(context) {
     var host: SherpaReaderInsertView? = null
+
+    // See ReaderRecyclerView: the host must really leave when it is moved.
+    override fun startViewTransition(view: View) = Unit
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
       val h = host

@@ -43,5 +43,25 @@ rows (`__debugRowCount`) and three inserts (`afterBlock`, `sectionEnd`, `beforeB
 | 7 | Fast refresh, leaving the screen with inserts mounted | ✅ no crash, no JS exception |
 | 8 | Rotation | ✅ inserts full width, tappable |
 
-Android: builds (`assembleDebug`), autolinking registers both descriptors; device
-test pending (see status in the implementation plan).
+## Results (Android, Nothing A142P, driven via adb + uiautomator)
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Add / remove / move inserts while scrolled | ✅ |
+| 2 | Insert grows above the viewport | ✅ pixel-identical viewport |
+| 3 | Tap with 8–14 px movement, insert far down (y≈1950 px) and in landscape | ✅ |
+| 4 | Drag that starts on an insert | ✅ list scrolls, no press |
+| 6 | Cell reuse | ✅ |
+| 7 | Leaving the screen while flinging, 4× | ✅ after the fixes below |
+| 8 | Rotation | ✅ |
+
+Android findings:
+
+- react-native-screens calls `startViewTransition` on every descendant while a
+  screen is popped. RecyclerView rows then stay "disappearing" (keep their
+  parent) when the list removes them, and recycling throws
+  `Scrapped or attached views may not be recycled`. `ReaderRecyclerView` and the
+  insert row container ignore `startViewTransition`.
+- Row changes use `DiffUtil` instead of `notifyDataSetChanged` (holders stay
+  valid, first visible row stays put).
+- Posted layout / sync callbacks only run while attached.
