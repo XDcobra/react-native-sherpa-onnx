@@ -10,6 +10,7 @@ export const TEST_EDOC_FILES = {
   MANGA_CBZ: 'test_edocs/manga.cbz',
   STRUCTURE_EPUB: 'test_edocs/structure.epub',
   LONG_EPUB: 'test_edocs/long.epub',
+  FRANKENSTEIN_EPUB: 'test_edocs/frankenstein.epub',
 } as const;
 
 export type DocumentExtractKind = 'document' | 'pdf';
@@ -137,6 +138,15 @@ export const READER_FILES: DocumentFileInfo[] = [
     id: TEST_EDOC_FILES.LONG_EPUB,
     name: 'Long book — EPUB',
     description: '40 chapters, 6160 blocks: virtualization, flings and jumps',
+    extract: 'document',
+    expect: 'text',
+    section: 'Reader samples',
+  },
+  {
+    id: TEST_EDOC_FILES.FRANKENSTEIN_EPUB,
+    name: 'Frankenstein — EPUB',
+    description:
+      'Real book (Standard Ebooks, CC0): nav TOC, SVG title page, front and back matter',
     extract: 'document',
     expect: 'text',
     section: 'Reader samples',

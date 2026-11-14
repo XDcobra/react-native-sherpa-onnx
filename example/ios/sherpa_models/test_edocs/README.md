@@ -13,6 +13,11 @@ Self-authored fixtures for the Documents / Read aloud and Reader example screens
 | `manga.cbz` | Cover + 2 manga pages, no markup → `ERR_DOC_NO_TEXT` |
 | `structure.epub` | Reader: nav + NCX titles, h1–h3, inline image, `<hr>`, `<pre>`, image-only spine item; 15 reader blocks in 4 sections |
 | `long.epub` | Reader: 40 chapters × ~154 blocks (6160) with images, for virtualization, flings and jumps |
+| `frankenstein.epub` | Reader: a real book (Standard Ebooks); nav TOC, SVG title page, front and back matter |
+
+## `frankenstein.epub` source
+
+Mary Shelley, *Frankenstein, or the Modern Prometheus*, from [Standard Ebooks](https://standardebooks.org/ebooks/mary-shelley/frankenstein) (downloaded 2026-11-14, release modified 2026-09-07). The text is public domain; Standard Ebooks dedicates its markup and artwork to the public domain under [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) (see the book's Uncopyright page).
 
 ## `manga.cbz` source
 
