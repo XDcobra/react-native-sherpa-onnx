@@ -20,12 +20,12 @@ Ein Ship, keine Produkt-v1/v2. Phasen unten = interne Bau-Reihenfolge. **Erster 
 | D2 | Fließtext → **TextBuffer** (`origin: 'markup'`). Keine Layout-Engine, WebView, Print, SDK-Seitenraster. |
 | D3 | **Zwei Public-Funktionen**, ein Buffer-Typ pro Call: `extractDocumentText` → TextBuffer; `extractDocumentImages` → ImageBuffer. |
 | D4 | `extractDocumentText` führt **nie** OCR aus. Gemischte Bücher: Metadaten `imageOnlySections`; der User orchestriert `extractDocumentImages` + `recognize`. |
-| D5 | `extractDocumentImages` hat **eine** Bedeutung: CBZ/CBR = alle Seiten; EPUB/FB2/MOBI = nur Abschnitte **ohne** extractierbaren Text. Kein Cover, keine Kapitel-`<img>`, kein `sections: 'all' \| 'imageOnly' \| ids`. |
+| D5 | `extractDocumentImages` hat **eine** Bedeutung: CBZ/CBR = alle Seiten; EPUB/FB2/MOBI = nur Abschnitte **ohne** extractierbaren Text. Kein Cover, keine Kapitel-`<img>`, kein `sections: 'all' \| 'imageOnly' \| ids`. **Erweitert:** Opt-in `scope: 'all'` (EPUB) liefert zusätzlich Inline-Bilder für Reader-Bildblöcke; der Default bleibt wie beschrieben. |
 | D6 | Keine Pixel-Quads auf Markup-Spans. `sectionIndex` + optional `href`. Kein `blockKind`. |
 | D7 | Kein neues Prebuilt, kein Copyleft (kein MuPDF/AGPL, Poppler/GPL, Okular, libmobi/LGPL). libarchive Default an; Disable → `ERR_DOC_ARCHIVE_DISABLED`. |
 | D8 | Kein Extra-Enable-Flag analog PDFium. Kein `isLibarchiveEnabled()`. |
 | D9 | DRM, KFX, AZW4, Topaz, DjVu, CHM, Office, TXT, lose HTML, PDF: **nicht** dieses Modul. PDF bleibt [`pdf/`](../pdf-offline.md). TXT → `createOfflineTextBufferFromText`. CBR **doch**: gleicher Pixel-Pfad wie CBZ, Decoder steckt schon in libarchive (kein neues `.so`). |
-| D10 | Kein Reader, kein Reflow-Preview-Widget. Die App zeigt den TextBuffer-String; FrameView nur nach `extractDocumentImages`. Example-App ist **nicht** Teil dieses Ships. |
+| D10 | Kein Reader, kein Reflow-Preview-Widget. Die App zeigt den TextBuffer-String; FrameView nur nach `extractDocumentImages`. Example-App ist **nicht** Teil dieses Ships. **Ersetzt** durch die Reader-API ([reader.md](../reader.md)): `ReaderView` (Fabric) zeigt EPUB-Struktur mit stabilen Block-IDs; `extractDocumentText` selbst bleibt reiner Extraktor. |
 | D11 | Kein öffentliches `detectDocumentFormat`. Sniff intern in den beiden Extract-Calls. `format` steht auf dem Result. |
 | D12 | Kein `interleaveDocumentText`, kein Document-Pipeline-Orchestrator. Lesereihenfolge mixed = App, zehn Zeilen. |
 | D13 | `textOut` **Pflicht**, wie PDF: leerer Offline-TextBuffer. Kein intern anlegen. `result.buffer` ist derselbe Handle. |

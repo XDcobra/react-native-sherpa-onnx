@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse / paddleocr_vl), video preview, Video → OCR, e-document read-aloud (EPUB / FB2 / CBZ / PDF), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse / paddleocr_vl), video preview, Video → OCR, e-document read-aloud (EPUB / FB2 / CBZ / PDF), a native EPUB reader with React Native inserts, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -41,7 +41,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Codec samples**          | `android/app/src/main/assets/test_codec/`        | `ios/sherpa_models/test_codec/`        |
 | **Test images (OCR / File I/O)** | `android/app/src/main/assets/test_images/`  | `ios/sherpa_models/test_images/`       |
 | **Test PDFs (text layer)** | `android/app/src/main/assets/test_pdfs/`         | `ios/sherpa_models/test_pdfs/`         |
-| **Test e-docs (Read aloud)** | `android/app/src/main/assets/test_edocs/`      | `ios/sherpa_models/test_edocs/`        |
+| **Test e-docs (Read aloud, Reader)** | `android/app/src/main/assets/test_edocs/` | `ios/sherpa_models/test_edocs/`        |
 | **Test videos (Preview / OCR / File I/O)** | `android/app/src/main/assets/test_videos/`   | `ios/sherpa_models/test_videos/`       |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
@@ -319,3 +319,22 @@ Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/h
 OCR detect/init on this screen is the same panel and engine cache as Vision → OCR. Recognize is a separate button, not automatic.
 
 See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offline.md](../docs/pdf-offline.md). Android bundled assets use `app:apkAsset` (the SDK copies them into app cache on first open).
+
+## Reader
+
+Home section **Documents (EPUB, MOBI, PDF, …)** → **Reader**. Opens an EPUB with `loadReaderDocument` and shows it in the native `ReaderView` (New Architecture). The screen inserts an app section (`app:demo`) after the second section and places two React Native insert cards in the reading flow: one at the end of the first section, one before a block of the third.
+
+Toolbar:
+- **Sections:** jump to any section (`scrollTo`).
+- **Aa:** theme, text size, line height and jump threshold.
+- **Save / Restore:** store the reading position and remount the reader at it (`initialLocator`).
+
+The log panel shows every reader event; in development each event is also logged as a `READER_SMOKE {…}` line.
+
+Bundled fixtures (Reader samples):
+- `test_edocs/structure.epub`: headings, an inline image, a separator, `pre` text and nav TOC titles.
+- `test_edocs/long.epub`: 40 chapters, 6160 blocks.
+- `test_edocs/frankenstein.epub`: Standard Ebooks, public domain / CC0.
+- Plus the Read aloud EPUBs.
+
+See [docs/reader.md](../docs/reader.md).

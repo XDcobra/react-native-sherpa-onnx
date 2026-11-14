@@ -2,6 +2,33 @@
 
 # SDK: Reader-API (`react-native-sherpa-onnx/reader`)
 
+## Stand (2026-11-14)
+
+Phasen 0–8 umgesetzt auf `feat/reader-api` (nicht gepusht).
+
+**Abweichungen vom Plan**
+- `debugRowCount` bleibt als internes Prop (`__debugRowCount`) für Tests, über ein gemeinsames `MakePlaceholderSnapshot`.
+- Keine Struktur-Getter am Text-Buffer; Blöcke liest man über `getReaderBlocks`.
+- Die Android-Bilder nutzen `OfflineImageBufferFrameView` direkt.
+- Bei Reflows (Theme, Breite) hält Android das Zeichen an der Lese-Oberkante. iOS behält die erste sichtbare Zeile samt Versatz.
+- Die Frankenstein-Probe dient als S9.
+
+**Smoke-Ergebnisse**
+
+| # | iOS (Simulator, iOS 27, DeviceHub) | Android (A142P, adb) |
+|---|---|---|
+| S1 | `structure.epub`: 15 Blöcke, 4 Abschnitte, `documentKey` = SHA-256 | gleich |
+| S2 | `furthest` steigt, `sectionEnd s0`/`s1`, Einschub sichtbar | gleich |
+| S3 | `jump scrollTo` (s0 → s31, 4776 Blöcke) | gleich |
+| S4 | `jump fling`, Frontier unverändert | gleich (Distanz 77) |
+| S5 | Tippen im Einschub nach Scrollen und mit Wackeln; Ziehen scrollt ohne Tippen | gleich |
+| S6 | erster Block ±1 nach Schriftgröße; unverändert nach Theme/Zeilenhöhe | gleich; Drehen behält den Block |
+| S7 | Merken/Wiederherstellen landet auf Block + Offset | gleich (s31.b80, Offset 51) |
+| S8 | Header-Traits, `alt`-Labels, Einschübe zugänglich | `alt` als contentDescription im a11y-Baum geprüft; Überschriften setzen `setAccessibilityHeading` (der uiautomator-Dump zeigt das Flag nicht, also nicht am Gerät geprüft) |
+| S9 | Frankenstein: 850 Blöcke, 39 Abschnitte, bis zum Ende ohne Absturz, Bilder da | gleich |
+
+Hinweis zum Testen auf Android: Ein CDP-Log-Client, der sich ständig neu verbindet, löst laufend das „Refreshing…“-Banner aus. Dann scheitert `uiautomator dump` mit „could not get idle state“. Die JS-Logs liest man auf Android besser über `adb logcat` (Tag `ReactNativeJS`).
+
 ## Context
 Reader-Apps brauchen mehr als einen Text-Buffer: Sie zeigen ein Buch in einer eigenen Ansicht, merken sich Lesestände absatzgenau und blenden eigene Inhalte in den Lesefluss ein.
 

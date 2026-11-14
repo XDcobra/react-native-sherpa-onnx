@@ -91,7 +91,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 
 - ✅ Offline OCR: [Offline](./docs/ocr-offline.md)
 - ✅ PDF: [Offline](./docs/pdf-offline.md)
-- ✅ E-documents: [Offline](./docs/document-offline.md)
+- ✅ E-documents: [Offline](./docs/document-offline.md) · [Reader](./docs/reader.md) (EPUB, native ReaderView, New Architecture)
 
 ### Pipeline & orchestration
 

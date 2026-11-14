@@ -122,7 +122,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 | Guide | Description |
 |-------|-------------|
-| [reader.md](./reader.md) | Reader API (in development): EPUB structure → `ReaderDocument` with stable block IDs → native Fabric `ReaderView` with inserts and reading events |
+| [reader.md](./reader.md) | Reader API: EPUB structure → `ReaderDocument` with stable block IDs → native Fabric `ReaderView` with inserts and reading events |
 
 ---
 

@@ -5,7 +5,7 @@ Two APIs, one buffer type per call:
 1. **`extractDocumentText`** — markup → `OfflineTextBuffer` (`origin: 'markup'`). **Never OCR.**
 2. **`extractDocumentImages`** — image-only sections / CBZ / CBR → `OfflineImageBuffer`.
 
-Source adapter like [`pdf/`](pdf-offline.md): not a reader and not OCR. Recognize stays `createOCR().recognize` on the ImageBuffer. The usual sink is TTS on whatever text the **app** concatenated; any feature that takes an `OfflineTextBuffer` can sit there instead.
+Source adapter like [`pdf/`](pdf-offline.md), not OCR. To display a book, build a reader document from these buffers with the [reader API](reader.md) (`loadReaderDocument`). Recognize stays `createOCR().recognize` on the ImageBuffer. The usual sink is TTS on whatever text the **app** concatenated; any feature that takes an `OfflineTextBuffer` can sit there instead.
 
 libarchive is **default-on**. Disable at build time → `ERR_DOC_ARCHIVE_DISABLED` (no `isLibarchiveEnabled()`). Log tag `[SherpaOnnx:doc]`.
 
@@ -145,6 +145,7 @@ type ExtractDocumentTextResult = {
   sections: DocumentSectionInfo[];
   imageOnlySections: DocumentSectionInfo[];
   spatialSpanCount: number;
+  structure?: DocumentStructure; // EPUB only
 };
 
 type DocumentSectionInfo = {
@@ -153,6 +154,27 @@ type DocumentSectionInfo = {
   kind: 'text' | 'image';
 };
 ```
+
+```ts
+type DocumentStructure = {
+  version: number; // structure rules version (1)
+  blockCount: number;
+  sections: {
+    sectionIndex: number;
+    href: string;
+    kind: 'text' | 'image';
+    title?: string; // TOC entry, else first heading
+    titleSource: 'toc' | 'heading' | 'none';
+    utf16Start: number;
+    utf16End: number;
+    firstBlock: number;
+    blockCount: number;
+  }[];
+  metadata: { title?: string; creator?: string; language?: string };
+};
+```
+
+For EPUB, the buffer also carries a **reading structure**: sections with TOC titles, and blocks (paragraph, heading, image, separator) with their text ranges. It stays in native memory next to the text; `structure` is its summary. The [reader API](reader.md) builds on it, and its decomposition rules (including whitespace handling) are described there as structure v1. Other formats have no `structure`.
 
 `sectionCount` / `sections` are linear spine items (`linear="yes"` or missing). `imageOnlySections` is a subset. Whole document without markup → `ERR_DOC_NO_TEXT`. Mixed EPUB is not an error.
 
@@ -178,12 +200,14 @@ type ExtractDocumentImagesResult = {
 | Option | Default | Notes |
 |--------|---------|--------|
 | `maxSide` | `4096` | longest-edge cap after decode; `<= 0` disables |
+| `scope` | `'imageSections'` | `'all'` (EPUB): also the images inside text sections, one frame per unique image path, in reading order (frame `href` = archive path). Used by the reader for image blocks. |
 | `signal` / `onProgress` | — | cancel / progress |
 
 | Input | Frames |
 |-------|--------|
 | CBZ / CBR | Image files, natural sort; skip `ComicInfo.xml` / thumbs / `.` files; skip undecodable codecs |
 | EPUB / FB2 / MOBI image-only sections | Those sections only, order = `sectionIndex` |
+| EPUB with `scope: 'all'` | Every image referenced in reading order (image-only sections and inline `img` / SVG `image`), each path once |
 | Pure text document | `ERR_DOC_NO_IMAGES` |
 
 Text extract first is optional. After a successful text extract with empty `imageOnlySections`, images still return `ERR_DOC_NO_IMAGES`. Zero decodable frames after skips → `ERR_DOC_NO_IMAGES`.
@@ -241,6 +265,7 @@ Blocks joined with `\n\n`; `<br>` → `\n`; ruby keeps `rb`, drops `rt`/`rp`; `s
 
 ## See also
 
+- [Reader API](reader.md)
 - [Offline PDF](pdf-offline.md)
 - [Offline OCR](ocr-offline.md)
 - [ImageBuffer](imagebuffer-offline.md)
