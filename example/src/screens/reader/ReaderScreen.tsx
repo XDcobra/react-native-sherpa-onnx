@@ -2,22 +2,30 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   Text,
+  TextInput,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import {
+  getReaderBlocks,
   insertSection,
   loadReaderDocument,
   ReaderView,
   releaseReaderDocument,
+  removeSection,
+  type ReaderBlock,
   type ReaderDocument,
+  type ReaderHighlight,
   type ReaderInsert,
   type ReaderLocator,
+  type ReaderSectionInfo,
   type ReaderTheme,
   type ReaderViewHandle,
 } from 'react-native-sherpa-onnx/reader';
@@ -33,74 +41,186 @@ import {
 } from '../../utils/fileSourceFromUri';
 import { styles } from './ReaderScreen.styles';
 
-const LOG_LIMIT = 50;
-
-type ThemeName = 'paper' | 'sepia' | 'contrast';
-type ScaleName = 'system' | '0.9×' | '1.2×' | '1.5×';
+type ThemeName = 'paper' | 'sepia' | 'night';
+type FontName = 'serif' | 'sans';
+type SizeName = 'system' | '0.9×' | '1.2×' | '1.5×';
 type LineName = '1.3' | '1.5' | '1.8';
-type JumpName = '5' | '20' | '50';
+type AlignName = 'start' | 'justify';
+type MarginName = 'narrow' | 'normal' | 'wide';
+type Panel = 'none' | 'appearance' | 'search';
 
-const THEMES: Record<ThemeName, NonNullable<ReaderTheme['colors']>> = {
+const THEMES: Record<
+  ThemeName,
+  { background: string; text: string; accent: string }
+> = {
   paper: { background: '#FBF8F1', text: '#2A2724', accent: '#3F3AB8' },
   sepia: { background: '#F4ECD8', text: '#5B4636', accent: '#8A5A2B' },
-  contrast: { background: '#000000', text: '#FFFFFF', accent: '#FFD60A' },
+  night: { background: '#15171A', text: '#E4E0D8', accent: '#8AB4F8' },
 };
-const SCALES: Record<ScaleName, ReaderTheme['fontScale']> = {
+const FONTS: Record<FontName, string | undefined> = {
+  serif: undefined, // system serif
+  sans: Platform.select({ ios: 'Avenir Next', default: 'sans-serif' }),
+};
+const SIZES: Record<SizeName, ReaderTheme['fontScale']> = {
   'system': 'system',
   '0.9×': 0.9,
   '1.2×': 1.2,
   '1.5×': 1.5,
 };
+const MARGINS: Record<MarginName, number> = {
+  narrow: 12,
+  normal: 20,
+  wide: 36,
+};
 
-function smoke(ev: string, data: Record<string, unknown> = {}) {
-  if (__DEV__) {
-    console.log('READER_SMOKE ' + JSON.stringify({ ev, ...data }));
+/** Colors of the app's own highlights (the read-aloud screen uses the theme accent). */
+const MARK_COLOR = '#FACC1566';
+const HIT_COLOR = '#EA580C';
+const HIT_ACTIVE_COLOR = '#FB923C55';
+const MAX_HITS = 500;
+/** Sections with at least this many blocks count as chapters (end cards). */
+const MIN_CHAPTER_BLOCKS = 8;
+
+/** App section the screen inserts after the first chapter. */
+const GUIDE_ID = 'app:about';
+const GUIDE_TITLE = 'About this example';
+
+/** Last position per book (documentKey), for "resume where you left off". */
+const savedPositions = new Map<
+  string,
+  { at: ReaderLocator; furthest: ReaderLocator | null }
+>();
+
+type Note = {
+  key: string;
+  blockId: string;
+  sectionId: string;
+  quote: string;
+  time: string;
+};
+
+type Hit = { from: ReaderLocator; to: ReaderLocator };
+
+/** Block index in reading order for each section's first block. */
+function sectionStarts(doc: ReaderDocument): Map<string, number> {
+  const out = new Map<string, number>();
+  let index = 0;
+  for (const s of doc.sections) {
+    out.set(s.id, index);
+    index += s.blockCount;
   }
+  return out;
 }
 
-const DEMO_SECTION_ID = 'app:demo';
+/** Index of a block in reading order (file blocks exact, app blocks at their section). */
+function blockIndex(
+  starts: Map<string, number>,
+  locator: ReaderLocator
+): number {
+  const start = starts.get(locator.sectionId) ?? 0;
+  const m = /\.b(\d+)$/.exec(locator.blockId);
+  return m ? start + Number(m[1]) : start;
+}
+
+function sectionTitle(s: ReaderSectionInfo | undefined): string {
+  if (!s) return '';
+  if (s.title) return s.title;
+  return s.kind === 'image' ? 'Image page' : 'Untitled section';
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 /**
- * Reader API demo: EPUB → ReaderDocument (stable block IDs, app section) →
- * native ReaderView with inserts, theme controls and an event log.
+ * Reader showcase: pick an EPUB, read it in the native ReaderView and try the
+ * reader API — appearance, contents, an app section, React Native inserts in
+ * the reading flow, highlights, search, progress, jumps and resume.
  */
 export default function ReaderScreen() {
+  const { height } = useWindowDimensions();
   const reader = useRef<ReaderViewHandle>(null);
   const docRef = useRef<ReaderDocument | null>(null);
+  const furthestRef = useRef<ReaderLocator | null>(null);
+  const textsRef = useRef<ReaderBlock[] | null>(null);
+
+  // Document
   const [doc, setDoc] = useState<ReaderDocument | null>(null);
   const [label, setLabel] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [log, setLog] = useState<string[]>([]);
-  const [themeName, setThemeName] = useState<ThemeName>('paper');
-  const [scaleName, setScaleName] = useState<ScaleName>('system');
-  const [lineName, setLineName] = useState<LineName>('1.5');
-  const [jumpName, setJumpName] = useState<JumpName>('20');
-  const [showSettings, setShowSettings] = useState(false);
-  const [showSections, setShowSections] = useState(false);
-  const [presses, setPresses] = useState<Record<string, number>>({});
-  const [visible, setVisible] = useState<ReaderLocator | null>(null);
-  const [saved, setSaved] = useState<ReaderLocator | null>(null);
   const [initialLocator, setInitialLocator] = useState<ReaderLocator | null>(
     null
   );
-  const [mountKey, setMountKey] = useState(0);
+  const [furthest, setFurthest] = useState<ReaderLocator | null>(null);
 
-  const push = useCallback(
-    (line: string, ev: string, data?: Record<string, unknown>) => {
-      smoke(ev, data);
-      setLog((prev) => [line, ...prev].slice(0, LOG_LIMIT));
-    },
-    []
+  // Appearance
+  const [themeName, setThemeName] = useState<ThemeName>('paper');
+  const [fontName, setFontName] = useState<FontName>('serif');
+  const [sizeName, setSizeName] = useState<SizeName>('system');
+  const [lineName, setLineName] = useState<LineName>('1.5');
+  const [alignName, setAlignName] = useState<AlignName>('start');
+  const [marginName, setMarginName] = useState<MarginName>('normal');
+  const [panel, setPanel] = useState<Panel>('none');
+  const [showContents, setShowContents] = useState(false);
+
+  // Reading state from events
+  const [chapterId, setChapterId] = useState<string | null>(null);
+  const [position, setPosition] = useState<ReaderLocator | null>(null);
+  const [finished, setFinished] = useState<Set<string>>(new Set());
+  const [jumpBack, setJumpBack] = useState<ReaderLocator | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Marks, notes, selection, search
+  const [selected, setSelected] = useState<{
+    locator: ReaderLocator;
+    quote: string;
+  } | null>(null);
+  const [marks, setMarks] = useState<Record<string, ReaderLocator>>({});
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [query, setQuery] = useState('');
+  const [hits, setHits] = useState<Hit[]>([]);
+  const [hitIndex, setHitIndex] = useState(0);
+  const [searching, setSearching] = useState(false);
+
+  const theme = useMemo<ReaderTheme>(
+    () => ({
+      fontFamily: FONTS[fontName],
+      fontScale: SIZES[sizeName],
+      lineHeight: Number(lineName),
+      textAlign: alignName,
+      margins: { horizontal: MARGINS[marginName] },
+      hyphenation: true,
+      colors: THEMES[themeName],
+    }),
+    [alignName, fontName, lineName, marginName, sizeName, themeName]
   );
+  const colors = THEMES[themeName];
+
+  const starts = useMemo(
+    () => (doc ? sectionStarts(doc) : new Map<string, number>()),
+    [doc]
+  );
+  const sectionsById = useMemo(
+    () => new Map((doc?.sections ?? []).map((s) => [s.id, s])),
+    [doc]
+  );
+
+  const showNotice = useCallback((text: string) => setNotice(text), []);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  // ---- Open / close ----
 
   const release = useCallback(async () => {
     const current = docRef.current;
     docRef.current = null;
-    if (current) {
-      await releaseReaderDocument(current).catch(() => {});
-    }
+    textsRef.current = null;
+    if (current) await releaseReaderDocument(current).catch(() => {});
   }, []);
 
   useEffect(
@@ -115,55 +235,50 @@ export default function ReaderScreen() {
       setBusy(true);
       setError(null);
       setLabel(name);
-      setLog([]);
-      setSaved(null);
-      setInitialLocator(null);
       await release();
       setDoc(null);
+      setChapterId(null);
+      setPosition(null);
+      setFinished(new Set());
+      setJumpBack(null);
+      setSelected(null);
+      setMarks({});
+      setNotes([]);
+      setHits([]);
+      setQuery('');
+      setPanel('none');
       try {
         let next = await loadReaderDocument(source);
-        // App section (text that is not in the file), after the second section.
-        const anchor = next.sections[1] ?? next.sections[0];
-        if (anchor) {
-          next = await insertSection(next, {
-            after: anchor.id,
-            id: DEMO_SECTION_ID,
-            title: 'A path of your own',
-            blocks: [
-              {
-                key: 'title',
-                type: 'heading',
-                level: 2,
-                text: 'A path of your own',
-              },
-              {
-                key: 'p1',
-                type: 'paragraph',
-                text: 'This section was inserted by the app with insertSection(). Its blocks have IDs like app:demo.p1 and sit between the file’s sections.',
-              },
-            ],
-          });
+        // Text that is not in the file: an app section after the first chapter.
+        const firstText = next.sections.find(
+          (s) => s.origin === 'file' && s.kind === 'text'
+        );
+        if (firstText) {
+          next = await insertSection(next, guideSection(firstText.id));
         }
+        const saved = savedPositions.get(next.documentKey);
+        setInitialLocator(saved?.at ?? null);
+        setFurthest(saved?.furthest ?? null);
+        furthestRef.current = saved?.furthest ?? null;
         docRef.current = next;
         setDoc(next);
-        smoke('loaded', {
-          name,
-          blocks: next.blockCount,
-          sections: next.sections.length,
-          key: next.documentKey.slice(0, 12),
-        });
+        if (saved) {
+          showNotice(
+            `Resumed at “${sectionTitle(
+              next.sections.find((s) => s.id === saved.at.sectionId)
+            )}”`
+          );
+        }
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(msg);
-        smoke('error', { message: msg });
+        setError(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
       }
     },
-    [release]
+    [release, showNotice]
   );
 
-  const handleChooseFile = useCallback(async () => {
+  const handlePickOwn = useCallback(async () => {
     try {
       const picked = await DocumentPicker.pick({
         type: ['application/epub+zip', 'org.idpf.epub-container'],
@@ -182,336 +297,778 @@ export default function ReaderScreen() {
     }
   }, [open]);
 
-  const inserts = useMemo<ReaderInsert[]>(() => {
-    if (!doc) return [];
-    const list: ReaderInsert[] = [];
-    const first = doc.sections.find((s) => s.origin === 'file');
-    if (first) list.push({ key: 'invite', at: { sectionEnd: first.id } });
-    const later = doc.sections.filter((s) => s.origin === 'file')[2];
-    if (later?.firstBlockId) {
+  // ---- App section ----
+
+  const hasGuide = doc?.sections.some((s) => s.id === GUIDE_ID) ?? false;
+  const toggleGuide = useCallback(async () => {
+    const current = docRef.current;
+    if (!current) return;
+    try {
+      let next: ReaderDocument;
+      if (current.sections.some((s) => s.id === GUIDE_ID)) {
+        next = await removeSection(current, GUIDE_ID);
+      } else {
+        const firstText = current.sections.find(
+          (s) => s.origin === 'file' && s.kind === 'text'
+        );
+        if (!firstText) return;
+        next = await insertSection(current, guideSection(firstText.id));
+      }
+      // A new revision keeps the reading position.
+      docRef.current = next;
+      textsRef.current = null;
+      setDoc(next);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  // ---- Block text (selection quote, search) ----
+
+  const loadTexts = useCallback(async (): Promise<ReaderBlock[]> => {
+    const current = docRef.current;
+    if (!current) return [];
+    if (!textsRef.current) {
+      textsRef.current = await getReaderBlocks(current, 0, current.blockCount, {
+        includeText: true,
+      });
+    }
+    return textsRef.current;
+  }, []);
+
+  const select = useCallback(
+    async (blockId: string) => {
+      const blocks = await loadTexts();
+      const block = blocks.find((b) => b.id === blockId);
+      if (!block?.text) {
+        setSelected(null);
+        return;
+      }
+      setSelected({
+        locator: { sectionId: block.sectionId, blockId: block.id },
+        quote: block.text,
+      });
+    },
+    [loadTexts]
+  );
+
+  const runSearch = useCallback(async () => {
+    const term = query.trim();
+    if (!term) {
+      setHits([]);
+      return;
+    }
+    setSearching(true);
+    try {
+      const blocks = await loadTexts();
+      const re = new RegExp(escapeRegExp(term), 'gi');
+      const found: Hit[] = [];
+      for (const b of blocks) {
+        if (!b.text) continue;
+        re.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(b.text)) !== null && found.length < MAX_HITS) {
+          found.push({
+            from: { sectionId: b.sectionId, blockId: b.id, offset: m.index },
+            to: {
+              sectionId: b.sectionId,
+              blockId: b.id,
+              offset: m.index + m[0].length,
+            },
+          });
+        }
+        if (found.length >= MAX_HITS) break;
+      }
+      setHits(found);
+      setHitIndex(0);
+      if (found[0]) reader.current?.scrollTo(found[0].from);
+    } finally {
+      setSearching(false);
+    }
+  }, [loadTexts, query]);
+
+  const goToHit = useCallback(
+    (delta: number) => {
+      if (hits.length === 0) return;
+      const next = (hitIndex + delta + hits.length) % hits.length;
+      setHitIndex(next);
+      reader.current?.scrollTo(hits[next]!.from, { animated: true });
+    },
+    [hitIndex, hits]
+  );
+
+  // ---- Highlights: marks, search hits, active hit, selection ----
+
+  const highlights = useMemo<ReaderHighlight[]>(() => {
+    const list: ReaderHighlight[] = Object.entries(marks).map(
+      ([blockId, at]) => ({
+        id: `mark:${blockId}`,
+        from: at,
+        to: at,
+        style: 'background',
+        color: MARK_COLOR,
+      })
+    );
+    hits.forEach((h, i) =>
       list.push({
-        key: 'turning-point',
-        at: { beforeBlock: later.firstBlockId },
+        id: `hit:${i}`,
+        from: h.from,
+        to: h.to,
+        style: 'textColor',
+        color: HIT_COLOR,
+      })
+    );
+    const active = hits[hitIndex];
+    if (active) {
+      list.push({
+        id: 'hit:active',
+        from: active.from,
+        to: active.to,
+        style: 'background',
+        color: HIT_ACTIVE_COLOR,
+      });
+    }
+    if (selected) {
+      list.push({
+        id: 'selection',
+        from: selected.locator,
+        to: selected.locator,
+        style: 'underline',
       });
     }
     return list;
-  }, [doc]);
+  }, [hitIndex, hits, marks, selected]);
+
+  // ---- Inserts: chapter ends and notes ----
+
+  const inserts = useMemo<ReaderInsert[]>(() => {
+    if (!doc) return [];
+    const list: ReaderInsert[] = [];
+    doc.sections.forEach((s, i) => {
+      const next = doc.sections[i + 1];
+      // Chapters only: skip short front matter such as the title page.
+      if (
+        s.origin === 'file' &&
+        s.kind === 'text' &&
+        s.blockCount >= MIN_CHAPTER_BLOCKS &&
+        next
+      ) {
+        list.push({ key: `end:${s.id}`, at: { sectionEnd: s.id } });
+      }
+    });
+    for (const n of notes) {
+      list.push({ key: n.key, at: { afterBlock: n.blockId } });
+    }
+    return list;
+  }, [doc, notes]);
 
   const renderInsert = useCallback(
-    (key: string) => (
-      <View
-        style={[styles.insertCard, { borderColor: THEMES[themeName].accent }]}
-        accessibilityLabel={`Insert ${key}`}
-      >
-        <Text style={styles.insertTitle}>
-          {key === 'invite' ? 'End of chapter' : 'Turning point'}
-        </Text>
-        <Text style={styles.insertBody}>
-          A React Native view inside the native reading flow.
-        </Text>
-        <Pressable
-          testID={`reader-insert-${key}-button`}
-          accessibilityRole="button"
-          accessibilityLabel={`Press ${key}`}
-          onPress={() => {
-            setPresses((p) => ({ ...p, [key]: (p[key] ?? 0) + 1 }));
-            push(`press ${key}`, 'insertPress', { key });
-          }}
-          style={({ pressed }) => [
-            styles.insertButton,
-            pressed && styles.insertButtonPressed,
-          ]}
-        >
-          <Text style={styles.insertButtonText}>
-            Press ({presses[key] ?? 0})
-          </Text>
-        </Pressable>
-      </View>
-    ),
-    [presses, push, themeName]
-  );
-
-  const theme = useMemo<ReaderTheme>(
-    () => ({
-      fontScale: SCALES[scaleName],
-      lineHeight: Number(lineName),
-      colors: THEMES[themeName],
-      hyphenation: true,
-    }),
-    [lineName, scaleName, themeName]
-  );
-
-  if (!doc) {
-    return (
-      <SafeAreaView style={styles.container} edges={['bottom']}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Open a book</Text>
-            <Text style={styles.sectionHint}>
-              EPUB text and images become a ReaderDocument with stable block
-              IDs, shown in the native ReaderView.
-            </Text>
-            <FileSourcePicker
-              disabled={busy}
-              selectedLabel={label}
-              selectedDescription={
-                READER_FILES.find((f) => f.id === selectedId)?.description ??
-                null
-              }
-              exampleListTitle="Choose an example book"
-              ownPickButtonLabel="Pick an EPUB…"
-              onPickOwn={() => {
-                handleChooseFile().catch(() => {});
-              }}
-              renderExampleList={({ disabled, collapse }) => (
-                <ExampleDocumentFileList
-                  files={READER_FILES}
-                  selectedId={selectedId}
-                  disabled={disabled}
-                  onSelect={(file) => {
-                    collapse();
-                    setSelectedId(file.id);
-                    open(fileSourceFromBundledPath(file.id), file.name).catch(
-                      () => {}
-                    );
-                  }}
-                />
-              )}
-            />
-            {busy ? (
-              <View style={styles.busyRow}>
-                <ActivityIndicator />
-                <Text style={styles.sectionHint}>Loading book…</Text>
-              </View>
-            ) : null}
-          </View>
-          {error ? (
-            <View style={styles.errorBox}>
-              <Text style={styles.errorTitle}>Could not open the book</Text>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          ) : null}
-        </ScrollView>
-        <ScreenIntroModal screenId="Reader" />
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView
-      style={[
-        styles.container,
-        { backgroundColor: THEMES[themeName].background },
-      ]}
-      edges={['bottom']}
-    >
-      <View style={styles.toolbar}>
-        <ToolbarButton
-          id="reader-close"
-          label="Close"
-          onPress={() => {
-            release().catch(() => {});
-            setDoc(null);
-          }}
-        />
-        <ToolbarButton
-          id="reader-sections"
-          label="Sections"
-          onPress={() => setShowSections(true)}
-        />
-        <ToolbarButton
-          id="reader-settings"
-          label="Aa"
-          onPress={() => setShowSettings((v) => !v)}
-        />
-        <ToolbarButton
-          id="reader-save"
-          label="Save"
-          onPress={() => {
-            setSaved(visible);
-            push(`saved ${visible?.blockId ?? '—'}`, 'save', {
-              blockId: visible?.blockId,
-            });
-          }}
-        />
-        <ToolbarButton
-          id="reader-restore"
-          label="Restore"
-          onPress={() => {
-            if (!saved) return;
-            setInitialLocator(saved);
-            setMountKey((k) => k + 1);
-            push(`restore ${saved.blockId}`, 'restore', {
-              blockId: saved.blockId,
-            });
-          }}
-        />
-      </View>
-
-      {showSettings ? (
-        <View style={styles.settings}>
-          <OcrChoiceRow
-            label="Theme"
-            options={['paper', 'sepia', 'contrast'] as const}
-            value={themeName}
-            onChange={(v) => {
-              setThemeName(v);
-              push(`theme ${v}`, 'theme', { value: v });
-            }}
-          />
-          <OcrChoiceRow
-            label="Text size"
-            options={['system', '0.9×', '1.2×', '1.5×'] as const}
-            value={scaleName}
-            onChange={(v) => {
-              setScaleName(v);
-              push(`size ${v}`, 'fontScale', { value: v });
-            }}
-          />
-          <OcrChoiceRow
-            label="Line height"
-            options={['1.3', '1.5', '1.8'] as const}
-            value={lineName}
-            onChange={(v) => {
-              setLineName(v);
-              push(`line ${v}`, 'lineHeight', { value: v });
-            }}
-          />
-          <OcrChoiceRow
-            label="Jump after (blocks)"
-            options={['5', '20', '50'] as const}
-            value={jumpName}
-            onChange={(v) => {
-              setJumpName(v);
-              push(`jump threshold ${v}`, 'jumpThreshold', { value: v });
-            }}
-          />
-        </View>
-      ) : null}
-
-      <ReaderView
-        key={mountKey}
-        ref={reader}
-        testID="reader-view"
-        document={doc}
-        initialLocator={initialLocator}
-        theme={theme}
-        inserts={inserts}
-        renderInsert={renderInsert}
-        jumpThreshold={Number(jumpName)}
-        style={styles.reader}
-        onReady={(info) =>
-          push(
-            `ready ${info.blockCount} blocks, ${info.sectionCount} sections`,
-            'ready',
-            info
-          )
-        }
-        onVisibleRangeChange={(r) => {
-          if (!r.settled) return;
-          setVisible({ ...r.first, offset: r.firstOffset });
-          push(
-            `visible ${r.first.blockId}…${r.last.blockId}${
-              r.visibleInserts.length ? ` [${r.visibleInserts.join(',')}]` : ''
-            }`,
-            'visible',
-            {
-              first: r.first.blockId,
-              last: r.last.blockId,
-              offset: r.firstOffset,
-              inserts: r.visibleInserts,
-            }
-          );
-        }}
-        onFurthestPositionChange={(l) =>
-          push(`furthest ${l.blockId}`, 'furthest', { blockId: l.blockId })
-        }
-        onSectionEnd={(e) =>
-          push(`section end ${e.sectionId}`, 'sectionEnd', e)
-        }
-        onJump={(j) =>
-          push(
-            `jump ${j.cause} ${j.from.blockId}→${j.to.blockId} (${j.distance})`,
-            'jump',
-            {
-              cause: j.cause,
-              from: j.from.blockId,
-              to: j.to.blockId,
-              distance: j.distance,
-            }
-          )
-        }
-        onTap={(t) => push(`tap ${t.blockId}`, 'tap', t)}
-        onError={(e) => push(`error ${e.code}`, 'readerError', e)}
-      />
-
-      <View style={styles.log} testID="reader-log">
-        {log.slice(0, 4).map((line, i) => (
-          <Text key={`${i}-${line}`} style={styles.logLine} numberOfLines={1}>
-            {line}
-          </Text>
-        ))}
-      </View>
-
-      <Modal
-        visible={showSections}
-        animationType="slide"
-        presentationStyle="pageSheet"
-        onRequestClose={() => setShowSections(false)}
-      >
-        <SafeAreaView style={styles.container}>
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sectionTitle}>
-              {doc.metadata.title ?? label}
+    (key: string) => {
+      if (key.startsWith('note:')) {
+        const note = notes.find((n) => n.key === key);
+        if (!note) return null;
+        return (
+          <View
+            style={[styles.noteCard, { borderLeftColor: colors.accent }]}
+            accessibilityLabel={`Note: ${note.quote}`}
+          >
+            <Text style={styles.noteMeta}>Note · {note.time}</Text>
+            <Text style={styles.noteQuote} numberOfLines={3}>
+              “{note.quote}”
             </Text>
             <Pressable
-              testID="reader-sections-done"
+              testID={`reader-note-remove-${note.key}`}
               accessibilityRole="button"
-              onPress={() => setShowSections(false)}
-              style={styles.toolbarButton}
+              accessibilityLabel="Remove note"
+              onPress={() =>
+                setNotes((all) => all.filter((n) => n.key !== key))
+              }
+              style={({ pressed }) => [
+                styles.linkButton,
+                pressed && styles.pressed,
+              ]}
             >
-              <Text style={styles.toolbarButtonText}>Done</Text>
+              <Text style={[styles.linkButtonText, { color: colors.accent }]}>
+                Remove note
+              </Text>
             </Pressable>
           </View>
-          <ScrollView contentContainerStyle={styles.content}>
-            {doc.sections.map((s) => (
-              <Pressable
-                key={s.id}
-                testID={`reader-section-${s.id}`}
-                accessibilityRole="button"
-                accessibilityLabel={`Go to ${s.title ?? s.id}`}
-                disabled={!s.firstBlockId}
-                onPress={() => {
-                  setShowSections(false);
-                  reader.current?.scrollTo({
-                    sectionId: s.id,
-                    blockId: s.firstBlockId,
+        );
+      }
+      const sectionId = key.slice('end:'.length);
+      const index = doc?.sections.findIndex((s) => s.id === sectionId) ?? -1;
+      const section = doc?.sections[index];
+      const next = doc?.sections[index + 1];
+      if (!section || !next) return null;
+      const done = finished.has(section.id);
+      return (
+        <View
+          style={[styles.chapterCard, { borderColor: colors.accent }]}
+          accessibilityLabel={`End of ${sectionTitle(section)}`}
+        >
+          <Text style={styles.chapterCardKicker}>
+            {done ? '✓ Chapter finished' : 'End of chapter'}
+          </Text>
+          <Text style={styles.chapterCardTitle} numberOfLines={2}>
+            {sectionTitle(section)}
+          </Text>
+          <Pressable
+            testID={`reader-next-${section.id}`}
+            accessibilityRole="button"
+            accessibilityLabel={`Continue with ${sectionTitle(next)}`}
+            onPress={() =>
+              reader.current?.scrollTo(
+                { sectionId: next.id, blockId: next.firstBlockId },
+                { animated: true }
+              )
+            }
+            style={({ pressed }) => [
+              styles.chapterCardButton,
+              { backgroundColor: colors.accent },
+              pressed && styles.pressed,
+            ]}
+          >
+            <Text style={styles.chapterCardButtonText} numberOfLines={1}>
+              Next: {sectionTitle(next)}
+            </Text>
+          </Pressable>
+        </View>
+      );
+    },
+    [colors.accent, doc, finished, notes]
+  );
+
+  // ---- Derived reading state ----
+
+  // Position in the book (first visible block).
+  const progress = useMemo(() => {
+    if (!doc || !position || doc.blockCount === 0) return 0;
+    return Math.min(1, (blockIndex(starts, position) + 1) / doc.blockCount);
+  }, [doc, position, starts]);
+
+  const chapter = chapterId ? sectionsById.get(chapterId) : undefined;
+  const readerHeight = Math.max(360, Math.round(height * 0.55));
+
+  // ---- Render ----
+
+  return (
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Book</Text>
+          <FileSourcePicker
+            disabled={busy}
+            selectedLabel={label}
+            selectedDescription={
+              doc
+                ? describe(doc)
+                : READER_FILES.find((f) => f.id === selectedId)?.description ??
+                  null
+            }
+            exampleListTitle="Choose an example book"
+            ownPickButtonLabel="Pick an EPUB…"
+            onPickOwn={() => {
+              handlePickOwn().catch(() => {});
+            }}
+            renderExampleList={({ disabled, collapse }) => (
+              <ExampleDocumentFileList
+                files={READER_FILES}
+                selectedId={selectedId}
+                disabled={disabled}
+                onSelect={(file) => {
+                  collapse();
+                  setSelectedId(file.id);
+                  open(fileSourceFromBundledPath(file.id), file.name).catch(
+                    () => {}
+                  );
+                }}
+              />
+            )}
+          />
+          {busy ? (
+            <View style={styles.busyRow}>
+              <ActivityIndicator />
+              <Text style={styles.sectionHint}>Opening the book…</Text>
+            </View>
+          ) : null}
+          {!doc && !busy ? (
+            <Text style={styles.sectionHint}>
+              loadReaderDocument() turns an EPUB into a ReaderDocument with
+              stable block IDs; the native ReaderView shows it.
+            </Text>
+          ) : null}
+        </View>
+
+        {error ? (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorTitle}>Reader error</Text>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        {doc ? (
+          <View style={[styles.section, styles.readerSection]}>
+            <View style={styles.toolbar}>
+              <ToolbarButton
+                id="reader-contents"
+                label="Contents"
+                onPress={() => setShowContents(true)}
+              />
+              <ToolbarButton
+                id="reader-appearance"
+                label="Aa"
+                active={panel === 'appearance'}
+                onPress={() =>
+                  setPanel((p) => (p === 'appearance' ? 'none' : 'appearance'))
+                }
+              />
+              <ToolbarButton
+                id="reader-search"
+                label="Search"
+                active={panel === 'search'}
+                onPress={() =>
+                  setPanel((p) => (p === 'search' ? 'none' : 'search'))
+                }
+              />
+            </View>
+
+            {panel === 'appearance' ? (
+              <View style={styles.panel}>
+                <OcrChoiceRow
+                  label="Theme"
+                  options={['paper', 'sepia', 'night'] as const}
+                  value={themeName}
+                  onChange={setThemeName}
+                />
+                <OcrChoiceRow
+                  label="Font"
+                  options={['serif', 'sans'] as const}
+                  value={fontName}
+                  onChange={setFontName}
+                />
+                <OcrChoiceRow
+                  label="Text size"
+                  options={['system', '0.9×', '1.2×', '1.5×'] as const}
+                  value={sizeName}
+                  onChange={setSizeName}
+                />
+                <OcrChoiceRow
+                  label="Line height"
+                  options={['1.3', '1.5', '1.8'] as const}
+                  value={lineName}
+                  onChange={setLineName}
+                />
+                <OcrChoiceRow
+                  label="Alignment"
+                  options={['start', 'justify'] as const}
+                  value={alignName}
+                  onChange={setAlignName}
+                />
+                <OcrChoiceRow
+                  label="Margins"
+                  options={['narrow', 'normal', 'wide'] as const}
+                  value={marginName}
+                  onChange={setMarginName}
+                />
+              </View>
+            ) : null}
+
+            {panel === 'search' ? (
+              <View style={styles.panel}>
+                <View style={styles.searchRow}>
+                  <TextInput
+                    testID="reader-search-input"
+                    style={styles.searchInput}
+                    value={query}
+                    onChangeText={setQuery}
+                    placeholder="Search the book"
+                    placeholderTextColor="#94A3B8"
+                    returnKeyType="search"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    onSubmitEditing={() => {
+                      runSearch().catch(() => {});
+                    }}
+                  />
+                  <ToolbarButton
+                    id="reader-search-go"
+                    label="Find"
+                    onPress={() => {
+                      runSearch().catch(() => {});
+                    }}
+                  />
+                </View>
+                <View style={styles.searchRow}>
+                  <Text style={styles.searchCount} testID="reader-search-count">
+                    {searching
+                      ? 'Searching…'
+                      : hits.length > 0
+                      ? `${hitIndex + 1} / ${hits.length}${
+                          hits.length >= MAX_HITS ? '+' : ''
+                        }`
+                      : query.trim()
+                      ? 'No matches'
+                      : 'Matches are highlighted in the text'}
+                  </Text>
+                  <ToolbarButton
+                    id="reader-search-prev"
+                    label="‹"
+                    onPress={() => goToHit(-1)}
+                  />
+                  <ToolbarButton
+                    id="reader-search-next"
+                    label="›"
+                    onPress={() => goToHit(1)}
+                  />
+                </View>
+              </View>
+            ) : null}
+
+            <View
+              style={[
+                styles.readerBox,
+                { height: readerHeight, backgroundColor: colors.background },
+              ]}
+            >
+              <ReaderView
+                ref={reader}
+                testID="reader-view"
+                document={doc}
+                initialLocator={initialLocator}
+                furthestLocator={furthest}
+                theme={theme}
+                inserts={inserts}
+                renderInsert={renderInsert}
+                highlights={highlights}
+                style={styles.reader}
+                onVisibleRangeChange={(r) => {
+                  setChapterId(r.first.sectionId);
+                  if (!r.settled) return;
+                  setPosition(r.first);
+                  savedPositions.set(doc.documentKey, {
+                    at: { ...r.first, offset: r.firstOffset },
+                    furthest: furthestRef.current,
                   });
-                  push(`go to ${s.id}`, 'scrollTo', { sectionId: s.id });
+                }}
+                onFurthestPositionChange={(l) => {
+                  furthestRef.current = l;
+                  setFurthest(l);
+                }}
+                onSectionEnd={(e) =>
+                  setFinished((s) =>
+                    s.has(e.sectionId) ? s : new Set(s).add(e.sectionId)
+                  )
+                }
+                onJump={(j) => setJumpBack(j.from)}
+                onTap={({ blockId }) => {
+                  select(blockId).catch(() => {});
+                }}
+                onError={(e) => setError(`${e.code}: ${e.message}`)}
+              />
+              {selected ? (
+                <View style={styles.actionBar} testID="reader-selection-bar">
+                  <Text style={styles.actionQuote} numberOfLines={1}>
+                    {selected.quote}
+                  </Text>
+                  <View style={styles.actionButtons}>
+                    <ActionButton
+                      id="reader-mark"
+                      label={
+                        marks[selected.locator.blockId] ? 'Unmark' : 'Mark'
+                      }
+                      onPress={() => {
+                        const { locator } = selected;
+                        setMarks((m) => {
+                          const next = { ...m };
+                          if (next[locator.blockId])
+                            delete next[locator.blockId];
+                          else next[locator.blockId] = locator;
+                          return next;
+                        });
+                        setSelected(null);
+                      }}
+                    />
+                    <ActionButton
+                      id="reader-note"
+                      label="Add note"
+                      onPress={() => {
+                        const { locator, quote } = selected;
+                        const now = new Date();
+                        setNotes((all) => [
+                          ...all,
+                          {
+                            key: `note:${now.getTime()}`,
+                            blockId: locator.blockId,
+                            sectionId: locator.sectionId,
+                            quote:
+                              quote.length > 140
+                                ? `${quote.slice(0, 140)}…`
+                                : quote,
+                            time: now.toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            }),
+                          },
+                        ]);
+                        setSelected(null);
+                      }}
+                    />
+                    <ActionButton
+                      id="reader-selection-close"
+                      label="✕"
+                      onPress={() => setSelected(null)}
+                    />
+                  </View>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.footer} testID="reader-footer">
+              <View style={styles.footerRow}>
+                <Text style={styles.footerChapter} numberOfLines={1}>
+                  {chapter ? sectionTitle(chapter) : ' '}
+                </Text>
+                <Text style={styles.footerPercent}>
+                  {Math.round(progress * 100)} %
+                </Text>
+              </View>
+              <View style={styles.progressTrack}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    {
+                      width: `${Math.round(progress * 100)}%`,
+                      backgroundColor: colors.accent,
+                    },
+                  ]}
+                />
+              </View>
+              {jumpBack ? (
+                <View style={styles.footerRow}>
+                  <Pressable
+                    testID="reader-jump-back"
+                    accessibilityRole="button"
+                    accessibilityLabel="Go back to where you were"
+                    onPress={() => {
+                      const target = jumpBack;
+                      setJumpBack(null);
+                      reader.current?.scrollTo(target);
+                    }}
+                    style={({ pressed }) => [
+                      styles.chip,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.chipText} numberOfLines={1}>
+                      ↩ Back to “
+                      {sectionTitle(sectionsById.get(jumpBack.sectionId))}”
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Dismiss"
+                    onPress={() => setJumpBack(null)}
+                    style={({ pressed }) => [
+                      styles.chipClose,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={styles.chipCloseText}>✕</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+              {notice ? <Text style={styles.notice}>{notice}</Text> : null}
+            </View>
+          </View>
+        ) : null}
+
+        {doc ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Try it</Text>
+            <Hint text="Tap a paragraph to mark it or attach a note. Notes and the chapter-end cards are React Native views inside the native list (inserts)." />
+            <Hint text="Contents jumps to a chapter with scrollTo(); a jump offers a way back (onJump)." />
+            <Hint
+              text={`“${GUIDE_TITLE}” is an app section: text that is not in the EPUB, added with insertSection().`}
+            />
+            <Hint text="Change the book and open this one again: it resumes at the last position (initialLocator, furthestLocator)." />
+          </View>
+        ) : null}
+      </ScrollView>
+
+      {doc ? (
+        <Modal
+          visible={showContents}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowContents(false)}
+        >
+          <SafeAreaView style={styles.container}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sectionTitle} numberOfLines={1}>
+                {doc.metadata.title ?? label}
+              </Text>
+              <ToolbarButton
+                id="reader-contents-done"
+                label="Done"
+                onPress={() => setShowContents(false)}
+              />
+            </View>
+            <ScrollView contentContainerStyle={styles.content}>
+              <Pressable
+                testID="reader-toggle-guide"
+                accessibilityRole="button"
+                onPress={() => {
+                  toggleGuide().catch(() => {});
                 }}
                 style={({ pressed }) => [
-                  styles.sectionRow,
-                  pressed && styles.toolbarButtonPressed,
+                  styles.guideRow,
+                  pressed && styles.pressed,
                 ]}
               >
-                <Text style={styles.sectionRowTitle} numberOfLines={1}>
-                  {s.title ?? (s.kind === 'image' ? 'Image page' : 'Untitled')}
-                </Text>
-                <Text style={styles.sectionRowMeta}>
-                  {s.id} · {s.blockCount} blocks
-                  {s.origin === 'app' ? ' · app' : ''}
+                <Text style={styles.guideRowText}>
+                  {hasGuide
+                    ? `Remove the app section “${GUIDE_TITLE}”`
+                    : `Insert the app section “${GUIDE_TITLE}”`}
                 </Text>
               </Pressable>
-            ))}
-          </ScrollView>
-        </SafeAreaView>
-      </Modal>
+              {doc.sections.map((s) => {
+                const current = s.id === chapterId;
+                return (
+                  <Pressable
+                    key={s.id}
+                    testID={`reader-section-${s.id}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Go to ${sectionTitle(s)}`}
+                    disabled={!s.firstBlockId}
+                    onPress={() => {
+                      setShowContents(false);
+                      reader.current?.scrollTo({
+                        sectionId: s.id,
+                        blockId: s.firstBlockId,
+                      });
+                    }}
+                    style={({ pressed }) => [
+                      styles.sectionRow,
+                      current && styles.sectionRowCurrent,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.sectionRowTitle,
+                        current && styles.sectionRowTitleCurrent,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {finished.has(s.id) ? '✓ ' : ''}
+                      {sectionTitle(s)}
+                    </Text>
+                    <Text style={styles.sectionRowMeta}>
+                      {furthest?.sectionId === s.id ? 'Furthest read · ' : ''}
+                      {s.origin === 'app'
+                        ? 'App section'
+                        : s.kind === 'image'
+                        ? 'Image'
+                        : `${s.blockCount} ${
+                            s.blockCount === 1 ? 'block' : 'blocks'
+                          }`}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </SafeAreaView>
+        </Modal>
+      ) : null}
       <ScreenIntroModal screenId="Reader" />
     </SafeAreaView>
   );
 }
 
+function guideSection(after: string) {
+  return {
+    after,
+    id: GUIDE_ID,
+    title: GUIDE_TITLE,
+    blocks: [
+      {
+        key: 'title',
+        type: 'heading' as const,
+        level: 2,
+        text: GUIDE_TITLE,
+      },
+      {
+        key: 'p1',
+        type: 'paragraph' as const,
+        text: 'This section is not part of the EPUB. The app inserted it with insertSection(), for example for a preface, a reading guide or generated content.',
+      },
+      {
+        key: 'p2',
+        type: 'paragraph' as const,
+        text: 'Its blocks have IDs like app:about.p1. Positions, events, highlights and inserts work here exactly as in the book’s own text. Remove it again from the contents.',
+      },
+    ],
+  };
+}
+
+function describe(doc: ReaderDocument): string {
+  const by = doc.metadata.creator ? ` · ${doc.metadata.creator}` : '';
+  const files = doc.sections.filter((s) => s.origin === 'file').length;
+  return `${doc.metadata.title ?? 'Untitled'}${by} — ${files} sections, ${
+    doc.blockCount
+  } blocks`;
+}
+
+function Hint({ text }: { text: string }) {
+  return (
+    <View style={styles.hintRow}>
+      <Text style={styles.hintBullet}>•</Text>
+      <Text style={styles.hintText}>{text}</Text>
+    </View>
+  );
+}
+
 function ToolbarButton({
+  id,
+  label,
+  active = false,
+  onPress,
+}: {
+  id: string;
+  label: string;
+  active?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      testID={id}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.toolbarButton,
+        active && styles.toolbarButtonActive,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Text
+        style={[
+          styles.toolbarButtonText,
+          active && styles.toolbarButtonTextActive,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ActionButton({
   id,
   label,
   onPress,
@@ -526,12 +1083,9 @@ function ToolbarButton({
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.toolbarButton,
-        pressed && styles.toolbarButtonPressed,
-      ]}
+      style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
     >
-      <Text style={styles.toolbarButtonText}>{label}</Text>
+      <Text style={styles.actionButtonText}>{label}</Text>
     </Pressable>
   );
 }

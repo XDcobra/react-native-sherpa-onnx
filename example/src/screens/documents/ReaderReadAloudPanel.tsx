@@ -61,13 +61,6 @@ type Props = {
 /** Characters per synthesis chunk (whole paragraphs, within one section). */
 const CHUNK_CHARS = 1500;
 const STYLES = ['background', 'underline', 'textColor'] as const;
-const SEARCH_WORD = 'the';
-
-function smoke(ev: string, data: Record<string, unknown> = {}) {
-  if (__DEV__) {
-    console.log(`READER_SMOKE ${JSON.stringify({ ev, ...data })}`);
-  }
-}
 
 /**
  * EPUB read-aloud in the native ReaderView: synthesis runs chunk by chunk from
@@ -102,9 +95,6 @@ export function ReaderReadAloudPanel({
   const [followMode, setFollowMode] = useState<
     'keepVisible' | 'center' | 'off'
   >('keepVisible');
-  const [searchDemo, setSearchDemo] = useState(false);
-  const [searchHits, setSearchHits] = useState<ReaderHighlight[]>([]);
-  const [log, setLog] = useState<string[]>([]);
 
   const playerRef = useRef<PcmPlayer | null>(null);
   const currentRef = useRef<Prepared | null>(null);
@@ -112,14 +102,6 @@ export function ReaderReadAloudPanel({
   const runRef = useRef(0);
   const imagesRef = useRef<string | null>(null);
   const docRef = useRef<ReaderDocument | null>(null);
-
-  const push = useCallback(
-    (line: string, ev: string, data: Record<string, unknown> = {}) => {
-      setLog((l) => [line, ...l].slice(0, 6));
-      smoke(ev, data);
-    },
-    []
-  );
 
   // ---- Reader document over the extraction buffer ----
   useEffect(() => {
@@ -169,10 +151,6 @@ export function ReaderReadAloudPanel({
         docRef.current = d;
         setDoc(d);
         setBlocks(textBlocks);
-        smoke('readerLoaded', {
-          blocks: d.blockCount,
-          textBlocks: textBlocks.length,
-        });
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
@@ -192,44 +170,6 @@ export function ReaderReadAloudPanel({
       if (img) releaseOfflineImageBuffer(img).catch(() => {});
     };
   }, [source, textBuffer]);
-
-  // ---- Demo: several highlights at once (static "search hits") ----
-  useEffect(() => {
-    if (!searchDemo || !doc) {
-      setSearchHits([]);
-      return;
-    }
-    let cancelled = false;
-    getReaderBlocks(doc, 0, 400, { includeText: true })
-      .then((all) => {
-        if (cancelled) return;
-        const hits: ReaderHighlight[] = [];
-        const re = new RegExp(`\\b${SEARCH_WORD}\\b`, 'gi');
-        for (const b of all) {
-          if (!b.text) continue;
-          let m: RegExpExecArray | null;
-          while ((m = re.exec(b.text)) !== null && hits.length < 200) {
-            hits.push({
-              id: `search:${b.id}:${m.index}`,
-              from: { sectionId: b.sectionId, blockId: b.id, offset: m.index },
-              to: {
-                sectionId: b.sectionId,
-                blockId: b.id,
-                offset: m.index + m[0].length,
-              },
-              style: 'textColor',
-              color: '#C2410C',
-            });
-          }
-        }
-        setSearchHits(hits);
-        smoke('search', { hits: hits.length });
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [doc, searchDemo]);
 
   // ---- Chunked synthesis ----
   const chunkFrom = useCallback(
@@ -308,20 +248,6 @@ export function ReaderReadAloudPanel({
       currentRef.current = prepared;
       setTimeline(prepared.timeline);
       setPositionMs(0);
-      push(
-        `chunk ${blocks[prepared.chunk.firstBlock]?.id} · ${
-          prepared.timeline.sentences.length
-        } sentences`,
-        'chunk',
-        {
-          firstBlock: blocks[prepared.chunk.firstBlock]?.id,
-          start: prepared.chunk.start,
-          end: prepared.chunk.end,
-          sentences: prepared.timeline.sentences.length,
-          words: prepared.timeline.words.length,
-          durationMs: Math.round(prepared.timeline.durationMs),
-        }
-      );
       // Prepare the next chunk while this one plays.
       const nextChunk = chunkFrom(prepared.chunk.next);
       nextRef.current = nextChunk ? prepare(nextChunk, run) : null;
@@ -334,7 +260,6 @@ export function ReaderReadAloudPanel({
           const pending = nextRef.current;
           nextRef.current = null;
           if (!pending) {
-            push('end of book', 'ended');
             stop().catch(() => {});
             return;
           }
@@ -351,7 +276,7 @@ export function ReaderReadAloudPanel({
       if (prev) prev.destroy().catch(() => {});
       if (old) releasePipelineAudioBuffer(old.audioBufferId).catch(() => {});
     },
-    [blocks, chunkFrom, onError, prepare, push, stop]
+    [chunkFrom, onError, prepare, stop]
   );
 
   const play = useCallback(async () => {
@@ -371,9 +296,6 @@ export function ReaderReadAloudPanel({
     onError(null);
     setBusy(true);
     setPlaying(true);
-    push(`play from ${blocks[index]?.id}`, 'play', {
-      blockId: blocks[index]?.id,
-    });
     try {
       const prepared = await prepare(chunk, run);
       if (prepared) await playPrepared(prepared, run);
@@ -391,41 +313,22 @@ export function ReaderReadAloudPanel({
     onError,
     playPrepared,
     prepare,
-    push,
     startBlockId,
     stop,
   ]);
 
-  // ---- Highlights ----
+  // ---- Highlights: the chosen start paragraph, then sentence and word ----
   const readAloud = useReadAloudHighlights(timeline, positionMs, {
     show,
     sentenceStyle: { style: sentenceStyle },
     wordStyle: { style: wordStyle },
   });
-  const highlights = useMemo(
-    () => [...searchHits, ...readAloud],
-    [readAloud, searchHits]
-  );
-
-  // Log unit changes (sentence / word) for smoke tests.
-  const spoken =
-    timeline && positionMs != null ? timeline.at(positionMs) : null;
-  const sentenceIdx = spoken?.sentence?.index ?? -1;
-  const wordIdx = spoken?.word?.index ?? -1;
-  useEffect(() => {
-    if (!spoken || (sentenceIdx < 0 && wordIdx < 0)) return;
-    smoke('unit', {
-      ms: Math.round(positionMs ?? 0),
-      sentence: sentenceIdx,
-      sentenceFrom: spoken.sentence?.range.from,
-      word: wordIdx,
-      wordText: spoken.word
-        ? `${spoken.word.range.from.blockId}@${spoken.word.range.from.offset}`
-        : null,
-    });
-    // Only on unit changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sentenceIdx, wordIdx]);
+  const startBlock = blocks.find((b) => b.id === startBlockId);
+  const highlights = useMemo<ReaderHighlight[]>(() => {
+    if (playing || !startBlock) return readAloud;
+    const at = { sectionId: startBlock.sectionId, blockId: startBlock.id };
+    return [{ id: 'start', from: at, to: at, style: 'underline' }];
+  }, [playing, readAloud, startBlock]);
 
   if (loadError) {
     return <Text style={styles.errorText}>{loadError}</Text>;
@@ -452,36 +355,12 @@ export function ReaderReadAloudPanel({
           }}
           highlights={highlights}
           follow={{ mode: followMode }}
-          onTap={({ blockId }) => {
-            setStartBlockId(blockId);
-            push(`start at ${blockId}`, 'tap', { blockId });
-          }}
+          onTap={({ blockId }) => setStartBlockId(blockId)}
           onVisibleRangeChange={(r) => {
             if (r.settled) setFirstVisibleId(r.first.blockId);
           }}
-          onFollowChange={(c) => {
-            setFollowPaused(!c.following);
-            push(
-              `follow ${c.following ? 'on' : 'paused'} (${c.reason})`,
-              'follow',
-              c
-            );
-          }}
-          onJump={(j) =>
-            push(`jump ${j.cause} ${j.from.blockId}→${j.to.blockId}`, 'jump', {
-              cause: j.cause,
-              from: j.from.blockId,
-              to: j.to.blockId,
-              distance: j.distance,
-            })
-          }
-          onFurthestPositionChange={(l) =>
-            smoke('furthest', { blockId: l.blockId })
-          }
-          onSectionEnd={(e) =>
-            push(`section end ${e.sectionId}`, 'sectionEnd', e)
-          }
-          onError={(e) => push(`error ${e.code}`, 'readerError', e)}
+          onFollowChange={(c) => setFollowPaused(!c.following)}
+          onError={(e) => onError(`${e.code}: ${e.message}`)}
         />
         {followPaused && playing ? (
           <TouchableOpacity
@@ -497,9 +376,11 @@ export function ReaderReadAloudPanel({
         ) : null}
       </View>
       <Text style={styles.meta}>
-        {startBlockId
-          ? `Start: ${startBlockId} (tap a paragraph to change)`
-          : 'Tap a paragraph to start there; otherwise the first visible one.'}
+        {playing
+          ? 'The sentence and the word being spoken are highlighted and kept in view.'
+          : startBlockId
+          ? 'Reading starts at the underlined paragraph. Tap another one to change it.'
+          : 'Tap a paragraph to start there; otherwise reading starts at the top of the view.'}
       </Text>
       <View style={styles.actionRow}>
         <TouchableOpacity
@@ -529,7 +410,6 @@ export function ReaderReadAloudPanel({
             testID="readaloud-stop"
             accessibilityLabel="Stop reading"
             onPress={() => {
-              push('stop', 'stop');
               stop().catch(() => {});
             }}
           >
@@ -541,51 +421,26 @@ export function ReaderReadAloudPanel({
         label="Highlight"
         options={['sentence', 'word', 'both'] as const}
         value={show}
-        onChange={(v) => {
-          setShow(v);
-          smoke('setting', { show: v });
-        }}
+        onChange={setShow}
       />
       <OcrChoiceRow
         label="Sentence style"
         options={STYLES}
         value={sentenceStyle}
-        onChange={(v) => {
-          setSentenceStyle(v);
-          smoke('setting', { sentenceStyle: v });
-        }}
+        onChange={setSentenceStyle}
       />
       <OcrChoiceRow
         label="Word style"
         options={STYLES}
         value={wordStyle}
-        onChange={(v) => {
-          setWordStyle(v);
-          smoke('setting', { wordStyle: v });
-        }}
+        onChange={setWordStyle}
       />
       <OcrChoiceRow
         label="Follow"
         options={['keepVisible', 'center', 'off'] as const}
         value={followMode}
-        onChange={(v) => {
-          setFollowMode(v);
-          smoke('setting', { follow: v });
-        }}
+        onChange={setFollowMode}
       />
-      <OcrChoiceRow
-        label={`Also mark “${SEARCH_WORD}” (several highlights)`}
-        options={['off', 'on'] as const}
-        value={searchDemo ? 'on' : 'off'}
-        onChange={(v) => setSearchDemo(v === 'on')}
-      />
-      <View style={styles.readerLog}>
-        {log.map((line, i) => (
-          <Text key={`${i}-${line}`} style={styles.readerLogLine}>
-            {line}
-          </Text>
-        ))}
-      </View>
     </View>
   );
 }

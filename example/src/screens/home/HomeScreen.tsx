@@ -115,7 +115,7 @@ const FEATURES: HomeFeature[] = [
     sectionTitle: 'Documents (EPUB, MOBI, PDF, …)',
     title: 'Reader',
     description:
-      'Open an EPUB in the native ReaderView: stable block IDs, inserts in the reading flow, reading events',
+      'Read an EPUB in the native ReaderView: themes, contents, search, marks, notes as React Native views, progress and resume',
     icon: 'reader-outline',
     screen: 'Reader',
     implemented: true,

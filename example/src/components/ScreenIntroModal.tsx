@@ -143,7 +143,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   Reader: {
     title: 'Native reader',
-    body: 'This screen shows the reader API: an EPUB becomes a ReaderDocument with stable block IDs and is shown in the native ReaderView. Your own React Native views (inserts) sit in the reading flow, and the log lists the reading events (visible range, furthest position, section end, jumps).',
+    body: 'This screen shows the reader API: an EPUB becomes a ReaderDocument with stable block IDs and is shown in the native ReaderView. Change the appearance, jump through the contents, search, mark paragraphs and add notes. Notes and chapter-end cards are your own React Native views inside the reading flow; progress, jumps and resume come from the reader events.',
   },
 };
 

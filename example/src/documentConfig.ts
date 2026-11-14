@@ -126,30 +126,30 @@ export const DOCUMENT_FILES: DocumentFileInfo[] = [
 /** EPUBs for the Reader screen (native ReaderView). */
 export const READER_FILES: DocumentFileInfo[] = [
   {
-    id: TEST_EDOC_FILES.STRUCTURE_EPUB,
-    name: 'Structure — EPUB',
+    id: TEST_EDOC_FILES.FRANKENSTEIN_EPUB,
+    name: 'Frankenstein — EPUB',
     description:
-      'Headings, inline image, separator, pre text, image spine item, nav TOC titles',
+      'A real book (Standard Ebooks, public domain): contents, title page image, front and back matter',
     extract: 'document',
     expect: 'text',
-    section: 'Reader samples',
+    section: 'Books',
   },
   {
     id: TEST_EDOC_FILES.LONG_EPUB,
     name: 'Long book — EPUB',
-    description: '40 chapters, 6160 blocks: virtualization, flings and jumps',
+    description: '40 chapters, 6160 blocks: fast scrolling, jumps and search',
     extract: 'document',
     expect: 'text',
-    section: 'Reader samples',
+    section: 'Books',
   },
   {
-    id: TEST_EDOC_FILES.FRANKENSTEIN_EPUB,
-    name: 'Frankenstein — EPUB',
+    id: TEST_EDOC_FILES.STRUCTURE_EPUB,
+    name: 'Structure — EPUB',
     description:
-      'Real book (Standard Ebooks, CC0): nav TOC, SVG title page, front and back matter',
+      'Headings, inline image, separator, preformatted text and an image page',
     extract: 'document',
     expect: 'text',
-    section: 'Reader samples',
+    section: 'Structure samples',
   },
   {
     id: TEST_EDOC_FILES.MIXED_EPUB,
@@ -157,7 +157,7 @@ export const READER_FILES: DocumentFileInfo[] = [
     description: 'Text chapters and an image-only page',
     extract: 'document',
     expect: 'mixed',
-    section: 'Reader samples',
+    section: 'Structure samples',
   },
   {
     id: TEST_EDOC_FILES.HELLO_EPUB,
@@ -165,6 +165,6 @@ export const READER_FILES: DocumentFileInfo[] = [
     description: 'Short text-only EPUB',
     extract: 'document',
     expect: 'text',
-    section: 'Reader samples',
+    section: 'Structure samples',
   },
 ];

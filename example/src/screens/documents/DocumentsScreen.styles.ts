@@ -247,15 +247,4 @@ export const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
-  readerLog: {
-    minHeight: 60,
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: '#F9FAFB',
-  },
-  readerLogLine: {
-    fontFamily: 'Menlo',
-    fontSize: 11,
-    color: '#374151',
-  },
 });
