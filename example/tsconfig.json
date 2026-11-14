@@ -35,7 +35,9 @@
       "react-native-sherpa-onnx/codec": ["../src/codec/index.ts"],
       "react-native-sherpa-onnx/videopreview": ["../src/videopreview/index.ts"],
       "react-native-sherpa-onnx/ocr": ["../src/ocr/index.ts"],
-      "react-native-sherpa-onnx/pdf": ["../src/pdf/index.ts"]
+      "react-native-sherpa-onnx/pdf": ["../src/pdf/index.ts"],
+      "react-native-sherpa-onnx/document": ["../src/document/index.ts"],
+      "react-native-sherpa-onnx/reader": ["../src/reader/index.ts"]
     }
   },
   "include": ["src/**/*"]

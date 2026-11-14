@@ -1,0 +1,116 @@
+import {
+  codegenNativeCommands,
+  codegenNativeComponent,
+  type CodegenTypes,
+  type ColorValue,
+  type HostComponent,
+  type ViewProps,
+} from 'react-native';
+import type * as React from 'react';
+
+type InsertSpec = Readonly<{
+  key: string;
+  /** `sectionEnd` | `beforeBlock` | `afterBlock`. */
+  kind: string;
+  /** Section ID or block ID, depending on `kind`. */
+  target: string;
+}>;
+
+type ReadyEvent = Readonly<{
+  blockCount: CodegenTypes.Int32;
+  sectionCount: CodegenTypes.Int32;
+}>;
+
+type VisibleRangeEvent = Readonly<{
+  firstSectionId: string;
+  firstBlockId: string;
+  lastSectionId: string;
+  lastBlockId: string;
+  firstOffset: CodegenTypes.Int32;
+  settled: boolean;
+  visibleInsertKeys: string[];
+}>;
+
+type LocatorEvent = Readonly<{
+  sectionId: string;
+  blockId: string;
+  offset: CodegenTypes.Int32;
+}>;
+
+type SectionEndEvent = Readonly<{
+  sectionId: string;
+  blockId: string;
+}>;
+
+type JumpEvent = Readonly<{
+  fromSectionId: string;
+  fromBlockId: string;
+  toSectionId: string;
+  toBlockId: string;
+  distance: CodegenTypes.Int32;
+  cause: string;
+}>;
+
+type TapEvent = Readonly<{
+  blockId: string;
+}>;
+
+type ErrorEvent = Readonly<{
+  code: string;
+  message: string;
+}>;
+
+export interface NativeProps extends ViewProps {
+  documentId?: CodegenTypes.WithDefault<string, ''>;
+  documentRevision?: CodegenTypes.WithDefault<CodegenTypes.Int32, 0>;
+  initialSectionId?: CodegenTypes.WithDefault<string, ''>;
+  initialBlockId?: CodegenTypes.WithDefault<string, ''>;
+  initialOffset?: CodegenTypes.WithDefault<CodegenTypes.Int32, -1>;
+  furthestBlockId?: CodegenTypes.WithDefault<string, ''>;
+  /** Bumped by JS whenever the app sets a new frontier. */
+  furthestRevision?: CodegenTypes.WithDefault<CodegenTypes.Int32, 0>;
+  fontFamily?: CodegenTypes.WithDefault<string, ''>;
+  fontSize?: CodegenTypes.WithDefault<CodegenTypes.Float, 18>;
+  /** -1 = follow the system font scale. */
+  fontScale?: CodegenTypes.WithDefault<CodegenTypes.Float, -1>;
+  maxFontScale?: CodegenTypes.WithDefault<CodegenTypes.Float, 0>;
+  lineHeight?: CodegenTypes.WithDefault<CodegenTypes.Float, 1.5>;
+  paragraphSpacing?: CodegenTypes.WithDefault<CodegenTypes.Float, 0.75>;
+  marginHorizontal?: CodegenTypes.WithDefault<CodegenTypes.Float, 20>;
+  marginVertical?: CodegenTypes.WithDefault<CodegenTypes.Float, 24>;
+  textAlign?: CodegenTypes.WithDefault<string, 'start'>;
+  hyphenation?: CodegenTypes.WithDefault<boolean, true>;
+  textColor?: ColorValue;
+  accentColor?: ColorValue;
+  inserts?: ReadonlyArray<InsertSpec>;
+  jumpThreshold?: CodegenTypes.WithDefault<CodegenTypes.Int32, 20>;
+  /** Spike/testing only: placeholder rows when there is no document. */
+  debugRowCount?: CodegenTypes.WithDefault<CodegenTypes.Int32, 0>;
+  onReaderReady?: CodegenTypes.DirectEventHandler<ReadyEvent>;
+  onVisibleRangeChange?: CodegenTypes.DirectEventHandler<VisibleRangeEvent>;
+  onFurthestPositionChange?: CodegenTypes.DirectEventHandler<LocatorEvent>;
+  onSectionEnd?: CodegenTypes.DirectEventHandler<SectionEndEvent>;
+  onJump?: CodegenTypes.DirectEventHandler<JumpEvent>;
+  onReaderTap?: CodegenTypes.DirectEventHandler<TapEvent>;
+  onReaderError?: CodegenTypes.DirectEventHandler<ErrorEvent>;
+}
+
+type ComponentType = HostComponent<NativeProps>;
+
+interface NativeCommands {
+  scrollToLocator: (
+    viewRef: React.ElementRef<ComponentType>,
+    sectionId: string,
+    blockId: string,
+    offset: CodegenTypes.Int32,
+    animated: boolean
+  ) => void;
+}
+
+export const Commands: NativeCommands = codegenNativeCommands<NativeCommands>({
+  supportedCommands: ['scrollToLocator'],
+});
+
+export default codegenNativeComponent<NativeProps>(
+  'SherpaReaderView'
+) as ComponentType;
