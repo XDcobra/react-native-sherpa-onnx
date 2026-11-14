@@ -59,6 +59,7 @@ import { useOcrModelInit } from '../../hooks/useOcrModelInit';
 import { useTtsModelInit } from '../../hooks/useTtsModelInit';
 import {
   DOCUMENT_FILES,
+  READER_FILES,
   type DocumentExtractKind,
   type DocumentFileInfo,
 } from '../../documentConfig';
@@ -67,6 +68,13 @@ import {
   toFileSource,
 } from '../../utils/fileSourceFromUri';
 import { styles } from './DocumentsScreen.styles';
+import { ReaderReadAloudPanel } from './ReaderReadAloudPanel';
+
+/** Read-aloud examples plus the reader samples (long books for highlight / follow). */
+const READ_ALOUD_FILES: DocumentFileInfo[] = [
+  ...DOCUMENT_FILES,
+  ...READER_FILES.filter((f) => !DOCUMENT_FILES.some((d) => d.id === f.id)),
+];
 
 type ExtractStatus =
   | 'idle'
@@ -235,6 +243,11 @@ export default function DocumentsScreen() {
   const [speakBusy, setSpeakBusy] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState<number | null>(null);
+  /** EPUB with a reading structure: shown in the ReaderView with read-aloud highlights. */
+  const [readerInput, setReaderInput] = useState<{
+    source: FileSource;
+    textBuffer: OfflineTextBufferRef;
+  } | null>(null);
 
   const textBufRef = useRef<OfflineTextBufferRef | null>(null);
   const ocrTextBufRef = useRef<OfflineTextBufferRef | null>(null);
@@ -469,6 +482,7 @@ export default function DocumentsScreen() {
       setResultText('');
       setSpans([]);
       setHighlightIndex(null);
+      setReaderInput(null);
       setTtsError(null);
       await stopPlayback();
       await releaseAudioBuf();
@@ -528,6 +542,9 @@ export default function DocumentsScreen() {
             await runExtractImages(source);
           } else {
             applyReadingOrder(loaded.text, loaded.spatial, '', [], false);
+            if (result.structure) {
+              setReaderInput({ source, textBuffer: textOut });
+            }
           }
           return;
         } catch (err) {
@@ -978,6 +995,18 @@ export default function DocumentsScreen() {
     );
   };
 
+  const getTtsEngine = useCallback(
+    () => tts.engineRef.current,
+    [tts.engineRef]
+  );
+  const parsedSpeakerId = Number.isFinite(parseInt(tts.speakerId, 10))
+    ? parseInt(tts.speakerId, 10)
+    : 0;
+  const parsedSpeed =
+    Number.isFinite(parseFloat(tts.speed)) && parseFloat(tts.speed) > 0
+      ? parseFloat(tts.speed)
+      : 1;
+
   const busy =
     extractBusy || imageExtractBusy || ocrBusy || speakBusy || ocr.initBusy;
   const imageProgressPercent =
@@ -987,7 +1016,7 @@ export default function DocumentsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} nestedScrollEnabled>
         <ScreenIntroModal screenId="Documents" />
         <View style={styles.header}>
           <Ionicons name="book-outline" size={48} style={styles.icon} />
@@ -1028,7 +1057,7 @@ export default function DocumentsScreen() {
             disabled={extractBusy}
             selectedLabel={sourceLabel}
             selectedDescription={
-              DOCUMENT_FILES.find((file) => file.id === selectedId)
+              READ_ALOUD_FILES.find((file) => file.id === selectedId)
                 ?.description ?? null
             }
             exampleListTitle="Choose an example document"
@@ -1038,7 +1067,7 @@ export default function DocumentsScreen() {
             }}
             renderExampleList={({ disabled, collapse }) => (
               <ExampleDocumentFileList
-                files={DOCUMENT_FILES}
+                files={READ_ALOUD_FILES}
                 selectedId={selectedId}
                 onSelect={(file) => {
                   collapse();
@@ -1214,30 +1243,44 @@ export default function DocumentsScreen() {
           ) : null}
           {extractBusy ? (
             <ActivityIndicator color="#007AFF" />
+          ) : readerInput ? (
+            <ReaderReadAloudPanel
+              key={readerInput.textBuffer.bufferId}
+              textBuffer={readerInput.textBuffer}
+              source={readerInput.source}
+              getEngine={getTtsEngine}
+              sampleRate={tts.modelInfo?.sampleRate ?? 16000}
+              speakerId={parsedSpeakerId}
+              speed={parsedSpeed}
+              ttsReady={Boolean(tts.selectedModelType) && !tts.loading}
+              onError={setTtsError}
+            />
           ) : imageStepUnlocked ? (
             renderOriginBlocks()
           ) : (
             renderHighlightedText()
           )}
-          <TouchableOpacity
-            style={[
-              styles.primaryButton,
-              (speakBusy || extractBusy || ocrBusy || !canSpeak) &&
-                styles.buttonDisabled,
-            ]}
-            onPress={() => {
-              handleSpeak().catch(() => {});
-            }}
-            disabled={speakBusy || extractBusy || ocrBusy || !canSpeak}
-          >
-            {speakBusy ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.primaryButtonText}>
-                {playing ? 'Speaking…' : 'Speak'}
-              </Text>
-            )}
-          </TouchableOpacity>
+          {readerInput ? null : (
+            <TouchableOpacity
+              style={[
+                styles.primaryButton,
+                (speakBusy || extractBusy || ocrBusy || !canSpeak) &&
+                  styles.buttonDisabled,
+              ]}
+              onPress={() => {
+                handleSpeak().catch(() => {});
+              }}
+              disabled={speakBusy || extractBusy || ocrBusy || !canSpeak}
+            >
+              {speakBusy ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  {playing ? 'Speaking…' : 'Speak'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          )}
           {playing ? (
             <TouchableOpacity
               style={styles.secondaryButton}

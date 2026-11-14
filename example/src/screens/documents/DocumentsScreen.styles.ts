@@ -219,4 +219,43 @@ export const styles = StyleSheet.create({
   originChipTextOcr: {
     color: '#C2410C',
   },
+  readerPanel: {
+    gap: 10,
+  },
+  readerBox: {
+    height: 480,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  readerView: {
+    flex: 1,
+  },
+  followButton: {
+    position: 'absolute',
+    bottom: 12,
+    alignSelf: 'center',
+    minHeight: 44,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    backgroundColor: '#2563EB',
+    justifyContent: 'center',
+  },
+  followButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  readerLog: {
+    minHeight: 60,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#F9FAFB',
+  },
+  readerLogLine: {
+    fontFamily: 'Menlo',
+    fontSize: 11,
+    color: '#374151',
+  },
 });
