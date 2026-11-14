@@ -97,8 +97,10 @@ export interface NativeProps extends ViewProps {
   maxFontScale?: CodegenTypes.WithDefault<CodegenTypes.Float, 0>;
   lineHeight?: CodegenTypes.WithDefault<CodegenTypes.Float, 1.5>;
   paragraphSpacing?: CodegenTypes.WithDefault<CodegenTypes.Float, 0.75>;
-  marginHorizontal?: CodegenTypes.WithDefault<CodegenTypes.Float, 20>;
-  marginVertical?: CodegenTypes.WithDefault<CodegenTypes.Float, 24>;
+  // Not `marginHorizontal` / `marginVertical`: Fabric would also read those
+  // as Yoga layout margins of the view itself.
+  readerMarginHorizontal?: CodegenTypes.WithDefault<CodegenTypes.Float, 20>;
+  readerMarginVertical?: CodegenTypes.WithDefault<CodegenTypes.Float, 24>;
   textAlign?: CodegenTypes.WithDefault<string, 'start'>;
   hyphenation?: CodegenTypes.WithDefault<boolean, true>;
   textColor?: ColorValue;

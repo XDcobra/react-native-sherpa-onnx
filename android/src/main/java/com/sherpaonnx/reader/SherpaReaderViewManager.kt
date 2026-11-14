@@ -85,9 +85,9 @@ class SherpaReaderViewManager :
 
   override fun setParagraphSpacing(view: SherpaReaderView, value: Float) = view.setParagraphSpacing(value)
 
-  override fun setMarginHorizontal(view: SherpaReaderView, value: Float) = view.setMarginHorizontal(value)
+  override fun setReaderMarginHorizontal(view: SherpaReaderView, value: Float) = view.setMarginHorizontal(value)
 
-  override fun setMarginVertical(view: SherpaReaderView, value: Float) = view.setMarginVertical(value)
+  override fun setReaderMarginVertical(view: SherpaReaderView, value: Float) = view.setMarginVertical(value)
 
   override fun setTextAlign(view: SherpaReaderView, value: String?) = view.setTextAlign(value)
 

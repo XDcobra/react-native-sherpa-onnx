@@ -280,8 +280,8 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
   t.bodyFont = font;
   t.lineHeightMultiple = p.lineHeight > 0 ? p.lineHeight : 1.5;
   t.paragraphSpacing = (p.paragraphSpacing >= 0 ? p.paragraphSpacing : 0.75) * size;
-  t.marginHorizontal = p.marginHorizontal;
-  t.marginVertical = p.marginVertical;
+  t.marginHorizontal = p.readerMarginHorizontal;
+  t.marginVertical = p.readerMarginVertical;
   t.alignment = p.textAlign == "justify" ? NSTextAlignmentJustified : NSTextAlignmentNatural;
   t.hyphenation = p.hyphenation;
   t.textColor = p.textColor ? RCTUIColorFromSharedColor(p.textColor) : UIColor.labelColor;
@@ -294,8 +294,8 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 {
   return a.fontFamily != b.fontFamily || a.fontSize != b.fontSize || a.fontScale != b.fontScale ||
       a.maxFontScale != b.maxFontScale || a.lineHeight != b.lineHeight ||
-      a.paragraphSpacing != b.paragraphSpacing || a.marginHorizontal != b.marginHorizontal ||
-      a.marginVertical != b.marginVertical || a.textAlign != b.textAlign ||
+      a.paragraphSpacing != b.paragraphSpacing || a.readerMarginHorizontal != b.readerMarginHorizontal ||
+      a.readerMarginVertical != b.readerMarginVertical || a.textAlign != b.textAlign ||
       a.hyphenation != b.hyphenation || a.textColor != b.textColor || a.accentColor != b.accentColor;
 }
 
