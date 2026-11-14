@@ -316,6 +316,9 @@ set(SOURCES
     document/DocComic.cpp
     document/DocMobi.cpp
     document/DocTextPopulate.cpp
+    reader/ReaderTextHash.cpp
+    reader/ReaderRegistry.cpp
+    reader/ReaderTracker.cpp
     ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
     jni/document/sherpa-onnx-document-jni.cpp
     codec/CodecTypes.cpp

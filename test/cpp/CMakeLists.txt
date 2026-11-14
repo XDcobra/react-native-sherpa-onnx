@@ -983,6 +983,52 @@ set_tests_properties(document_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
 )
 
+# Reader core (structure → ReaderDocument, textHash, tracker); reuses the
+# document extractor for fixture-based tests.
+set(READER_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp")
+add_executable(reader_host_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/reader/reader_host_test.cpp"
+  "${READER_CPP_ROOT}/reader/ReaderTextHash.cpp"
+  "${READER_CPP_ROOT}/reader/ReaderRegistry.cpp"
+  "${READER_CPP_ROOT}/reader/ReaderTracker.cpp"
+  "${READER_CPP_ROOT}/crypto/sha256.cpp"
+  "${DOC_CPP_ROOT}/DocumentExtractor.cpp"
+  "${DOC_CPP_ROOT}/DocArchive.cpp"
+  "${DOC_CPP_ROOT}/DocSniff.cpp"
+  "${DOC_CPP_ROOT}/DocHtmlText.cpp"
+  "${DOC_CPP_ROOT}/DocEpub.cpp"
+  "${DOC_CPP_ROOT}/DocFb2.cpp"
+  "${DOC_CPP_ROOT}/DocComic.cpp"
+  "${DOC_CPP_ROOT}/DocMobi.cpp"
+  "${DOC_REPO_ROOT}/third_party/pugixml/src/pugixml.cpp"
+  "${DOC_IMAGE_ROOT}/decode/ImageDecoder.cpp"
+)
+target_include_directories(reader_host_test PRIVATE
+  "${READER_CPP_ROOT}"
+  "${READER_CPP_ROOT}/reader"
+  "${DOC_CPP_ROOT}"
+  "${DOC_REPO_ROOT}/third_party/pugixml/src"
+  "${DOC_IMAGE_ROOT}"
+  "${DOC_IMAGE_ROOT}/decode"
+)
+target_link_libraries(reader_host_test PRIVATE ${PDF_GTEST_LIBS})
+target_compile_definitions(reader_host_test PRIVATE
+  SHERPA_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../.."
+)
+if(SHERPA_ONNX_HOST_ENABLE_LEXBOR AND LIBARCHIVE_INCLUDE_DIR AND LIBARCHIVE_LIBRARY)
+  target_include_directories(reader_host_test PRIVATE
+    "${DOC_REPO_ROOT}/third_party/lexbor/source" "${LIBARCHIVE_INCLUDE_DIR}")
+  target_link_libraries(reader_host_test PRIVATE lexbor_static "${LIBARCHIVE_LIBRARY}")
+  target_compile_definitions(reader_host_test PRIVATE
+    SHERPA_ONNX_HAS_LEXBOR=1 HAVE_LIBARCHIVE=1)
+  add_test(NAME reader_host_test COMMAND $<TARGET_FILE:reader_host_test>)
+  set_tests_properties(reader_host_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
+  )
+else()
+  message(STATUS "reader_host_test: needs lexbor + libarchive (skipped)")
+endif()
+
 # --- Shared codec layer (no video/image includes) ---
 set(CODEC_CPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp")
 set(CODEC_SOURCES

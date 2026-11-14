@@ -97,6 +97,8 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/pdf/**/*.{h,cpp}",
     # Portable SHA-256 (reader textHash / documentKey; Android archive checksums).
     "android/src/main/cpp/crypto/*.{h,cpp}",
+    # Shared reader core (ReaderDocument registry, textHash, reading tracker).
+    "android/src/main/cpp/reader/*.{h,cpp}",
     # Shared e-document extractor (EPUB/FB2/CBZ/CBR). JNI excluded below.
     "android/src/main/cpp/document/*.{h,hpp,cpp}",
     # Shared seekable FileSource (document/ + pdf/).

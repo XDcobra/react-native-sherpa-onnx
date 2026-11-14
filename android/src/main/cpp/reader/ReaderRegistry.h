@@ -1,0 +1,62 @@
+#pragma once
+
+#include "ReaderDocument.h"
+
+#include <mutex>
+
+namespace sherpa_onnx {
+namespace reader {
+
+inline constexpr const char* kErrReaderNotFound = "ERR_READER_NOT_FOUND";
+inline constexpr const char* kErrReaderNoStructure = "ERR_READER_NO_STRUCTURE";
+inline constexpr const char* kErrReaderUnsupportedStructure = "ERR_READER_UNSUPPORTED_STRUCTURE";
+inline constexpr const char* kErrReaderInvalidArgument = "ERR_READER_INVALID_ARGUMENT";
+
+struct ReaderError {
+  std::string code;
+  std::string message;
+};
+
+/**
+ * Native reader documents (`rdr_*`). Each document is an immutable snapshot;
+ * inserting / removing an app section publishes a new snapshot with a higher
+ * revision, so views keep reading a consistent state.
+ */
+class ReaderRegistry {
+ public:
+  static ReaderRegistry& Instance();
+
+  /**
+   * @param text populated offline text buffer with a reading structure.
+   * @param frameHrefs href of every frame of `imageBufferId` (may be empty).
+   * @return document ID, or "" with `err`.
+   */
+  std::string Create(std::shared_ptr<TxtOfflineEntry> text, const std::string& imageBufferId,
+                     const std::vector<std::string>& frameHrefs, const std::string& documentKey,
+                     ReaderError* err);
+
+  bool InsertSection(const std::string& documentId, const ReaderAppSectionInput& section,
+                     ReaderError* err);
+  bool RemoveSection(const std::string& documentId, const std::string& sectionId,
+                     ReaderError* err);
+
+  std::shared_ptr<const ReaderSnapshot> Snapshot(const std::string& documentId) const;
+  bool Release(const std::string& documentId);
+
+ private:
+  mutable std::mutex mutex_;
+  std::unordered_map<std::string, std::shared_ptr<const ReaderSnapshot>> docs_;
+  uint64_t nextId_ = 1;
+};
+
+/** Rebuilds the ID maps of a snapshot after its sections / blocks changed. */
+void ReindexSnapshot(ReaderSnapshot* snap);
+
+/**
+ * Index of the block whose textHash equals `textHash`, nearest to `hintIndex`;
+ * -1 if none. Used to remap stored positions after a structure change.
+ */
+int RemapBlockByHash(const ReaderSnapshot& snap, const std::string& textHash, int hintIndex);
+
+}  // namespace reader
+}  // namespace sherpa_onnx
