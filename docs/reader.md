@@ -93,23 +93,23 @@ Details: [Read aloud](#read-aloud).
 
 ### From file to view
 
-```
-EPUB ──extractDocumentText──▶ text buffer + structure ─┐
-     ──extractDocumentImages(scope: 'all')──▶ images ──┼─▶ ReaderDocument ──▶ <ReaderView>
-     ──computeDocumentKey──▶ documentKey ─────────────┘   (stable IDs, app sections)
-```
-
-`loadReaderDocument(source)` runs all three steps. Use `createReaderDocument` when you already extracted the text, for example to synthesize it as well.
-
-PDFs and comics are page-based:
-
-```
-PDF ──extractPdfTextLayer(layout: 'paragraphs')──▶ text buffer + structure ─┐
-    ──rasterizePdfPages(strategy: 'lazy-lru')──▶ page images ───────────────┼─▶ ReaderDocument
-CBZ ──extractDocumentImages(strategy: 'lazy-lru')──▶ page images ──▶ createReaderDocument({ pages })
+```mermaid
+flowchart LR
+  E["EPUB · FB2 · MOBI"] -->|extractDocumentText| T[text buffer + structure]
+  E -->|"extractDocumentImages(scope: 'all')"| I[images]
+  P[PDF] -->|"extractPdfTextLayer(layout: 'paragraphs')"| T
+  P -->|"rasterizePdfPages(strategy: 'lazy-lru')"| G[page images]
+  C[CBZ] -->|"extractDocumentImages(strategy: 'lazy-lru')"| G
+  T --> D[ReaderDocument]
+  I --> D
+  G --> D
+  K["computeDocumentKey(file)"] --> D
+  D --> V[ReaderView]
 ```
 
-Each page is a section (`kind: 'page'`) whose first block, `s{n}.b0`, is the page image (`type: 'page'`); the page's text blocks follow. `pageDisplay` on the view chooses what is shown: the text, the page images, or both ([Pages](#pages)).
+`loadReaderDocument(source)` runs these steps for every format. Use `createReaderDocument` when you already have the buffers, for example to synthesize the text as well.
+
+In PDFs and comics, each page is a section (`kind: 'page'`) whose first block, `s{n}.b0`, is the page image (`type: 'page'`); the page's text blocks follow. `pageDisplay` on the view chooses what is shown: the text, the page images, or both ([Pages](#pages)).
 
 ### Stable IDs and locators
 
@@ -223,7 +223,7 @@ await saveReaderRecognition(doc, { kind: 'app', base: 'documents', path: 'book.o
 doc = await loadReaderRecognition(doc, { kind: 'app', base: 'documents', path: 'book.ocr' });
 ```
 
-Saves the document's recognized pages to a sidecar file, and loads them back in a later session without running OCR again. The file holds each page's text blocks with their type, place, line boxes and text. Encoding, writing, reading and attaching happen natively, so no text crosses the bridge. Loading rejects a file of another book (`documentKey`), of another model (when you pass `modelId` on save and load and they differ), and one with pages this document does not have (`ERR_READER_SIDECAR_MISMATCH`). It also rejects a corrupt file (`ERR_READER_SIDECAR_INVALID`).
+Saves the document's recognized pages to a sidecar file, and loads them back in a later session without running OCR again. Loading rejects a file of another book (`documentKey`), of another model (when you pass `modelId` on save and load and they differ), and one with pages this document does not have (`ERR_READER_SIDECAR_MISMATCH`). It also rejects a corrupt file (`ERR_READER_SIDECAR_INVALID`).
 
 #### `computeDocumentKey(source)`
 
@@ -602,7 +602,7 @@ Page sections (PDF pages, comic pages) start with their page image; `pageDisplay
 | `'imageAndText'` | The page image, then its text | Running headers, footers and page numbers |
 | `'auto'` (default) | `'image'` for page documents (`format: 'pages'`), else `'text'` | |
 
-Hidden blocks still count for reading progress: they belong to the row that shows them (the page, or the nearest text row), so `onFurthestPositionChange` and `onSectionEnd` see every block. In `'image'`, a block counts as visible when at least half of it (or of the viewport) is on screen, from its rectangle on the page; `scrollTo` a block puts its place on the page at the top. Pages are full width without margins, and their height comes from the page size before the page is rendered.
+Hidden blocks still count for reading progress, so `onFurthestPositionChange` and `onSectionEnd` see every block. In `'image'` mode a block counts as visible where it is on the page, and `scrollTo` a block puts its place on the page at the top.
 
 ## Text for scans and comics
 
@@ -621,32 +621,28 @@ const next = await recognizeReaderPages(doc, ocr, {
 
 Each recognized page gets text blocks `s{n}.b0.t{j}` (for an image block, `{imageBlockId}.t{j}`) right after its page block. The blocks are built from what the model returns:
 
-| | `ppocr`, `doctr`, `paddleocr_vl` spotting | `doc_vlm` | `nemotron_parse`, `paddleocr_vl` (Markdown) |
+| | `ppocr`, `doctr`, `paddleocr_vl` (spotting) | `doc_vlm` | `nemotron_parse`, `paddleocr_vl` (Markdown) |
 | --- | --- | --- | --- |
 | Paragraphs | From the line boxes: reading order, columns, gaps, indents, line ends | The model's items | The Markdown blocks |
 | Headings | — (a clearly larger line is its own paragraph) | Title → level 1, section header → its level | `#` → title / section header |
 | Running headers, page numbers | A lone page number at the top or bottom of the page | Page header / footer elements | — |
-| Place on the page | Union of the paragraph's line boxes | The element's box | — (the whole page) |
+| Highlights on the page image | On the line; a word is placed by its share of the line | On the element's box | On the whole page: the model returns no positions |
 
-The same scanned page with each model, from the example app (iOS simulator on an Apple M4, one page). Top: `'text'` mode. Bottom: `'image'` mode after searching for "lighthouse"; the hit is drawn over the page image, on its line where the model returns positions and over the whole page where it does not.
+The same scanned page with each model:
 
-| `ppocrv6-tiny` | `doctr-mobile` | `docvlm-granite-258m-fp32` | `nemotron-3.5-parse-int8` | `paddleocr-vl-1.6-fp16` |
-| --- | --- | --- | --- | --- |
-| <img src="./images/example/reader_ocr_ppocr_text.png" alt="PP-OCR: lines joined into paragraphs, no headings" width="160" /> | <img src="./images/example/reader_ocr_doctr_text.png" alt="docTR: lines joined into paragraphs, no headings" width="160" /> | <img src="./images/example/reader_ocr_docvlm_text.png" alt="Document VLM: title and section header as headings" width="160" /> | <img src="./images/example/reader_ocr_nemotron_text.png" alt="Nemotron Parse: Markdown headings and paragraphs" width="160" /> | <img src="./images/example/reader_ocr_paddleocr_vl_text.png" alt="PaddleOCR-VL: paragraphs" width="160" /> |
-| <img src="./images/example/reader_ocr_ppocr_image.png" alt="PP-OCR: search hit on its line" width="160" /> | <img src="./images/example/reader_ocr_doctr_image.png" alt="docTR: search hit on its line" width="160" /> | <img src="./images/example/reader_ocr_docvlm_image.png" alt="Document VLM: search hit inside its paragraph box" width="160" /> | <img src="./images/example/reader_ocr_nemotron_image.png" alt="Nemotron Parse: search hit over the whole page" width="160" /> | <img src="./images/example/reader_ocr_paddleocr_vl_image.png" alt="PaddleOCR-VL: search hit over the whole page" width="160" /> |
-| 2 s | 2 s | 31 s | 18 min | 67 s |
+| | `ppocr` | `doctr` | `doc_vlm` | `nemotron_parse` | `paddleocr_vl` (spotting) |
+| --- | --- | --- | --- | --- | --- |
+| `'text'` mode | <img src="./images/example/reader_ocr_ppocr_text.png" alt="Paragraphs, no headings" width="140" /> | <img src="./images/example/reader_ocr_doctr_text.png" alt="Paragraphs, no headings" width="140" /> | <img src="./images/example/reader_ocr_docvlm_text.png" alt="Title and section header as headings" width="140" /> | <img src="./images/example/reader_ocr_nemotron_text.png" alt="Markdown headings and paragraphs" width="140" /> | <img src="./images/example/reader_ocr_paddleocr_vl_text.png" alt="Paragraphs, no headings" width="140" /> |
+| `'image'` mode, a search hit | <img src="./images/example/reader_ocr_ppocr_image.png" alt="The hit on its line" width="140" /> | <img src="./images/example/reader_ocr_doctr_image.png" alt="The hit on its line" width="140" /> | <img src="./images/example/reader_ocr_docvlm_image.png" alt="The hit on its paragraph" width="140" /> | <img src="./images/example/reader_ocr_nemotron_image.png" alt="The hit over the whole page" width="140" /> | <img src="./images/example/reader_ocr_paddleocr_vl_image.png" alt="The hit on its line" width="140" /> |
+| Time per page vs. the fastest | Fastest | Fastest | +1,450 % | +53,500 % | +3,000 % |
 
-Times are for the simulator and only show the order of magnitude; phones differ. For `doc_vlm`, use the `fp32` pack: `q8` is smaller and faster but can repeat a line until `maxNewTokens`, and `fp16` / `q4f16` currently return no text (see [Offline OCR](./ocr-offline.md)). When a model returns nothing for a page, `onProgress` reports `hasText: false` and the page keeps showing its image.
-
-The blocks are text blocks like any other: they show in `'text'` mode (the page image is then hidden), count for reading progress, can be highlighted and searched. In `'image'` mode they count as visible where they are on the page. A page's first heading becomes the section title when the section has none.
-
-To keep the recognized text between sessions, save it with `saveReaderRecognition` and load it with `loadReaderRecognition`; the document then has the same blocks as after OCR.
+OCR blocks work like any other block: they can be highlighted, searched and read aloud, and in `'text'` mode highlights sit on the words for every model. A page's first heading becomes the section title when the section has none. To keep the text between sessions, save it with `saveReaderRecognition` and load it with `loadReaderRecognition`.
 
 Block IDs of OCR text are stable for the same model and settings only; recognizing a page again replaces its blocks. Store positions on OCR pages by the page block (`s{n}.b0`) or keep the `textHash` (see [remapLocator](#remaplocatordoc-stored-hint)).
 
 ## Structure rules
 
-`structureVersion` describes how an EPUB is split into sections and blocks. The rules below change only together with that number; a golden file in the native tests guards them.
+`structureVersion` describes how an EPUB is split into sections and blocks. The rules below change only together with that number.
 
 - **Sections** are the linear spine items, numbered from 0. Items with `linear="no"` are skipped.
 - **Block-forming tags:** `p`, `h1`–`h6`, `li`, `blockquote`, `pre`, `td`.

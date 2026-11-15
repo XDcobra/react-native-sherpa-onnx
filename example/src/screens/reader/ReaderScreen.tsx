@@ -227,6 +227,7 @@ export default function ReaderScreen() {
     );
   }, [setCustomInitForm]);
   const [direction, setDirection] = useState<'ltr' | 'rtl'>('ltr');
+  const [paddleTask, setPaddleTask] = useState<'ocr' | 'spotting'>('ocr');
   const [ocrScope, setOcrScope] = useState<OcrScope>('around');
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrProgress, setOcrProgress] = useState<{
@@ -324,7 +325,12 @@ export default function ReaderScreen() {
           scope: scope === 'page' ? { sections: [page] } : scope,
           force: scope === 'page',
           at: position,
-          recognize: { readingDirection: direction },
+          recognize: {
+            readingDirection: direction,
+            ...(engine.family === 'paddleocr_vl'
+              ? { instruction: { task: paddleTask } }
+              : {}),
+          },
           onDocument: apply,
           onProgress: (e) => {
             if (!e.hasText) empty += 1;
@@ -360,7 +366,7 @@ export default function ReaderScreen() {
         setOcrProgress(null);
       }
     },
-    [direction, ocr.engineRef, position]
+    [direction, ocr.engineRef, paddleTask, position]
   );
 
   // Recognized text is saved per book (documentKey) in the app's documents folder.
@@ -914,6 +920,8 @@ export default function ReaderScreen() {
                 pages={pageCoverage}
                 direction={direction}
                 onDirection={setDirection}
+                paddleTask={paddleTask}
+                onPaddleTask={setPaddleTask}
                 busy={ocrBusy}
                 progress={ocrProgress}
                 status={ocrStatus}

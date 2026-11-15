@@ -47,7 +47,7 @@ const FAMILY_RESULT: Record<OcrFamily, { name: string; result: string }> = {
   paddleocr_vl: {
     name: 'PaddleOCR-VL',
     result:
-      'Text in paragraphs. No places on the page, so highlights cover the whole page. Large.',
+      'Task Text: paragraphs without places on the page, so highlights cover the whole page. Task Spotting: lines with their places, like PP-OCR. Large.',
   },
 };
 
@@ -229,6 +229,8 @@ export function ReaderOcrPanel({
   pages,
   direction,
   onDirection,
+  paddleTask,
+  onPaddleTask,
   busy,
   progress,
   status,
@@ -244,6 +246,9 @@ export function ReaderOcrPanel({
   pages: { total: number; withText: number };
   direction: 'ltr' | 'rtl';
   onDirection: (d: 'ltr' | 'rtl') => void;
+  /** PaddleOCR-VL task: Markdown text, or lines with their places. */
+  paddleTask: 'ocr' | 'spotting';
+  onPaddleTask: (t: 'ocr' | 'spotting') => void;
   busy: boolean;
   progress: { done: number; total: number } | null;
   status: PanelStatus;
@@ -343,6 +348,17 @@ export function ReaderOcrPanel({
         }
       />
 
+      {family === 'paddleocr_vl' ? (
+        <Choice
+          label="PaddleOCR-VL task"
+          options={['ocr', 'spotting'] as const}
+          value={paddleTask}
+          onChange={onPaddleTask}
+          disabled={busy}
+          format={(t) => (t === 'ocr' ? 'Text' : 'Spotting')}
+        />
+      ) : null}
+
       <Choice
         label="Pages"
         options={['page', 'around', 'all'] as const}
@@ -419,6 +435,7 @@ export function ReaderOcrPanel({
           "recognizeReaderPages(doc, ocr, { scope: 'around', at })",
           "scope: { sections: ['s4'] }, force: true",
           "recognize: { readingDirection: 'rtl' }",
+          "recognize: { instruction: { task: 'spotting' } } // paddleocr_vl",
           'saveReaderRecognition(doc, file) / loadReaderRecognition(doc, file)',
         ]}
       />

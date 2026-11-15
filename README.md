@@ -527,7 +527,7 @@ The SDK exposes a native, virtualized reading view (`react-native-sherpa-onnx/re
 </tr>
 </table>
 
-Full guide: [Reader](./docs/reader.md), with the same page from each OCR model.
+Full guide: [Reader](./docs/reader.md).
 
 ## Video preview
 
