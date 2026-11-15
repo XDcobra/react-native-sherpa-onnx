@@ -141,3 +141,66 @@ TEST(OcrReadingOrder, RaggedLineEndsWhenTheNextWordWouldHaveFit) {
             "The keeper counted the lighthouse lamps every night. It was short.\n\nAnother day "
             "began with fog and rain.");
 }
+
+TEST(OcrReadingOrder, WordBoxesFormLinesInReadingOrder) {
+  // A word detector (doctr): one box per word. Words with ascenders start
+  // higher than the others, and the lines touch (no gap between them), so
+  // sorting the boxes by their top would mix the words up.
+  OcrResult r = Lines({
+      {"lighthouse", 120, 98, 230, 122},
+      {"The", 70, 100, 110, 120},
+      {"keeper", 240, 103, 310, 122},
+      {"counted", 320, 98, 400, 120},
+      {"every", 50, 122, 110, 146},
+      {"evening.", 120, 124, 210, 146},
+  });
+  ArrangeLinesIntoParagraphs(&r, OcrReadingDirection::kLtr);
+  EXPECT_EQ(r.text_utf8, "The lighthouse keeper counted every evening.");
+  // Every word keeps its own span and place.
+  ASSERT_EQ(r.spans.size(), 6u);
+  EXPECT_EQ(SpanText(r, 0), "The");
+  EXPECT_EQ(SpanText(r, 1), "lighthouse");
+  EXPECT_EQ(SpanText(r, 5), "evening.");
+  EXPECT_FLOAT_EQ(r.spans[1].quad.xy[0], 120.f);
+}
+
+TEST(OcrReadingOrder, GrownWordBoxesThatOverlapStillFormALine) {
+  // Detectors grow word boxes: neighbours overlap by up to ~0.5 em here.
+  OcrResult r = Lines({
+      {"narrow", 46, 96, 124, 124},
+      {"book", 114, 94, 176, 124},
+      {"with", 166, 94, 226, 124},
+      {"a", 216, 100, 236, 124},
+      {"green", 226, 98, 300, 128},
+      {"cover.", 290, 98, 366, 124},
+  });
+  ArrangeLinesIntoParagraphs(&r, OcrReadingDirection::kLtr);
+  EXPECT_EQ(r.text_utf8, "narrow book with a green cover.");
+  EXPECT_EQ(r.spans.size(), 6u);
+}
+
+TEST(OcrReadingOrder, GrownLineBoxesThatOverlapStillJoin) {
+  // Line pitch 24, boxes 30 high: adjacent lines overlap by 6 px.
+  OcrResult r = Lines({
+      {"The keeper counted the ships every", 70, 95, 560, 125},
+      {"evening and wrote their names into a", 50, 119, 560, 149},
+      {"narrow book with an exam-", 50, 143, 560, 173},
+      {"ple of it.", 50, 167, 160, 197},
+  });
+  ArrangeLinesIntoParagraphs(&r, OcrReadingDirection::kLtr);
+  EXPECT_EQ(r.text_utf8,
+            "The keeper counted the ships every evening and wrote their names into a narrow book "
+            "with an example of it.");
+}
+
+TEST(OcrReadingOrder, LinesOnOneRowStaySeparateAcrossAGutter) {
+  // Two columns: the lines at the same height are 60 px (3 em) apart.
+  OcrResult r = Lines({
+      {"Left column", 50, 100, 250, 120},
+      {"Right column", 310, 100, 520, 120},
+      {"goes on here.", 50, 124, 250, 144},
+      {"goes on there.", 310, 124, 520, 144},
+  });
+  ArrangeLinesIntoParagraphs(&r, OcrReadingDirection::kLtr);
+  EXPECT_EQ(r.text_utf8, "Left column goes on here.\n\nRight column goes on there.");
+}

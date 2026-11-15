@@ -433,12 +433,19 @@ static OcrGranularity ParseGranularity(NSString *raw) {
         return;
       }
 
+      // The output buffer must exist and be empty (same checks as Android).
       std::string textId = textOutBufferId ? [textOutBufferId UTF8String] : "";
-      std::string existingText;
-      std::string readErr;
-      if (!txt_read_offline_text(textId, &existingText, &readErr)) {
-        reject(@"TEXT_BUFFER_NOT_FOUND",
+      auto textEntry = txt_get_offline_entry(textId);
+      if (!textEntry) {
+        reject(kOcrInvalidArg,
                [NSString stringWithFormat:@"Offline text buffer not found: %@",
+                                          textOutBufferId],
+               nil);
+        return;
+      }
+      if (textEntry->populated) {
+        reject(kOcrAlreadyPopulated,
+               [NSString stringWithFormat:@"Text buffer already populated: %@",
                                           textOutBufferId],
                nil);
         return;

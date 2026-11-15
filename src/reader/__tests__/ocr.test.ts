@@ -6,6 +6,7 @@ const mockNative = {
 };
 const mockText = {
   createEmptyOfflineTextBuffer: jest.fn(),
+  getPipelineTextBufferInfo: jest.fn(),
   releasePipelineTextBuffer: jest.fn(),
 };
 
@@ -21,6 +22,8 @@ jest.mock('../../pdf', () => ({}));
 jest.mock('../../textbuffer', () => ({
   createEmptyOfflineTextBuffer: (...a: unknown[]) =>
     mockText.createEmptyOfflineTextBuffer(...a),
+  getPipelineTextBufferInfo: (...a: unknown[]) =>
+    mockText.getPipelineTextBufferInfo(...a),
   releasePipelineTextBuffer: (...a: unknown[]) =>
     mockText.releasePipelineTextBuffer(...a),
   resolveOfflineTextBufferId: (id: unknown) =>
@@ -78,6 +81,10 @@ describe('reader ocr', () => {
       bufferId: `txt_off_${++n}`,
     }));
     mockText.releasePipelineTextBuffer.mockResolvedValue(undefined);
+    mockText.getPipelineTextBufferInfo.mockResolvedValue({
+      kind: 'offlineTextBuffer',
+      utf16Length: 12,
+    });
     mockNative.attachReaderPageText.mockImplementation(async () =>
       JSON.stringify({ ...DOC, revision: ++revision })
     );
@@ -148,8 +155,28 @@ describe('reader ocr', () => {
       done: 3,
       total: 3,
       sectionId: 's1',
+      hasText: true,
     });
     expect(doc.revision).toBe(4);
+  });
+
+  it('reports a page the model returned no text for', async () => {
+    mockNative.getReaderPages.mockResolvedValue(pages());
+    mockText.getPipelineTextBufferInfo.mockResolvedValueOnce({
+      kind: 'offlineTextBuffer',
+      utf16Length: 0,
+    });
+    const onProgress = jest.fn();
+    await recognizeReaderPages(DOC as never, engine() as never, {
+      scope: { sections: ['s0', 's1'] },
+      onProgress,
+    });
+    expect(onProgress.mock.calls.map((c) => c[0].hasText)).toEqual([
+      false,
+      true,
+    ]);
+    // The page is attached even without text.
+    expect(mockNative.attachReaderPageText).toHaveBeenCalledTimes(2);
   });
 
   it('all with force runs every page; onDocument is throttled but ends on the last value', async () => {

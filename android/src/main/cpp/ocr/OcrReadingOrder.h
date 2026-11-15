@@ -1,7 +1,8 @@
 /**
  * Reading order and paragraphs for line-level OCR (ppocr, doctr, paddleocr_vl
- * spotting): detectors return text lines with boxes in a rough top-to-bottom
- * order and join them with "\n". This puts the lines of one frame into
+ * spotting): detectors return text lines (doctr: words) with boxes in a rough
+ * top-to-bottom order and join them with "\n". Boxes on the same text line are
+ * first grouped into lines (each box keeps its span). This puts the lines of one frame into
  * reading order (columns via recursive XY cuts, right-to-left and vertical
  * text supported), groups them into paragraphs from their geometry and
  * rebuilds the text: lines of a paragraph joined by a space (no space between

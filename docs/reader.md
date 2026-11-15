@@ -10,7 +10,7 @@ Import from `react-native-sherpa-onnx/reader`.
 | --- | --- | --- |
 | Highlights · chapter-end insert · progress | Note insert after a paragraph | Search with all hits marked |
 
-The screenshots are from the [example app](../example/README.md#reader) (`ReaderScreen`). Cards, notes, toolbar and selection bar are app UI built with the public API; the SDK draws the text, images and highlights.
+The screenshots are from the [example app](../example/README.md#reader) (`ReaderScreen`). Cards, notes, toolbar, panels and selection bar are app UI built with the public API; the SDK draws the text, page images and highlights.
 
 What the SDK gives you:
 
@@ -200,7 +200,7 @@ function recognizeReaderPages(
 doc = await recognizeReaderPages(doc, ocr, { scope: 'around', at: position, onDocument: setDoc });
 ```
 
-Recognizes page images one page per `recognize` call and attaches each page's text as it is done. `scope: 'around'` (default) does the page at `at`, `ahead` pages after it (default 2) and `behind` pages before it (default 1). `'all'` does the whole book from the first page, and `{ sections }` does the pages you name. Pages that already have text are skipped unless `force` is set. `onDocument` receives new document values at most every `updateIntervalMs` (default 300) and once at the end. `recognize` passes options such as `readingDirection: 'rtl'` (manga) or a VLM `instruction` to every call. With `signal`, the run stops after the page in progress, and recognized pages keep their text. Run one at a time per document.
+Recognizes page images one page per `recognize` call and attaches each page's text as it is done. `scope: 'around'` (default) does the page at `at`, `ahead` pages after it (default 2) and `behind` pages before it (default 1). `'all'` does the whole book from the first page, and `{ sections }` does the pages you name. Pages that already have text are skipped unless `force` is set. `onDocument` receives new document values at most every `updateIntervalMs` (default 300) and once at the end. `recognize` passes options such as `readingDirection: 'rtl'` (manga) or a VLM `instruction` to every call. `onProgress` reports `{ done, total, sectionId, hasText }` after each page; `hasText: false` means the model returned no text for the page, which keeps showing only its image. With `signal`, the run stops after the page in progress, and recognized pages keep their text. Run one at a time per document.
 
 #### `saveReaderRecognition(doc, destination, options?)` / `loadReaderRecognition(doc, source, options?)`
 
@@ -528,7 +528,7 @@ Rules (shared C++ tracker, identical on iOS and Android):
 
 ## Highlights
 
-![Underline, background and a chapter-end insert](./images/example/reader_highlights_cut.png)
+<p align="center"><img src="./images/example/reader_highlights_cut.png" alt="Underline, background and a chapter-end insert" width="300" /></p>
 
 `highlights` marks any number of ranges at the same time: search hits, the sentence being read, notes, the user's selection.
 
@@ -573,7 +573,7 @@ const inserts = notes.map((n) => ({ key: n.id, at: { afterBlock: n.blockId } }))
 
 ## Read aloud
 
-![Sentence background and word underline while reading aloud](./images/example/reader_read_aloud_cut.png)
+<p align="center"><img src="./images/example/reader_read_aloud_cut.png" alt="Sentence background and word underline while reading aloud" width="300" /></p>
 
 The SDK maps synthesized speech onto the reader, so the sentence or word being spoken can be highlighted and followed.
 
@@ -584,7 +584,7 @@ The SDK maps synthesized speech onto the reader, so the sentence or word being s
    - `textOffset` is where `textIn` starts in the document's text buffer when you synthesized a part of it. Read block ranges from `getReaderBlocks(…).textRange`. With `slice`, positions are in the slice and `textOffset` is not used.
 3. **Play and highlight:** pass the `PcmPlayer` position to `useReadAloudHighlights`, and the result to `highlights`. By default the word is followed when words are shown, else the sentence.
 
-Long books: synthesize in chunks (whole paragraphs up to a section end) and prepare the next chunk while one plays; see [use case examples](#use-case-examples).
+Long books: synthesize in chunks (text slices of ~1500 characters, whole blocks) and prepare the next chunk while one plays; see [use case examples](#use-case-examples). Pass `errorRecovery: 'skip'` to `synthesize` so a word the voice cannot speak (OCR noise) becomes a short silence instead of stopping the chunk.
 
 Limits:
 
@@ -609,7 +609,7 @@ Hidden blocks still count for reading progress: they belong to the row that show
 A page without a text layer (a scanned PDF page, a comic page, an image-only section of an EPUB) gets its text from an OCR engine (`react-native-sherpa-onnx/ocr`). Text grows page by page while the user reads, or a full run does the whole book:
 
 ```ts
-const ocr = await createOCR({ modelPath });
+const ocr = await createOCR({ modelSource });         // an OCR pack folder
 const doc = await loadReaderDocument(scanPdf);       // pages show as images
 const next = await recognizeReaderPages(doc, ocr, {
   scope: 'around',                                    // or 'all'
@@ -627,6 +627,16 @@ Each recognized page gets text blocks `s{n}.b0.t{j}` (for an image block, `{imag
 | Headings | — (a clearly larger line is its own paragraph) | Title → level 1, section header → its level | `#` → title / section header |
 | Running headers, page numbers | A lone page number at the top or bottom of the page | Page header / footer elements | — |
 | Place on the page | Union of the paragraph's line boxes | The element's box | — (the whole page) |
+
+The same scanned page with each model, from the example app (iOS simulator on an Apple M4, one page). Top: `'text'` mode. Bottom: `'image'` mode after searching for "lighthouse"; the hit is drawn over the page image, on its line where the model returns positions and over the whole page where it does not.
+
+| `ppocrv6-tiny` | `doctr-mobile` | `docvlm-granite-258m-fp32` | `nemotron-3.5-parse-int8` | `paddleocr-vl-1.6-fp16` |
+| --- | --- | --- | --- | --- |
+| <img src="./images/example/reader_ocr_ppocr_text.png" alt="PP-OCR: lines joined into paragraphs, no headings" width="160" /> | <img src="./images/example/reader_ocr_doctr_text.png" alt="docTR: lines joined into paragraphs, no headings" width="160" /> | <img src="./images/example/reader_ocr_docvlm_text.png" alt="Document VLM: title and section header as headings" width="160" /> | <img src="./images/example/reader_ocr_nemotron_text.png" alt="Nemotron Parse: Markdown headings and paragraphs" width="160" /> | <img src="./images/example/reader_ocr_paddleocr_vl_text.png" alt="PaddleOCR-VL: paragraphs" width="160" /> |
+| <img src="./images/example/reader_ocr_ppocr_image.png" alt="PP-OCR: search hit on its line" width="160" /> | <img src="./images/example/reader_ocr_doctr_image.png" alt="docTR: search hit on its line" width="160" /> | <img src="./images/example/reader_ocr_docvlm_image.png" alt="Document VLM: search hit inside its paragraph box" width="160" /> | <img src="./images/example/reader_ocr_nemotron_image.png" alt="Nemotron Parse: search hit over the whole page" width="160" /> | <img src="./images/example/reader_ocr_paddleocr_vl_image.png" alt="PaddleOCR-VL: search hit over the whole page" width="160" /> |
+| 2 s | 2 s | 31 s | 18 min | 67 s |
+
+Times are for the simulator and only show the order of magnitude; phones differ. For `doc_vlm`, use the `fp32` pack: `q8` is smaller and faster but can repeat a line until `maxNewTokens`, and `fp16` / `q4f16` currently return no text (see [Offline OCR](./ocr-offline.md)). When a model returns nothing for a page, `onProgress` reports `hasText: false` and the page keeps showing its image.
 
 The blocks are text blocks like any other: they show in `'text'` mode (the page image is then hidden), count for reading progress, can be highlighted and searched. In `'image'` mode they count as visible where they are on the page. A page's first heading becomes the section title when the section has none.
 
@@ -961,27 +971,31 @@ onVisibleRangeChange={(r) => {
 <details>
 <summary>Read a book aloud from the tapped paragraph</summary>
 
-Synthesize one chunk (whole paragraphs, up to ~1500 characters, within a section), map it with `textOffset`, and prepare the next chunk while it plays.
+Synthesize one chunk (whole blocks, up to ~1500 characters) from a text slice, map it with the slice, and prepare the next chunk while it plays. Slices run across sections and page breaks and include OCR text, so this works for every format.
 
 ```ts
-const blocks = (await getReaderBlocks(doc)).filter((b) => b.textRange);
-const startIndex = blocks.findIndex((b) => b.id === tappedBlockId);
-const { start } = blocks[startIndex]!.textRange!;
-const end = blocks[Math.min(startIndex + 5, blocks.length - 1)]!.textRange!.end;
+async function prepare(from: ReaderLocator) {
+  const slice = await createReaderTextSlice(doc, { from, maxLength: 1500 });
+  const audioOut = await createEmptyOfflineAudioBuffer(await tts.getSampleRate());
+  const result = await tts.synthesize(slice.buffer, audioOut, {
+    segmentation: { mode: 'auto' },
+    errorRecovery: 'skip', // OCR text can hold words a voice cannot speak
+    timeline: true,
+  });
+  const timeline = await createReadAloudTimeline(doc, { slice, tts: result.timeline! });
+  await releasePipelineTextBuffer(slice.buffer);
+  return { audioOut, timeline, next: slice.to }; // the next chunk starts after `slice.to`
+}
 
-const textIn = await createOfflineTextBufferFromText(await getOfflineTextBufferTextSlice(bookText, start, end - start));
-const audioOut = await createEmptyOfflineAudioBuffer(await tts.getSampleRate());
-const result = await tts.synthesize(textIn, audioOut, { segmentation: { mode: 'auto' }, timeline: true });
-const timeline = await createReadAloudTimeline(doc, { text: textIn, tts: result.timeline!, textOffset: start });
-
-const player = await createPcmPlayer(audioOut, { onPosition: (e) => setPositionMs(e.positionMs), onEnded: playNextChunk });
+const first = await prepare({ sectionId, blockId: tappedBlockId });
+const player = await createPcmPlayer(first.audioOut, { onPosition: (e) => setPositionMs(e.positionMs), onEnded: playNextChunk });
 
 // in the component
 const spoken = useReadAloudHighlights(timeline, positionMs);
 <ReaderView document={doc} highlights={spoken} follow={{ mode: 'keepVisible' }} onFollowChange={(c) => setPaused(!c.following)} />;
 ```
 
-`bookText` is the buffer you passed to `createReaderDocument`. The example app's `ReaderReadAloudPanel.tsx` has the full chunk loop.
+At the end of the book `createReaderTextSlice` throws `ERR_READER_INVALID_ARGUMENT` (no text from `from` on). The example app's `useReaderReadAloud.ts` (`example/src/screens/reader/`) has the full chunk loop.
 
 </details>
 
@@ -1036,7 +1050,7 @@ The first visible line stays in place when the theme changes.
 | ![Example 1](./images/example/reader_1.png) | ![Example 2](./images/example/reader_2.png) | ![Example 3](./images/example/reader_3.png) |
 | --- | --- | --- |
 
-The monorepo example exposes **Reader** (`example/src/screens/reader/ReaderScreen.tsx`) as a developer showcase for this API: book picker, appearance, contents, an app section, chapter-end and note inserts, marks, search, progress, jump back and resume. Read-aloud with sentence and word highlights is on **Read aloud** (`example/src/screens/documents/ReaderReadAloudPanel.tsx`). See [example/README.md](../example/README.md#reader).
+The monorepo example exposes **Reader** (`example/src/screens/reader/ReaderScreen.tsx`) as a developer showcase for this API: a book picker for every format, appearance and page display, contents, an app section, chapter-end and note inserts, marks, search, progress, jump back and resume, an **OCR** panel (model, reading order, this page / around here / whole book, save and load) and **Listen** (read-aloud with sentence and word highlights, `useReaderReadAloud.ts`). See [example/README.md](../example/README.md#reader).
 
 ---
 

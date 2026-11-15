@@ -13,9 +13,18 @@ namespace ocr {
 
 namespace {
 
-struct Line {
+/** One box of the detector output: a text line (ppocr) or a word (doctr). */
+struct Part {
   std::string text;
   OcrSpan span;
+  float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+  float h() const { return y1 - y0; }
+};
+
+/** A text line: one or more boxes side by side, in reading order. */
+struct Line {
+  std::string text;  // parts joined by a space (none between CJK characters)
+  std::vector<Part> parts;
   float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
   float w() const { return x1 - x0; }
   float h() const { return y1 - y0; }
@@ -183,32 +192,108 @@ void XyCut(const std::vector<Line>& lines, std::vector<int> idx, bool vertical, 
         column_cut ? EdgesOf(lines, second, vertical) : column, edges, out);
 }
 
+/** Appends `piece` to `text`: a space between words, none between CJK characters. */
+bool NeedsSpace(const std::string& prev, const std::string& next) {
+  return !(IsCjk(LastCodePoint(prev)) || IsCjk(FirstCodePoint(next)));
+}
+
+/**
+ * Horizontal text: boxes on the same text line, closer than a column gutter,
+ * become one line (word detectors such as doctr return one box per word).
+ * Boxes of a line overlap vertically by at least half the smaller height;
+ * side by side they may overlap (grown boxes), each starting further on.
+ */
+std::vector<Line> GroupIntoLines(std::vector<Part> parts, bool rtl, float em) {
+  std::sort(parts.begin(), parts.end(), [rtl](const Part& a, const Part& b) {
+    return rtl ? a.x1 > b.x1 : a.x0 < b.x0;
+  });
+  std::vector<Line> lines;
+  for (Part& p : parts) {
+    int best = -1;
+    float best_overlap = 0;
+    for (size_t i = 0; i < lines.size(); ++i) {
+      const Line& l = lines[i];
+      const Part& last = l.parts.back();
+      const float overlap = std::min(last.y1, p.y1) - std::max(last.y0, p.y0);
+      if (overlap < 0.5f * std::min(last.h(), p.h())) continue;
+      // Next in the reading direction; word boxes may overlap (detectors
+      // grow them), but not by more than half.
+      const float pc = (p.x0 + p.x1) / 2;
+      const float lc = (last.x0 + last.x1) / 2;
+      if (rtl ? pc >= lc : pc <= lc) continue;
+      const float gap = rtl ? last.x0 - p.x1 : p.x0 - last.x1;
+      if (gap > 0.8f * em) continue;
+      if (overlap > best_overlap) {
+        best = static_cast<int>(i);
+        best_overlap = overlap;
+      }
+    }
+    if (best < 0) {
+      Line l;
+      l.text = p.text;
+      l.x0 = p.x0;
+      l.y0 = p.y0;
+      l.x1 = p.x1;
+      l.y1 = p.y1;
+      l.parts.push_back(std::move(p));
+      lines.push_back(std::move(l));
+      continue;
+    }
+    Line& l = lines[static_cast<size_t>(best)];
+    if (NeedsSpace(l.text, p.text)) l.text.push_back(' ');
+    l.text += p.text;
+    l.x0 = std::min(l.x0, p.x0);
+    l.y0 = std::min(l.y0, p.y0);
+    l.x1 = std::max(l.x1, p.x1);
+    l.y1 = std::max(l.y1, p.y1);
+    l.parts.push_back(std::move(p));
+  }
+  return lines;
+}
+
 }  // namespace
 
 void ArrangeLinesIntoParagraphs(OcrResult* r, OcrReadingDirection direction) {
   if (!r || r->spans.empty()) return;
-  std::vector<Line> lines;
-  lines.reserve(r->spans.size());
+  std::vector<Part> parts;
+  parts.reserve(r->spans.size());
   for (const OcrSpan& s : r->spans) {
     if (s.level != OcrSpanLevel::kLine || s.utf16_end <= s.utf16_start) return;  // not line output
-    Line l;
+    Part p;
     const size_t a = ByteAtUtf16(r->text_utf8, s.utf16_start);
     const size_t b = ByteAtUtf16(r->text_utf8, s.utf16_end);
-    l.text = r->text_utf8.substr(a, b - a);
-    l.span = s;
-    l.x0 = std::min({s.quad.xy[0], s.quad.xy[2], s.quad.xy[4], s.quad.xy[6]});
-    l.x1 = std::max({s.quad.xy[0], s.quad.xy[2], s.quad.xy[4], s.quad.xy[6]});
-    l.y0 = std::min({s.quad.xy[1], s.quad.xy[3], s.quad.xy[5], s.quad.xy[7]});
-    l.y1 = std::max({s.quad.xy[1], s.quad.xy[3], s.quad.xy[5], s.quad.xy[7]});
-    if (l.x1 <= l.x0 || l.y1 <= l.y0) return;  // no usable geometry
-    lines.push_back(std::move(l));
+    p.text = r->text_utf8.substr(a, b - a);
+    p.span = s;
+    p.x0 = std::min({s.quad.xy[0], s.quad.xy[2], s.quad.xy[4], s.quad.xy[6]});
+    p.x1 = std::max({s.quad.xy[0], s.quad.xy[2], s.quad.xy[4], s.quad.xy[6]});
+    p.y0 = std::min({s.quad.xy[1], s.quad.xy[3], s.quad.xy[5], s.quad.xy[7]});
+    p.y1 = std::max({s.quad.xy[1], s.quad.xy[3], s.quad.xy[5], s.quad.xy[7]});
+    if (p.x1 <= p.x0 || p.y1 <= p.y0) return;  // no usable geometry
+    parts.push_back(std::move(p));
   }
   const bool rtl = direction == OcrReadingDirection::kRtl;
   std::vector<float> ratios, thickness;
-  for (const Line& l : lines) ratios.push_back(l.h() / l.w());
+  for (const Part& p : parts) ratios.push_back(p.h() / (p.x1 - p.x0));
   const bool vertical = Median(ratios) > 1.5f;
-  for (const Line& l : lines) thickness.push_back(vertical ? l.w() : l.h());
+  for (const Part& p : parts) thickness.push_back(vertical ? p.x1 - p.x0 : p.h());
   const float em = std::max(1.f, Median(thickness));
+
+  std::vector<Line> lines;
+  if (vertical) {
+    // Vertical text (manga): every box is a column line of its own.
+    for (Part& p : parts) {
+      Line l;
+      l.text = p.text;
+      l.x0 = p.x0;
+      l.y0 = p.y0;
+      l.x1 = p.x1;
+      l.y1 = p.y1;
+      l.parts.push_back(std::move(p));
+      lines.push_back(std::move(l));
+    }
+  } else {
+    lines = GroupIntoLines(std::move(parts), rtl, em);
+  }
 
   std::vector<int> order;
   std::vector<int> all(lines.size());
@@ -245,9 +330,12 @@ void ArrangeLinesIntoParagraphs(OcrResult* r, OcrReadingDirection direction) {
         // join. One font varies up to ~1.3 between lines with and without
         // ascenders / descenders.
         const bool same_size = std::max(a.h(), b.h()) <= 1.4f * std::min(a.h(), b.h());
+        // The next line is below (grown boxes of adjacent lines may overlap:
+        // compare the middles) and close.
+        const float pitch = (b.y0 + b.y1) / 2 - (a.y0 + a.y1) / 2;
+        const bool below = pitch >= 0.6f * std::min(a.h(), b.h()) && gap <= 0.8f * em;
         // "exam-" + lowercase continuation: the same paragraph whatever the layout.
-        join = gap >= -0.3f * em && gap <= 0.8f * em && overlap && same_size &&
-               (hyphenated || (!indent && !short_prev));
+        join = below && overlap && same_size && (hyphenated || (!indent && !short_prev));
       } else {
         const float gap = rtl ? a.x0 - b.x1 : b.x0 - a.x1;
         const bool overlap = std::min(a.y1, b.y1) > std::max(a.y0, b.y0);
@@ -270,28 +358,36 @@ void ArrangeLinesIntoParagraphs(OcrResult* r, OcrReadingDirection direction) {
       cursor += 2;
     }
     for (size_t j = 0; j < para.size(); ++j) {
-      std::string piece = lines[para[j]].text;
+      const Line& line = lines[para[j]];
       if (j > 0) {
         const std::string& prev = lines[para[j - 1]].text;
         const uint32_t last = LastCodePoint(prev);
-        const uint32_t first = FirstCodePoint(piece);
+        const uint32_t first = FirstCodePoint(line.text);
         const bool hyphen = last == '-' && first >= 'a' && first <= 'z' && prev.size() > 1;
         if (hyphen) {
           // "exam-" + "ple" → "example": drop the hyphen from the text so far.
           text.pop_back();
           cursor -= 1;
           if (!spans.empty()) spans.back().utf16_end -= 1;
-        } else if (!(IsCjk(last) || IsCjk(first))) {
+        } else if (NeedsSpace(prev, line.text)) {
           text.push_back(' ');
           cursor += 1;
         }
       }
-      OcrSpan span = lines[para[j]].span;
-      span.utf16_start = cursor;
-      text += piece;
-      cursor += Utf8ToUtf16Length(piece);
-      span.utf16_end = cursor;
-      spans.push_back(span);
+      // Every box keeps its own span (a word keeps its own place on the page).
+      for (size_t k = 0; k < line.parts.size(); ++k) {
+        const Part& part = line.parts[k];
+        if (k > 0 && NeedsSpace(line.parts[k - 1].text, part.text)) {
+          text.push_back(' ');
+          cursor += 1;
+        }
+        OcrSpan span = part.span;
+        span.utf16_start = cursor;
+        text += part.text;
+        cursor += Utf8ToUtf16Length(part.text);
+        span.utf16_end = cursor;
+        spans.push_back(span);
+      }
     }
   }
   r->text_utf8 = std::move(text);

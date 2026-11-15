@@ -1274,7 +1274,11 @@ export interface Spec extends TurboModule {
   /** Load an OCR engine instance (Cpp OcrEngine + backend). */
   initializeOcr(
     instanceId: string,
-    options: OcrInitBridgeOptions
+    /**
+     * {@link OcrInitBridgeOptions}. Declared `Object` so the iOS bridge gets
+     * an `NSDictionary` (it reads nested `modelPaths` and family keys).
+     */
+    options: Object
   ): Promise<{
     instanceId: string;
     modelType: string;
@@ -1295,7 +1299,8 @@ export interface Spec extends TurboModule {
     instanceId: string,
     imageBufferId: string,
     textOutBufferId: string,
-    options?: OcrRecognizeBridgeOptions
+    /** {@link OcrRecognizeBridgeOptions}, as an `NSDictionary` on iOS. */
+    options?: Object
   ): Promise<OcrRecognizeNativeResult>;
 
   /** Cancel an in-flight OCR recognize by native operationId. */

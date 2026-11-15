@@ -123,7 +123,7 @@ export const DOCUMENT_FILES: DocumentFileInfo[] = [
   },
 ];
 
-/** EPUBs for the Reader screen (native ReaderView). */
+/** Books for the Reader screen (native ReaderView): EPUB, FB2, MOBI / AZW3, PDF, comics. */
 export const READER_FILES: DocumentFileInfo[] = [
   {
     id: TEST_EDOC_FILES.FRANKENSTEIN_EPUB,
@@ -149,6 +149,15 @@ export const READER_FILES: DocumentFileInfo[] = [
       'Text layer: paragraphs, headings, bookmarks as contents, page labels, two columns, a plate',
     extract: 'pdf',
     expect: 'text',
+    section: 'PDF and comics',
+  },
+  {
+    id: TEST_PDF_FILES.BOOK_SCAN,
+    name: 'Scanned book — PDF',
+    description:
+      'The same book as page images only: OCR gives it headings and paragraphs, per model',
+    extract: 'pdf',
+    expect: 'imagesOnly',
     section: 'PDF and comics',
   },
   {

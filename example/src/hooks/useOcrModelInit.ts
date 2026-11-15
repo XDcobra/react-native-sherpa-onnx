@@ -117,8 +117,11 @@ export function asOcrFamily(
 function largeVlmPackWarning(id: string): string | null {
   const lower = id.toLowerCase();
   if (lower.includes('docvlm') || lower.includes('granite')) {
-    if (lower.includes('q4f16')) {
-      return 'docvlm-granite-258m-q4f16 is ~221 MiB compressed / ~265 MB unpacked (Float16 KV + MatMulNBits). Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?';
+    if (lower.includes('q4f16') || lower.includes('fp16')) {
+      return `${id} runs its decoder in float16 and currently returns no text on the CPU. Use docvlm-granite-258m-q8 or -fp32 instead. Continue anyway?`;
+    }
+    if (lower.includes('q8')) {
+      return 'docvlm-granite-258m-q8 is ~227 MiB compressed / ~312 MiB unpacked and about three times faster than fp32, but can repeat a line on some pages. Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?';
     }
     return 'docvlm-granite-258m is ~420 MiB compressed / ~1.2 GiB unpacked and needs significant RAM. Mobile ORT must include com.microsoft.GroupQueryAttention. Continue?';
   }

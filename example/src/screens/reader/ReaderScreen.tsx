@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from '@react-native-documents/picker';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
+import { PADDLEOCR_VL_MOBILE_MAX_PIXELS } from 'react-native-sherpa-onnx/ocr';
 import {
   getReaderBlocks,
   insertSection,
@@ -32,20 +33,28 @@ import {
   type ReaderSectionInfo,
   type ReaderTheme,
   type ReaderViewHandle,
+  useReadAloudHighlights,
 } from 'react-native-sherpa-onnx/reader';
 
 import { ExampleDocumentFileList } from '../../components/ExampleDocumentFileList';
 import { FileSourcePicker } from '../../components/FileSourcePicker';
 import { OcrChoiceRow } from '../../components/ocr/OcrChoiceRow';
-import { OcrModelInitPanel } from '../../components/OcrModelInitPanel';
 import { ScreenIntroModal } from '../../components/ScreenIntroModal';
 import { READER_FILES } from '../../documentConfig';
 import { useOcrModelInit } from '../../hooks/useOcrModelInit';
+import { useTtsModelInit } from '../../hooks/useTtsModelInit';
 import {
   fileSourceFromBundledPath,
   toFileSource,
 } from '../../utils/fileSourceFromUri';
+import {
+  ReaderListenPanel,
+  ReaderOcrPanel,
+  type OcrScope,
+  type PanelStatus,
+} from './ReaderPanels';
 import { styles } from './ReaderScreen.styles';
+import { useReaderReadAloud } from './useReaderReadAloud';
 
 type ThemeName = 'paper' | 'sepia' | 'night';
 type FontName = 'serif' | 'sans';
@@ -53,7 +62,7 @@ type SizeName = 'system' | '0.9×' | '1.2×' | '1.5×';
 type LineName = '1.3' | '1.5' | '1.8';
 type AlignName = 'start' | 'justify';
 type MarginName = 'narrow' | 'normal' | 'wide';
-type Panel = 'none' | 'appearance' | 'search' | 'text';
+type Panel = 'none' | 'appearance' | 'search' | 'text' | 'listen';
 
 const THEMES: Record<
   ThemeName,
@@ -86,6 +95,25 @@ const HIT_ACTIVE_COLOR = '#FB923C55';
 const MAX_HITS = 500;
 /** Sections with at least this many blocks count as chapters (end cards). */
 const MIN_CHAPTER_BLOCKS = 8;
+
+/** Formats the reader opens (document picker types). */
+const BOOK_TYPES = [
+  'application/epub+zip',
+  'org.idpf.epub-container',
+  'application/pdf',
+  'com.adobe.pdf',
+  'application/x-fictionbook+xml',
+  'application/xml',
+  'application/x-mobipocket-ebook',
+  'application/vnd.amazon.ebook',
+  'application/x-mobi8-ebook',
+  'com.amazon.mobi',
+  'com.amazon.azw3',
+  'application/vnd.comicbook+zip',
+  'application/x-cbz',
+  'com.apple.comicbook-archive',
+  'application/zip',
+];
 
 /** App section the screen inserts after the first chapter. */
 const GUIDE_ID = 'app:about';
@@ -130,8 +158,18 @@ function blockIndex(
 
 function sectionTitle(s: ReaderSectionInfo | undefined): string {
   if (!s) return '';
+  if (s.kind === 'page') {
+    const page = `Page ${s.label ?? (s.sectionIndex ?? 0) + 1}`;
+    return s.title ? `${s.title} · ${page}` : page;
+  }
   if (s.title) return s.title;
   return s.kind === 'image' ? 'Image page' : 'Untitled section';
+}
+
+/** The first block of the book. */
+function firstLocator(doc: ReaderDocument | null): ReaderLocator | null {
+  const first = doc?.sections[0];
+  return first ? { sectionId: first.id, blockId: first.firstBlockId } : null;
 }
 
 function escapeRegExp(s: string): string {
@@ -139,9 +177,11 @@ function escapeRegExp(s: string): string {
 }
 
 /**
- * Reader showcase: pick an EPUB, read it in the native ReaderView and try the
- * reader API — appearance, contents, an app section, React Native inserts in
- * the reading flow, highlights, search, progress, jumps and resume.
+ * Reader showcase: open a book (EPUB, FB2, MOBI / AZW3, PDF, scan, comic),
+ * read it in the native ReaderView and try the reader API — appearance,
+ * pages, contents, an app section, React Native inserts in the reading flow,
+ * highlights, search, progress, jumps and resume, OCR text for page images
+ * (saved and loaded again) and read-aloud with sentence and word highlights.
  */
 export default function ReaderScreen() {
   const { height } = useWindowDimensions();
@@ -177,9 +217,35 @@ export default function ReaderScreen() {
   const ocr = useOcrModelInit({
     onBeforeInit: () => ocrAbortRef.current?.abort(),
   });
+  // Phone-sized input for PaddleOCR-VL (other families ignore it).
+  const { setCustomInitForm } = ocr;
+  useEffect(() => {
+    setCustomInitForm((prev) =>
+      prev.maxPixels > 0
+        ? prev
+        : { ...prev, maxPixels: PADDLEOCR_VL_MOBILE_MAX_PIXELS }
+    );
+  }, [setCustomInitForm]);
   const [direction, setDirection] = useState<'ltr' | 'rtl'>('ltr');
+  const [ocrScope, setOcrScope] = useState<OcrScope>('around');
   const [ocrBusy, setOcrBusy] = useState(false);
-  const [ocrStatus, setOcrStatus] = useState<string | null>(null);
+  const [ocrProgress, setOcrProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
+  const [ocrStatus, setOcrStatus] = useState<PanelStatus>(null);
+
+  // Read aloud
+  const readAloudStopRef = useRef<(() => Promise<void>) | null>(null);
+  const tts = useTtsModelInit({
+    onBeforeInit: () => readAloudStopRef.current?.(),
+  });
+  const [listenStatus, setListenStatus] = useState<PanelStatus>(null);
+  const [show, setShow] = useState<'sentence' | 'word' | 'both'>('both');
+  const [followMode, setFollowMode] = useState<
+    'keepVisible' | 'center' | 'off'
+  >('keepVisible');
+  const [followPaused, setFollowPaused] = useState(false);
 
   // Reading state from events
   const [chapterId, setChapterId] = useState<string | null>(null);
@@ -233,7 +299,7 @@ export default function ReaderScreen() {
   // ---- Text for scans and comics ----
 
   const recognizePages = useCallback(
-    async (scope: 'around' | 'all') => {
+    async (scope: OcrScope) => {
       const engine = ocr.engineRef.current;
       const current = docRef.current;
       if (!engine || !current) return;
@@ -241,7 +307,8 @@ export default function ReaderScreen() {
       const controller = new AbortController();
       ocrAbortRef.current = controller;
       setOcrBusy(true);
-      setOcrStatus('Recognizing…');
+      setOcrProgress(null);
+      setOcrStatus(null);
       const apply = (next: ReaderDocument) => {
         // Ignore results for a document that was closed meanwhile.
         if (docRef.current?.id !== next.id) return;
@@ -250,24 +317,47 @@ export default function ReaderScreen() {
         setDoc(next);
       };
       try {
+        const page = position?.sectionId ?? current.sections[0]?.id ?? '';
+        let empty = 0; // pages the model returned no text for
         const next = await recognizeReaderPages(current, engine, {
-          scope,
+          // 'This page' recognizes the visible page again (to compare models).
+          scope: scope === 'page' ? { sections: [page] } : scope,
+          force: scope === 'page',
           at: position,
           recognize: { readingDirection: direction },
           onDocument: apply,
-          onProgress: (e) => setOcrStatus(`${e.done} / ${e.total} pages`),
+          onProgress: (e) => {
+            if (!e.hasText) empty += 1;
+            setOcrProgress({ done: e.done, total: e.total });
+          },
           signal: controller.signal,
         });
         apply(next);
-        setOcrStatus(
-          controller.signal.aborted
-            ? 'Stopped.'
-            : 'Done: the pages show their text.'
-        );
+        const aborted = controller.signal.aborted;
+        setOcrStatus({
+          text: aborted
+            ? 'Stopped. The pages done so far keep their text.'
+            : empty > 0
+            ? scope === 'page'
+              ? 'Done, but the model returned no text for this page.'
+              : `Done, but the model returned no text for ${empty} ${
+                  empty === 1 ? 'page' : 'pages'
+                }.`
+            : scope === 'page'
+            ? 'Done: the page shows its text.'
+            : scope === 'around'
+            ? 'Done: the pages around the reading position show their text.'
+            : 'Done: every page shows its text.',
+          error: !aborted && empty > 0,
+        });
       } catch (err: unknown) {
-        setOcrStatus(err instanceof Error ? err.message : String(err));
+        setOcrStatus({
+          text: err instanceof Error ? err.message : String(err),
+          error: true,
+        });
       } finally {
         setOcrBusy(false);
+        setOcrProgress(null);
       }
     },
     [direction, ocr.engineRef, position]
@@ -289,9 +379,12 @@ export default function ReaderScreen() {
         overwrite: true,
         createParentDirectories: true,
       });
-      setOcrStatus(`Saved the text of ${r.pages} pages.`);
+      setOcrStatus({ text: `Saved the text of ${r.pages} pages.` });
     } catch (err: unknown) {
-      setOcrStatus(err instanceof Error ? err.message : String(err));
+      setOcrStatus({
+        text: err instanceof Error ? err.message : String(err),
+        error: true,
+      });
     }
   }, [ocr.initializedFolder]);
 
@@ -304,11 +397,68 @@ export default function ReaderScreen() {
       docRef.current = next;
       textsRef.current = null;
       setDoc(next);
-      setOcrStatus('Loaded the saved text: no OCR needed.');
+      setOcrStatus({ text: 'Loaded the saved text: no OCR needed.' });
     } catch (err: unknown) {
-      setOcrStatus(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setOcrStatus({
+        text: /FILEIO|ENOENT|not found|No such file/i.test(message)
+          ? 'Nothing saved for this book yet.'
+          : message,
+        error: true,
+      });
     }
   }, []);
+
+  // Page and image-only sections, and how many of them have text.
+  const pageCoverage = useMemo(() => {
+    const pages = (doc?.sections ?? []).filter(
+      (sec) => sec.kind === 'page' || sec.kind === 'image'
+    );
+    return {
+      total: pages.length,
+      // A page section holds its page block, then its text blocks.
+      withText: pages.filter((sec) => sec.blockCount > 1).length,
+    };
+  }, [doc]);
+
+  // ---- Read aloud ----
+
+  const getTtsEngine = useCallback(
+    () => tts.engineRef.current,
+    [tts.engineRef]
+  );
+  const speakerId = Number.isFinite(parseInt(tts.speakerId, 10))
+    ? parseInt(tts.speakerId, 10)
+    : 0;
+  const speed =
+    Number.isFinite(parseFloat(tts.speed)) && parseFloat(tts.speed) > 0
+      ? parseFloat(tts.speed)
+      : 1;
+  const onListenError = useCallback(
+    (message: string | null) =>
+      setListenStatus(message ? { text: message, error: true } : null),
+    []
+  );
+  const listen = useReaderReadAloud(doc, {
+    getEngine: getTtsEngine,
+    sampleRate: tts.modelInfo?.sampleRate ?? 16000,
+    speakerId,
+    speed,
+    onError: onListenError,
+  });
+  readAloudStopRef.current = listen.stop;
+  const spoken = useReadAloudHighlights(listen.timeline, listen.positionMs, {
+    show,
+  });
+
+  const listenFrom = useCallback(
+    (from: ReaderLocator | null) => {
+      if (!from) return;
+      setFollowPaused(false);
+      listen.play(from).catch(() => {});
+    },
+    [listen]
+  );
 
   // ---- Open / close ----
 
@@ -344,6 +494,8 @@ export default function ReaderScreen() {
       setHits([]);
       setQuery('');
       setPanel('none');
+      setOcrStatus(null);
+      setListenStatus(null);
       try {
         let next = await loadReaderDocument(source);
         // Text that is not in the file: an app section after the first chapter.
@@ -378,13 +530,13 @@ export default function ReaderScreen() {
   const handlePickOwn = useCallback(async () => {
     try {
       const picked = await DocumentPicker.pick({
-        type: ['application/epub+zip', 'org.idpf.epub-container'],
+        type: BOOK_TYPES,
         allowMultiSelection: false,
       });
       const file = Array.isArray(picked) ? picked[0] : picked;
       const uri = file?.uri ?? '';
       if (!uri) return;
-      const name = file?.name?.trim() || uri.split('/').pop() || 'book.epub';
+      const name = file?.name?.trim() || uri.split('/').pop() || 'book';
       setSelectedId(null);
       await open(toFileSource(uri, name), name);
     } catch (e: unknown) {
@@ -533,8 +685,10 @@ export default function ReaderScreen() {
         style: 'underline',
       });
     }
+    // Read aloud: the spoken sentence and word (the word is followed).
+    list.push(...spoken);
     return list;
-  }, [hitIndex, hits, marks, selected]);
+  }, [hitIndex, hits, marks, selected, spoken]);
 
   // ---- Inserts: chapter ends and notes ----
 
@@ -667,7 +821,7 @@ export default function ReaderScreen() {
                   null
             }
             exampleListTitle="Choose an example book"
-            ownPickButtonLabel="Pick an EPUB…"
+            ownPickButtonLabel="Pick a book…"
             onPickOwn={() => {
               handlePickOwn().catch(() => {});
             }}
@@ -694,8 +848,9 @@ export default function ReaderScreen() {
           ) : null}
           {!doc && !busy ? (
             <Text style={styles.sectionHint}>
-              loadReaderDocument() turns an EPUB into a ReaderDocument with
-              stable block IDs; the native ReaderView shows it.
+              loadReaderDocument() opens an EPUB, FB2, MOBI / AZW3, PDF or comic
+              as a ReaderDocument with stable block IDs; the native ReaderView
+              shows it. Scans and comics get their text from OCR.
             </Text>
           ) : null}
         </View>
@@ -736,94 +891,72 @@ export default function ReaderScreen() {
               ) ? (
                 <ToolbarButton
                   id="reader-ocr"
-                  label="Text"
+                  label="OCR"
                   active={panel === 'text'}
                   onPress={() =>
                     setPanel((p) => (p === 'text' ? 'none' : 'text'))
                   }
                 />
               ) : null}
+              <ToolbarButton
+                id="reader-listen"
+                label={listen.playing ? '■ Listen' : 'Listen'}
+                active={panel === 'listen'}
+                onPress={() =>
+                  setPanel((p) => (p === 'listen' ? 'none' : 'listen'))
+                }
+              />
             </View>
 
             {panel === 'text' ? (
-              <View style={styles.panel}>
-                <Text style={styles.sectionHint}>
-                  Pages without a text layer get their text from OCR, page by
-                  page around the reading position or for the whole book.
-                </Text>
-                <OcrModelInitPanel
-                  ocr={ocr}
-                  title="OCR model"
-                  disabled={ocrBusy}
-                  showScatteredTest={false}
-                />
-                <OcrChoiceRow
-                  label="Direction"
-                  options={['ltr', 'rtl'] as const}
-                  value={direction}
-                  onChange={setDirection}
-                />
-                <View style={styles.actionButtons}>
-                  <Pressable
-                    testID="reader-ocr-around"
-                    style={[
-                      styles.actionButton,
-                      (!ocr.initializedFolder || ocrBusy) && styles.pressed,
-                    ]}
-                    disabled={!ocr.initializedFolder || ocrBusy}
-                    onPress={() => {
-                      recognizePages('around').catch(() => {});
-                    }}
-                  >
-                    <Text style={styles.actionButtonText}>Around here</Text>
-                  </Pressable>
-                  <Pressable
-                    testID="reader-ocr-all"
-                    style={[
-                      styles.actionButton,
-                      (!ocr.initializedFolder || ocrBusy) && styles.pressed,
-                    ]}
-                    disabled={!ocr.initializedFolder || ocrBusy}
-                    onPress={() => {
-                      recognizePages('all').catch(() => {});
-                    }}
-                  >
-                    <Text style={styles.actionButtonText}>Whole book</Text>
-                  </Pressable>
-                  <Pressable
-                    testID="reader-ocr-save"
-                    style={[styles.actionButton, ocrBusy && styles.pressed]}
-                    disabled={ocrBusy}
-                    onPress={() => {
-                      saveText().catch(() => {});
-                    }}
-                  >
-                    <Text style={styles.actionButtonText}>Save</Text>
-                  </Pressable>
-                  <Pressable
-                    testID="reader-ocr-load"
-                    style={[styles.actionButton, ocrBusy && styles.pressed]}
-                    disabled={ocrBusy}
-                    onPress={() => {
-                      loadText().catch(() => {});
-                    }}
-                  >
-                    <Text style={styles.actionButtonText}>Load</Text>
-                  </Pressable>
-                  {ocrBusy ? (
-                    <Pressable
-                      testID="reader-ocr-stop"
-                      style={styles.actionButton}
-                      onPress={() => ocrAbortRef.current?.abort()}
-                    >
-                      <Text style={styles.actionButtonText}>Stop</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-                {ocrStatus ? (
-                  <Text style={styles.sectionHint}>{ocrStatus}</Text>
-                ) : null}
-              </View>
+              <ReaderOcrPanel
+                ocr={ocr}
+                pages={pageCoverage}
+                direction={direction}
+                onDirection={setDirection}
+                busy={ocrBusy}
+                progress={ocrProgress}
+                status={ocrStatus}
+                scope={ocrScope}
+                onScope={setOcrScope}
+                onRecognize={() => {
+                  recognizePages(ocrScope).catch(() => {});
+                }}
+                onStop={() => ocrAbortRef.current?.abort()}
+                onSave={() => {
+                  saveText().catch(() => {});
+                }}
+                onLoad={() => {
+                  loadText().catch(() => {});
+                }}
+              />
+            ) : null}
+
+            {panel === 'listen' ? (
+              <ReaderListenPanel
+                tts={tts}
+                playing={listen.playing}
+                busy={listen.busy}
+                startsAt={
+                  selected
+                    ? 'Starts at the underlined paragraph.'
+                    : 'Starts at the top of the view. Tap a paragraph to start there.'
+                }
+                show={show}
+                onShow={setShow}
+                follow={followMode}
+                onFollow={setFollowMode}
+                status={listenStatus}
+                onPlay={() => {
+                  listenFrom(
+                    selected?.locator ?? position ?? firstLocator(doc)
+                  );
+                  setSelected(null);
+                }}
+                onStop={() => {
+                  listen.stop().catch(() => {});
+                }}
+              />
             ) : null}
 
             {panel === 'appearance' ? (
@@ -942,6 +1075,8 @@ export default function ReaderScreen() {
                 inserts={inserts}
                 renderInsert={renderInsert}
                 highlights={highlights}
+                follow={{ mode: followMode }}
+                onFollowChange={(c) => setFollowPaused(!c.following)}
                 pageDisplay={pageDisplay}
                 style={styles.reader}
                 onVisibleRangeChange={(r) => {
@@ -1017,12 +1152,41 @@ export default function ReaderScreen() {
                       }}
                     />
                     <ActionButton
+                      id="reader-listen-here"
+                      label="▶ Listen"
+                      onPress={() => {
+                        const { locator } = selected;
+                        setSelected(null);
+                        if (!tts.currentModelFolder) {
+                          setPanel('listen');
+                          return;
+                        }
+                        listenFrom(locator);
+                      }}
+                    />
+                    <ActionButton
                       id="reader-selection-close"
                       label="✕"
                       onPress={() => setSelected(null)}
                     />
                   </View>
                 </View>
+              ) : null}
+              {listen.playing && followPaused && !selected ? (
+                <Pressable
+                  testID="reader-resume-follow"
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to the reading position"
+                  onPress={() => reader.current?.resumeFollow()}
+                  style={({ pressed }) => [
+                    styles.followButton,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text style={styles.followButtonText}>
+                    Back to the spoken text
+                  </Text>
+                </Pressable>
               ) : null}
             </View>
 
@@ -1094,6 +1258,10 @@ export default function ReaderScreen() {
               text={`“${GUIDE_TITLE}” is an app section: text that is not in the EPUB, added with insertSection().`}
             />
             <Hint text="Change the book and open this one again: it resumes at the last position (initialLocator, furthestLocator)." />
+            <Hint text="Listen reads the book aloud from the top of the view or the tapped paragraph, with the sentence and word highlighted; also on OCR pages and across page breaks." />
+            {pageCoverage.total > 0 ? (
+              <Hint text="OCR gives scanned pages and comics their text: around the reading position or for the whole book. Aa → Pages switches between text, page images and both; highlights and search hits are drawn over the page image." />
+            ) : null}
           </View>
         ) : null}
       </ScrollView>
@@ -1203,7 +1371,7 @@ function guideSection(after: string) {
       {
         key: 'p1',
         type: 'paragraph' as const,
-        text: 'This section is not part of the EPUB. The app inserted it with insertSection(), for example for a preface, a reading guide or generated content.',
+        text: 'This section is not part of the book file. The app inserted it with insertSection(), for example for a preface, a reading guide or generated content.',
       },
       {
         key: 'p2',

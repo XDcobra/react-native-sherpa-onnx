@@ -68,6 +68,7 @@ export function useOcrModelCatalog(): UseOcrModelCatalogResult {
             padModelsPath: snapshot.padModelsPath,
             bundledFolders: snapshot.bundledFolders,
             downloadedIds: snapshot.downloadedIds,
+            downloadedPaths: snapshot.downloadedPaths,
           }
         : null,
     [snapshot]

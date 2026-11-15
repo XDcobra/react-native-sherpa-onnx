@@ -1,53 +1,31 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Text, TouchableOpacity, View } from 'react-native';
-import {
-  createEmptyOfflineAudioBuffer,
-  releasePipelineAudioBuffer,
-} from 'react-native-sherpa-onnx/audiobuffer';
 import {
   DocumentErrorCode,
   extractDocumentImages,
 } from 'react-native-sherpa-onnx/document';
 import type { FileSource } from 'react-native-sherpa-onnx/fileio';
 import { releaseOfflineImageBuffer } from 'react-native-sherpa-onnx/imagebuffer';
-import { createPcmPlayer, type PcmPlayer } from 'react-native-sherpa-onnx/pcm';
 import {
   computeDocumentKey,
-  createReadAloudTimeline,
   createReaderDocument,
-  getReaderBlocks,
   ReaderView,
   releaseReaderDocument,
   useReadAloudHighlights,
-  type ReadAloudTimeline,
   type ReaderDocument,
   type ReaderHighlight,
   type ReaderHighlightStyle,
+  type ReaderLocator,
   type ReaderViewHandle,
 } from 'react-native-sherpa-onnx/reader';
-import {
-  createOfflineTextBufferFromText,
-  getOfflineTextBufferTextSlice,
-  releasePipelineTextBuffer,
-  type OfflineTextBufferRef,
-} from 'react-native-sherpa-onnx/textbuffer';
+import type { OfflineTextBufferRef } from 'react-native-sherpa-onnx/textbuffer';
 import type { TtsEngine } from 'react-native-sherpa-onnx/tts';
 import { OcrChoiceRow } from '../../components/ocr/OcrChoiceRow';
+import { useReaderReadAloud } from '../reader/useReaderReadAloud';
 import { styles } from './DocumentsScreen.styles';
 
-/** A paragraph / heading with its range in the extraction text buffer. */
-type TextBlock = { id: string; sectionId: string; start: number; end: number };
-
-type Chunk = { start: number; end: number; firstBlock: number; next: number };
-
-type Prepared = {
-  chunk: Chunk;
-  audioBufferId: string;
-  timeline: ReadAloudTimeline;
-};
-
 type Props = {
-  /** Extraction buffer with the EPUB reading structure (kept by the screen). */
+  /** Extraction buffer with the reading structure (kept by the screen). */
   textBuffer: OfflineTextBufferRef;
   source: FileSource;
   getEngine: () => TtsEngine | null;
@@ -58,14 +36,19 @@ type Props = {
   onError: (message: string | null) => void;
 };
 
-/** Characters per synthesis chunk (whole paragraphs, within one section). */
-const CHUNK_CHARS = 1500;
 const STYLES = ['background', 'underline', 'textColor'] as const;
 
+/** `s4.b2` → `s4`, `s4.b0.t1` → `s4`, `app:about.p1` → `app:about`. */
+function sectionOf(blockId: string): string {
+  const dot = blockId.indexOf('.');
+  return dot < 0 ? blockId : blockId.slice(0, dot);
+}
+
 /**
- * EPUB read-aloud in the native ReaderView: synthesis runs chunk by chunk from
- * the chosen paragraph, and the spoken sentence / word is highlighted and
- * followed (react-native-sherpa-onnx/reader read-aloud helpers).
+ * Read-aloud of an extracted book (EPUB, FB2, MOBI / AZW3) in the native
+ * ReaderView: text slices from the chosen paragraph are synthesized chunk by
+ * chunk, and the spoken sentence / word is highlighted and followed
+ * (react-native-sherpa-onnx/reader read-aloud helpers, useReaderReadAloud).
  */
 export function ReaderReadAloudPanel({
   textBuffer,
@@ -79,14 +62,9 @@ export function ReaderReadAloudPanel({
 }: Props) {
   const readerRef = useRef<ReaderViewHandle>(null);
   const [doc, setDoc] = useState<ReaderDocument | null>(null);
-  const [blocks, setBlocks] = useState<TextBlock[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [startBlockId, setStartBlockId] = useState<string | null>(null);
-  const [firstVisibleId, setFirstVisibleId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [timeline, setTimeline] = useState<ReadAloudTimeline | null>(null);
-  const [positionMs, setPositionMs] = useState<number | null>(null);
+  const [firstVisible, setFirstVisible] = useState<ReaderLocator | null>(null);
   const [followPaused, setFollowPaused] = useState(false);
   const [show, setShow] = useState<'sentence' | 'word' | 'both'>('both');
   const [sentenceStyle, setSentenceStyle] =
@@ -96,12 +74,17 @@ export function ReaderReadAloudPanel({
     'keepVisible' | 'center' | 'off'
   >('keepVisible');
 
-  const playerRef = useRef<PcmPlayer | null>(null);
-  const currentRef = useRef<Prepared | null>(null);
-  const nextRef = useRef<Promise<Prepared | null> | null>(null);
-  const runRef = useRef(0);
   const imagesRef = useRef<string | null>(null);
   const docRef = useRef<ReaderDocument | null>(null);
+
+  const { play, stop, busy, playing, timeline, positionMs } =
+    useReaderReadAloud(doc, {
+      getEngine,
+      sampleRate,
+      speakerId,
+      speed,
+      onError,
+    });
 
   // ---- Reader document over the extraction buffer ----
   useEffect(() => {
@@ -139,18 +122,8 @@ export function ReaderReadAloudPanel({
           releaseReaderDocument(d).catch(() => {});
           return;
         }
-        const all = await getReaderBlocks(d);
-        const textBlocks = all
-          .filter((b) => b.textRange)
-          .map((b) => ({
-            id: b.id,
-            sectionId: b.sectionId,
-            start: b.textRange!.start,
-            end: b.textRange!.end,
-          }));
         docRef.current = d;
         setDoc(d);
-        setBlocks(textBlocks);
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
@@ -159,9 +132,6 @@ export function ReaderReadAloudPanel({
     })();
     return () => {
       cancelled = true;
-      runRef.current += 1;
-      playerRef.current?.destroy().catch(() => {});
-      playerRef.current = null;
       const d = docRef.current;
       docRef.current = null;
       if (d) releaseReaderDocument(d).catch(() => {});
@@ -171,151 +141,14 @@ export function ReaderReadAloudPanel({
     };
   }, [source, textBuffer]);
 
-  // ---- Chunked synthesis ----
-  const chunkFrom = useCallback(
-    (index: number): Chunk | null => {
-      const first = blocks[index];
-      if (!first) return null;
-      let end = first.end;
-      let i = index + 1;
-      while (
-        i < blocks.length &&
-        blocks[i]!.sectionId === first.sectionId &&
-        blocks[i]!.end - first.start <= CHUNK_CHARS
-      ) {
-        end = blocks[i]!.end;
-        i += 1;
-      }
-      return { start: first.start, end, firstBlock: index, next: i };
-    },
-    [blocks]
-  );
-
-  const prepare = useCallback(
-    async (chunk: Chunk, run: number): Promise<Prepared | null> => {
-      const engine = getEngine();
-      const d = docRef.current;
-      if (!engine || !d) return null;
-      const slice = await getOfflineTextBufferTextSlice(
-        textBuffer,
-        chunk.start,
-        chunk.end - chunk.start
-      );
-      const textIn = await createOfflineTextBufferFromText(slice);
-      const audio = await createEmptyOfflineAudioBuffer(sampleRate);
-      try {
-        const result = await engine.synthesize(textIn, audio, {
-          sid: speakerId,
-          speed,
-          segmentation: { mode: 'auto' },
-          timeline: true,
-        });
-        if (run !== runRef.current || !result.timeline) {
-          await releasePipelineAudioBuffer(audio.bufferId).catch(() => {});
-          return null;
-        }
-        const tl = await createReadAloudTimeline(d, {
-          text: textIn,
-          tts: result.timeline,
-          textOffset: chunk.start,
-        });
-        return { chunk, audioBufferId: audio.bufferId, timeline: tl };
-      } finally {
-        await releasePipelineTextBuffer(textIn.bufferId).catch(() => {});
-      }
-    },
-    [getEngine, sampleRate, speakerId, speed, textBuffer]
-  );
-
-  const stop = useCallback(async () => {
-    runRef.current += 1;
-    nextRef.current = null;
-    const player = playerRef.current;
-    playerRef.current = null;
-    if (player) await player.destroy().catch(() => {});
-    const cur = currentRef.current;
-    currentRef.current = null;
-    if (cur) releasePipelineAudioBuffer(cur.audioBufferId).catch(() => {});
-    setPlaying(false);
-    setPositionMs(null);
-    setTimeline(null);
-  }, []);
-
-  const playPrepared = useCallback(
-    async (prepared: Prepared, run: number) => {
-      if (run !== runRef.current) return;
-      const old = currentRef.current;
-      currentRef.current = prepared;
-      setTimeline(prepared.timeline);
-      setPositionMs(0);
-      // Prepare the next chunk while this one plays.
-      const nextChunk = chunkFrom(prepared.chunk.next);
-      nextRef.current = nextChunk ? prepare(nextChunk, run) : null;
-      const player = await createPcmPlayer(prepared.audioBufferId, {
-        onPosition: (e) => {
-          if (run === runRef.current) setPositionMs(e.positionMs);
-        },
-        onEnded: () => {
-          if (run !== runRef.current) return;
-          const pending = nextRef.current;
-          nextRef.current = null;
-          if (!pending) {
-            stop().catch(() => {});
-            return;
-          }
-          pending
-            .then((p) => {
-              if (p) return playPrepared(p, run);
-              return stop();
-            })
-            .catch((e) => onError(e instanceof Error ? e.message : String(e)));
-        },
-      });
-      const prev = playerRef.current;
-      playerRef.current = player;
-      if (prev) prev.destroy().catch(() => {});
-      if (old) releasePipelineAudioBuffer(old.audioBufferId).catch(() => {});
-    },
-    [chunkFrom, onError, prepare, stop]
-  );
-
-  const play = useCallback(async () => {
-    if (!getEngine()) {
-      onError('Initialize a TTS model first.');
-      return;
+  const startAt = (): ReaderLocator | null => {
+    if (startBlockId) {
+      return { sectionId: sectionOf(startBlockId), blockId: startBlockId };
     }
-    const fromId = startBlockId ?? firstVisibleId ?? blocks[0]?.id;
-    const index = Math.max(
-      0,
-      blocks.findIndex((b) => b.id === fromId)
-    );
-    const chunk = chunkFrom(index);
-    if (!chunk) return;
-    await stop();
-    const run = runRef.current;
-    onError(null);
-    setBusy(true);
-    setPlaying(true);
-    try {
-      const prepared = await prepare(chunk, run);
-      if (prepared) await playPrepared(prepared, run);
-    } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
-      await stop();
-    } finally {
-      setBusy(false);
-    }
-  }, [
-    blocks,
-    chunkFrom,
-    firstVisibleId,
-    getEngine,
-    onError,
-    playPrepared,
-    prepare,
-    startBlockId,
-    stop,
-  ]);
+    if (firstVisible) return firstVisible;
+    const first = doc?.sections[0];
+    return first ? { sectionId: first.id, blockId: first.firstBlockId } : null;
+  };
 
   // ---- Highlights: the chosen start paragraph, then sentence and word ----
   const readAloud = useReadAloudHighlights(timeline, positionMs, {
@@ -323,12 +156,11 @@ export function ReaderReadAloudPanel({
     sentenceStyle: { style: sentenceStyle },
     wordStyle: { style: wordStyle },
   });
-  const startBlock = blocks.find((b) => b.id === startBlockId);
   const highlights = useMemo<ReaderHighlight[]>(() => {
-    if (playing || !startBlock) return readAloud;
-    const at = { sectionId: startBlock.sectionId, blockId: startBlock.id };
+    if (playing || !startBlockId) return readAloud;
+    const at = { sectionId: sectionOf(startBlockId), blockId: startBlockId };
     return [{ id: 'start', from: at, to: at, style: 'underline' }];
-  }, [playing, readAloud, startBlock]);
+  }, [playing, readAloud, startBlockId]);
 
   if (loadError) {
     return <Text style={styles.errorText}>{loadError}</Text>;
@@ -357,7 +189,7 @@ export function ReaderReadAloudPanel({
           follow={{ mode: followMode }}
           onTap={({ blockId }) => setStartBlockId(blockId)}
           onVisibleRangeChange={(r) => {
-            if (r.settled) setFirstVisibleId(r.first.blockId);
+            if (r.settled) setFirstVisible(r.first);
           }}
           onFollowChange={(c) => setFollowPaused(!c.following)}
           onError={(e) => onError(`${e.code}: ${e.message}`)}
@@ -393,7 +225,8 @@ export function ReaderReadAloudPanel({
           testID="readaloud-play"
           accessibilityLabel="Read aloud"
           onPress={() => {
-            play().catch(() => {});
+            const from = startAt();
+            if (from) play(from).catch(() => {});
           }}
         >
           {busy ? (

@@ -91,7 +91,7 @@ Full doc index: [docs/README.md](./docs/README.md). New to models? See [How to s
 
 - ✅ Offline OCR: [Offline](./docs/ocr-offline.md)
 - ✅ PDF: [Offline](./docs/pdf-offline.md)
-- ✅ E-documents: [Offline](./docs/document-offline.md) · [Reader](./docs/reader.md) (EPUB, native ReaderView, New Architecture)
+- ✅ E-documents: [Offline](./docs/document-offline.md) · [Reader](./docs/reader.md)
 
 ### Pipeline & orchestration
 
@@ -503,6 +503,31 @@ The SDK exposes a public API for native image-buffer previews (`react-native-she
 </table>
 
 Full guide: [Image buffer](./docs/imagebuffer-offline.md).
+
+## Reader
+
+The SDK exposes a native, virtualized reading view (`react-native-sherpa-onnx/reader`) for EPUB, FB2, MOBI / AZW3, PDF, scanned books and comics: positions that stay valid, your own React Native views in the text, highlights, search, contents, OCR text for page images and read-aloud with sentence and word highlights. The [example app](./example/README.md#reader) opens every format.
+
+<table>
+<tr>
+<td align="center" width="33%"><img src="./docs/images/example/reader_1.png" alt="EPUB with highlights and a chapter-end card" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/example/reader_scan_text.png" alt="Scanned PDF page as text after OCR, with headings" width="180" /></td>
+<td align="center" width="33%"><img src="./docs/images/example/reader_scan_image.png" alt="Search hit drawn over the page image" width="180" /></td>
+</tr>
+<tr>
+<td align="center"><sub>EPUB · highlights · inserts</sub></td>
+<td align="center"><sub>Scanned PDF · OCR text</sub></td>
+<td align="center"><sub>Page image · hit on its line</sub></td>
+</tr>
+<tr>
+<td></td>
+<td align="left"><pre><code>const doc = await loadReaderDocument(source);
+&lt;ReaderView document={doc} /&gt;</code></pre></td>
+<td></td>
+</tr>
+</table>
+
+Full guide: [Reader](./docs/reader.md), with the same page from each OCR model.
 
 ## Video preview
 

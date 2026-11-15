@@ -114,9 +114,11 @@ bool DocVlmPackLooksValid(const std::string& dir) {
   for (const char* file : required) {
     if (!fs::is_regular_file(root / file)) return false;
   }
-  return FileAtLeast(root / "vision_encoder.onnx_data", 300 * kMiB) &&
-         FileAtLeast(root / "embed_tokens.onnx_data", 200 * kMiB) &&
-         FileAtLeast(root / "decoder_model_merged.onnx_data", 600 * kMiB);
+  // Every release dtype passes (the smallest file, q4f16 vision, is ~52 MiB);
+  // LFS pointers and truncated downloads do not.
+  return FileAtLeast(root / "vision_encoder.onnx_data", 32 * kMiB) &&
+         FileAtLeast(root / "embed_tokens.onnx_data", 32 * kMiB) &&
+         FileAtLeast(root / "decoder_model_merged.onnx_data", 32 * kMiB);
 }
 
 std::string PackDirOrEmpty() {

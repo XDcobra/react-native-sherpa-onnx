@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <string>
 #include <sys/stat.h>
@@ -106,3 +107,59 @@ TEST(OcrReaderPages, ScannedPageGetsTextBlocksWithPlaces) {
   EXPECT_TRUE(reader::PlanRows(*snap, reader::PageDisplay::kImage).front().page);
   reg.Release(id);
 }
+
+// Any OCR family on page 3 of the scanned book ("Chapter One"): set
+// OCR_READER_FAMILY (ppocr, doctr, doc_vlm, nemotron_parse, paddleocr_vl) and
+// OCR_READER_MODEL_DIR (an unpacked release pack). Prints the reader blocks.
+TEST(OcrReaderPages, BookScanPageWithModelFromEnv) {
+  const char* family = std::getenv("OCR_READER_FAMILY");
+  const char* dir = std::getenv("OCR_READER_MODEL_DIR");
+  if (!family || !dir) GTEST_SKIP() << "set OCR_READER_FAMILY and OCR_READER_MODEL_DIR";
+  if (!pdf::IsPdfiumCompiledIn()) GTEST_SKIP() << "no PDFium";
+  pdf::RasterOptions ro;
+  ro.pages = {3};
+  ro.dpi = 150;
+  pdf::PdfSource src;
+  src.path = std::string(SHERPA_TEST_SOURCE_DIR) + "/test/fixtures/pdf/book_scan.pdf";
+  auto raster = pdf::RasterizePdfPages(src, ro);
+  ASSERT_TRUE(raster.ok) << raster.error_code << " " << raster.error_message;
+  auto backend = ocr::CreateOcrBackend(family);
+  ocr::OcrLoadOptions opts;
+  opts.num_threads = 4;
+  backend->Load(dir, opts);
+  ocr::OcrFrameView view;
+  view.rgb = raster.frames[0].rgb.data();
+  view.width = raster.frames[0].width;
+  view.height = raster.frames[0].height;
+  ocr::OcrResult r = backend->Recognize(view);
+  backend->Release();
+  const std::string fam(family);
+  if (r.elements.empty() && (fam == "ppocr" || fam == "doctr" || fam == "paddleocr_vl")) {
+    ocr::ArrangeLinesIntoParagraphs(&r, ocr::OcrReadingDirection::kLtr);
+  }
+  std::printf("[text] %s\n[raw] %.600s\n[elements] %zu [spans] %zu\n", r.text_utf8.c_str(),
+              r.raw_utf8.c_str(), r.elements.size(), r.spans.size());
+  r.frames.push_back({0, 0, txt_utf16_length(r.text_utf8), view.width, view.height});
+  const ocr::OcrTextData data = ocr::MakeOcrTextData("img_off_book", family, r, nullptr);
+  auto entry = std::make_shared<TxtOfflineEntry>();
+  ASSERT_TRUE(entry->tryPopulate(r.text_utf8, {}, {}, {}, "", "", "", data.spans));
+  ASSERT_TRUE(entry->trySetOcrLayout(data.layout));
+
+  auto& reg = reader::ReaderRegistry::Instance();
+  reader::ReaderError err;
+  const std::string id = reg.CreatePages("img_off_book", {{"page:3", 0}}, "book", &err);
+  ASSERT_FALSE(id.empty()) << err.message;
+  int attached = 0;
+  ASSERT_TRUE(reg.AttachPageText(id, entry, &attached, &err)) << err.message;
+  auto snap = reg.Snapshot(id);
+  for (size_t i = 1; i < snap->blocks.size(); ++i) {
+    const auto& b = snap->blocks[i];
+    std::printf("%s type=%d level=%d flags=%u rect=%d [%.2f %.2f %.2f %.2f] lines=%zu | %s\n",
+                b.id.c_str(), static_cast<int>(b.type), b.headingLevel, b.flags, b.hasRect ? 1 : 0,
+                b.rect[0], b.rect[1], b.rect[2], b.rect[3], b.lines.size(),
+                snap->BlockText(static_cast<int>(i)).substr(0, 80).c_str());
+  }
+  EXPECT_GE(attached, 1) << r.text_utf8;
+  reg.Release(id);
+}
+

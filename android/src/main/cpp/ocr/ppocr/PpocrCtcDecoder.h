@@ -13,7 +13,9 @@ std::vector<std::string> LoadCharacterDictFromYml(const std::string& yml_path);
 
 /**
  * CTC greedy decode. logits: [T, C] row-major. dict[0] unused (blank=0).
- * Returns utf8 text + mean confidence of kept steps.
+ * When C is dict.size() + 1, the last class is a space (`use_space_char`).
+ * Returns utf8 text (without leading / trailing spaces) + mean confidence of
+ * kept steps.
  */
 std::pair<std::string, float> CtcGreedyDecode(
     const float* logits,

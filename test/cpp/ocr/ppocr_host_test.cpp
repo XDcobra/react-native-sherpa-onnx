@@ -221,6 +221,28 @@ TEST(PpocrCtcUnit, LoadDictAndGreedyDecode) {
   EXPECT_EQ(Utf8ToUtf16Length("你好"), 2);
 }
 
+// PP-OCR models trained with use_space_char have one class after the YAML
+// dictionary: a space. Without it every line came out without spaces.
+TEST(PpocrCtcUnit, ClassAfterDictionaryIsSpace) {
+  const std::vector<std::string> dict = {"blank", "H", "i", "y", "o", "u"};
+  const int C = static_cast<int>(dict.size()) + 1;  // + space
+  const int space = C - 1;
+  const std::vector<int> steps = {space, 1, 2, 0, space, 3, 4, 5, space};
+  const int T = static_cast<int>(steps.size());
+  std::vector<float> logits(static_cast<size_t>(T) * C, 0.f);
+  for (int t = 0; t < T; ++t) logits[static_cast<size_t>(t) * C + steps[t]] = 5.f;
+
+  auto [text, conf] = CtcGreedyDecode(logits.data(), T, C, dict);
+  EXPECT_EQ(text, "Hi you");  // leading / trailing spaces dropped
+  EXPECT_GT(conf, 0.5f);
+
+  // A model without the extra class: an index past the dictionary is not a space.
+  std::vector<float> narrow(static_cast<size_t>(T) * (C - 1), 0.f);
+  const std::vector<int> narrow_steps = {1, 2, 0, 3, 4, 5, 0, 0, 0};
+  for (int t = 0; t < T; ++t) narrow[static_cast<size_t>(t) * (C - 1) + narrow_steps[t]] = 5.f;
+  EXPECT_EQ(CtcGreedyDecode(narrow.data(), T, C - 1, dict).first, "Hiyou");
+}
+
 TEST(PpocrDbUnit, SyntheticBlobYieldsBox) {
   constexpr int H = 32;
   constexpr int W = 64;
@@ -297,6 +319,7 @@ TEST_P(PpocrGolden, RecognizeMatchesExpected) {
   OcrResult result = backend->Recognize(frame);
   backend->Release();
 
+  RecordProperty("text", result.text_utf8);
   EXPECT_EQ(NormText(result.text_utf8), expected_text);
   EXPECT_NEAR(static_cast<double>(result.spans.size()), expected_spans, 1.0);
   ASSERT_GE(result.spans.size(), 1u);

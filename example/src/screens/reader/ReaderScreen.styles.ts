@@ -58,13 +58,13 @@ export const styles = StyleSheet.create({
   toolbar: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 6,
     paddingHorizontal: 16,
   },
   toolbarButton: {
     minHeight: 40,
     minWidth: 44,
-    paddingHorizontal: 14,
+    paddingHorizontal: 8,
     borderRadius: 8,
     backgroundColor: '#F2F2F7',
     alignItems: 'center',
@@ -74,7 +74,7 @@ export const styles = StyleSheet.create({
     backgroundColor: '#E3F2FD',
   },
   toolbarButtonText: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#007AFF',
     fontWeight: '600',
   },
@@ -151,6 +151,23 @@ export const styles = StyleSheet.create({
   },
   actionButtonText: {
     fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  followButton: {
+    position: 'absolute',
+    alignSelf: 'center',
+    bottom: 12,
+    minHeight: 40,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#1F2937',
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+  },
+  followButtonText: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#FFFFFF',
   },

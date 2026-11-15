@@ -10,6 +10,7 @@ import type { FileDestination, FileSource } from '../fileio/types';
 import type { OcrEngine, OcrRecognizeOptions } from '../ocr/types';
 import {
   createEmptyOfflineTextBuffer,
+  getPipelineTextBufferInfo,
   releasePipelineTextBuffer,
   resolveOfflineTextBufferId,
 } from '../textbuffer';
@@ -149,11 +150,15 @@ export type RecognizeReaderPagesOptions = {
   onDocument?: (doc: ReaderDocument) => void;
   /** Minimum ms between `onDocument` calls while running (default 300). */
   updateIntervalMs?: number;
-  /** After each page: pages done / to do, and the page's section. */
+  /**
+   * After each page: pages done / to do, the page's section, and whether the
+   * model returned text for it (`false`: the page still shows only its image).
+   */
   onProgress?: (event: {
     done: number;
     total: number;
     sectionId: string;
+    hasText: boolean;
   }) => void;
   /** Stops after the page in progress; recognized pages stay attached. */
   signal?: AbortSignal;
@@ -216,12 +221,15 @@ export async function recognizeReaderPages(
   for (const page of todo) {
     if (options.signal?.aborted) break;
     const text = await createEmptyOfflineTextBuffer();
+    let hasText = false;
     try {
       await recognize.call(ocr, imageBufferId, text, {
         ...options.recognize,
         frames: [page.frame],
         signal: options.signal,
       });
+      const info = await getPipelineTextBufferInfo(text);
+      hasText = info.kind === 'offlineTextBuffer' && info.utf16Length > 0;
       current = await attachReaderPageText(current, { text });
     } catch (err: unknown) {
       if (options.signal?.aborted) break;
@@ -235,6 +243,7 @@ export async function recognizeReaderPages(
       done,
       total: todo.length,
       sectionId: page.sectionId,
+      hasText,
     });
     pending = true;
     const now = Date.now();

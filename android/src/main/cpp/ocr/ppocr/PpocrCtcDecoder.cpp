@@ -80,6 +80,9 @@ std::pair<std::string, float> CtcGreedyDecode(
   float conf_sum = 0.f;
   int conf_n = 0;
   int prev = -1;
+  // Models trained with `use_space_char` have one class more than the YAML
+  // dictionary lists: a space, after the last character (PP-OCR CTCLabelDecode).
+  const bool space_class = static_cast<size_t>(num_classes) == dict.size() + 1;
   for (int t = 0; t < time_steps; ++t) {
     const float* row = logits + static_cast<size_t>(t) * num_classes;
     int best = 0;
@@ -113,8 +116,13 @@ std::pair<std::string, float> CtcGreedyDecode(
     conf_n += 1;
     if (best >= 0 && static_cast<size_t>(best) < dict.size()) {
       text += dict[static_cast<size_t>(best)];
+    } else if (space_class && static_cast<size_t>(best) == dict.size()) {
+      text += ' ';
     }
   }
+  // A line starts and ends with text.
+  const size_t first = text.find_first_not_of(' ');
+  text = first == std::string::npos ? std::string() : text.substr(first, text.find_last_not_of(' ') - first + 1);
   const float conf = conf_n > 0 ? conf_sum / static_cast<float>(conf_n) : 0.f;
   return {text, conf};
 }

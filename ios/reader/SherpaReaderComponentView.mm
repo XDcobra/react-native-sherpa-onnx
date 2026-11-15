@@ -149,6 +149,16 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
                                          UIGestureRecognizerDelegate>
 @end
 
+/** First visible row of the reader list: its identity and its distance to the top. */
+@interface SherpaReaderAnchor : NSObject
+@property (nonatomic, copy, nullable) NSString *identity;
+@property (nonatomic) CGFloat delta;
+@property (nonatomic) BOOL atTop;
+@end
+
+@implementation SherpaReaderAnchor
+@end
+
 @implementation SherpaReaderComponentView {
   UITableView *_tableView;
   UITapGestureRecognizer *_tap;
@@ -726,6 +736,8 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 
 - (void)rebuildRows
 {
+  // The first visible row, read from the rows and snapshot it was built from.
+  SherpaReaderAnchor *anchor = [self captureAnchor];
   [self loadSnapshot];
   [self resolveHighlights];
   std::vector<ReaderRow> rows;
@@ -752,11 +764,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     }
   }
   _tableView.contentInset = UIEdgeInsetsMake(_theme.marginVertical, 0, _theme.marginVertical, 0);
-  [self keepingAnchor:^{
-    self->_rows = std::move(rows);
-    [self->_tableView reloadData];
-    [self->_tableView layoutIfNeeded];
-  }];
+  _rows = std::move(rows);
+  [_tableView reloadData];
+  [_tableView layoutIfNeeded];
+  [self restoreAnchor:anchor];
 
   if (!_snap || _snap->blocks.empty()) return;
   if (!_initialApplied) {
@@ -807,24 +818,37 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   return NSNotFound;
 }
 
-/** Runs `updates` and keeps the first visible row at the same screen position. */
-- (void)keepingAnchor:(void (^)(void))updates
+/** The first visible row (call before the rows or the snapshot change). */
+- (SherpaReaderAnchor *)captureAnchor
 {
+  SherpaReaderAnchor *anchor = [SherpaReaderAnchor new];
   NSIndexPath *anchorPath = _tableView.indexPathsForVisibleRows.firstObject;
-  NSString *anchorId = anchorPath ? [self identityOfRow:anchorPath.row] : nil;
-  CGFloat delta = 0;
+  anchor.identity = anchorPath ? [self identityOfRow:anchorPath.row] : nil;
   if (anchorPath) {
-    delta = [_tableView rectForRowAtIndexPath:anchorPath].origin.y - _tableView.contentOffset.y;
+    anchor.delta = [_tableView rectForRowAtIndexPath:anchorPath].origin.y - _tableView.contentOffset.y;
   }
-  BOOL atTop = _tableView.contentOffset.y <= -_tableView.contentInset.top;
-  updates();
+  anchor.atTop = _tableView.contentOffset.y <= -_tableView.contentInset.top;
+  return anchor;
+}
+
+/** Puts the anchor row back at the same screen position. */
+- (void)restoreAnchor:(SherpaReaderAnchor *)anchor
+{
   dispatch_async(dispatch_get_main_queue(), ^{
     [self syncInsertOrigins];
   });
-  if (anchorId == nil || atTop) {
+  if (anchor.identity == nil || anchor.atTop) {
     return;
   }
-  NSInteger row = [self rowForIdentity:anchorId];
+  CGFloat delta = anchor.delta;
+  NSInteger row = [self rowForIdentity:anchor.identity];
+  if (row == NSNotFound && _snap && [anchor.identity hasPrefix:@"b:"]) {
+    // The anchor row is gone (OCR text in place of a page image): the row that
+    // now covers its block, from its top.
+    const int block = _snap->BlockIndex(std::string([anchor.identity substringFromIndex:2].UTF8String ?: ""));
+    row = block >= 0 ? [self rowForBlock:block] : NSNotFound;
+    delta = 0;
+  }
   if (row == NSNotFound) {
     return;
   }
@@ -832,6 +856,14 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   CGFloat maxY = MAX(-_tableView.contentInset.top,
                      _tableView.contentSize.height + _tableView.contentInset.bottom - _tableView.bounds.size.height);
   _tableView.contentOffset = CGPointMake(0, MIN(MAX(-_tableView.contentInset.top, y), maxY));
+}
+
+/** Runs `updates` (same snapshot) and keeps the first visible row at the same screen position. */
+- (void)keepingAnchor:(void (^)(void))updates
+{
+  SherpaReaderAnchor *anchor = [self captureAnchor];
+  updates();
+  [self restoreAnchor:anchor];
 }
 
 #pragma mark - UITableViewDataSource / Delegate

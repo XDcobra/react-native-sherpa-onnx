@@ -278,6 +278,11 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   internal fun setDocumentRevision(value: Int) {
     if (value == documentRevision) return
     documentRevision = value
+    // Rows can change (OCR text in place of a page image): keep the reading
+    // position. While the user scrolls, the list keeps its own position.
+    if (pendingAnchor == null && recycler.scrollState == RecyclerView.SCROLL_STATE_IDLE) {
+      pendingAnchor = readingAnchor()
+    }
     scheduleRebuild()
   }
 
@@ -775,7 +780,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   }
 
   /** A position the reader keeps across reflows: block ID + UTF-16 offset. */
-  private class Anchor(val blockId: String, val offset: Int)
+  /** `offset`: character at the reading top (text rows); `px`: pixels into an image or page row. */
+  private class Anchor(val blockId: String, val offset: Int, val px: Int = 0)
 
   private var pendingAnchor: Anchor? = null
 
@@ -802,21 +808,30 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       }
       val tv = (recycler.getChildViewHolder(child) as? TextHolder)?.text
       val layout = tv?.layout
-      val offset =
-        if (tv != null && layout != null) {
-          val ly = y - child.top - tv.paddingTop
-          if (ly > 0) layout.getLineStart(layout.getLineForVertical(ly)) else 0
-        } else {
-          0
-        }
-      return Anchor(row.id, offset)
+      if (tv == null || layout == null) return Anchor(row.id, 0, y - child.top)
+      val ly = y - child.top - tv.paddingTop
+      return Anchor(row.id, if (ly > 0) layout.getLineStart(layout.getLineForVertical(ly)) else 0)
     }
     return fallback?.let { Anchor(it.id, 0) }
   }
 
   private fun restoreAnchor(anchor: Anchor) {
     val block = ReaderViewNative.nativeBlockIndex(snapshot, anchor.blockId)
-    if (block >= 0) scrollToBlock(block, anchor.offset, sampleAfter = false)
+    if (block < 0) return
+    if (anchor.px > 0) {
+      val row = rowOfBlock(block)
+      val r = rows.getOrNull(row) as? Row.Block
+      if (r != null && r.index == block) {
+        // The image or page row is still there: the same pixel at the reading top.
+        recycler.stopScroll()
+        programmaticScroll = false
+        pendingScroll = PendingScroll(row, 0, sampleAfter = false)
+        layoutManager.scrollToPositionWithOffset(row, -anchor.px)
+        return
+      }
+    }
+    // Text rows, or a block now covered by another row (its text took the page's place).
+    scrollToBlock(block, anchor.offset, sampleAfter = false)
   }
 
   // ---- Snapshot and rows ----

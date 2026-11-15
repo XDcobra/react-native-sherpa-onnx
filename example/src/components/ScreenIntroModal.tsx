@@ -143,7 +143,7 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
   },
   Reader: {
     title: 'Native reader',
-    body: 'This screen shows the reader API: an EPUB becomes a ReaderDocument with stable block IDs and is shown in the native ReaderView. Change the appearance, jump through the contents, search, mark paragraphs and add notes. Notes and chapter-end cards are your own React Native views inside the reading flow; progress, jumps and resume come from the reader events.',
+    body: 'This screen shows the reader API: an EPUB, FB2, MOBI / AZW3, PDF, scan or comic becomes a ReaderDocument with stable block IDs and is shown in the native ReaderView. Change the appearance and how pages are shown, jump through the contents, search, mark paragraphs and add notes. Scanned pages and comics get their text from OCR, page by page or for the whole book, and can keep it in a saved file. Listen reads any book aloud with the spoken sentence and word highlighted, also over page images.',
   },
 };
 

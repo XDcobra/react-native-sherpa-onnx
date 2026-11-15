@@ -129,7 +129,7 @@ try {
 | --- | --- | --- | --- |
 | `ppocr` | `det`, `rec`, `rec_dict` | `cls` | Phone default. Fast line OCR with overlay boxes on signs, receipts, and scans. Start with `ppocrv6-tiny`; step up to `ppocrv6-small` / `ppocrv6-medium` for accuracy. |
 | `doctr` | `det`, `rec`, `manifest` | — | Same job as ppocr (detect + recognize + boxes) when the pack language set matches. `doctr-mobile` is the small `en`/`fr` pack; `doctr-default` is the larger Latin pack. |
-| `doc_vlm` | `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` | — | Structured documents: page markdown, a table / formula / code block, or a pixel region. Needs more RAM. Smallest published pack: `docvlm-granite-258m-q4f16`. |
+| `doc_vlm` | `vision_encoder`, `vision_encoder_data`, `embed_tokens`, `embed_tokens_data`, `decoder`, `decoder_data`, `tokenizer`, `manifest` | — | Structured documents: page markdown, a table / formula / code block, or a pixel region. Needs more RAM. Most accurate: `docvlm-granite-258m-fp32`. `-q8` is the smallest working pack and about three times faster, but on some pages it repeats a line until `maxNewTokens`. The `-fp16` and `-q4f16` packs run the decoder in float16 and currently return no text on the CPU: the first token is already wrong. |
 | `nemotron_parse` | granite octet plus `patch_embed`, `pos_embed` | `patch_embed_data` | Full-page markdown from a document photo. Larger VLM. Prefer `nemotron-3.5-parse-int8`. Alias `nemotron-parse` only (never bare `nemotron`). |
 | `paddleocr_vl` | `vision_encoder`, `embedding`, `decoder`, `tokenizer` | `*_data`, `manifest` | One loaded session, pick a task per run (page, table, formula, chart, seal, spotting with boxes). Largest pack: `paddleocr-vl-1.6-fp16`. Alias `paddleocr-vl` only (never bare `paddleocr`). |
 | `auto` | Resolves family from pack layout (manifest `family`, then layout heuristics) | — | When you do not want to hard-code `modelType`. Result extras follow the resolved family. |
@@ -149,9 +149,20 @@ Shared on every family (`OcrRecognizeOptionsBase`):
 | `frames` | Frame indices in the image buffer. Omit = all frames. |
 | `crop` | `{ x, y, width, height }` in decoded-frame pixels. The engine crops first; span and element quads are translated back to the full frame. Omit = full frame. Outside the frame → `OCR_INVALID_REGION`. |
 | `granularity` | Span level filter. Must be in `engine.capabilities.granularities` or `OCR_UNSUPPORTED_GRANULARITY`. |
+| `readingDirection` | `'ltr'` (default) or `'rtl'`: the order of columns for families that detect text lines (`ppocr`, `doctr`, `paddleocr_vl` spotting). `'rtl'` also reads vertical text right to left (manga). VLM families keep the model's order. See [Text layout](#text-layout). |
 | `onProgress` | Phase callbacks (`OCR_PROGRESS_PHASES`). |
 | `progressMinIntervalMs` | Coalesce interval for progress events. Default `200`. `0` = unthrottled. |
 | `signal` | Abort at the same hooks as progress → `OCR_CANCELLED`. |
+
+### Text layout
+
+What `recognize` writes into `textOut`:
+
+- **Frames** are separated by a blank line (`\n\n`).
+- **Line-detecting families** (`ppocr`, `doctr`, `paddleocr_vl` spotting) return their boxes in reading order: boxes on one text line are grouped into a line (`doctr` returns one box per word), columns are read one after the other (`readingDirection`), and lines become paragraphs from their geometry (gaps, first-line indents, lines that end early, a clearly larger title line). Lines of a paragraph are joined by a space (none between CJK characters; `exam-` + `ple` → `example`), paragraphs by a blank line. Every box keeps its span and quad, with its range in the new text.
+- **VLM families** write the model's text in its own order; `doc_vlm`, `nemotron_parse` and `paddleocr_vl` keep paragraph breaks as blank lines.
+
+The reader builds its blocks from this layout ([reader.md](reader.md#text-for-scans-and-comics)). The rules can change before 1.0.
 
 ### `ppocr`
 
@@ -187,7 +198,7 @@ type OcrRecognizeOptionsOf<'doctr'> = {
 
 | Option | Effect |
 | --- | --- |
-| `granularity` | `'line'` only. Line boxes land on `textOut` as spatial spans. |
+| `granularity` | `'line'` only. One span per detected word box, grouped into lines and paragraphs ([Text layout](#text-layout)). |
 | `crop` | Run detect/recognize on a pixel cutout. |
 | *(no `instruction`)* | Line OCR. Init-time `doctr` DB knobs match ppocr except thresh defaults `0.15` / `0.15`. |
 
@@ -566,7 +577,7 @@ import {
   detectOcrModel,
 } from 'react-native-sherpa-onnx/ocr';
 
-const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m-q4f16');
+const model = await ensureModel(ModelCategory.Ocr, 'docvlm-granite-258m-fp32');
 const source = { kind: 'fs' as const, path: model.modelDir };
 const det = await detectOcrModel(source);
 if (!det.success) {
