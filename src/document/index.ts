@@ -3,6 +3,7 @@
  *
  * - `extractDocumentText` — markup → OfflineTextBuffer (`origin: 'markup'`). Never OCR.
  * - `extractDocumentImages` — image-only sections / CBZ / CBR → OfflineImageBuffer.
+ * - `detectDocumentFormat` — container format by content, before extracting.
  *
  * libarchive is default-on. Disable → `ERR_DOC_ARCHIVE_DISABLED`.
  * lexbor is opt-in (default off). EPUB/MOBI HTML without it → `ERR_DOC_LEXBOR_DISABLED`.
@@ -21,6 +22,7 @@ import type { OfflineTextBufferHandle } from '../textbuffer/types';
 import { mapDocumentStructure } from './structure';
 import {
   DocumentErrorCode,
+  type DocumentFileFormat,
   type DocumentImageFormat,
   type DocumentSectionInfo,
   type DocumentTextFormat,
@@ -272,8 +274,38 @@ export async function extractDocumentImages(
   }
 }
 
+/**
+ * Container format of a file by its content (signature / archive entries), not
+ * by name or MIME type. Resolves `null` for anything else (plain text, HTML,
+ * unknown). Opens the file only to read it; nothing is extracted.
+ */
+export async function detectDocumentFormat(
+  source: FileSource
+): Promise<DocumentFileFormat | null> {
+  assertFileSource(source);
+  let raw: string;
+  try {
+    raw = await getNative().detectDocumentFormat(source as Object);
+  } catch (err) {
+    return mapDocNativeError(err);
+  }
+  return FILE_FORMATS.includes(raw as DocumentFileFormat)
+    ? (raw as DocumentFileFormat)
+    : null;
+}
+
+const FILE_FORMATS: readonly DocumentFileFormat[] = [
+  'epub',
+  'fb2',
+  'mobi',
+  'cbz',
+  'cbr',
+  'pdf',
+];
+
 export type {
   DocumentErrorCodeValue,
+  DocumentFileFormat,
   DocumentImageFormat,
   DocumentSectionInfo,
   DocumentSectionKind,

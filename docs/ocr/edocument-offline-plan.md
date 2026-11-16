@@ -26,7 +26,7 @@ Ein Ship, keine Produkt-v1/v2. Phasen unten = interne Bau-Reihenfolge. **Erster 
 | D8 | Kein Extra-Enable-Flag analog PDFium. Kein `isLibarchiveEnabled()`. |
 | D9 | DRM, KFX, AZW4, Topaz, DjVu, CHM, Office, TXT, lose HTML, PDF: **nicht** dieses Modul. PDF bleibt [`pdf/`](../pdf-offline.md). TXT → `createOfflineTextBufferFromText`. CBR **doch**: gleicher Pixel-Pfad wie CBZ, Decoder steckt schon in libarchive (kein neues `.so`). |
 | D10 | Kein Reader, kein Reflow-Preview-Widget. Die App zeigt den TextBuffer-String; FrameView nur nach `extractDocumentImages`. Example-App ist **nicht** Teil dieses Ships. **Ersetzt** durch die Reader-API ([reader.md](../reader.md)): `ReaderView` (Fabric) zeigt EPUB-Struktur mit stabilen Block-IDs; `extractDocumentText` selbst bleibt reiner Extraktor. |
-| D11 | Kein öffentliches `detectDocumentFormat`. Sniff intern in den beiden Extract-Calls. `format` steht auf dem Result. |
+| D11 | Sniff intern in den beiden Extract-Calls. `format` steht auf dem Result. **Ersetzt:** `detectDocumentFormat` ist öffentlich, damit Apps den Inhalt vor dem Import prüfen können (z. B. eine umbenannte Datei). |
 | D12 | Kein `interleaveDocumentText`, kein Document-Pipeline-Orchestrator. Lesereihenfolge mixed = App, zehn Zeilen. |
 | D13 | `textOut` **Pflicht**, wie PDF: leerer Offline-TextBuffer. Kein intern anlegen. `result.buffer` ist derselbe Handle. |
 | D14 | Ein Markup-Span **pro Block-Element** (`p`, `h1`–`h6`, `li`, `blockquote`, `pre`, `td`), nicht pro Spine-Item. Dasselbe `sectionIndex` (+ `href`) auf jedem Span des Abschnitts. |
@@ -260,7 +260,7 @@ Dieselbe Public-Signatur von Anfang an (`textOut` Pflicht).
 
 ### A — Vertrag
 
-- `src/document/types.ts`, Error-Codes. Kein `detectDocumentFormat`-Export. Kein `isLibarchiveEnabled()`.
+- `src/document/types.ts`, Error-Codes. `detectDocumentFormat`-Export (siehe D11). Kein `isLibarchiveEnabled()`.
 - `TextSpatialSpan`: optionales `sectionIndex`, `href`. Kein `blockKind`.
 - `ImageFrameInfo`: optionales `sectionIndex`, `href` (CBZ/CBR: `pageNumber` nach Sort).
 - AnnotatedView: Boxen nur `ocr` \| `textLayer` (ist schon so).

@@ -25,6 +25,15 @@ export const DocumentErrorCode = {
 export type DocumentErrorCodeValue =
   (typeof DocumentErrorCode)[keyof typeof DocumentErrorCode];
 
+/** Container format by content (`detectDocumentFormat`). MOBI includes AZW3. */
+export type DocumentFileFormat =
+  | 'epub'
+  | 'fb2'
+  | 'mobi'
+  | 'cbz'
+  | 'cbr'
+  | 'pdf';
+
 export type DocumentTextFormat = 'epub' | 'fb2' | 'mobi';
 export type DocumentImageFormat = 'epub' | 'fb2' | 'mobi' | 'cbz' | 'cbr';
 

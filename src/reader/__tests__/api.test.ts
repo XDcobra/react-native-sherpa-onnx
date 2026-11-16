@@ -34,12 +34,9 @@ jest.mock('react-native', () => ({
   codegenNativeCommands: () => ({ scrollToLocator: jest.fn() }),
 }));
 
-jest.mock('../../document/detect', () => ({
+jest.mock('../../document', () => ({
   detectDocumentFormat: (...a: unknown[]) =>
     mockDocument.detectDocumentFormat(...a),
-}));
-
-jest.mock('../../document', () => ({
   extractDocumentText: (...a: unknown[]) =>
     mockDocument.extractDocumentText(...a),
   extractDocumentImages: (...a: unknown[]) =>

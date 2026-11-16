@@ -15,7 +15,6 @@ jest.mock('react-native', () => ({
 }));
 
 jest.mock('../../document', () => ({ DocumentErrorCode: {} }));
-jest.mock('../../document/detect', () => ({}));
 jest.mock('../../imagebuffer', () => ({}));
 jest.mock('../../pdf', () => ({}));
 

@@ -1,6 +1,7 @@
 const mockNative = {
   extractDocumentText: jest.fn(),
   extractDocumentImages: jest.fn(),
+  detectDocumentFormat: jest.fn(),
 };
 
 jest.mock('react-native', () => ({
@@ -20,6 +21,7 @@ jest.mock('../../textbuffer', () => ({
 
 import {
   DocumentErrorCode,
+  detectDocumentFormat,
   extractDocumentImages,
   extractDocumentText,
 } from '../index';
@@ -276,9 +278,39 @@ describe('document offline api', () => {
     ).rejects.toMatchObject({ code: DocumentErrorCode.NO_IMAGES });
   });
 
-  it('does not export detectDocumentFormat', async () => {
+  it('detectDocumentFormat returns the content format', async () => {
+    mockNative.detectDocumentFormat.mockResolvedValue('pdf');
+    const source = { kind: 'contentUri' as const, uri: 'content://x/1' };
+    await expect(detectDocumentFormat(source)).resolves.toBe('pdf');
+    expect(mockNative.detectDocumentFormat).toHaveBeenCalledWith(source);
+  });
+
+  it('detectDocumentFormat returns null for other content', async () => {
+    mockNative.detectDocumentFormat.mockResolvedValue('');
+    await expect(
+      detectDocumentFormat({ kind: 'fs', path: '/tmp/notes.txt' })
+    ).resolves.toBeNull();
+    mockNative.detectDocumentFormat.mockResolvedValue('html');
+    await expect(
+      detectDocumentFormat({ kind: 'fs', path: '/tmp/page.html' })
+    ).resolves.toBeNull();
+  });
+
+  it('detectDocumentFormat checks the source and maps native errors', async () => {
+    await expect(detectDocumentFormat(null as never)).rejects.toMatchObject({
+      code: DocumentErrorCode.INVALID_ARGUMENT,
+    });
+    expect(mockNative.detectDocumentFormat).not.toHaveBeenCalled();
+    mockNative.detectDocumentFormat.mockRejectedValue(
+      Object.assign(new Error('cannot open'), { code: 'ERR_DOC_OPEN_FAILED' })
+    );
+    await expect(
+      detectDocumentFormat({ kind: 'fs', path: '/tmp/missing.pdf' })
+    ).rejects.toMatchObject({ code: DocumentErrorCode.OPEN_FAILED });
+  });
+
+  it('does not export isLibarchiveEnabled', async () => {
     const mod = await import('../index');
-    expect('detectDocumentFormat' in mod).toBe(false);
     expect('isLibarchiveEnabled' in mod).toBe(false);
   });
 });

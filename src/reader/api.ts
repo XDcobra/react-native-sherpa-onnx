@@ -7,11 +7,11 @@ import { TurboModuleRegistry } from 'react-native';
 
 import type { Spec } from '../NativeSherpaOnnx';
 import {
+  detectDocumentFormat,
   extractDocumentImages,
   extractDocumentText,
   DocumentErrorCode,
 } from '../document';
-import { detectDocumentFormat } from '../document/detect';
 import type { FileSource } from '../fileio/types';
 import { releaseOfflineImageBuffer } from '../imagebuffer';
 import { extractPdfTextLayer, rasterizePdfPages } from '../pdf';

@@ -5,6 +5,8 @@ Two APIs, one buffer type per call:
 1. **`extractDocumentText`** — markup → `OfflineTextBuffer` (`origin: 'markup'`). **Never OCR.**
 2. **`extractDocumentImages`** — image-only sections / CBZ / CBR → `OfflineImageBuffer`.
 
+`detectDocumentFormat` tells the container format by content before either call, e.g. to check a picked file whose name says `.txt`.
+
 Source adapter like [`pdf/`](pdf-offline.md), not OCR. To display a book, build a reader document from these buffers with the [reader API](reader.md) (`loadReaderDocument`). Recognize stays `createOCR().recognize` on the ImageBuffer. The usual sink is TTS on whatever text the **app** concatenated; any feature that takes an `OfflineTextBuffer` can sit there instead.
 
 libarchive is **default-on**. Disable at build time → `ERR_DOC_ARCHIVE_DISABLED` (no `isLibarchiveEnabled()`). Log tag `[SherpaOnnx:doc]`.
@@ -218,9 +220,19 @@ Text extract first is optional. After a successful text extract with empty `imag
 
 CBZ/CBR `pageNumber` is 1-based **after** sort; `href` is the archive path. EPUB/FB2 frames use `sectionIndex` + `href`. MOBI image frames use `href` like `recindex:1`.
 
+#### `detectDocumentFormat(source)`
+
+```ts
+function detectDocumentFormat(
+  source: FileSource
+): Promise<'epub' | 'fb2' | 'mobi' | 'cbz' | 'cbr' | 'pdf' | null>;
+```
+
+Reads the file signature and, for ZIP / RAR, the archive entries. Nothing is extracted and lexbor is not needed. `null` for any other content (plain text, HTML, unknown). Also reports `'pdf'`, which this module does not extract (use [`pdf/`](pdf-offline.md)). Errors: `ERR_DOC_INVALID_ARGUMENT`, `ERR_DOC_OPEN_FAILED` (unreadable file or broken archive), `ERR_DOC_ARCHIVE_DISABLED` (ZIP / RAR without libarchive).
+
 ## Formats
 
-Sniff is by file signature / container, not extension. `format` is on the result (no public detect API). Capability only — dispatch is [Typical pipeline](#typical-pipeline).
+Sniff is by file signature / container, not extension. `format` is on the result; [`detectDocumentFormat`](#detectdocumentformatsource) gives it without extracting. Capability only — dispatch is [Typical pipeline](#typical-pipeline).
 
 | Format | `extractDocumentText` | `extractDocumentImages` |
 |--------|----------------------|-------------------------|
