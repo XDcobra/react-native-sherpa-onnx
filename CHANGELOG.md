@@ -40,6 +40,7 @@
   - `createReaderTextSlice(doc, { from, maxLength })` puts the text from a position on (file text, OCR text, app sections; across page breaks) into a new text buffer for TTS; `createReadAloudTimeline` / `mapTextRanges` take the slice.
   - `saveReaderRecognition` / `loadReaderRecognition`: recognized pages in a sidecar file, written and read natively (`ERR_READER_SIDECAR_INVALID`, `ERR_READER_SIDECAR_MISMATCH`).
   - See `docs/reader.md`.
+* **reader:** Italic and bold are kept for EPUB, MOBI / AZW3 and FB2: each text block carries style runs (`ReaderBlock.styles`: `{ start, end, italic?, bold? }`, UTF-16 in the block text, from `getReaderBlocks(…, { includeText: true })`) and `<ReaderView>` draws them with the italic / bold faces of the theme font (synthetic when a custom family has none). The text, `textHash`, block IDs, offsets and `structureVersion` are unchanged.
 * **pdf:** `extractPdfTextLayer(source, out, { layout: 'paragraphs' })` joins lines into paragraphs and attaches a reading structure (headings, running headers and page numbers, bookmarks, metadata, page labels).
 * **document:** `extractDocumentImages(…, { strategy: 'lazy-lru' })` decodes comic pages on demand; frame info has `expectedWidth` / `expectedHeight` before a frame is decoded.
 * **tts:** `synthesize(…, { timeline: true })` returns where each text segment landed in the output audio (UTF-16 range, start sample, sample count).

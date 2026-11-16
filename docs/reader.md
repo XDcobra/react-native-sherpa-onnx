@@ -290,7 +290,7 @@ function getReaderBlocks(
 const blocks = await getReaderBlocks(doc, 0, doc.blockCount, { includeText: true });
 ```
 
-Blocks in reading order with ID, type, `textHash`, `textRange` and optionally the text. Use it for search, quotes, word counts or your own table of contents. Large ranges are paged natively in chunks of 4096.
+Blocks in reading order with ID, type, `textHash`, `textRange` and optionally the text. With `includeText`, blocks with italic or bold also carry `styles` ([Inline styles](#inline-styles)). Use it for search, quotes, word counts or your own table of contents. Large ranges are paged natively in chunks of 4096.
 
 #### `mapTextRanges(doc, ranges, options?)`
 
@@ -490,7 +490,7 @@ The default word splitter: whitespace-separated words without surrounding punctu
 
 | Field | Default | Meaning |
 |---|---|---|
-| `fontFamily` | system serif | Font family, resolved as for `<Text>` (custom fonts work the same way). |
+| `fontFamily` | system serif | Font family, resolved as for `<Text>` (custom fonts work the same way). Italic and bold runs use the family's italic / bold faces ([Inline styles](#inline-styles)). |
 | `fontSize` | `18` | Base size in pt / dp. |
 | `fontScale` | `'system'` | `'system'` follows Dynamic Type / the Android font scale; a number multiplies `fontSize`. |
 | `maxFontScale` | `0` (no limit) | Upper limit for `'system'`. |
@@ -655,6 +655,23 @@ Block IDs of OCR text are stable for the same model and settings only; recognizi
 - **Image-only sections** (raw image spine items, or XHTML with only images) get one `image` block per image.
 - **Metadata:** `title`, `creator` and `language` from the OPF `dc:` fields.
 
+## Inline styles
+
+File blocks of EPUB, MOBI / AZW3 and FB2 keep italic and bold as **style runs**, a layer next to the text:
+
+```ts
+type ReaderTextStyleRun = { start: number; end: number; italic?: boolean; bold?: boolean };
+// block.text = 'Plain italic and bold text.'
+// block.styles = [{ start: 6, end: 12, italic: true }, { start: 17, end: 21, bold: true }]
+```
+
+- **Offsets:** `[start, end)` in UTF-16 units of the block's text (relative to the block, like highlight offsets), computed on the final text after whitespace collapsing and trimming. Runs are sorted and never overlap; bold inside italic is one run with both flags. A run that spans blocks is split per block; a `<br>` inside a run stays inside it.
+- **The text never changes.** There are no markers in the text, so `textHash`, block IDs, `textRange`, locators, `mapTextRanges`, text slices, read-aloud, search and highlights are the same with or without styles. Style runs are not part of `structureVersion`.
+- **Sources:** EPUB / MOBI / AZW3: `em`, `i`, `cite`, `dfn`, `var` (italic), `strong`, `b` (bold) and an inline `style` attribute with `font-style` (`italic`, `oblique`, `normal`) or `font-weight` (`bold`, `bolder`, `600`–`900`; `normal`, `lighter`, `100`–`500` clear it). Stylesheets and classes are not read. FB2: `emphasis` (italic) and `strong` (bold); named `<style>` is not. PDF, OCR text, app blocks and plain text have no runs.
+- **In the view:** runs are part of the first layout of a row (not applied later like highlights), so measured row heights include them; highlights are drawn on top. In headings (bold already) italic shows as bold italic.
+- **Fonts:** the default serif has real italic and bold faces. With a custom `fontFamily`, iOS asks the family for the italic / bold face (font descriptor traits); Android uses `ReactFontManager` (`assets/fonts/<family>_italic.ttf`, `_bold`, `_bold_italic`, or a font family XML). When the family has no such face, the view synthesizes it: iOS slants the regular face (`NSObliquenessAttributeName`) or thickens its strokes, Android uses fake bold and text skew. Synthetic faces keep the glyph widths of the regular face.
+- `getReaderBlocks(doc, start, count, { includeText: true })` returns the runs as `styles` (absent when a block has none).
+
 ## textHash
 
 `textHash` identifies a block's text independent of its position. Backends can compute it with the reference below (matches the native code byte for byte).
@@ -721,7 +738,7 @@ SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 
 - Scroll mode only; no zoom and no text selection (use `onTap` and highlights for paragraph-level selection).
 - On page images, a highlight inside a line (a word) is placed by estimate; OCR models without positions mark the whole page.
-- Inline formatting (italics, bold, links) is not kept; each block has one text style.
+- Of the inline formatting only italic and bold are kept ([Inline styles](#inline-styles)); links, footnote markers, underline, small caps, colors and CSS classes are not. PDF, OCR and plain text blocks have no inline styles.
 - An image is scaled to the text width and is at most 90 % of the viewport high.
 
 ## Types and constants
@@ -756,7 +773,7 @@ import {
 } from 'react-native-sherpa-onnx/reader';
 
 import type {
-  ReaderDocument, ReaderSectionInfo, ReaderDocumentMetadata, ReaderBlock, ReaderBlockType,
+  ReaderDocument, ReaderSectionInfo, ReaderDocumentMetadata, ReaderBlock, ReaderBlockType, ReaderTextStyleRun,
   ReaderLocator, ReaderRange, ReaderAppSection, ReaderAppBlock, ReaderInsert, ReaderInsertTarget,
   ReaderTheme, ReaderHighlight, ReaderHighlightStyle, ReaderFollowOptions, ReaderFollowChange,
   ReaderVisibleRange, ReaderJump, ReaderJumpCause, ReaderViewProps, ReaderViewHandle, ReaderPageDisplay,
@@ -771,7 +788,8 @@ import type {
 | `ReaderDocument` | `{ id, revision, documentKey, format, structureVersion, textHashVersion, blockCount, sections, metadata }` (immutable value); `format`: `'epub' \| 'fb2' \| 'mobi' \| 'pdf' \| 'pages'` |
 | `ReaderSectionInfo` | `{ id, sectionIndex?, origin: 'file' \| 'app', kind: 'text' \| 'image' \| 'page', href?, title?, titleSource, label?, blockCount, firstBlockId, lastBlockId }`; `label`: printed PDF page label |
 | `ReaderDocumentMetadata` | `{ title?, creator?, language? }` |
-| `ReaderBlock` | `{ id, sectionId, index, type, headingLevel?, textHash, text?, imageHref?, imageFrameIndex?, alt?, textRange? }` |
+| `ReaderBlock` | `{ id, sectionId, index, type, headingLevel?, textHash, text?, imageHref?, imageFrameIndex?, alt?, textRange?, styles? }` |
+| `ReaderTextStyleRun` | `{ start, end, italic?, bold? }` (UTF-16 in the block text, see [Inline styles](#inline-styles)) |
 | `ReaderBlockType` | `'paragraph' \| 'heading' \| 'image' \| 'separator' \| 'page'` |
 | `ReaderLocator` | `{ sectionId, blockId, offset? }` |
 | `ReaderRange` | `{ from, to }` (`to` exclusive) |
