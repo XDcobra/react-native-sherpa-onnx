@@ -218,6 +218,39 @@ describe('reader api', () => {
     );
   });
 
+  it('passes style runs through with the text', async () => {
+    mockNative.getReaderBlocks.mockResolvedValue(
+      JSON.stringify([
+        {
+          id: 's0.b1',
+          sectionId: 's0',
+          index: 0,
+          type: 'paragraph',
+          textHash: '0123456789abcdef',
+          text: 'Plain italic and bold text.',
+          styles: [
+            { start: 6, end: 12, italic: true },
+            { start: 17, end: 21, bold: true },
+          ],
+        },
+        { id: 's0.b2', index: 1, text: 'No styles.' },
+      ])
+    );
+    const blocks = await getReaderBlocks(
+      { ...SUMMARY, blockCount: 2 } as never,
+      0,
+      2,
+      { includeText: true }
+    );
+    const [styled, plain] = blocks;
+    expect(styled?.styles).toEqual([
+      { start: 6, end: 12, italic: true },
+      { start: 17, end: 21, bold: true },
+    ]);
+    expect(styled?.text?.slice(6, 12)).toBe('italic');
+    expect(plain?.styles).toBeUndefined();
+  });
+
   it('remaps a stored position by textHash', async () => {
     mockNative.findReaderBlockByHash.mockResolvedValue(
       JSON.stringify({ blockId: 's2.b7', sectionId: 's2' })

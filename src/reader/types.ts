@@ -74,6 +74,18 @@ export type ReaderDocument = {
   metadata: ReaderDocumentMetadata;
 };
 
+/**
+ * Inline style over `[start, end)` UTF-16 units of a block's `text` (relative
+ * to the block). Runs are sorted and do not overlap; bold inside italic is one
+ * run with both flags. Only file blocks of EPUB, MOBI / AZW3 and FB2 have them.
+ */
+export type ReaderTextStyleRun = {
+  start: number;
+  end: number;
+  italic?: boolean;
+  bold?: boolean;
+};
+
 export type ReaderBlock = {
   id: string;
   sectionId: string;
@@ -94,6 +106,11 @@ export type ReaderBlock = {
    * only). The shown text is exactly this slice.
    */
   textRange?: { start: number; end: number };
+  /**
+   * Inline italic / bold of the block text (with `includeText` only; absent
+   * when the block has none). The text itself carries no markers.
+   */
+  styles?: ReaderTextStyleRun[];
 };
 
 /** One entry of the book's contents (`getReaderToc`). */

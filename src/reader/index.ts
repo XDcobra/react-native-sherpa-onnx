@@ -52,6 +52,7 @@ export type {
   ReaderAppBlock,
   ReaderAppSection,
   ReaderBlock,
+  ReaderTextStyleRun,
   ReaderBlockType,
   ReaderDocument,
   ReaderDocumentFormat,
