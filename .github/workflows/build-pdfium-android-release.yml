@@ -1,5 +1,9 @@
-# Build/package PDFium for Android and publish as GitHub Release + Maven.
+# Package PDFium for Android and publish as GitHub Release + Maven.
 # Tag from third_party/pdfium_prebuilt/ANDROID_RELEASE_TAG.
+#
+# The binaries come from https://github.com/XDcobra/pdfium-binaries (release sdk-<N>, built by its
+# workflow "Build for react-native-sherpa-onnx"): run that workflow first, with the same PDFium
+# version as the iOS framework. Every ABI is checked for the FPDF functions the SDK calls.
 #
 name: Prebuilt - PDFium (Android) Release
 
@@ -47,6 +51,14 @@ jobs:
           chmod +x fetch_pdfium_android.sh
           ./fetch_pdfium_android.sh "${{ steps.tag.outputs.chromium_version }}"
 
+      - name: Verify binaries (FPDF functions the SDK calls)
+        run: |
+          chmod +x third_party/pdfium_prebuilt/verify_pdfium.sh
+          NM=$(command -v llvm-nm || command -v llvm-nm-18 || command -v llvm-nm-17 || command -v nm)
+          for so in third_party/pdfium_prebuilt/android/jni/*/libpdfium.so; do
+            PDFIUM_NM="$NM" third_party/pdfium_prebuilt/verify_pdfium.sh "$so"
+          done
+
       - name: Package jniLibs layout
         run: |
           LAYOUT=pdfium-android-layout
@@ -92,7 +104,7 @@ jobs:
             - **pdfium-android.zip** – Layout: `arm64-v8a/`, `armeabi-v7a/`, `x86/`, `x86_64/` (`libpdfium.so`) and `include/` (C headers, e.g. `fpdfview.h`). Gradle extracts `.so` to jniLibs and headers to `android/src/main/cpp/include/pdfium`.
             - **pdfium-${{ steps.tag.outputs.maven_version }}.aar** – Android library (native libs + headers). Also on Maven as `com.xdcobra.sherpa:pdfium`.
 
-            Upstream binaries: [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries) `chromium/${{ steps.tag.outputs.chromium_version }}`.
+            Binaries: [XDcobra/pdfium-binaries](https://github.com/XDcobra/pdfium-binaries) `sdk-${{ steps.tag.outputs.chromium_version }}` (fork of [bblanchon/pdfium-binaries](https://github.com/bblanchon/pdfium-binaries), PDFium `chromium/${{ steps.tag.outputs.chromium_version }}`).
 
             ## Maven
             The AAR is published to [GitHub Pages Maven](https://xdcobra.github.io/maven/) as `com.xdcobra.sherpa:pdfium` when `MAVEN_REPO_PAT` is set.

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Fetch PDFium Android binaries (pdfium-binaries) and rearrange into our prebuilt layout.
+# Fetch PDFium Android binaries and rearrange into our prebuilt layout.
 # Usage: ./fetch_pdfium_android.sh [version]
-# Version is the pdfium-binaries chromium/ tag suffix (e.g. 8100 for chromium/8100).
-# Default reads ANDROID_RELEASE_TAG (pdfium-android-v8100-1 → chromium/8100).
-# Trailing -N is our rebuild counter and is stripped for the upstream fetch.
+# Binaries come from https://github.com/XDcobra/pdfium-binaries (release sdk-<version>), a
+# fork of bblanchon/pdfium-binaries; override the base with PDFIUM_BINARIES_URL.
+# Version is the PDFium branch number (8152 for chromium/8152).
+# Default reads ANDROID_RELEASE_TAG (pdfium-android-v8152-1 → 8152).
+# Trailing -N is our rebuild counter and is stripped for the fetch.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 strip_rebuild() { echo "$1" | sed 's/-[0-9][0-9]*$//'; }
@@ -16,10 +18,10 @@ else
     VERSION="$(strip_rebuild "${RELEASE_TAG#pdfium-android-v}")"
   fi
 fi
-VERSION="${VERSION:-8100}"
+VERSION="${VERSION:-8152}"
 OUT="$ROOT/android"
 TMP="$ROOT/.fetch-tmp"
-BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${VERSION}"
+BASE_URL="${PDFIUM_BINARIES_URL:-https://github.com/XDcobra/pdfium-binaries/releases/download}/sdk-${VERSION}"
 
 rm -rf "$TMP"
 mkdir -p "$TMP" "$OUT/include"
