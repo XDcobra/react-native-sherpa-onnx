@@ -8,11 +8,11 @@ import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.sherpaonnx.bridge.JniWritables
 import com.sherpaonnx.fileio.FileIOHelper
 import com.sherpaonnx.fileio.SeekableOpenedSource
 import com.sherpaonnx.pdf.PdfNative
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
-import com.sherpaonnx.text.pipeline.TextSpatialSpan
 import java.util.concurrent.Executors
 
 class SherpaOnnxPdfHelper(
@@ -89,58 +89,48 @@ class SherpaOnnxPdfHelper(
     val opened = openSeekable(source, promise) ?: return
     val pages = readPages(options)
     val password = readPassword(options)
+    val layout =
+      if (options != null && options.hasKey("layout") && !options.isNull("layout")) {
+        options.getString("layout")
+      } else {
+        null
+      }
     emitProgress(0, 1, "extract")
+    // Text, spans and structure go straight into the native text buffer; only
+    // a summary crosses JNI.
     val raw =
       try {
-        PdfNative.nativeExtractTextLayer(opened.path, opened.fd, pages, password)
+        PdfNative.nativeExtractTextLayer(
+          opened.path,
+          opened.fd,
+          pages,
+          password,
+          layout,
+          textOutBufferId,
+        )
       } finally {
         opened.close()
       }
-    val ok = raw.getOrNull(0) as? Boolean ?: false
-    val errorCode = raw.getOrNull(1) as? String
-    val errorMessage = raw.getOrNull(2) as? String
-    if (!ok) {
+    if (raw["ok"] as? Boolean != true) {
       promise.reject(
-        errorCode ?: ERR_INTERNAL,
-        errorMessage ?: "PDF text-layer extract failed",
+        raw["errorCode"] as? String ?: ERR_INTERNAL,
+        raw["errorMessage"] as? String ?: "PDF text-layer extract failed",
       )
       return
     }
     emitProgress(1, 1, "done")
 
-    val text = raw.getOrNull(3) as? String ?: ""
-    val pageCount = (raw.getOrNull(4) as? Number)?.toInt() ?: 0
-    val pagesWithText = (raw.getOrNull(5) as? Number)?.toInt() ?: 0
-    @Suppress("UNCHECKED_CAST")
-    val spanObjs = raw.getOrNull(6) as? Array<Any?> ?: emptyArray()
-    val spans = spanObjs.mapNotNull { mapSpan(it) }
-
-    try {
-      textEntry.populate(
-        text = text,
-        tokens = emptyArray(),
-        timestamps = floatArrayOf(),
-        durations = floatArrayOf(),
-        lang = "",
-        emotion = "",
-        event = "",
-        spatialSpans = spans,
-      )
-    } catch (e: IllegalStateException) {
-      promise.reject(ERR_INVALID, e.message, e)
-      return
-    }
-
+    val result: WritableMap = Arguments.createMap()
+    result.putInt("pageCount", (raw["pageCount"] as? Number)?.toInt() ?: 0)
+    result.putInt("pagesWithText", (raw["pagesWithText"] as? Number)?.toInt() ?: 0)
+    result.putInt("utf16Length", (raw["utf16Length"] as? Number)?.toInt() ?: 0)
+    result.putInt("spatialSpanCount", (raw["spatialSpanCount"] as? Number)?.toInt() ?: 0)
+    (raw["structure"] as? Map<*, *>)?.let { result.putMap("structure", JniWritables.map(it)) }
     Log.i(
       TAG,
-      "extract ok pages=$pageCount withText=$pagesWithText spans=${spans.size} utf16=${text.length}",
+      "extract ok pages=${raw["pageCount"]} withText=${raw["pagesWithText"]} " +
+        "spans=${raw["spatialSpanCount"]} layout=${layout ?: "lines"}",
     )
-
-    val result: WritableMap = Arguments.createMap()
-    result.putInt("pageCount", pageCount)
-    result.putInt("pagesWithText", pagesWithText)
-    result.putInt("utf16Length", text.length)
-    result.putInt("spatialSpanCount", spans.size)
     promise.resolve(result)
   }
 
@@ -277,39 +267,6 @@ class SherpaOnnxPdfHelper(
     } catch (_: Exception) {
       return null
     }
-  }
-
-  private fun mapSpan(raw: Any?): TextSpatialSpan? {
-    @Suppress("UNCHECKED_CAST")
-    val one = raw as? Array<Any?> ?: return null
-    val utf16Start = (one.getOrNull(0) as? Number)?.toInt() ?: 0
-    val utf16End = (one.getOrNull(1) as? Number)?.toInt() ?: 0
-    val level = one.getOrNull(2) as? String ?: "line"
-    val pageNumber = (one.getOrNull(3) as? Number)?.toInt()
-    val pageWidth = (one.getOrNull(4) as? Number)?.toFloat()
-    val pageHeight = (one.getOrNull(5) as? Number)?.toFloat()
-    val frameIndex = (one.getOrNull(6) as? Number)?.toInt() ?: 0
-    val quadArr = one.getOrNull(7) as? FloatArray
-    val quad = FloatArray(8)
-    if (quadArr != null) {
-      for (i in 0 until 8) {
-        quad[i] = quadArr.getOrElse(i) { 0f }
-      }
-    }
-    return TextSpatialSpan(
-      utf16Start = utf16Start,
-      utf16End = utf16End,
-      level = level,
-      sourceImageBufferId = "",
-      frameIndex = frameIndex,
-      quad = quad,
-      confidence = null,
-      origin = "textLayer",
-      pageNumber = pageNumber,
-      ptsMs = null,
-      pageWidth = pageWidth,
-      pageHeight = pageHeight,
-    )
   }
 
   fun shutdown() {

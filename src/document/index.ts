@@ -3,6 +3,7 @@
  *
  * - `extractDocumentText` — markup → OfflineTextBuffer (`origin: 'markup'`). Never OCR.
  * - `extractDocumentImages` — image-only sections / CBZ / CBR → OfflineImageBuffer.
+ * - `detectDocumentFormat` — container format by content, before extracting.
  *
  * libarchive is default-on. Disable → `ERR_DOC_ARCHIVE_DISABLED`.
  * lexbor is opt-in (default off). EPUB/MOBI HTML without it → `ERR_DOC_LEXBOR_DISABLED`.
@@ -18,8 +19,10 @@ import type { FileSource } from '../fileio/types';
 import type { OfflineImageBufferHandle } from '../imagebuffer/types';
 import { resolveOfflineTextBufferId } from '../textbuffer';
 import type { OfflineTextBufferHandle } from '../textbuffer/types';
+import { mapDocumentStructure } from './structure';
 import {
   DocumentErrorCode,
+  type DocumentFileFormat,
   type DocumentImageFormat,
   type DocumentSectionInfo,
   type DocumentTextFormat,
@@ -169,6 +172,9 @@ export async function extractDocumentText(
       sections,
       imageOnlySections,
       spatialSpanCount: Number(raw.spatialSpanCount ?? 0),
+      ...(raw.structure
+        ? { structure: mapDocumentStructure(raw.structure) }
+        : {}),
     };
   } catch (err: unknown) {
     return mapDocNativeError(err);
@@ -206,9 +212,32 @@ export async function extractDocumentImages(
     );
   }
 
-  const nativeOptions: { maxSide?: number } = {};
+  const nativeOptions: {
+    maxSide?: number;
+    scope?: string;
+    strategy?: string;
+    hotFrames?: number;
+  } = {};
+  if (options?.scope === 'all') {
+    nativeOptions.scope = 'all';
+  }
   if (options?.maxSide != null) {
     nativeOptions.maxSide = Math.trunc(options.maxSide);
+  }
+  const strategy = options?.strategy;
+  if (strategy !== undefined) {
+    if (strategy !== 'decode-all' && strategy !== 'lazy-lru') {
+      throw Object.assign(
+        new Error(
+          `${DocumentErrorCode.INVALID_ARGUMENT}: strategy must be 'decode-all' or 'lazy-lru'`
+        ),
+        { code: DocumentErrorCode.INVALID_ARGUMENT }
+      );
+    }
+    nativeOptions.strategy = strategy;
+  }
+  if (options?.hotFrames != null) {
+    nativeOptions.hotFrames = Math.trunc(options.hotFrames);
   }
 
   const progressSub = subscribeDocProgress(options?.onProgress);
@@ -245,11 +274,43 @@ export async function extractDocumentImages(
   }
 }
 
+/**
+ * Container format of a file by its content (signature / archive entries), not
+ * by name or MIME type. Resolves `null` for anything else (plain text, HTML,
+ * unknown). Opens the file only to read it; nothing is extracted.
+ */
+export async function detectDocumentFormat(
+  source: FileSource
+): Promise<DocumentFileFormat | null> {
+  assertFileSource(source);
+  let raw: string;
+  try {
+    raw = await getNative().detectDocumentFormat(source as Object);
+  } catch (err) {
+    return mapDocNativeError(err);
+  }
+  return FILE_FORMATS.includes(raw as DocumentFileFormat)
+    ? (raw as DocumentFileFormat)
+    : null;
+}
+
+const FILE_FORMATS: readonly DocumentFileFormat[] = [
+  'epub',
+  'fb2',
+  'mobi',
+  'cbz',
+  'cbr',
+  'pdf',
+];
+
 export type {
   DocumentErrorCodeValue,
+  DocumentFileFormat,
   DocumentImageFormat,
   DocumentSectionInfo,
   DocumentSectionKind,
+  DocumentStructure,
+  DocumentStructureSection,
   DocumentTextFormat,
   ExtractDocumentImagesOptions,
   ExtractDocumentImagesResult,

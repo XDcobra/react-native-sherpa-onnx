@@ -348,6 +348,46 @@ bool txt_copy_live_snapshot_utf16_units(const std::string &liveBufferId, int sta
   }
 }
 
+bool txt_set_offline_structure(const std::string &bufferId,
+                               std::shared_ptr<const TxtStructure> structure,
+                               std::string *error) {
+  std::shared_ptr<TxtOfflineEntry> entry = txt_get_offline_entry(bufferId);
+  if (!entry) {
+    if (error) *error = "Offline text buffer not found";
+    return false;
+  }
+  if (!entry->trySetStructure(std::move(structure))) {
+    if (error) *error = "Text buffer not populated or structure already set";
+    return false;
+  }
+  return true;
+}
+
+std::shared_ptr<const TxtStructure> txt_get_offline_structure(const std::string &bufferId) {
+  std::shared_ptr<TxtOfflineEntry> entry = txt_get_offline_entry(bufferId);
+  return entry ? entry->getStructure() : nullptr;
+}
+
+bool txt_set_offline_ocr_layout(const std::string &bufferId,
+                                std::shared_ptr<const TxtOcrLayout> layout,
+                                std::string *error) {
+  std::shared_ptr<TxtOfflineEntry> entry = txt_get_offline_entry(bufferId);
+  if (!entry) {
+    if (error) *error = "Offline text buffer not found";
+    return false;
+  }
+  if (!entry->trySetOcrLayout(std::move(layout))) {
+    if (error) *error = "Text buffer not populated or OCR layout already set";
+    return false;
+  }
+  return true;
+}
+
+std::shared_ptr<const TxtOcrLayout> txt_get_offline_ocr_layout(const std::string &bufferId) {
+  std::shared_ptr<TxtOfflineEntry> entry = txt_get_offline_entry(bufferId);
+  return entry ? entry->getOcrLayout() : nullptr;
+}
+
 bool txt_populate_offline_if_empty(const std::string &bufferId, const std::string &text,
                                    const std::vector<std::string> &tokens,
                                    const std::vector<float> &timestamps,

@@ -2,6 +2,8 @@
 #include "DocHtmlText.h"
 #include "DocPath.h"
 #include "DocSniff.h"
+#include "decode/ImageDecoder.h"
+#include "../textbuffer/TxtUtf16.h"
 
 #include <cstdint>
 #include <cstring>
@@ -10,6 +12,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 namespace {
@@ -107,6 +110,81 @@ TEST(DocHtml, BlocksAndRuby) {
   EXPECT_NE(hx.text.find("World"), std::string::npos);
   EXPECT_EQ(hx.text.find("kan"), std::string::npos);
 }
+
+namespace {
+sherpa_onnx::document::HtmlExtract Html(const char* html) {
+  return sherpa_onnx::document::ExtractHtmlText(
+      reinterpret_cast<const uint8_t*>(html), std::strlen(html));
+}
+using sherpa_onnx::document::HtmlBlockKind;
+}  // namespace
+
+TEST(DocHtml, CollapsesWhitespaceInsideBlocks) {
+  auto hx = Html(
+      "<p>\n    The   quick\n\tbrown <em>fox</em>\n    jumps.\n  </p>");
+  ASSERT_EQ(hx.blocks.size(), 1u);
+  EXPECT_EQ(hx.blocks[0], "The quick brown fox jumps.");
+}
+
+TEST(DocHtml, LineBreakKeepsNewlineWithoutSurroundingSpaces) {
+  auto hx = Html("<p>Roses are red, <br/>\n   violets are blue.</p>");
+  ASSERT_EQ(hx.blocks.size(), 1u);
+  EXPECT_EQ(hx.blocks[0], "Roses are red,\nviolets are blue.");
+}
+
+TEST(DocHtml, PreKeepsWhitespace) {
+  auto hx = Html("<pre>a  b\n  c</pre><p>x   y</p>");
+  ASSERT_EQ(hx.blocks.size(), 2u);
+  EXPECT_EQ(hx.blocks[0], "a  b\n  c");
+  EXPECT_EQ(hx.blocks[1], "x y");
+}
+
+TEST(DocHtml, HeadingLevelsAndKinds) {
+  auto hx = Html("<h1>Title</h1><p>Body</p><h3>Sub</h3>");
+  ASSERT_EQ(hx.items.size(), 3u);
+  EXPECT_EQ(hx.items[0].kind, HtmlBlockKind::Heading);
+  EXPECT_EQ(hx.items[0].level, 1);
+  EXPECT_EQ(hx.items[1].kind, HtmlBlockKind::Paragraph);
+  EXPECT_EQ(hx.items[2].level, 3);
+  EXPECT_EQ(hx.text, "Title\n\nBody\n\nSub");
+}
+
+TEST(DocHtml, ImageInsideParagraphComesAfterIt) {
+  auto hx = Html(
+      "<p>Before <img src='../img/a.png' alt=' A map '/> after.</p>"
+      "<img src='b.jpg'/><p>Next</p>");
+  ASSERT_EQ(hx.items.size(), 4u);
+  EXPECT_EQ(hx.items[0].kind, HtmlBlockKind::Paragraph);
+  EXPECT_EQ(hx.items[0].text, "Before after.");
+  EXPECT_EQ(hx.items[1].kind, HtmlBlockKind::Image);
+  EXPECT_EQ(hx.items[1].image_src, "../img/a.png");
+  EXPECT_TRUE(hx.items[1].has_alt);
+  EXPECT_EQ(hx.items[1].alt, "A map");
+  EXPECT_EQ(hx.items[2].image_src, "b.jpg");
+  EXPECT_FALSE(hx.items[2].has_alt);
+  EXPECT_EQ(hx.items[3].text, "Next");
+  // Images never add text.
+  EXPECT_EQ(hx.text, "Before after.\n\nNext");
+}
+
+TEST(DocHtml, SeparatorAndSvgImage) {
+  auto hx = Html(
+      "<p>One</p><hr/><svg xmlns='http://www.w3.org/2000/svg' "
+      "xmlns:xlink='http://www.w3.org/1999/xlink'>"
+      "<image xlink:href='cover.jpg'/></svg><p>Two</p>");
+  ASSERT_EQ(hx.items.size(), 4u);
+  EXPECT_EQ(hx.items[1].kind, HtmlBlockKind::Separator);
+  EXPECT_EQ(hx.items[2].kind, HtmlBlockKind::Image);
+  EXPECT_EQ(hx.items[2].image_src, "cover.jpg");
+}
+
+TEST(DocHtml, LooseTextBeforeBlockIsItsOwnParagraph) {
+  auto hx = Html("<div>Intro text <p>Para</p> tail</div>");
+  ASSERT_EQ(hx.blocks.size(), 3u);
+  EXPECT_EQ(hx.blocks[0], "Intro text");
+  EXPECT_EQ(hx.blocks[1], "Para");
+  EXPECT_EQ(hx.blocks[2], "tail");
+}
 #else
 TEST(DocHtml, DisabledWithoutLexbor) {
   const char* html = "<p>Hello</p>";
@@ -154,6 +232,256 @@ TEST(DocumentExtract, EpubTextDisabledWithoutLexbor) {
   EXPECT_NE(t.error_message.find("sherpaOnnxEnableLexbor"), std::string::npos);
 }
 #else
+
+#if defined(SHERPA_ONNX_HAS_LEXBOR) && SHERPA_ONNX_HAS_LEXBOR && defined(HAVE_LIBARCHIVE)
+namespace {
+std::string BlockText(const sherpa_onnx::document::ExtractTextResult& r,
+                      const TxtStructBlock& b) {
+  // Fixture text is ASCII, so UTF-16 offsets equal byte offsets.
+  return r.text.substr(b.utf16Start, b.utf16End - b.utf16Start);
+}
+}  // namespace
+
+TEST(DocumentStructure, EpubSectionsBlocksTitlesAndMetadata) {
+  const auto path = FixturePath("structure.epub");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  const TxtStructure& st = *r.structure;
+  EXPECT_EQ(st.version, 1);
+  EXPECT_EQ(st.title, "The Reader Fixture");
+  EXPECT_EQ(st.creator, "Ada Example");
+  EXPECT_EQ(st.language, "en");
+
+  // nav.xhtml is linear="no" and gets no index.
+  ASSERT_EQ(st.sections.size(), 3u);
+  EXPECT_EQ(st.sections[0].href, "OEBPS/text/ch1.xhtml");
+  EXPECT_EQ(st.sections[0].title, "Chapter One");  // nav toc, first entry, collapsed
+  EXPECT_EQ(st.sections[0].titleSource, "toc");
+  EXPECT_EQ(st.sections[1].kind, "image");
+  EXPECT_EQ(st.sections[1].title, "The Plate");
+  EXPECT_EQ(st.sections[2].title, "A section without a TOC entry");
+  EXPECT_EQ(st.sections[2].titleSource, "heading");
+
+  // Section 0: h1, h2, p, p, img (after its paragraph), hr, pre, p.
+  const auto& s0 = st.sections[0];
+  ASSERT_EQ(s0.blockCount, 8);
+  const auto b = [&](int i) { return st.blocks[s0.firstBlock + i]; };
+  EXPECT_EQ(b(0).type, TxtBlockType::Heading);
+  EXPECT_EQ(b(0).headingLevel, 1);
+  EXPECT_EQ(BlockText(r, b(0)), "Chapter One");
+  EXPECT_EQ(b(1).headingLevel, 2);
+  EXPECT_EQ(BlockText(r, b(2)),
+            "It was a bright cold day, and the clocks were striking thirteen.");
+  EXPECT_EQ(BlockText(r, b(3)), "A map: drawn by hand.");
+  EXPECT_EQ(b(4).type, TxtBlockType::Image);
+  EXPECT_EQ(b(4).imageHref, "OEBPS/images/map.png");
+  EXPECT_EQ(b(4).alt, "Map of the island");
+  EXPECT_EQ(b(4).utf16Start, b(4).utf16End);
+  EXPECT_EQ(b(5).type, TxtBlockType::Separator);
+  EXPECT_EQ(BlockText(r, b(6)), "keep   this\n  spacing");
+  EXPECT_EQ(BlockText(r, b(7)), "Roses are red,\nviolets are blue.");
+  for (int i = 0; i < s0.blockCount; ++i) {
+    EXPECT_EQ(b(i).blockIndex, i);
+    EXPECT_EQ(b(i).sectionIndex, 0);
+  }
+  EXPECT_EQ(s0.utf16Start, b(0).utf16Start);
+  EXPECT_EQ(s0.utf16End, b(7).utf16End);
+
+  // Raw image spine item: one image block, empty text range.
+  const auto& s1 = st.sections[1];
+  ASSERT_EQ(s1.blockCount, 1);
+  EXPECT_EQ(st.blocks[s1.firstBlock].imageHref, "OEBPS/images/plate.png");
+  EXPECT_EQ(s1.utf16Start, s1.utf16End);
+
+  // figure/figcaption are not block tags: img, then the caption as loose text.
+  const auto& s2 = st.sections[2];
+  ASSERT_EQ(s2.blockCount, 4);
+  EXPECT_EQ(st.blocks[s2.firstBlock + 2].type, TxtBlockType::Image);
+  EXPECT_TRUE(st.blocks[s2.firstBlock + 2].hasAlt);
+  EXPECT_EQ(st.blocks[s2.firstBlock + 2].alt, "");
+  EXPECT_EQ(BlockText(r, st.blocks[s2.firstBlock + 3]), "Same map again");
+
+  // Text blocks are exactly the markup spans.
+  int text_blocks = 0;
+  for (const auto& blk : st.blocks) {
+    if (blk.type == TxtBlockType::Paragraph || blk.type == TxtBlockType::Heading) ++text_blocks;
+  }
+  EXPECT_EQ(text_blocks, static_cast<int>(r.spans.size()));
+}
+
+TEST(DocumentStructure, Epub2NcxTitles) {
+  const auto path = FixturePath("structure-ncx.epub");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  ASSERT_EQ(r.structure->sections.size(), 2u);
+  EXPECT_EQ(r.structure->sections[0].title, "Opening");  // nested point does not override
+  EXPECT_EQ(r.structure->sections[1].title, "Closing");
+}
+
+TEST(DocumentStructure, LongEpubBlockCount) {
+  const auto path = FixturePath("long.epub");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  ASSERT_EQ(r.structure->sections.size(), 40u);
+  // Per chapter: heading + 150 paragraphs + 3 figures.
+  EXPECT_EQ(r.structure->blocks.size(), 40u * 154u);
+  EXPECT_EQ(r.structure->sections[39].title, "Chapter 40");
+}
+
+TEST(DocumentStructure, AllImagesScopeCollectsInlineImagesOncePerPath) {
+  const auto path = FixturePath("structure.epub");
+  RequireFixture(path);
+  sherpa_onnx::document::ExtractOptions opt;
+  opt.all_images = true;
+  auto r = sherpa_onnx::document::ExtractDocumentImages(Src(path), opt);
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  // map.png appears twice (ch1, ch2) → one frame; plate.png is a spine item.
+  ASSERT_EQ(r.frames.size(), 2u);
+  EXPECT_EQ(r.frames[0].href, "OEBPS/images/map.png");
+  EXPECT_EQ(r.frames[0].section_index, 0);
+  EXPECT_EQ(r.frames[1].href, "OEBPS/images/plate.png");
+  EXPECT_EQ(r.frames[1].section_index, 1);
+
+  // Default scope: only image-only sections (here the plate).
+  auto def = sherpa_onnx::document::ExtractDocumentImages(Src(path));
+  ASSERT_TRUE(def.ok) << def.error_code;
+  ASSERT_EQ(def.frames.size(), 1u);
+  EXPECT_EQ(def.frames[0].href, "OEBPS/images/plate.png");
+}
+
+TEST(DocumentStructure, MobiCarriesStructureMetadataAndImages) {
+  const auto path = FixturePath("structure.mobi");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  const auto& st = *r.structure;
+  EXPECT_EQ(st.format, "mobi");
+  EXPECT_EQ(st.title, "A Mobi Structure Book");  // EXTH 503 wins over the full name
+  EXPECT_EQ(st.creator, "Ada Example");
+  EXPECT_EQ(st.language, "en");
+  ASSERT_EQ(st.sections.size(), 3u);
+  EXPECT_EQ(st.sections[0].title, "The Lighthouse");
+  EXPECT_EQ(st.sections[0].titleSource, "heading");
+  EXPECT_EQ(st.sections[2].kind, "image");
+  // Section 0: heading, paragraph, separator, paragraph, image (after its paragraph).
+  std::vector<TxtBlockType> types;
+  for (int k = 0; k < st.sections[0].blockCount; ++k) {
+    types.push_back(st.blocks[st.sections[0].firstBlock + k].type);
+  }
+  EXPECT_EQ(types, (std::vector<TxtBlockType>{TxtBlockType::Heading, TxtBlockType::Paragraph,
+                                              TxtBlockType::Separator, TxtBlockType::Paragraph,
+                                              TxtBlockType::Image}));
+  const auto& inline_img = st.blocks[st.sections[0].firstBlock + 4];
+  EXPECT_EQ(inline_img.imageHref, "recindex:2");
+  EXPECT_EQ(inline_img.alt, "map of the bay");
+  const auto& plate = st.blocks[st.sections[2].firstBlock];
+  EXPECT_EQ(plate.imageHref, "recindex:1");
+
+  // scope 'all': every referenced image once, in reading order.
+  sherpa_onnx::document::ExtractOptions all;
+  all.all_images = true;
+  auto images = sherpa_onnx::document::ExtractDocumentImages(Src(path), all);
+  ASSERT_TRUE(images.ok) << images.error_code << " " << images.error_message;
+  ASSERT_EQ(images.frames.size(), 2u);
+  EXPECT_EQ(images.frames[0].href, "recindex:2");
+  EXPECT_EQ(images.frames[0].section_index, 0);
+  EXPECT_EQ(images.frames[1].href, "recindex:1");
+  EXPECT_EQ(images.frames[1].section_index, 2);
+  // Default scope: only the image-only part.
+  auto def = sherpa_onnx::document::ExtractDocumentImages(Src(path));
+  ASSERT_TRUE(def.ok);
+  ASSERT_EQ(def.frames.size(), 1u);
+  EXPECT_EQ(def.frames[0].href, "recindex:1");
+}
+
+TEST(DocumentStructure, Azw3KindleEmbedImagesAndFullNameTitle) {
+  const auto path = FixturePath("structure.azw3");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  EXPECT_EQ(r.structure->title, "An AZW3 Structure Book");
+  bool saw_inline = false;
+  for (const auto& b : r.structure->blocks) {
+    if (b.type == TxtBlockType::Image && b.imageHref == "recindex:2") saw_inline = true;
+  }
+  EXPECT_TRUE(saw_inline) << "kindle:embed:0002 resolves to image record 2";
+  // The image-only part decodes its own record (not always record 1).
+  auto def = sherpa_onnx::document::ExtractDocumentImages(Src(path));
+  ASSERT_TRUE(def.ok) << def.error_code << " " << def.error_message;
+  ASSERT_EQ(def.frames.size(), 1u);
+  EXPECT_EQ(def.frames[0].href, "recindex:1");
+}
+
+TEST(DocumentStructure, Fb2TitlesSectionsImagesAndMetadata) {
+  const auto path = FixturePath("structure.fb2");
+  RequireFixture(path);
+  auto r = sherpa_onnx::document::ExtractDocumentText(Src(path));
+  ASSERT_TRUE(r.ok) << r.error_code << " " << r.error_message;
+  ASSERT_TRUE(r.structure);
+  const auto& st = *r.structure;
+  EXPECT_EQ(st.format, "fb2");
+  EXPECT_EQ(st.title, "The Lighthouse Keeper");
+  EXPECT_EQ(st.creator, "Ada B. Example");
+  EXPECT_EQ(st.language, "en");
+  // Body lead-in, ch1 (with nested ch1-1), plate, notes section.
+  ASSERT_EQ(st.sections.size(), 4u);
+  EXPECT_EQ(st.sections[0].href, "body-0");
+  EXPECT_EQ(st.sections[0].title, "The Lighthouse Keeper A Story");
+  EXPECT_EQ(st.sections[1].href, "ch1");
+  EXPECT_EQ(st.sections[1].title, "Chapter One The Bay");
+  EXPECT_EQ(st.sections[1].titleSource, "toc");
+  EXPECT_EQ(st.sections[2].kind, "image");
+  EXPECT_EQ(st.sections[3].href, "n1");
+
+  auto text_of = [&](const TxtStructBlock& b) {
+    return txt_utf16_slice(r.text, b.utf16Start, b.utf16End - b.utf16Start);
+  };
+  std::vector<std::string> got;
+  for (int k = 0; k < st.sections[1].blockCount; ++k) {
+    const auto& b = st.blocks[st.sections[1].firstBlock + k];
+    std::string line = txt_block_type_name(b.type);
+    if (b.type == TxtBlockType::Heading) line += std::to_string(b.headingLevel);
+    if (b.type == TxtBlockType::Image) line += " " + b.imageHref;
+    if (b.utf16End > b.utf16Start) line += " " + text_of(b);
+    got.push_back(line);
+  }
+  EXPECT_EQ(got, (std::vector<std::string>{
+                     "heading1 Chapter One\nThe Bay",
+                     "heading2 Evening",
+                     "paragraph The keeper counted the ships every evening.",
+                     "paragraph A map of the bay hung by the door.",
+                     "image map",
+                     "separator",
+                     "heading2 The Boat",
+                     "paragraph On the third night a small boat drifted in.",
+                     "heading3 Harbour Song",
+                     "paragraph The tide comes in,\nthe tide goes out.",
+                     "paragraph Ships",
+                     "paragraph 12",
+                 }));
+
+  sherpa_onnx::document::ExtractOptions all;
+  all.all_images = true;
+  auto images = sherpa_onnx::document::ExtractDocumentImages(Src(path), all);
+  ASSERT_TRUE(images.ok) << images.error_code;
+  ASSERT_EQ(images.frames.size(), 2u);
+  EXPECT_EQ(images.frames[0].href, "map");
+  EXPECT_EQ(images.frames[0].section_index, 1);
+  EXPECT_EQ(images.frames[1].href, "plate");
+  auto def = sherpa_onnx::document::ExtractDocumentImages(Src(path));
+  ASSERT_TRUE(def.ok);
+  ASSERT_EQ(def.frames.size(), 1u);
+  EXPECT_EQ(def.frames[0].href, "plate");
+}
+#endif
 
 TEST(DocumentExtract, MixedEpubTextAndImages) {
   const auto path = FixturePath("mixed.epub");
@@ -256,6 +584,82 @@ TEST(DocumentExtract, CbrRar3NaturalSortAndNoText) {
   EXPECT_EQ(sherpa_onnx::document::SniffFormat(Src(path), nullptr, nullptr, nullptr),
             sherpa_onnx::document::DocFormat::Cbr);
   ExpectComicNoTextAndSortedPages(path, "cbr");
+}
+
+namespace {
+
+/** Lazy comic pages: no RGB yet, sizes from the headers, bytes on demand. */
+void ExpectLazyComicMatchesEager(const sherpa_onnx::document::DocumentSource& src) {
+  sherpa_onnx::document::ExtractOptions lazy_opt;
+  lazy_opt.lazy = true;
+  auto lazy = sherpa_onnx::document::ExtractDocumentImages(src, lazy_opt);
+  ASSERT_TRUE(lazy.ok) << lazy.error_code << " " << lazy.error_message;
+  auto eager = sherpa_onnx::document::ExtractDocumentImages(src);
+  ASSERT_TRUE(eager.ok);
+  ASSERT_EQ(lazy.frames.size(), eager.frames.size());
+  for (size_t i = 0; i < lazy.frames.size(); ++i) {
+    auto& fr = lazy.frames[i];
+    EXPECT_TRUE(fr.rgb.rgb.empty()) << "nothing decoded up front";
+    ASSERT_TRUE(fr.load);
+    EXPECT_EQ(fr.href, eager.frames[i].href);
+    EXPECT_EQ(fr.page_number, eager.frames[i].page_number);
+    EXPECT_EQ(fr.expected_width, eager.frames[i].rgb.width);
+    EXPECT_EQ(fr.expected_height, eager.frames[i].rgb.height);
+    std::vector<uint8_t> bytes;
+    std::string code;
+    std::string msg;
+    ASSERT_TRUE(fr.load(&bytes, &code, &msg)) << code << " " << msg;
+    auto decoded = sherpa_onnx::image::ImageDecoder::DecodeBytes(bytes.data(), bytes.size(), {});
+    ASSERT_TRUE(decoded.ok);
+    EXPECT_EQ(decoded.frame.width, fr.expected_width);
+    EXPECT_EQ(decoded.frame.rgb, eager.frames[i].rgb.rgb);
+  }
+}
+
+}  // namespace
+
+TEST(DocumentExtract, CbzLazyPagesDecodeOnDemand) {
+  const auto path = FixturePath("comic.cbz");
+  RequireFixture(path);
+  ExpectLazyComicMatchesEager(Src(path));
+}
+
+TEST(DocumentExtract, CbrLazyPagesDecodeOnDemand) {
+  const auto path = FixturePath("tiny-comic.cbr");
+  RequireFixture(path);
+  ExpectLazyComicMatchesEager(Src(path));
+}
+
+TEST(DocumentExtract, LazyComicKeepsItsOwnFd) {
+  const auto path = FixturePath("comic.cbz");
+  RequireFixture(path);
+  const int fd = ::open(path.c_str(), O_RDONLY);
+  ASSERT_GE(fd, 0);
+  sherpa_onnx::document::DocumentSource src;
+  src.fd = fd;
+  sherpa_onnx::document::ExtractOptions opt;
+  opt.lazy = true;
+  auto lazy = sherpa_onnx::document::ExtractDocumentImages(src, opt);
+  ::close(fd);  // the caller's fd goes away, like a closed Android PFD
+  ASSERT_TRUE(lazy.ok) << lazy.error_message;
+  ASSERT_FALSE(lazy.frames.empty());
+  std::vector<uint8_t> bytes;
+  std::string code;
+  std::string msg;
+  EXPECT_TRUE(lazy.frames.back().load(&bytes, &code, &msg)) << code << " " << msg;
+  EXPECT_FALSE(bytes.empty());
+}
+
+TEST(DocumentExtract, LazyIsIgnoredOutsideComics) {
+  const auto path = FixturePath("mixed.epub");
+  RequireFixture(path);
+  sherpa_onnx::document::ExtractOptions opt;
+  opt.lazy = true;
+  auto images = sherpa_onnx::document::ExtractDocumentImages(Src(path), opt);
+  ASSERT_TRUE(images.ok) << images.error_message;
+  ASSERT_FALSE(images.frames.empty());
+  EXPECT_FALSE(images.frames[0].load);
+  EXPECT_FALSE(images.frames[0].rgb.rgb.empty());
 }
 
 TEST(DocumentExtract, CbrTruncatedIsOpenFailed) {

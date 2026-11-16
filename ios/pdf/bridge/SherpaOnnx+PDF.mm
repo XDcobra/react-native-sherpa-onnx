@@ -3,12 +3,14 @@
 #import "../../fileio/FileIOSeekable.h"
 #include "TextRegistry.h"
 #import "PdfLazyIo.h"
+#import "../../document/bridge/SherpaDocStructureSummary.h"
 
 #include "ImageRegistry.h"
 #include "pdf/PdfFeatureGuard.h"
 #include "pdf/PdfLazySession.h"
 #include "pdf/PdfPageRasterizer.h"
 #include "pdf/PdfTextLayerExtractor.h"
+#include "pdf/PdfTextPopulate.h"
 #include "pdf/PdfTypes.h"
 
 #include <mutex>
@@ -137,6 +139,11 @@ RCT_EXPORT_METHOD(extractPdfTextLayer : (NSDictionary *)source textOutBufferId :
   if ([extractPasswordVal isKindOfClass:[NSString class]]) {
     opts.password = [(NSString *)extractPasswordVal UTF8String];
   }
+  id layoutVal = options[@"layout"];
+  if ([layoutVal isKindOfClass:[NSString class]] &&
+      [(NSString *)layoutVal isEqualToString:@"paragraphs"]) {
+    opts.layout = sherpa_onnx::pdf::PdfTextLayout::kParagraphs;
+  }
 
   if ([self respondsToSelector:@selector(sendEventWithName:body:)]) {
     [self sendEventWithName:@"SherpaOnnxPdfProgress"
@@ -157,32 +164,11 @@ RCT_EXPORT_METHOD(extractPdfTextLayer : (NSDictionary *)source textOutBufferId :
     return;
   }
 
-  std::vector<TxtSpatialSpan> spans;
-  spans.reserve(result.spans.size());
-  for (const auto &s : result.spans) {
-    TxtSpatialSpan t;
-    t.utf16Start = s.utf16_start;
-    t.utf16End = s.utf16_end;
-    t.level = s.level;
-    t.sourceImageBufferId = "";
-    t.frameIndex = s.frame_index;
-    for (int i = 0; i < 8; ++i) {
-      t.quad[i] = s.quad[i];
-    }
-    t.origin = "textLayer";
-    t.hasPageNumber = true;
-    t.pageNumber = s.page_number;
-    t.hasPageWidth = true;
-    t.pageWidth = s.page_width;
-    t.hasPageHeight = true;
-    t.pageHeight = s.page_height;
-    spans.push_back(t);
-  }
-
+  // Text, line spans and (layout "paragraphs") the reading structure; same
+  // native path as Android.
   std::string popErr;
-  const bool ok = txt_populate_offline_if_empty(
-      [textOutBufferId UTF8String], result.text, {}, {}, {}, "", "", "", spans,
-      &popErr);
+  const bool ok = sherpa_onnx::pdf::PopulateTextFromPdf(
+      [textOutBufferId UTF8String], result, &popErr);
   if (!ok) {
     reject(@"ERR_PDF_INVALID_ARGUMENT",
            popErr.empty()
@@ -198,12 +184,16 @@ RCT_EXPORT_METHOD(extractPdfTextLayer : (NSDictionary *)source textOutBufferId :
   }
 
   NSString *nsText = [NSString stringWithUTF8String:result.text.c_str()] ?: @"";
-  resolve(@{
+  NSMutableDictionary *out = [@{
     @"pageCount" : @(result.page_count),
     @"pagesWithText" : @(result.pages_with_text),
     @"utf16Length" : @(nsText.length),
     @"spatialSpanCount" : @((NSInteger)result.spans.size()),
-  });
+  } mutableCopy];
+  if (result.structure) {
+    out[@"structure"] = SherpaDocStructureSummary(*result.structure);
+  }
+  resolve(out);
 }
 
 RCT_EXPORT_METHOD(rasterizePdfPages : (NSDictionary *)source options : (

@@ -36,6 +36,30 @@ ExtractImagesResult FailImg(const char* code, const std::string& msg) {
   return r;
 }
 
+/**
+ * Opens a ZIP / RAR container (when the file is one) and sniffs the format by
+ * content. False only when the file cannot be read or the archive opened.
+ */
+bool OpenAndSniff(const DocumentSource& src, ArchiveReader* ar, bool* have_ar, DocFormat* fmt,
+                  std::string* err_code, std::string* err_msg) {
+  uint8_t prefix[8];
+  size_t got = 0;
+  if (!ReadSourcePrefix(src, prefix, sizeof(prefix), &got, err_code, err_msg)) return false;
+  const bool zip_or_rar =
+      (got >= 4 && prefix[0] == 0x50 && prefix[1] == 0x4B) ||
+      (got >= 6 && prefix[0] == 'R' && prefix[1] == 'a' && prefix[2] == 'r');
+  *have_ar = false;
+  if (zip_or_rar) {
+    if (!ArchiveReader::Open(src, ar, err_code, err_msg)) {
+      if (err_code->empty()) *err_code = kErrOpenFailed;
+      return false;
+    }
+    *have_ar = true;
+  }
+  *fmt = SniffFormat(src, *have_ar ? ar : nullptr, err_code, err_msg);
+  return true;
+}
+
 #ifndef HAVE_LIBARCHIVE
 const char* kDisabledMsg =
     "libarchive is not linked. Rebuild without sherpaOnnxDisableLibarchive "
@@ -59,22 +83,10 @@ ExtractTextResult ExtractDocumentText(const DocumentSource& src,
   std::string err_msg;
   ArchiveReader ar;
   bool have_ar = false;
-  uint8_t prefix[8];
-  size_t got = 0;
-  if (!ReadSourcePrefix(src, prefix, sizeof(prefix), &got, &err_code, &err_msg)) {
+  DocFormat fmt = DocFormat::Unknown;
+  if (!OpenAndSniff(src, &ar, &have_ar, &fmt, &err_code, &err_msg)) {
     return Fail(err_code.c_str(), err_msg);
   }
-  const bool zip_or_rar =
-      (got >= 4 && prefix[0] == 0x50 && prefix[1] == 0x4B) ||
-      (got >= 6 && prefix[0] == 'R' && prefix[1] == 'a' && prefix[2] == 'r');
-  if (zip_or_rar) {
-    if (!ArchiveReader::Open(src, &ar, &err_code, &err_msg)) {
-      return Fail(err_code.empty() ? kErrOpenFailed : err_code.c_str(), err_msg);
-    }
-    have_ar = true;
-  }
-  const DocFormat fmt =
-      SniffFormat(src, have_ar ? &ar : nullptr, &err_code, &err_msg);
   DOC_LOGI("extractText format=%s", FormatName(fmt));
   if (fmt == DocFormat::Unknown) {
     return Fail(err_code.empty() ? kErrUnsupportedFormat : err_code.c_str(),
@@ -117,23 +129,10 @@ ExtractImagesResult ExtractDocumentImages(const DocumentSource& src,
   std::string err_msg;
   ArchiveReader ar;
   bool have_ar = false;
-  uint8_t prefix[8];
-  size_t got = 0;
-  if (!ReadSourcePrefix(src, prefix, sizeof(prefix), &got, &err_code, &err_msg)) {
+  DocFormat fmt = DocFormat::Unknown;
+  if (!OpenAndSniff(src, &ar, &have_ar, &fmt, &err_code, &err_msg)) {
     return FailImg(err_code.c_str(), err_msg);
   }
-  const bool zip_or_rar =
-      (got >= 4 && prefix[0] == 0x50 && prefix[1] == 0x4B) ||
-      (got >= 6 && prefix[0] == 'R' && prefix[1] == 'a' && prefix[2] == 'r');
-  if (zip_or_rar) {
-    if (!ArchiveReader::Open(src, &ar, &err_code, &err_msg)) {
-      return FailImg(err_code.empty() ? kErrOpenFailed : err_code.c_str(),
-                     err_msg);
-    }
-    have_ar = true;
-  }
-  const DocFormat fmt =
-      SniffFormat(src, have_ar ? &ar : nullptr, &err_code, &err_msg);
   DOC_LOGI("extractImages format=%s", FormatName(fmt));
   if (fmt == DocFormat::Unknown) {
     return FailImg(err_code.empty() ? kErrUnsupportedFormat : err_code.c_str(),
@@ -150,7 +149,7 @@ ExtractImagesResult ExtractDocumentImages(const DocumentSource& src,
     if (!have_ar) {
       return FailImg(kErrOpenFailed, "Comic archive is not seekable");
     }
-    return ExtractComicImages(ar, FormatName(fmt), opt);
+    return ExtractComicImages(src, ar, FormatName(fmt), opt);
   }
   if (fmt == DocFormat::Epub) {
     if (!have_ar) {
@@ -163,6 +162,26 @@ ExtractImagesResult ExtractDocumentImages(const DocumentSource& src,
   }
   return FailImg(kErrUnsupportedFormat, "Unrecognized document container");
 #endif
+}
+
+std::string DetectDocumentFormat(const DocumentSource& src, std::string* err_code,
+                                 std::string* err_message) {
+  if (src.path.empty() && src.fd < 0) {
+    if (err_code) *err_code = kErrInvalidArgument;
+    if (err_message) *err_message = "source must be a path or seekable fd";
+    return {};
+  }
+  std::string code;
+  std::string msg;
+  ArchiveReader ar;
+  bool have_ar = false;
+  DocFormat fmt = DocFormat::Unknown;
+  if (!OpenAndSniff(src, &ar, &have_ar, &fmt, &code, &msg)) {
+    if (err_code) *err_code = code.empty() ? kErrOpenFailed : code;
+    if (err_message) *err_message = msg;
+    return {};
+  }
+  return FormatName(fmt);
 }
 
 }  // namespace document

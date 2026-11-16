@@ -85,6 +85,7 @@ bool RasterizePageUnlocked(
   }
 
   const int page_index = page_1based - 1;
+  std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
   FPDF_PAGE page = FPDF_LoadPage(raw, page_index);
   if (!page) {
     if (err_code) *err_code = kErrRenderFailed;
@@ -279,6 +280,39 @@ bool RasterizePdfPage(
         "(Android) or SHERPA_ONNX_ENABLE_PDFIUM=1 (iOS) and ensure pdfium "
         "prebuilts resolve.";
   }
+  return false;
+#endif
+}
+
+bool PdfPagePixelSize(
+    const PdfDocument& doc,
+    int page_1based,
+    int dpi,
+    int max_side,
+    int* width,
+    int* height) {
+#if defined(HAVE_PDFIUM) && HAVE_PDFIUM
+  if (!doc.ok() || dpi <= 0 || page_1based < 1 || page_1based > doc.page_count()) {
+    return false;
+  }
+  FS_SIZEF size;
+  {
+    std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
+    if (!FPDF_GetPageSizeByIndexF(doc.handle(), page_1based - 1, &size)) return false;
+  }
+  int w = 0;
+  int h = 0;
+  ComputePixelSize(size.width, size.height, dpi, max_side, &w, &h);
+  if (width) *width = w;
+  if (height) *height = h;
+  return true;
+#else
+  (void)doc;
+  (void)page_1based;
+  (void)dpi;
+  (void)max_side;
+  (void)width;
+  (void)height;
   return false;
 #endif
 }

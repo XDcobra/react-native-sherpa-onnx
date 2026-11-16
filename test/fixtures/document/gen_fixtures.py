@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import base64
 import io
+import struct
 import zipfile
 from pathlib import Path
 
@@ -370,7 +371,13 @@ def make_mobi(
     dictionary_exth: bool = False,
     extra_records: list[bytes] | None = None,
     extra_resource: bytes | None = None,
+    extra_resources: list[bytes] | None = None,
+    exth: list[tuple[int, bytes]] | None = None,
+    full_name: bytes | None = None,
 ) -> bytes:
+    resources = list(extra_resources or [])
+    if extra_resource is not None:
+        resources.insert(0, extra_resource)
     text = html.encode("utf-8")
     rec_size = 4096
     chunks = [text[i : i + rec_size] for i in range(0, max(len(text), 1), rec_size)] or [b""]
@@ -388,7 +395,7 @@ def make_mobi(
         poke32(rec0, 28, encoding)
         poke32(rec0, 36, version)
         extras = extra_records or []
-        res_start = 0xFFFFFFFF if extra_resource is None else 1 + ntext + len(extras)
+        res_start = 0xFFFFFFFF if not resources else 1 + ntext + len(extras)
         poke32(rec0, 108, res_start)
         poke32(rec0, 112, 0xFFFFFFFF)
         poke32(rec0, 192, fdst)
@@ -406,11 +413,22 @@ def make_mobi(
             poke32(rec0, exth + 12, 403)
             poke32(rec0, exth + 16, 12)
             poke32(rec0, exth + 20, 0)
+        elif exth:
+            # EXTH records (metadata) right after the 240-byte MOBI header.
+            body = b"".join(
+                struct.pack(">II", t, 8 + len(v)) + v for t, v in exth
+            )
+            block = b"EXTH" + struct.pack(">II", 12 + len(body), len(exth)) + body
+            poke32(rec0, 128, 0x40)
+            rec0.extend(block)
+        if full_name:
+            poke32(rec0, 0x54, len(rec0))
+            poke32(rec0, 0x58, len(full_name))
+            rec0.extend(full_name + b"\x00\x00")
     recs: list[bytes] = [bytes(rec0)] + chunks
     if extra_records:
         recs.extend(extra_records)
-    if extra_resource is not None:
-        recs.append(extra_resource)
+    recs.extend(resources)
     nrec = len(recs)
     list_off = 78
     rec0_off = list_off + nrec * 8
@@ -427,6 +445,321 @@ def make_mobi(
         poke32(pdb, list_off + i * 8, off)
         pdb[off : off + len(r)] = r
     return bytes(pdb)
+
+
+# ---------------------------------------------------------------------------
+# Reader structure fixtures (python3 gen_fixtures.py --reader writes only these).
+# Fixed zip timestamps keep the bytes (and so the SHA-256 documentKey) stable.
+
+FIXED_ZIP_TIME = (2026, 1, 1, 0, 0, 0)
+
+
+def write_epub_fixed(path: Path, files: list[tuple[str, bytes]]) -> None:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        info = zipfile.ZipInfo("mimetype", date_time=FIXED_ZIP_TIME)
+        info.compress_type = zipfile.ZIP_STORED
+        zf.writestr(info, "application/epub+zip")
+        for name, data in files:
+            info = zipfile.ZipInfo(name, date_time=FIXED_ZIP_TIME)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            zf.writestr(info, data)
+    path.write_bytes(buf.getvalue())
+
+
+def reader_opf(items: str, spine: str, toc_attr: str = "") -> str:
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="id">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:identifier id="id">urn:uuid:reader-fixture</dc:identifier>
+    <dc:title>  The   Reader
+      Fixture </dc:title>
+    <dc:creator>Ada Example</dc:creator>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+{items}
+  </manifest>
+  <spine{toc_attr}>
+{spine}
+  </spine>
+</package>
+"""
+
+
+STRUCT_NAV = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
+<body>
+  <nav epub:type="landmarks"><ol><li><a href="text/ch1.xhtml">Landmark, not a title</a></li></ol></nav>
+  <nav epub:type="toc"><ol>
+    <li><a href="text/ch1.xhtml#start">Chapter   One</a></li>
+    <li><a href="text/ch1.xhtml#later">Ignored second entry</a></li>
+    <li><a href="images/plate.png">The Plate</a></li>
+  </ol></nav>
+</body></html>
+"""
+
+STRUCT_CH1 = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>ch1</title></head>
+<body>
+  <section>
+    <hgroup>
+      <h1 id="start">Chapter One</h1>
+      <h2>In which things begin</h2>
+    </hgroup>
+    <p>
+      It was a   bright cold day,
+      and the clocks were <em>striking</em> thirteen.
+    </p>
+    <p>A map: <img src="../images/map.png" alt="Map of the island"/> drawn by hand.</p>
+    <hr/>
+    <pre>  keep   this
+  spacing</pre>
+    <p id="later">Roses are red,<br/>
+      violets are blue.</p>
+  </section>
+</body></html>
+"""
+
+STRUCT_CH2 = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>ch2</title></head>
+<body>
+  <h3>A section without a TOC entry</h3>
+  <p>Second chapter text.</p>
+  <figure><img src="../images/map.png" alt=""/><figcaption>Same map again</figcaption></figure>
+</body></html>
+"""
+
+
+def structure_files() -> list[tuple[str, bytes]]:
+    items = """    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="plate" href="images/plate.png" media-type="image/png"/>
+    <item id="ch2" href="text/ch2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="map" href="images/map.png" media-type="image/png"/>"""
+    spine = """    <itemref idref="ch1"/>
+    <itemref idref="nav" linear="no"/>
+    <itemref idref="plate"/>
+    <itemref idref="ch2"/>"""
+    return [
+        ("META-INF/container.xml", CONTAINER.encode()),
+        ("OEBPS/content.opf", reader_opf(items, spine).encode()),
+        ("OEBPS/nav.xhtml", STRUCT_NAV.encode()),
+        ("OEBPS/text/ch1.xhtml", STRUCT_CH1.encode()),
+        ("OEBPS/text/ch2.xhtml", STRUCT_CH2.encode()),
+        ("OEBPS/images/plate.png", PNG),
+        ("OEBPS/images/map.png", PNG),
+    ]
+
+
+NCX = """<?xml version="1.0" encoding="utf-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="p1" playOrder="1"><navLabel><text>Opening</text></navLabel><content src="a.xhtml"/>
+      <navPoint id="p1a" playOrder="2"><navLabel><text>Nested</text></navLabel><content src="a.xhtml#n"/></navPoint>
+    </navPoint>
+    <navPoint id="p2" playOrder="3"><navLabel><text>Closing</text></navLabel><content src="b.xhtml"/></navPoint>
+  </navMap>
+</ncx>
+"""
+
+
+def ncx_files() -> list[tuple[str, bytes]]:
+    items = """    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="a" href="a.xhtml" media-type="application/xhtml+xml"/>
+    <item id="b" href="b.xhtml" media-type="application/xhtml+xml"/>"""
+    spine = """    <itemref idref="a"/>
+    <itemref idref="b"/>"""
+    page = lambda body: f"""<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><body>{body}</body></html>"""
+    return [
+        ("META-INF/container.xml", CONTAINER.encode()),
+        ("OEBPS/content.opf", reader_opf(items, spine, ' toc="ncx"').encode()),
+        ("OEBPS/toc.ncx", NCX.encode()),
+        ("OEBPS/a.xhtml", page("<p>First.</p>").encode()),
+        ("OEBPS/b.xhtml", page("<p>Last.</p>").encode()),
+    ]
+
+
+def long_files(chapters: int = 40, paragraphs: int = 150) -> list[tuple[str, bytes]]:
+    """A deterministic long book for virtualization / jump tests."""
+    words = (
+        "the sea was calm and the light moved slowly over the water while the "
+        "travellers watched the coast fade into a thin grey line"
+    ).split()
+    items = ['    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
+             '    <item id="fig" href="images/figure.png" media-type="image/png"/>']
+    spine = []
+    nav = []
+    files: list[tuple[str, bytes]] = []
+    for c in range(1, chapters + 1):
+        name = f"ch{c:02d}.xhtml"
+        items.append(f'    <item id="c{c}" href="{name}" media-type="application/xhtml+xml"/>')
+        spine.append(f'    <itemref idref="c{c}"/>')
+        nav.append(f'<li><a href="{name}">Chapter {c}</a></li>')
+        body = [f"<h1>Chapter {c}</h1>"]
+        for p in range(1, paragraphs + 1):
+            n = 8 + (c * 7 + p * 13) % 40
+            text = " ".join(words[(c + p + k) % len(words)] for k in range(n))
+            body.append(f"<p>{c}.{p} {text.capitalize()}.</p>")
+            if p % 50 == 0:
+                body.append('<p><img src="images/figure.png" alt="Figure"/></p>')
+        files.append((f"OEBPS/{name}", (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<html xmlns="http://www.w3.org/1999/xhtml"><body>\n'
+            + "\n".join(body) + "\n</body></html>\n").encode()))
+    nav_doc = ('<?xml version="1.0" encoding="utf-8"?>\n'
+               '<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">'
+               '<body><nav epub:type="toc"><ol>' + "".join(nav) + "</ol></nav></body></html>")
+    return [
+        ("META-INF/container.xml", CONTAINER.encode()),
+        ("OEBPS/content.opf", reader_opf("\n".join(items), "\n".join(spine)).encode()),
+        ("OEBPS/nav.xhtml", nav_doc.encode()),
+        ("OEBPS/images/figure.png", PNG),
+    ] + files
+
+
+MOBI_STRUCTURE_HTML = """<html><head><title>ignored</title></head><body>
+<h1>The Lighthouse</h1>
+<p>The keeper counted the ships every evening.</p>
+<hr/>
+<p>A map of the bay hung by the door.<img recindex="00002" alt="map of the bay"/></p>
+<mbp:pagebreak/>
+<h2>The Storm</h2>
+<p>On the third night a small boat drifted into the harbour.</p>
+<mbp:pagebreak/>
+<img recindex="00001"/>
+</body></html>
+"""
+
+AZW3_STRUCTURE_HTML = """<html><body>
+<h1>The Lighthouse</h1>
+<p>The keeper counted the ships every evening.</p>
+<p>A map of the bay hung by the door.<img src="kindle:embed:0002?mime=image/png" alt="map of the bay"/></p>
+<mbp:pagebreak/>
+<img src="kindle:embed:0001?mime=image/png"/>
+</body></html>
+"""
+
+MOBI_META = [
+    (100, "Ada Example".encode()),
+    (503, "A Mobi Structure Book".encode()),
+    (524, b"en"),
+]
+
+
+def structure_fb2() -> str:
+    b64 = base64.b64encode(PNG).decode("ascii")
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>The Lighthouse Keeper</book-title>
+      <author><first-name>Ada</first-name><middle-name>B.</middle-name><last-name>Example</last-name></author>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <title><p>The Lighthouse Keeper</p><p>A Story</p></title>
+    <epigraph><p>Every light is a promise.</p><text-author>Harbour saying</text-author></epigraph>
+    <section id="ch1">
+      <title><p>Chapter One</p><p>The Bay</p></title>
+      <subtitle>Evening</subtitle>
+      <p>The keeper   counted the
+         ships every evening.</p>
+      <p>A map of the bay <style name="italic">hung</style> by the door.<image l:href="#map" alt="map of the bay"/></p>
+      <empty-line/>
+      <section id="ch1-1">
+        <title><p>The Boat</p></title>
+        <p>On the third night a small boat drifted in.</p>
+        <poem>
+          <title><p>Harbour Song</p></title>
+          <stanza><v>The tide comes in,</v><v>the tide goes out.</v></stanza>
+        </poem>
+      </section>
+      <table><tr><td>Ships</td><td>12</td></tr></table>
+      <empty-line/>
+    </section>
+    <section id="plate"><image l:href="#plate"/></section>
+  </body>
+  <body name="notes">
+    <section id="n1"><title><p>1</p></title><p>A note about the bay.</p></section>
+  </body>
+  <binary id="map" content-type="image/png">{b64}</binary>
+  <binary id="plate" content-type="image/png">{b64}</binary>
+</FictionBook>
+"""
+
+
+STYLES_CH1 = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>styles</title></head>
+<body>
+  <h1>The <i>North</i> Wind</h1>
+  <p>Plain <em>italic</em> and <strong>bold</strong> text.</p>
+  <p><i>Italic with <b>bold inside</b> it</i>, then <b>bold <i>and both</i></b><i> italic</i>.</p>
+  <p>   <em>  Leading   space </em>   collapses   </p>
+  <p><em>First line<br/>
+     second line</em> plain<br/><b> bold after a break </b></p>
+  <p>Café <em>naïve 😀 smile</em> end.</p>
+  <i><p>One italic paragraph.</p><p>Another <b>one</b>.</p></i>
+  <p><span style="font-style: italic">Inline italic</span>, <span style="font-weight:700">inline bold</span>, <em>not <span style="font-style:normal">this</span></em>.</p>
+  <p>A <a href="#n1"><i>linked</i> word</a> and a <cite>cited title</cite>.</p>
+  <pre>  keep <i>this</i>   spacing</pre>
+</body></html>
+"""
+
+
+def styles_files() -> list[tuple[str, bytes]]:
+    items = """    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>"""
+    spine = """    <itemref idref="ch1"/>"""
+    return [
+        ("META-INF/container.xml", CONTAINER.encode()),
+        ("OEBPS/content.opf", reader_opf(items, spine).encode()),
+        ("OEBPS/text/ch1.xhtml", STYLES_CH1.encode()),
+    ]
+
+
+def styles_fb2() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>Styles</book-title>
+      <author><first-name>Ada</first-name><last-name>Example</last-name></author>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <section id="ch1">
+      <title><p>The <emphasis>North</emphasis></p><p><strong>Wind</strong></p></title>
+      <p>Plain <emphasis>italic</emphasis> and <strong>bold <emphasis>both</emphasis></strong>.</p>
+      <p>   <emphasis>  Leading   space </emphasis>   collapses   </p>
+      <p>A <style name="note">named style</style> and a <a l:href="#n1"><emphasis>link</emphasis></a>.</p>
+      <poem><stanza><v><emphasis>The tide</emphasis> comes in,</v><v>the tide <strong>goes out.</strong></v></stanza></poem>
+    </section>
+  </body>
+</FictionBook>
+"""
+
+
+def write_reader_fixtures() -> None:
+    (HERE / "structure.fb2").write_text(structure_fb2(), encoding="utf-8")
+    (HERE / "structure.mobi").write_bytes(
+        make_mobi(MOBI_STRUCTURE_HTML, extra_resources=[PNG, PNG], exth=MOBI_META,
+                  full_name=b"Full Name Fallback")
+    )
+    (HERE / "structure.azw3").write_bytes(
+        make_mobi(AZW3_STRUCTURE_HTML, version=8, extra_resources=[PNG, PNG],
+                  full_name=b"An AZW3 Structure Book")
+    )
+    write_epub_fixed(HERE / "structure.epub", structure_files())
+    write_epub_fixed(HERE / "structure-ncx.epub", ncx_files())
+    write_epub_fixed(HERE / "long.epub", long_files())
+    write_epub_fixed(HERE / "styles.epub", styles_files())
+    (HERE / "styles.fb2").write_text(styles_fb2(), encoding="utf-8")
 
 
 def main() -> None:
@@ -546,4 +879,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import sys
+
+    if "--reader" in sys.argv:
+        write_reader_fixtures()
+    else:
+        main()
+        write_reader_fixtures()

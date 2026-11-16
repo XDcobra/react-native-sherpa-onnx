@@ -20,6 +20,11 @@
 #include <cstdio>
 #include "crypto/sha256.h"
 
+using sherpa_onnx::crypto::Sha256Context;
+using sherpa_onnx::crypto::sha256_final;
+using sherpa_onnx::crypto::sha256_init;
+using sherpa_onnx::crypto::sha256_update;
+
 // ── Cancel state ─────────────────────────────────────────────────
 
 std::mutex ArchiveHelper::cancel_mutex_;

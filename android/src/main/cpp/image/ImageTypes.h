@@ -101,8 +101,15 @@ struct CompressedImageFrame {
 
 struct ImageFrameInfo {
   int index = 0;
+  /** Resident RGB size; 0 while a lazy frame is cold. */
   int width = 0;
   int height = 0;
+  /**
+   * Size the frame has once decoded (= width / height when resident). Known
+   * before decoding for lazy PDF pages and archive images; 0 = unknown.
+   */
+  int expectedWidth = 0;
+  int expectedHeight = 0;
   int64_t byteSize = 0;
   ImageStorageKind storageKind = ImageStorageKind::Ram;
   /** 1-based PDF page number; 0 = unset. */

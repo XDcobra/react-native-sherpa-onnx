@@ -511,7 +511,40 @@ export type TtsSynthesisOptions = {
   overlapChars?: number;
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;
+  /**
+   * Also return a {@link TtsTimeline}: where each text segment landed in the
+   * output audio. Use it to follow along (e.g. highlight the sentence being
+   * spoken). Default false.
+   */
+  timeline?: boolean;
 } & Partial<TtsPhonemeInput>;
+
+/** One synthesized text segment in the output audio. */
+export interface TtsTimelineSegment {
+  /** UTF-16 range of the segment in the input text buffer. */
+  utf16Start: number;
+  utf16End: number;
+  /** First sample of the segment in the output buffer. */
+  startSample: number;
+  numSamples: number;
+  /** The segment failed and was replaced by a short silence (`errorRecovery: 'skip'`). */
+  skipped: boolean;
+}
+
+/**
+ * Text ↔ audio map of one `synthesize` call. With `segmentation.mode: 'off'`
+ * it has a single segment for the whole text.
+ */
+export interface TtsTimeline {
+  sampleRate: number;
+  /**
+   * False when the audio text differs from the buffer text (`overlapChars > 0`
+   * or a policy that rewrites text, e.g. `text_punctuation_assisted`): ranges
+   * are then approximate.
+   */
+  exact: boolean;
+  segments: TtsTimelineSegment[];
+}
 
 export interface TtsSynthesisResult {
   status: 'complete' | 'partial' | 'failed';
@@ -521,6 +554,8 @@ export interface TtsSynthesisResult {
   failedSegment?: FailedSegmentInfo;
   processingTimeMs: number;
   linkMap?: SegmentLinkMapRef;
+  /** Present when `options.timeline` was true. */
+  timeline?: TtsTimeline;
 }
 
 /**

@@ -13,7 +13,6 @@ import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.ocr.OcrNative
 import com.sherpaonnx.ocr.core.OcrErrorCodes
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
-import com.sherpaonnx.text.pipeline.TextSpatialSpan
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -282,6 +281,10 @@ class SherpaOnnxOcrHelper(
       options
         ?.takeIf { it.hasKey("recognizeSpec") && !it.isNull("recognizeSpec") }
         ?.getString("recognizeSpec")
+    val readingDirection =
+      options
+        ?.takeIf { it.hasKey("readingDirection") && !it.isNull("readingDirection") }
+        ?.getString("readingDirection")
 
     val gateKey = NativeInstanceGate.keyFor(sentinel)
     if (!NativeInstanceGate.beginUse(gateKey)) {
@@ -308,6 +311,8 @@ class SherpaOnnxOcrHelper(
           operationId.ifEmpty { null },
           progressMinIntervalMs,
           recognizeSpec,
+          readingDirection,
+          textOutBufferId,
         )
           ?: run {
             promise.reject(OcrErrorCodes.RECOGNIZE_FAILED, "nativeRecognize returned null")
@@ -328,9 +333,7 @@ class SherpaOnnxOcrHelper(
       }
 
       val text = raw["text"] as? String ?: ""
-      @Suppress("UNCHECKED_CAST")
-      val spanMaps = raw["spans"] as? ArrayList<HashMap<String, Any>> ?: arrayListOf()
-      val spans = spanMaps.map { mapNativeSpan(it, imageBufferId) }
+      val spanCount = (raw["spanCount"] as? Number)?.toInt() ?: 0
 
       val family = raw["family"] as? String
       if (family.isNullOrBlank()) {
@@ -352,29 +355,14 @@ class SherpaOnnxOcrHelper(
         return
       }
 
-      try {
-        textEntry.populate(
-          text = text,
-          tokens = emptyArray(),
-          timestamps = floatArrayOf(),
-          durations = floatArrayOf(),
-          lang = "",
-          emotion = "",
-          event = "",
-          spatialSpans = spans,
-        )
-      } catch (e: IllegalStateException) {
-        promise.reject(OcrErrorCodes.ALREADY_POPULATED, e.message, e)
-        return
-      }
-
+      // Native recognize already filled the text buffer (text, spans, OCR layout).
       Log.i(
         TAG,
-        "recognize ok instance=$instanceId image=$imageBufferId spans=${spans.size} textLen=${text.length} rawLen=${(rawText ?: "").length}",
+        "recognize ok instance=$instanceId image=$imageBufferId spans=$spanCount textLen=${text.length} rawLen=${(rawText ?: "").length}",
       )
       val result = Arguments.createMap()
       result.putString("family", family)
-      result.putInt("spanCount", spans.size)
+      result.putInt("spanCount", spanCount)
       result.putString("raw", rawText ?: "")
       val instructionSpec = raw["instructionSpec"] as? String
       if (!instructionSpec.isNullOrEmpty()) {
@@ -441,40 +429,6 @@ class SherpaOnnxOcrHelper(
     (raw["headingLevel"] as? Number)?.toInt()?.let { map.putInt("headingLevel", it) }
     (raw["checked"] as? Boolean)?.let { map.putBoolean("checked", it) }
     return map
-  }
-
-  private fun mapNativeSpan(raw: HashMap<String, Any>, imageBufferId: String): TextSpatialSpan {
-    val utf16Start = (raw["utf16Start"] as? Number)?.toInt() ?: 0
-    val utf16End = (raw["utf16End"] as? Number)?.toInt() ?: 0
-    val level = raw["level"] as? String ?: "line"
-    val frameIndex = (raw["frameIndex"] as? Number)?.toInt() ?: 0
-    val confidence = (raw["confidence"] as? Number)?.toFloat()
-    @Suppress("UNCHECKED_CAST")
-    val quadList = raw["quad"] as? ArrayList<Any> ?: arrayListOf()
-    val quad = FloatArray(8)
-    for (i in 0 until 8) {
-      quad[i] = (quadList.getOrNull(i) as? Number)?.toFloat() ?: 0f
-    }
-    var ptsMs: Double? = null
-    try {
-      val info = com.sherpaonnx.image.ImageBufferService.getFrameInfo(imageBufferId, frameIndex)
-      val us = (info?.get("sourcePtsUs") as? Number)?.toLong()
-      if (us != null && us >= 0) {
-        ptsMs = us / 1000.0
-      }
-    } catch (_: Exception) {
-    }
-    return TextSpatialSpan(
-      utf16Start = utf16Start,
-      utf16End = utf16End,
-      level = level,
-      sourceImageBufferId = imageBufferId,
-      frameIndex = frameIndex,
-      quad = quad,
-      confidence = confidence,
-      origin = "ocr",
-      ptsMs = ptsMs,
-    )
   }
 
   private fun detectMapToWritable(raw: HashMap<String, Any>): WritableMap {

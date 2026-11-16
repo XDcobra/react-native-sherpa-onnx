@@ -162,10 +162,10 @@ function extractPdfTextLayer(
 ```
 
 ```ts
-const r = await extractPdfTextLayer(pdfSource, textOut, { pages: [1] });
+const r = await extractPdfTextLayer(pdfSource, textOut, { layout: 'paragraphs' });
 ```
 
-Writes digital text into an empty TextBuffer (`origin: 'textLayer'`). No text layer → `ERR_PDF_NO_TEXT_LAYER`. Options: `pages`, `password`, `signal`, `onProgress`.
+Writes digital text into an empty TextBuffer (`origin: 'textLayer'`). Options: `pages`, `password`, `layout`, `signal`, `onProgress`. `layout: 'lines'` (default) gives one line per text line and fails with `ERR_PDF_NO_TEXT_LAYER` when there is no text. `layout: 'paragraphs'` gives reading text plus a reading structure (`result.structure`, see [Reading text and structure](#reading-text-and-structure)).
 
 #### `rasterizePdfPages(source, options?)`
 
@@ -203,7 +203,7 @@ Seekable PDF file. Sniff is the PDF signature (`%PDF`), not the extension. Needs
 | Input | `extractPdfTextLayer` | `rasterizePdfPages` |
 | --- | --- | --- |
 | Digital PDF (text layer) | UTF-16 `origin: 'textLayer'` | RGB8 ImageBuffer pages |
-| Scan-only PDF | `ERR_PDF_NO_TEXT_LAYER` | RGB8 ImageBuffer pages |
+| Scan-only PDF | `ERR_PDF_NO_TEXT_LAYER`; with `layout: 'paragraphs'` sections with only their page (`pagesWithText: 0`) | RGB8 ImageBuffer pages |
 | Standard encryption | `options.password` (user or owner); wrong/missing → `ERR_PDF_ENCRYPTED` | same |
 | Adobe DRM / FileOpen | not supported | not supported |
 
@@ -225,17 +225,39 @@ Text-layer spans on the TextBuffer:
 
 Raster frames use the same top-left / y-down convention, so overlays can map quads onto frame pixels via page size and frame size (`mapTextSpatialSpansToFrame` or `OfflineImageBufferAnnotatedView` in [imagebuffer-offline.md](./imagebuffer-offline.md)).
 
+With `layout: 'paragraphs'` the spans also carry `sectionIndex` (page − 1) and `href` (`page:N`).
+
 See [textbuffer-offline.md](./textbuffer-offline.md) and [imagebuffer-offline.md](./imagebuffer-offline.md).
+
+## Reading text and structure
+
+`layout: 'paragraphs'` turns the text layer into reading text and attaches a reading structure (`format: 'pdf'`) to the buffer. The reader reads the same structure (see [reader.md](reader.md)).
+
+```ts
+const r = await extractPdfTextLayer(pdfSource, textOut, { layout: 'paragraphs' });
+r.structure?.sections[0]; // { kind: 'page', href: 'page:1', label: 'i', title?, ... }
+```
+
+| What | How it is found |
+| --- | --- |
+| Paragraphs | Lines close below each other, without a first-line indent, after a line that ended where the next line's first word would not have fit. Wrapped lines are joined by a space (none between CJK characters), and a word hyphenated at a line end is rejoined. Paragraphs are separated by a blank line. |
+| Headings | Lines clearly larger than the body text (≥ 1.15 × the most common font size). Sizes within 15 % of each other share a level; levels 1–3 from the largest down. Heading lines that wrap are merged. |
+| Running headers, footers, page numbers | Lines in the top or bottom 10 % of the page that repeat on several pages (digits ignored), or that look like a page number. They stay in the text, flagged as furniture, so a reader can hide them. |
+| Sections | One per page (`kind: 'page'`, `href: 'page:N'`, `label` from the PDF's page labels). The first block of each section is the page itself. A page without text is a section with only that block. |
+| Contents | The PDF outline (bookmarks), pointed at the matching heading on its page; without an outline, the detected headings. A section's `title` comes from the contents first, else from its first heading. |
+| Metadata | `metadata.title` and `metadata.creator` from the document info, `metadata.language` from the catalog (`/Lang`). |
+
+The text keeps PDFium's order, which is the order the PDF draws its text in. Columns stay in the right order when the PDF draws them one after the other, which is the usual case. Columns drawn line by line across the page are not re-sorted. A paragraph that runs over a page break is split at the page. Reading text and blocks may change between versions; the structure carries a version for that (`structure.version`).
 
 ## Errors
 
 | Code | Meaning |
 |------|---------|
 | `ERR_PDF_PDFIUM_DISABLED` | Binary built without PDFium |
-| `ERR_PDF_INVALID_ARGUMENT` | Bad source / pages / dpi / populated text buffer |
+| `ERR_PDF_INVALID_ARGUMENT` | Bad source / pages / dpi / layout / populated text buffer |
 | `ERR_PDF_OPEN_FAILED` | Unreadable / corrupt PDF, or a non-seekable source (stream, PFD with no length) |
 | `ERR_PDF_ENCRYPTED` | Encrypted PDF; missing or incorrect `options.password` |
-| `ERR_PDF_NO_TEXT_LAYER` | No extractable text (extract only) |
+| `ERR_PDF_NO_TEXT_LAYER` | No extractable text (extract with `layout: 'lines'` only) |
 | `ERR_PDF_RENDER_FAILED` | Page raster failed |
 | `ERR_PDF_CANCELLED` | AbortSignal / cancel |
 

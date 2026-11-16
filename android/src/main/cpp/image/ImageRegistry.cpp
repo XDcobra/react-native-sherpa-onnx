@@ -209,6 +209,8 @@ void ImageRegistry::FillFrameInfoLocked(const Frame& f, int frameIndex,
   out.index = frameIndex;
   out.width = f.width;
   out.height = f.height;
+  out.expectedWidth = f.width > 0 ? f.width : f.expectedWidth;
+  out.expectedHeight = f.height > 0 ? f.height : f.expectedHeight;
   out.byteSize = static_cast<int64_t>(f.width) * static_cast<int64_t>(f.height) * 3;
   out.storageKind = f.kind;
   out.pageNumber = f.pageNumber;
@@ -296,7 +298,7 @@ bool ImageRegistry::UpgradeEntryLocked(Entry& entry) {
   bool any = false;
   for (size_t i = 0; i < entry.frames.size(); ++i) {
     auto& f = entry.frames[i];
-    if (f.kind == ImageStorageKind::Ram && !f.ram.empty()) {
+    if (f.kind == ImageStorageKind::Ram && !f.ram.empty() && f.pins == 0) {
       if (WriteFrameToMmap(f, entry.bufferId, static_cast<int>(i))) {
         any = true;
       } else {
@@ -438,14 +440,16 @@ ImageRegistry::CreateResult ImageRegistry::CreateLazyPdfSlots(
   e.pathType = ImageThresholdPathType::FileOrigin;
   e.state = ImageBufferState::Lazy;
   e.hotFramesLimit = limit;
-  e.pdfLazy = std::move(backend);
   e.frames.reserve(pages.size());
   for (int page : pages) {
     Frame f;
     f.pageNumber = page;
     f.dpi = dpi;
+    // Page size without rendering, so viewers can lay out cold pages.
+    backend->PageSize(page, &f.expectedWidth, &f.expectedHeight);
     e.frames.push_back(std::move(f));
   }
+  e.pdfLazy = std::move(backend);
 
   PDF_LAZY_LOGI(
       "createLazy bufferId=%s frames=%zu hotFrames=%d pageCount=%d",
@@ -473,7 +477,7 @@ void ImageRegistry::EvictUntilUnderLimitLocked(Entry& entry) {
     int victim = -1;
     uint64_t oldest = UINT64_MAX;
     for (size_t i = 0; i < entry.frames.size(); ++i) {
-      if (!entry.isHot(i)) continue;
+      if (!entry.isHot(i) || entry.frames[i].pins > 0) continue;
       const uint64_t tick = entry.frames[i].lruTick;
       if (tick < oldest) {
         oldest = tick;
@@ -491,32 +495,83 @@ void ImageRegistry::EvictUntilUnderLimitLocked(Entry& entry) {
 void ImageRegistry::ScheduleNeighborPrefetch(const std::string& bufferId,
                                              int frameIndex, uint64_t generation,
                                              int frameCount) {
-  auto enqueue = [this](std::string id, int idx, uint64_t gen) {
-    std::thread([this, id = std::move(id), idx, gen]() {
-      {
-        std::lock_guard<std::mutex> lock(mu_);
-        auto it = entries_.find(id);
-        if (it == entries_.end()) return;
-        if (it->second.generation != gen) return;
-        if (it->second.state != ImageBufferState::Lazy) return;
-        if (idx < 0 || idx >= static_cast<int>(it->second.frames.size())) return;
-        if (it->second.isHot(static_cast<size_t>(idx))) return;
+  constexpr size_t kMaxQueued = 8;  // newest requests win; old ones are stale
+  {
+    std::lock_guard<std::mutex> lock(prefetchMu_);
+    for (int idx : {frameIndex + 1, frameIndex - 1}) {
+      if (idx < 0 || idx >= frameCount) continue;
+      bool queued = false;
+      for (const auto& job : prefetchQueue_) {
+        if (job.frameIndex == idx && job.bufferId == bufferId) {
+          queued = true;
+          break;
+        }
       }
-      PDF_LAZY_LOGI("prefetch bufferId=%s frame=%d", id.c_str(), idx);
-      (void)EnsureFrame(id, idx);
-    }).detach();
-  };
-
-  if (frameIndex - 1 >= 0) {
-    enqueue(bufferId, frameIndex - 1, generation);
+      if (queued) continue;
+      prefetchQueue_.push_back(PrefetchJob{bufferId, idx, generation});
+      while (prefetchQueue_.size() > kMaxQueued) prefetchQueue_.pop_front();
+    }
+    if (!prefetchWorkerStarted_) {
+      prefetchWorkerStarted_ = true;
+      std::thread([this]() { PrefetchWorkerLoop(); }).detach();
+    }
   }
-  if (frameIndex + 1 < frameCount) {
-    enqueue(bufferId, frameIndex + 1, generation);
+  prefetchCv_.notify_one();
+}
+
+void ImageRegistry::PrefetchWorkerLoop() {
+  for (;;) {
+    PrefetchJob job;
+    {
+      std::unique_lock<std::mutex> lock(prefetchMu_);
+      prefetchCv_.wait(lock, [this]() { return !prefetchQueue_.empty(); });
+      job = std::move(prefetchQueue_.back());  // most recent first
+      prefetchQueue_.pop_back();
+    }
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      auto it = entries_.find(job.bufferId);
+      if (it == entries_.end()) continue;
+      if (it->second.generation != job.generation) continue;
+      if (it->second.state != ImageBufferState::Lazy) continue;
+      if (job.frameIndex < 0 ||
+          job.frameIndex >= static_cast<int>(it->second.frames.size())) {
+        continue;
+      }
+      if (it->second.isHot(static_cast<size_t>(job.frameIndex))) continue;
+    }
+    PDF_LAZY_LOGI("prefetch bufferId=%s frame=%d", job.bufferId.c_str(), job.frameIndex);
+    (void)EnsureFrameNoPrefetch(job.bufferId, job.frameIndex);
   }
 }
 
 ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& bufferId,
                                                        int frameIndex) {
+  return EnsureFrameImpl(bufferId, frameIndex, /*prefetchNeighbours=*/true);
+}
+
+void ImageRegistry::PinLocked(Entry& entry, int frameIndex, FramePin* pin) {
+  if (!pin) return;
+  Frame& f = entry.frames[static_cast<size_t>(frameIndex)];
+  const uint8_t* data = f.kind == ImageStorageKind::Mmap ? f.mmap.rgbPtr() : f.ram.data();
+  if (!data) return;
+  f.pins += 1;
+  pin->bufferId_ = entry.bufferId;
+  pin->frameIndex_ = frameIndex;
+  pin->data_ = data;
+  pin->width_ = f.width;
+  pin->height_ = f.height;
+}
+
+ImageRegistry::EnsureResult ImageRegistry::EnsureFrameNoPrefetch(
+    const std::string& bufferId, int frameIndex) {
+  return EnsureFrameImpl(bufferId, frameIndex, /*prefetchNeighbours=*/false);
+}
+
+ImageRegistry::EnsureResult ImageRegistry::EnsureFrameImpl(const std::string& bufferId,
+                                                           int frameIndex,
+                                                           bool prefetchNeighbours,
+                                                           FramePin* pinOut) {
   EnsureResult r;
   if (bufferId.rfind("img_live_", 0) == 0) {
     std::shared_ptr<LiveImageEntry> live;
@@ -572,6 +627,7 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
 
     if (entry.isHot(static_cast<size_t>(frameIndex))) {
       TouchLruLocked(entry, frameIndex);
+      PinLocked(entry, frameIndex, pinOut);
       FillFrameInfoLocked(entry.frames[static_cast<size_t>(frameIndex)], frameIndex,
                           hotInfo);
       alreadyHot = true;
@@ -602,7 +658,7 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
       auto it = entries_.find(bufferId);
       if (it != entries_.end()) hotLimit = it->second.hotFramesLimit;
     }
-    if (hotLimit >= 2) {
+    if (prefetchNeighbours && hotLimit >= 2) {
       ScheduleNeighborPrefetch(bufferId, frameIndex, generation, frameCount);
     }
     return r;
@@ -655,22 +711,28 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
         hot.decoderOrigin = fileLazy->lastOrigin();
       }
       TouchLruLocked(entry, frameIndex);
+      PinLocked(entry, frameIndex, pinOut);
       FillFrameInfoLocked(hot, frameIndex, r.info);
       r.ok = true;
     } else {
       Frame& f = entry.frames[static_cast<size_t>(frameIndex)];
       f.width = rgb.width;
       f.height = rgb.height;
+      // Keep the real size for later cold phases (eviction resets width).
+      f.expectedWidth = rgb.width;
+      f.expectedHeight = rgb.height;
       f.kind = ImageStorageKind::Ram;
       f.ram = std::move(rgb.rgb);
-      f.pageNumber = rgb.pageNumber;
-      f.dpi = rgb.dpi;
+      // Decoded files carry no page number / dpi: keep the slot's metadata.
+      if (rgb.pageNumber > 0) f.pageNumber = rgb.pageNumber;
+      if (rgb.dpi > 0) f.dpi = rgb.dpi;
       if (fileLazy) {
         f.decoderProvider = fileLazy->lastProvider();
         f.decoderTier = fileLazy->lastTier();
         f.decoderOrigin = fileLazy->lastOrigin();
       }
       TouchLruLocked(entry, frameIndex);
+      PinLocked(entry, frameIndex, pinOut);  // before eviction can pick it
       UpgradeEntryLocked(entry);
       EvictUntilUnderLimitLocked(entry);
       FillFrameInfoLocked(entry.frames[static_cast<size_t>(frameIndex)], frameIndex,
@@ -689,7 +751,7 @@ ImageRegistry::EnsureResult ImageRegistry::EnsureFrame(const std::string& buffer
     auto it = entries_.find(bufferId);
     if (it != entries_.end()) hotLimit = it->second.hotFramesLimit;
   }
-  if (hotLimit >= 2) {
+  if (prefetchNeighbours && hotLimit >= 2) {
     ScheduleNeighborPrefetch(bufferId, frameIndex, generation, frameCount);
   }
   return r;
@@ -703,6 +765,7 @@ bool ImageRegistry::EvictFrame(const std::string& bufferId, int frameIndex) {
     return false;
   }
   if (!it->second.isHot(static_cast<size_t>(frameIndex))) return true;
+  if (it->second.frames[static_cast<size_t>(frameIndex)].pins > 0) return false;
   PDF_LAZY_LOGI("evictFrame bufferId=%s frame=%d", bufferId.c_str(), frameIndex);
   ClearFrameRgbLocked(it->second.frames[static_cast<size_t>(frameIndex)]);
   return true;
@@ -750,8 +813,12 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromFiles(
   e.pathType = ImageThresholdPathType::FileOrigin;
   e.state = ImageBufferState::Lazy;
   e.hotFramesLimit = limit;
-  e.fileLazy = std::move(backend);
   e.frames.resize(static_cast<size_t>(total));
+  for (int i = 0; i < total; ++i) {
+    Frame& f = e.frames[static_cast<size_t>(i)];
+    backend->ExpectedSize(i, &f.expectedWidth, &f.expectedHeight);
+  }
+  e.fileLazy = std::move(backend);
   IMG_LOGI("[SherpaOnnx:image] createFromFiles lazy bufferId=%s frames=%d hotFrames=%d",
            e.bufferId.c_str(), total, limit);
   r.info.bufferId = e.bufferId;
@@ -801,9 +868,54 @@ ImageRegistry::CreateResult ImageRegistry::CreateFromBytesList(
   e.pathType = pathType;
   e.state = ImageBufferState::Lazy;
   e.hotFramesLimit = limit;
-  e.fileLazy = std::move(backend);
   e.frames.resize(static_cast<size_t>(total));
+  for (int i = 0; i < total; ++i) {
+    Frame& f = e.frames[static_cast<size_t>(i)];
+    backend->ExpectedSize(i, &f.expectedWidth, &f.expectedHeight);
+  }
+  e.fileLazy = std::move(backend);
   IMG_LOGI("[SherpaOnnx:image] createFromBytes lazy bufferId=%s frames=%d hotFrames=%d",
+           e.bufferId.c_str(), total, limit);
+  r.info.bufferId = e.bufferId;
+  r.info.frameCount = total;
+  r.info.totalBytes = 0;
+  r.info.storageKind = ImageStorageKind::Ram;
+  r.info.state = ImageBufferState::Lazy;
+  r.bufferId = e.bufferId;
+  r.ok = true;
+  entries_[e.bufferId] = std::move(e);
+  return r;
+}
+
+ImageRegistry::CreateResult ImageRegistry::CreateLazyFromBackend(
+    std::shared_ptr<ImageFileLazyBackend> backend, const std::vector<LazyFrameMeta>& meta,
+    ImageThresholdPathType pathType, int hotFrames) {
+  CreateResult r;
+  if (!backend || backend->frame_count() <= 0) {
+    r.errorCode = "ERR_IMAGE_INVALID_ARGUMENT";
+    r.errorMessage = "no frames";
+    return r;
+  }
+  const int total = backend->frame_count();
+  const int limit = ClampHotFrames(hotFrames);
+  std::lock_guard<std::mutex> lock(mu_);
+  Entry e;
+  e.bufferId = NewBufferId();
+  e.pathType = pathType;
+  e.state = ImageBufferState::Lazy;
+  e.hotFramesLimit = limit;
+  e.frames.resize(static_cast<size_t>(total));
+  for (int i = 0; i < total; ++i) {
+    Frame& f = e.frames[static_cast<size_t>(i)];
+    backend->ExpectedSize(i, &f.expectedWidth, &f.expectedHeight);
+    if (i < static_cast<int>(meta.size())) {
+      f.sectionIndex = meta[static_cast<size_t>(i)].sectionIndex;
+      f.href = meta[static_cast<size_t>(i)].href;
+      f.pageNumber = meta[static_cast<size_t>(i)].pageNumber;
+    }
+  }
+  e.fileLazy = std::move(backend);
+  IMG_LOGI("[SherpaOnnx:image] createLazyFromBackend bufferId=%s frames=%d hotFrames=%d",
            e.bufferId.c_str(), total, limit);
   r.info.bufferId = e.bufferId;
   r.info.frameCount = total;
@@ -909,6 +1021,126 @@ const uint8_t* ImageRegistry::GetFrameRgbPtr(const std::string& bufferId, int fr
   return nullptr;
 }
 
+// ---- FramePin ----
+
+ImageRegistry::FramePin::FramePin(FramePin&& other) noexcept
+    : bufferId_(std::move(other.bufferId_)),
+      frameIndex_(other.frameIndex_),
+      data_(other.data_),
+      width_(other.width_),
+      height_(other.height_) {
+  other.frameIndex_ = -1;
+  other.data_ = nullptr;
+}
+
+ImageRegistry::FramePin& ImageRegistry::FramePin::operator=(FramePin&& other) noexcept {
+  if (this != &other) {
+    reset();
+    bufferId_ = std::move(other.bufferId_);
+    frameIndex_ = other.frameIndex_;
+    data_ = other.data_;
+    width_ = other.width_;
+    height_ = other.height_;
+    other.frameIndex_ = -1;
+    other.data_ = nullptr;
+  }
+  return *this;
+}
+
+ImageRegistry::FramePin::~FramePin() { reset(); }
+
+void ImageRegistry::FramePin::reset() {
+  if (frameIndex_ >= 0) {
+    ImageRegistry::Instance().Unpin(bufferId_, frameIndex_);
+  }
+  frameIndex_ = -1;
+  data_ = nullptr;
+  width_ = 0;
+  height_ = 0;
+}
+
+ImageRegistry::FramePin ImageRegistry::PinFrame(const std::string& bufferId,
+                                                int frameIndex) {
+  FramePin pin;
+  if (bufferId.rfind("img_live_", 0) == 0) {
+    pin.data_ = GetFrameRgbPtr(bufferId, frameIndex, &pin.width_, &pin.height_);
+    return pin;
+  }
+  // A prefetch thread may evict between EnsureFrame and the pin; retry.
+  for (int attempt = 0; attempt < 4; ++attempt) {
+    {
+      std::lock_guard<std::mutex> lock(mu_);
+      auto it = entries_.find(bufferId);
+      if (it == entries_.end()) return pin;
+      Entry& entry = it->second;
+      if (frameIndex < 0 || frameIndex >= static_cast<int>(entry.frames.size())) {
+        return pin;
+      }
+      if (entry.isHot(static_cast<size_t>(frameIndex))) {
+        Frame& f = entry.frames[static_cast<size_t>(frameIndex)];
+        const uint8_t* data =
+            f.kind == ImageStorageKind::Mmap ? f.mmap.rgbPtr() : f.ram.data();
+        if (!data) return pin;
+        f.pins += 1;
+        if (entry.state == ImageBufferState::Lazy) TouchLruLocked(entry, frameIndex);
+        pin.bufferId_ = bufferId;
+        pin.frameIndex_ = frameIndex;
+        pin.data_ = data;
+        pin.width_ = f.width;
+        pin.height_ = f.height;
+        return pin;
+      }
+      if (entry.state != ImageBufferState::Lazy) return pin;
+    }
+    // Ensures and pins under the same lock, so no other thread can evict the
+    // frame in between.
+    if (!EnsureFrameImpl(bufferId, frameIndex, /*prefetchNeighbours=*/true, &pin).ok) {
+      return pin;
+    }
+    if (pin) return pin;
+  }
+  return pin;
+}
+
+void ImageRegistry::Unpin(const std::string& bufferId, int frameIndex) {
+  std::lock_guard<std::mutex> lock(mu_);
+  auto it = entries_.find(bufferId);
+  if (it != entries_.end()) {
+    if (frameIndex < static_cast<int>(it->second.frames.size())) {
+      Frame& f = it->second.frames[static_cast<size_t>(frameIndex)];
+      if (f.pins > 0) f.pins -= 1;
+      if (f.pins == 0) EvictUntilUnderLimitLocked(it->second);
+    }
+    return;
+  }
+  auto rel = released_.find(bufferId);
+  if (rel == released_.end()) return;
+  Entry& entry = rel->second;
+  if (frameIndex < static_cast<int>(entry.frames.size())) {
+    Frame& f = entry.frames[static_cast<size_t>(frameIndex)];
+    if (f.pins > 0) f.pins -= 1;
+  }
+  for (const auto& f : entry.frames) {
+    if (f.pins > 0) return;
+  }
+  for (auto& f : entry.frames) ClearFrameRgbLocked(f);
+  released_.erase(rel);
+  IMG_LOGI("[SherpaOnnx:image] release (deferred) bufferId=%s", bufferId.c_str());
+}
+
+int ImageRegistry::FramePinCount(const std::string& bufferId, int frameIndex) const {
+  std::lock_guard<std::mutex> lock(mu_);
+  for (const auto* map : {&entries_, &released_}) {
+    auto it = map->find(bufferId);
+    if (it == map->end()) continue;
+    if (frameIndex < 0 || frameIndex >= static_cast<int>(it->second.frames.size())) {
+      return 0;
+    }
+    return it->second.frames[static_cast<size_t>(frameIndex)].pins;
+  }
+  return 0;
+}
+
 bool ImageRegistry::Release(const std::string& bufferId) {
   std::lock_guard<std::mutex> lock(mu_);
   auto liveIt = liveEntries_.find(bufferId);
@@ -920,11 +1152,20 @@ bool ImageRegistry::Release(const std::string& bufferId) {
   auto it = entries_.find(bufferId);
   if (it == entries_.end()) return false;
   it->second.generation += 1;  // invalidate in-flight prefetch / ensure
+  bool pinned = false;
   for (auto& f : it->second.frames) {
+    if (f.pins > 0) {
+      pinned = true;
+      continue;
+    }
     ClearFrameRgbLocked(f);
   }
   it->second.pdfLazy.reset();
   it->second.fileLazy.reset();
+  if (pinned) {
+    // A reader still holds frame memory: keep it until the last unpin.
+    released_[bufferId] = std::move(it->second);
+  }
   entries_.erase(it);
   IMG_LOGI("[SherpaOnnx:image] release bufferId=%s", bufferId.c_str());
   return true;

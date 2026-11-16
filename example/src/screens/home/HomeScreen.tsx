@@ -111,6 +111,16 @@ const FEATURES: HomeFeature[] = [
     implemented: true,
   },
   {
+    id: 'reader',
+    sectionTitle: 'Documents (EPUB, MOBI, PDF, …)',
+    title: 'Reader',
+    description:
+      'Read EPUB, FB2, MOBI, PDF, scans and comics in the native ReaderView: themes, pages, contents, search, notes as React Native views, OCR text for page images and read-aloud with highlights',
+    icon: 'reader-outline',
+    screen: 'Reader',
+    implemented: true,
+  },
+  {
     id: 'offline_pipeline_showcase',
     sectionTitle: 'Pipelines & Demos',
     title: 'Offline Pipeline',

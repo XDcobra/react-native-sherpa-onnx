@@ -81,9 +81,20 @@ struct OcrLayoutElement {
   std::optional<bool> checked;
 };
 
+/** Where one recognized frame landed in the merged text. */
+struct OcrFrameText {
+  int frame_index = 0;
+  int utf16_start = 0;  // empty range when the frame had no text
+  int utf16_end = 0;
+  int width = 0;  // frame size in pixels (quads are in these coordinates)
+  int height = 0;
+};
+
 struct OcrResult {
   std::string text_utf8;
   std::vector<OcrSpan> spans;
+  /** One entry per recognized frame, in request order (multi-frame merge). */
+  std::vector<OcrFrameText> frames;
   /**
    * Family markup stream (always the decoder output). doc_vlm: DocTags.
    * nemotron_parse: xy/class tags. paddleocr_vl: decoded tokens.

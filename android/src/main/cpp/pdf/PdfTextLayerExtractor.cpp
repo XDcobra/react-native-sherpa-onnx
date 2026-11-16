@@ -1,13 +1,18 @@
 #include "PdfTextLayerExtractor.h"
 #include "PdfDocument.h"
 #include "PdfFeatureGuard.h"
+#include "PdfStructureBuilder.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <set>
 #include <sstream>
 
 #if defined(HAVE_PDFIUM) && HAVE_PDFIUM
 #include "fpdfview.h"
+#include "fpdf_catalog.h"
+#include "fpdf_doc.h"
 #include "fpdf_text.h"
 #endif
 
@@ -39,25 +44,199 @@ void BoxToQuadTopLeft(
   out_quad[7] = y1;
 }
 
-std::string WideToUtf8(const std::u16string& w) {
+void AppendUtf8(std::string* out, uint32_t cp) {
+  if (cp < 0x80) {
+    out->push_back(static_cast<char>(cp));
+  } else if (cp < 0x800) {
+    out->push_back(static_cast<char>(0xC0 | (cp >> 6)));
+    out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else if (cp < 0x10000) {
+    out->push_back(static_cast<char>(0xE0 | (cp >> 12)));
+    out->push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  } else {
+    out->push_back(static_cast<char>(0xF0 | (cp >> 18)));
+    out->push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+    out->push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+    out->push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+  }
+}
+
+/** UTF-16 → UTF-8; surrogate pairs combined, NULs dropped. */
+std::string Utf16ToUtf8(const unsigned short* w, size_t n) {
   std::string out;
-  out.reserve(w.size() * 3);
-  for (char16_t ch : w) {
-    if (ch == 0) {
-      continue;
+  out.reserve(n * 3);
+  for (size_t i = 0; i < n; ++i) {
+    uint32_t cp = w[i];
+    if (cp == 0) continue;
+    if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < n && w[i + 1] >= 0xDC00 && w[i + 1] <= 0xDFFF) {
+      cp = 0x10000 + ((cp - 0xD800) << 10) + (w[i + 1] - 0xDC00);
+      ++i;
     }
-    if (ch < 0x80) {
-      out.push_back(static_cast<char>(ch));
-    } else if (ch < 0x800) {
-      out.push_back(static_cast<char>(0xC0 | (ch >> 6)));
-      out.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
-    } else {
-      out.push_back(static_cast<char>(0xE0 | (ch >> 12)));
-      out.push_back(static_cast<char>(0x80 | ((ch >> 6) & 0x3F)));
-      out.push_back(static_cast<char>(0x80 | (ch & 0x3F)));
-    }
+    AppendUtf8(&out, cp);
   }
   return out;
+}
+
+std::string WideToUtf8(const std::u16string& w) {
+  return Utf16ToUtf8(reinterpret_cast<const unsigned short*>(w.data()), w.size());
+}
+
+std::string TrimSpaces(const std::string& s) {
+  size_t a = 0;
+  while (a < s.size() && (s[a] == ' ' || s[a] == '\t')) ++a;
+  size_t b = s.size();
+  while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t')) --b;
+  return s.substr(a, b - a);
+}
+
+/** Reads a UTF-16LE string from a PDFium getter that reports its size in bytes. */
+template <typename Getter>
+std::string ReadUtf16(Getter get) {
+  const unsigned long bytes = get(nullptr, 0);
+  if (bytes <= 2) return {};
+  std::vector<unsigned short> buf(bytes / 2 + 1, 0);
+  get(buf.data(), static_cast<unsigned long>(buf.size() * 2));
+  return TrimSpaces(Utf16ToUtf8(buf.data(), bytes / 2));
+}
+
+/**
+ * Text lines of a page from PDFium's characters: a line ends at PDFium's
+ * generated line break, when the next character sits on another row, or after
+ * a horizontal gap of more than three line heights (table cells, columns set
+ * side by side in the content). Boxes are the characters' loose boxes (font
+ * ascent to descent), top-left origin.
+ */
+std::vector<PdfLine> ReadPageLines(FPDF_TEXTPAGE tp, double page_height) {
+  std::vector<PdfLine> lines;
+  const int n = FPDFText_CountChars(tp);
+  PdfLine cur;
+  bool has_box = false;
+  bool first_word_done = false;
+  float last_x1 = 0;
+  std::vector<float> sizes;
+  auto flush = [&]() {
+    cur.text = TrimSpaces(cur.text);
+    if (has_box && !cur.text.empty()) {
+      if (!first_word_done) cur.first_word_width = cur.x1 - cur.x0;
+      if (!sizes.empty()) {
+        std::nth_element(sizes.begin(), sizes.begin() + sizes.size() / 2, sizes.end());
+        cur.font_size = sizes[sizes.size() / 2];
+      }
+      lines.push_back(std::move(cur));
+    }
+    cur = PdfLine();
+    has_box = false;
+    first_word_done = false;
+    sizes.clear();
+  };
+  for (int i = 0; i < n; ++i) {
+    uint32_t cp = FPDFText_GetUnicode(tp, i);
+    if (cp >= 0xD800 && cp <= 0xDBFF && i + 1 < n) {
+      const uint32_t lo = FPDFText_GetUnicode(tp, i + 1);
+      if (lo >= 0xDC00 && lo <= 0xDFFF) {
+        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+        ++i;
+      }
+    }
+    if (cp == '\r' || cp == '\n') {
+      flush();
+      continue;
+    }
+    if (cp == 0) continue;
+    if (cp == 0x02 || cp == 0xFFFE) cp = '-';  // PDFium's mark for a hyphen at the line end
+    const bool space = cp == ' ' || cp == '\t' || cp == 0xA0;
+    FS_RECTF r;
+    if (!space && FPDFText_IsGenerated(tp, i) != 1 && FPDFText_GetLooseCharBox(tp, i, &r)) {
+      const float x0 = std::min(r.left, r.right);
+      const float x1 = std::max(r.left, r.right);
+      const float y0 = static_cast<float>(page_height) - std::max(r.top, r.bottom);
+      const float y1 = static_cast<float>(page_height) - std::min(r.top, r.bottom);
+      if (has_box) {
+        const float h = std::max(1.f, cur.y1 - cur.y0);
+        const float cy = 0.5f * (y0 + y1);
+        if (cy < cur.y0 || cy > cur.y1 || x0 - last_x1 > 3 * h || x1 < cur.x0 - h) flush();
+      }
+      if (!has_box) {
+        cur.x0 = x0;
+        cur.y0 = y0;
+        cur.x1 = x1;
+        cur.y1 = y1;
+        has_box = true;
+      } else {
+        cur.x0 = std::min(cur.x0, x0);
+        cur.y0 = std::min(cur.y0, y0);
+        cur.x1 = std::max(cur.x1, x1);
+        cur.y1 = std::max(cur.y1, y1);
+      }
+      last_x1 = x1;
+      // Em size scaled by the text and page matrices (PDFium reports the
+      // unscaled size); the loose box height is the fallback.
+      double size = FPDFText_GetFontSize(tp, i);
+      FS_MATRIX m;
+      if (size > 0 && FPDFText_GetMatrix(tp, i, &m)) {
+        const double det = std::fabs(static_cast<double>(m.a) * m.d - static_cast<double>(m.b) * m.c);
+        if (det > 1e-9) size *= std::sqrt(det);
+      }
+      const double box_h = y1 - y0;
+      if (size <= 0 || (box_h > 0 && (box_h / size > 3.0 || box_h / size < 0.3))) {
+        size = box_h / 1.15;
+      }
+      if (size > 0) sizes.push_back(static_cast<float>(size));
+    }
+    if (space) {
+      if (has_box && !first_word_done) {
+        cur.first_word_width = last_x1 - cur.x0;
+        first_word_done = true;
+      }
+      if (!cur.text.empty() && cur.text.back() != ' ') cur.text.push_back(' ');
+      continue;
+    }
+    AppendUtf8(&cur.text, cp);
+  }
+  flush();
+  return lines;
+}
+
+void ReadOutline(FPDF_DOCUMENT doc, FPDF_BOOKMARK parent, int level,
+                 std::vector<PdfOutlineEntry>* out, std::set<FPDF_BOOKMARK>* seen) {
+  if (level > 16) return;
+  for (FPDF_BOOKMARK b = FPDFBookmark_GetFirstChild(doc, parent); b != nullptr;
+       b = FPDFBookmark_GetNextSibling(doc, b)) {
+    // Malformed outlines can loop.
+    if (!seen->insert(b).second || out->size() >= 10000) return;
+    PdfOutlineEntry e;
+    e.level = level;
+    e.title = ReadUtf16(
+        [&](void* buf, unsigned long len) { return FPDFBookmark_GetTitle(b, buf, len); });
+    FPDF_DEST dest = FPDFBookmark_GetDest(doc, b);
+    if (dest == nullptr) {
+      FPDF_ACTION action = FPDFBookmark_GetAction(b);
+      if (action != nullptr && FPDFAction_GetType(action) == PDFACTION_GOTO) {
+        dest = FPDFAction_GetDest(doc, action);
+      }
+    }
+    if (dest != nullptr) {
+      const int idx = FPDFDest_GetDestPageIndex(doc, dest);
+      if (idx >= 0) e.page_number = idx + 1;
+    }
+    if (!e.title.empty()) out->push_back(std::move(e));
+    ReadOutline(doc, b, level + 1, out, seen);
+  }
+}
+
+PdfDocInfo ReadDocInfo(FPDF_DOCUMENT doc) {
+  PdfDocInfo info;
+  info.title = ReadUtf16(
+      [&](void* buf, unsigned long len) { return FPDF_GetMetaText(doc, "Title", buf, len); });
+  info.author = ReadUtf16(
+      [&](void* buf, unsigned long len) { return FPDF_GetMetaText(doc, "Author", buf, len); });
+  info.language = ReadUtf16([&](void* buf, unsigned long len) {
+    return FPDFCatalog_GetLanguage(doc, static_cast<FPDF_WCHAR*>(buf), len);
+  });
+  std::set<FPDF_BOOKMARK> seen;
+  ReadOutline(doc, nullptr, 1, &info.outline, &seen);
+  return info;
 }
 
 /** UTF-16 code unit length of UTF-8 string (matches JS String length for BMP). */
@@ -131,6 +310,8 @@ PdfTextLayerResult ExtractWithPdfium(
   int utf16_offset = 0;
   int pages_with_text = 0;
   FPDF_DOCUMENT raw = doc.handle();
+  const bool paragraphs = options.layout == PdfTextLayout::kParagraphs;
+  std::vector<PdfPageText> page_texts;
 
   for (int page_1based : pages) {
     if (options.is_cancelled && options.is_cancelled()) {
@@ -142,7 +323,38 @@ PdfTextLayerResult ExtractWithPdfium(
     }
 
     const int page_index = page_1based - 1;
+    // Per page, so a long extraction does not block the rasterizer.
+    std::lock_guard<std::recursive_mutex> page_lock(PdfiumMutex());
     FPDF_PAGE page = FPDF_LoadPage(raw, page_index);
+    if (paragraphs) {
+      // Every page becomes a section, also one without text or that fails to load.
+      PdfPageText pt;
+      pt.page_number = page_1based;
+      pt.label = ReadUtf16([&](void* buf, unsigned long len) {
+        return FPDF_GetPageLabel(raw, page_index, buf, len);
+      });
+      if (page) {
+        pt.width = static_cast<float>(FPDF_GetPageWidth(page));
+        pt.height = static_cast<float>(FPDF_GetPageHeight(page));
+        if (FPDF_TEXTPAGE tp = FPDFText_LoadPage(page)) {
+          pt.lines = ReadPageLines(tp, pt.height);
+          FPDFText_ClosePage(tp);
+        }
+        FPDF_ClosePage(page);
+      } else {
+        FS_SIZEF size;
+        if (FPDF_GetPageSizeByIndexF(raw, page_index, &size)) {
+          pt.width = size.width;
+          pt.height = size.height;
+        }
+      }
+      page_texts.push_back(std::move(pt));
+      ++done;
+      if (options.on_progress) {
+        options.on_progress(done, total, "extract");
+      }
+      continue;
+    }
     if (!page) {
       ++done;
       if (options.on_progress) {
@@ -261,6 +473,24 @@ PdfTextLayerResult ExtractWithPdfium(
     if (options.on_progress) {
       options.on_progress(done, total, "extract");
     }
+  }
+
+  if (paragraphs) {
+    PdfDocInfo info;
+    {
+      std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
+      info = ReadDocInfo(raw);
+    }
+    PdfReadingText reading = BuildPdfReadingText(page_texts, info);
+    result.text = std::move(reading.text);
+    result.spans = std::move(reading.spans);
+    result.pages_with_text = reading.pages_with_text;
+    result.structure = std::move(reading.structure);
+    result.ok = true;
+    if (options.on_progress) {
+      options.on_progress(total, total, "done");
+    }
+    return result;
   }
 
   result.pages_with_text = pages_with_text;

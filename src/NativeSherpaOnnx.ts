@@ -349,6 +349,8 @@ export type OcrRecognizeBridgeOptions = {
   progressMinIntervalMs?: number;
   /** Wire spec from `encodeOcrRecognizeSpec`. Kotlin/ObjC forward unchanged. */
   recognizeSpec?: string;
+  /** `'ltr'` (default) | `'rtl'`: reading order of line-level families. */
+  readingDirection?: string;
 };
 
 /** Native result from `detectOcrModel`. */
@@ -1150,6 +1152,8 @@ export interface Spec extends TurboModule {
     index: number;
     width: number;
     height: number;
+    expectedWidth?: number;
+    expectedHeight?: number;
     byteSize: number;
     storageKind: string;
     pageNumber?: number;
@@ -1270,7 +1274,11 @@ export interface Spec extends TurboModule {
   /** Load an OCR engine instance (Cpp OcrEngine + backend). */
   initializeOcr(
     instanceId: string,
-    options: OcrInitBridgeOptions
+    /**
+     * {@link OcrInitBridgeOptions}. Declared `Object` so the iOS bridge gets
+     * an `NSDictionary` (it reads nested `modelPaths` and family keys).
+     */
+    options: Object
   ): Promise<{
     instanceId: string;
     modelType: string;
@@ -1291,7 +1299,8 @@ export interface Spec extends TurboModule {
     instanceId: string,
     imageBufferId: string,
     textOutBufferId: string,
-    options?: OcrRecognizeBridgeOptions
+    /** {@link OcrRecognizeBridgeOptions}, as an `NSDictionary` on iOS. */
+    options?: Object
   ): Promise<OcrRecognizeNativeResult>;
 
   /** Cancel an in-flight OCR recognize by native operationId. */
@@ -1308,6 +1317,7 @@ export interface Spec extends TurboModule {
    * Extract digital PDF text layer into an empty OfflineTextBuffer.
    * Rejects with ERR_PDF_PDFIUM_DISABLED when PDFium was not enabled at build time.
    * `options.password` is the user/owner password for standard PDF encryption.
+   * `options.layout`: `'lines'` (default) or `'paragraphs'` (reading structure).
    */
   extractPdfTextLayer(
     source: Object,
@@ -1318,6 +1328,25 @@ export interface Spec extends TurboModule {
     pagesWithText: number;
     utf16Length: number;
     spatialSpanCount: number;
+    /** Layout "paragraphs": reading structure summary (format "pdf"). */
+    structure?: {
+      format: string;
+      version: number;
+      blockCount: number;
+      sections: Array<{
+        sectionIndex: number;
+        href: string;
+        kind: string;
+        title?: string;
+        titleSource: string;
+        label?: string;
+        utf16Start: number;
+        utf16End: number;
+        firstBlock: number;
+        blockCount: number;
+      }>;
+      metadata: { title?: string; creator?: string; language?: string };
+    };
   }>;
 
   /**
@@ -1358,7 +1387,130 @@ export interface Spec extends TurboModule {
       kind: string;
     }>;
     spatialSpanCount: number;
+    /** Reading structure summary (blocks stay native on the text buffer). */
+    structure?: {
+      format: string;
+      version: number;
+      blockCount: number;
+      sections: Array<{
+        sectionIndex: number;
+        href: string;
+        kind: string;
+        title?: string;
+        titleSource: string;
+        utf16Start: number;
+        utf16End: number;
+        firstBlock: number;
+        blockCount: number;
+      }>;
+      metadata: { title?: string; creator?: string; language?: string };
+    };
   }>;
+
+  // ========== Reader (react-native-sherpa-onnx/reader) ==========
+
+  /** Lowercase hex SHA-256 of a FileSource (reader `documentKey`). */
+  computeFileSourceSha256(source: Object): Promise<string>;
+
+  /**
+   * Native reader document from a text buffer with a reading structure (+
+   * optional image buffer from `extractDocumentImages({ scope: 'all' })`).
+   * Resolves the document summary as JSON.
+   */
+  createReaderDocument(
+    textBufferId: string,
+    imageBufferId: string,
+    documentKey: string
+  ): Promise<string>;
+
+  /** Page document over an image buffer (one page per frame). Resolves the summary JSON. */
+  createReaderPagesDocument(
+    imageBufferId: string,
+    documentKey: string
+  ): Promise<string>;
+
+  /** Attaches an OCR text buffer to the pages it was recognized from. Resolves the new summary JSON. */
+  attachReaderPageText(
+    documentId: string,
+    textBufferId: string
+  ): Promise<string>;
+
+  /** Pages that can get OCR text: `{ imageBufferId, pages: [{ sectionId, blockId, frame, hasText }] }` JSON. */
+  getReaderPages(documentId: string): Promise<string>;
+
+  /** Inserts an app section; block arrays are parallel. Resolves the new summary JSON. */
+  insertReaderSection(
+    documentId: string,
+    after: string,
+    sectionId: string,
+    title: string,
+    keys: Array<string>,
+    types: Array<string>,
+    texts: Array<string>,
+    levels: Array<number>
+  ): Promise<string>;
+
+  /** Removes an app section. Resolves the new summary JSON. */
+  removeReaderSection(documentId: string, sectionId: string): Promise<string>;
+
+  /** Blocks [start, start + maxCount) as JSON (max 4096 per call). */
+  getReaderBlocks(
+    documentId: string,
+    start: number,
+    maxCount: number,
+    includeText: boolean
+  ): Promise<string>;
+
+  /** Nearest block with `textHash` (JSON `{blockId, sectionId}` or `null`). */
+  findReaderBlockByHash(
+    documentId: string,
+    textHash: string,
+    hintBlockId: string
+  ): Promise<string>;
+
+  /**
+   * Maps text-buffer UTF-16 ranges onto reader locators. Resolves a JSON array
+   * with `{from, to}` locators or `null` per range.
+   */
+  mapReaderTextRanges(
+    documentId: string,
+    starts: number[],
+    ends: number[],
+    /** "" = the document's text buffer; else a slice from createReaderTextSlice. */
+    sliceBufferId: string
+  ): Promise<string>;
+
+  /** Text slice for reading aloud: `{ bufferId, length, from, to }` JSON. `toBlockId` "" = no end; `maxLength` <= 0 = no limit. */
+  createReaderTextSlice(
+    documentId: string,
+    fromBlockId: string,
+    fromOffset: number,
+    toBlockId: string,
+    maxLength: number
+  ): Promise<string>;
+  /** JSON array of `{ title, level, sectionId, blockId }` (reader contents). */
+  getReaderToc(documentId: string): Promise<string>;
+
+  releaseReaderDocument(documentId: string): Promise<boolean>;
+
+  /** Writes the recognized pages to a sidecar file (encoded natively). */
+  saveReaderRecognition(
+    documentId: string,
+    destination: Object,
+    modelId: string,
+    overwrite: boolean,
+    createParentDirectories: boolean
+  ): Promise<{ pages: number; outputKind: string; outputPath: string }>;
+
+  /** Reads a sidecar file and attaches its pages natively. Resolves the new summary JSON. */
+  loadReaderRecognition(
+    documentId: string,
+    source: Object,
+    modelId: string
+  ): Promise<string>;
+
+  /** Container format by content ("epub", "fb2", "mobi", "cbz", "cbr", "pdf"; "" = unknown). */
+  detectDocumentFormat(source: Object): Promise<string>;
 
   /**
    * Extract image-only sections / CBZ / CBR into a new OfflineImageBuffer.

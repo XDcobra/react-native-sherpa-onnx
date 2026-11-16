@@ -4,6 +4,7 @@
 #include "OcrCapabilities.h"
 #include "OcrDetect.h"
 #include "OcrEngine.h"
+#include "OcrTextPopulate.h"
 #include "OcrTypes.h"
 #include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "../../../android/src/main/cpp/jni/model_detect/common/sherpa-onnx-model-detect.h"
@@ -61,17 +62,6 @@ static void EmitOcrProgress(SherpaOnnx *bridge, NSString *operationId, int done,
                        }];
 }
 
-static const char *SpanLevelName(OcrSpanLevel level) {
-  switch (level) {
-    case OcrSpanLevel::kWord:
-      return "word";
-    case OcrSpanLevel::kBlock:
-      return "block";
-    case OcrSpanLevel::kLine:
-    default:
-      return "line";
-  }
-}
 
 static OcrGranularity ParseGranularity(NSString *raw) {
   if ([raw isEqualToString:@"word"]) return OcrGranularity::kWord;
@@ -79,32 +69,6 @@ static OcrGranularity ParseGranularity(NSString *raw) {
   return OcrGranularity::kLine;
 }
 
-static std::vector<TxtSpatialSpan> MapSpansToTxt(
-    const sherpa_onnx::ocr::OcrResult &result, const std::string &imageBufferId) {
-  std::vector<TxtSpatialSpan> out;
-  out.reserve(result.spans.size());
-  for (const auto &span : result.spans) {
-    TxtSpatialSpan t;
-    t.utf16Start = span.utf16_start;
-    t.utf16End = span.utf16_end;
-    t.level = SpanLevelName(span.level);
-    t.sourceImageBufferId = imageBufferId;
-    t.frameIndex = span.frame_index;
-    for (int i = 0; i < 8; ++i) t.quad[i] = span.quad.xy[i];
-    t.hasConfidence = true;
-    t.confidence = span.confidence;
-    t.origin = "ocr";
-    sherpa_onnx::image::ImageFrameInfo finfo;
-    if (ImageRegistry::Instance().GetFrameInfo(imageBufferId, span.frame_index,
-                                               finfo) &&
-        !finfo.sourceVideoBufferId.empty() && finfo.sourcePtsUs >= 0) {
-      t.hasPtsMs = true;
-      t.ptsMs = static_cast<double>(finfo.sourcePtsUs) / 1000.0;
-    }
-    out.push_back(t);
-  }
-  return out;
-}
 
 }  // namespace
 
@@ -469,12 +433,19 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
         return;
       }
 
+      // The output buffer must exist and be empty (same checks as Android).
       std::string textId = textOutBufferId ? [textOutBufferId UTF8String] : "";
-      std::string existingText;
-      std::string readErr;
-      if (!txt_read_offline_text(textId, &existingText, &readErr)) {
-        reject(@"TEXT_BUFFER_NOT_FOUND",
+      auto textEntry = txt_get_offline_entry(textId);
+      if (!textEntry) {
+        reject(kOcrInvalidArg,
                [NSString stringWithFormat:@"Offline text buffer not found: %@",
+                                          textOutBufferId],
+               nil);
+        return;
+      }
+      if (textEntry->populated) {
+        reject(kOcrAlreadyPopulated,
+               [NSString stringWithFormat:@"Text buffer already populated: %@",
                                           textOutBufferId],
                nil);
         return;
@@ -497,6 +468,11 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       NSString *recognizeSpec = options[@"recognizeSpec"];
       if ([recognizeSpec isKindOfClass:[NSString class]] && recognizeSpec.length > 0) {
         ropts.recognize_spec = [recognizeSpec UTF8String];
+      }
+      NSString *readingDirection = options[@"readingDirection"];
+      if ([readingDirection isKindOfClass:[NSString class]] &&
+          [readingDirection isEqualToString:@"rtl"]) {
+        ropts.reading_direction = sherpa_onnx::ocr::OcrReadingDirection::kRtl;
       }
       id framesObj = options[@"frames"];
       if ([framesObj isKindOfClass:[NSArray class]]) {
@@ -540,11 +516,12 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
         return;
       }
 
-      auto spans = MapSpansToTxt(outcome.result, imageId);
+      // Shared with Android: text, spans with frame metadata, OCR layout.
+      std::string populateCode;
       std::string populateError;
-      if (!txt_populate_offline_if_empty(
-              textId, outcome.result.text_utf8, {}, {}, {}, "", "", "", spans,
-              &populateError)) {
+      if (!sherpa_onnx::ocr::PopulateTextFromOcr(textId, imageId, outcome.family,
+                                                 outcome.result, &populateCode,
+                                                 &populateError)) {
         reject(kOcrAlreadyPopulated,
                populateError.empty()
                    ? @"Text buffer already populated"
@@ -558,7 +535,7 @@ static std::vector<TxtSpatialSpan> MapSpansToTxt(
       }
       NSMutableDictionary *payload = [@{
         @"family" : [NSString stringWithUTF8String:outcome.family.c_str()] ?: @"",
-        @"spanCount" : @(static_cast<NSInteger>(spans.size())),
+        @"spanCount" : @(static_cast<NSInteger>(outcome.result.spans.size())),
         @"raw" : [NSString stringWithUTF8String:outcome.result.raw_utf8.c_str()]
             ?: @"",
         @"instructionSpec" :

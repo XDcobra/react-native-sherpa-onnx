@@ -93,8 +93,9 @@
     const uint8_t *rgb = nullptr;
     int width = 0;
     int height = 0;
+    sherpa_onnx::image::ImageRegistry::FramePin pin;
     if (!sherpa_onnx::image::ResolveFrameRgb([bufferId UTF8String], frameIndex, maxSide,
-                                              scratch, &rgb, &width, &height) ||
+                                              scratch, &rgb, &width, &height, &pin) ||
         !rgb || width <= 0 || height <= 0) {
       dispatch_async(dispatch_get_main_queue(), ^{
         if (gen != self->_reloadGeneration.load()) {

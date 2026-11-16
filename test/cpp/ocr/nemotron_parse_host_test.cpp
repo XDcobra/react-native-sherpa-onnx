@@ -380,7 +380,14 @@ TEST(NemotronParseMarkup, InstructionMarkdownNonePicGoldens) {
     EXPECT_EQ(result.content.format, OcrContentFormat::kMarkdown) << fixture;
     EXPECT_FALSE(result.content.value.empty()) << fixture;
     EXPECT_TRUE(result.spans.empty()) << fixture;
-    EXPECT_TRUE(result.elements.empty()) << fixture;
+    // Without layout: headings / list items from the Markdown, text ranges only.
+    for (const auto& el : result.elements) {
+      EXPECT_FALSE(el.has_quad) << fixture;
+      EXPECT_TRUE(el.has_utf16) << fixture;
+      EXPECT_LE(el.utf16_end, static_cast<int>(result.text_utf8.size())) << fixture;
+    }
+    EXPECT_EQ(result.text_utf8.rfind("# ", 0), std::string::npos) << fixture;
+    EXPECT_EQ(result.text_utf8.find("\n# "), std::string::npos) << fixture;
     EXPECT_EQ(result.content.value.find("<class_"), std::string::npos) << fixture;
   }
 }

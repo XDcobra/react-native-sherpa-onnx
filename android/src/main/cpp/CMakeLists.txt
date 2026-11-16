@@ -262,12 +262,16 @@ set(SOURCES
     ocr/OcrDetect.cpp
     ocr/OcrTextUtils.cpp
     ocr/OcrEngine.cpp
+    ocr/OcrReadingOrder.cpp
+    ocr/OcrTextData.cpp
+    ocr/OcrTextPopulate.cpp
     ocr/OcrRecognizeContext.cpp
     ocr/OcrRecognizeSpec.cpp
     ocr/OcrCapabilities.cpp
     ocr/OcrGeometry.cpp
     ocr/OcrCrop.cpp
     ocr/markup/OcrTable.cpp
+    ocr/markup/OcrMarkdownText.cpp
     ocr/markup/OcrOtsl.cpp
     ocr/markup/OcrElementKind.cpp
     ocr/OcrOrtEnv.cpp
@@ -306,15 +310,34 @@ set(SOURCES
     pdf/PdfTextLayerExtractor.cpp
     pdf/PdfPageRasterizer.cpp
     pdf/PdfLazySession.cpp
+    pdf/PdfStructureBuilder.cpp
+    pdf/PdfTextPopulate.cpp
     jni/pdf/sherpa-onnx-pdf-jni.cpp
     document/DocumentExtractor.cpp
     document/DocArchive.cpp
     document/DocSniff.cpp
     document/DocHtmlText.cpp
     document/DocEpub.cpp
+    document/DocStructureBuild.cpp
     document/DocFb2.cpp
     document/DocComic.cpp
     document/DocMobi.cpp
+    document/DocTextPopulate.cpp
+    document/DocImagePopulate.cpp
+    document/DocArchiveSource.cpp
+    reader/ReaderTextHash.cpp
+    reader/ReaderRegistry.cpp
+    reader/ReaderTracker.cpp
+    reader/ReaderLayout.cpp
+    reader/ReaderOcrText.cpp
+    reader/ReaderTextSlice.cpp
+    reader/ReaderSidecar.cpp
+    reader/ReaderHighlights.cpp
+    reader/ReaderJson.cpp
+    reader/ReaderFileHash.cpp
+    reader/ReaderBridge.cpp
+    jni/reader/sherpa-onnx-reader-jni.cpp
+    jni/reader/sherpa-onnx-reader-view-jni.cpp
     ${PROJECT_ROOT}/../third_party/pugixml/src/pugixml.cpp
     jni/document/sherpa-onnx-document-jni.cpp
     codec/CodecTypes.cpp

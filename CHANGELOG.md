@@ -4,6 +4,10 @@
 
 ### BREAKING CHANGES
 
+* **ocr:** Line-level results (`ppocr`, `doctr`, `paddleocr_vl` spotting) come back in reading order and in paragraphs: columns are read one after the other, the lines of a paragraph are joined by a space (hyphenated line ends rejoined), paragraphs and frames are separated by a blank line (`\n\n`). Spans keep their boxes with ranges into the new text. `doctr` word boxes are grouped into lines first. `recognize(…, { readingDirection: 'rtl' })` reads columns right to left (manga). Text and UTF-16 offsets differ from earlier builds for the same image.
+* **ocr:** PP-OCR lines now contain their spaces. Models trained with `use_space_char` have one class after the YAML dictionary (a space), which the decoder dropped, so `Hello World` came back as `HelloWorld`.
+* **document:** FB2 and MOBI / AZW3 text keeps titles and headings, nested sections, separators and images in the text, and reads metadata (FB2 `title-info`, MOBI EXTH); FB2 whitespace collapses like EPUB. KF8 image pages decode the right resource. Extracted text and offsets differ for the same file.
+* **document:** EPUB / FB2-in-XHTML / MOBI text extraction now collapses whitespace inside blocks (runs of spaces, tabs and newlines from pretty-printed XHTML become one space), drops spaces around `<br>` line breaks, and keeps `<pre>` text unchanged. Extracted text, UTF-16 offsets and markup spans can differ from earlier builds for the same file. This is part of the reader structure rules (`docs/reader.md`).
 * **textbuffer:** LiveText segment `meta` is now a Fabric-safe **JSON tree** (`Record<string, JsonValue>`). Nested objects/arrays round-trip through Android emit, iOS passthrough, JS `sanitizeJsonMeta`, and `getLiveTextBufferSegments({ includeMeta })`. Soft limits: depth ≤ 4, array length ≤ 64, keys/level ≤ 64 (excess dropped). Apps that relied on silent dropping of nested keys will now see those keys. **KWS** and other scalar-only producers need no change.
 * **audio-tagging:** Live overload `meta.events` is a nested array of `{ name, index, prob }`. The previous JSON-string workaround is removed (no string parse).
 * **tts:** `startPcmPlayer`, `writePcmChunk`, `stopPcmPlayer` removed from `StreamingTtsEngine`. Use standalone `createPcmPlayer` from `react-native-sherpa-onnx/pcm` or `playback: true` on streaming options.
@@ -19,6 +23,28 @@
 
 ### Features
 
+* **reader:** New `react-native-sherpa-onnx/reader` subpath (New Architecture only). It has three parts:
+  - `loadReaderDocument` / `createReaderDocument` turn an EPUB into a reader document with stable block IDs (`s11.b42`), a `textHash` per block and a `documentKey`.
+  - `insertSection` / `removeSection` add app sections; `getReaderBlocks` and `remapLocator` read blocks and remap stored positions.
+  - `<ReaderView>` is a native, virtualized Fabric list on iOS and Android with React Native inserts in the reading flow. It reports reading events (visible range, furthest position, section end, jump, tap) and has a `scrollTo` command.
+  - `highlights` marks any number of ranges at once (background, underline or text color, overlapping, across blocks); `follow` keeps one in view (`keepVisible`, `center`, `off`) and pauses while the user scrolls (`onFollowChange`, `resumeFollow()`).
+  - `mapTextRanges` / `locatorAtTextOffset` map text-buffer ranges onto reader locators; blocks report their `textRange`.
+  - `createReadAloudTimeline` + `useReadAloudHighlights` highlight the sentence / word being spoken from a TTS timeline (exact sentences, estimated or aligned words, custom word splitter).
+  - See `docs/reader.md`.
+* **reader:** Every format the SDK reads, best effort:
+  - `loadReaderDocument` opens EPUB, FB2, MOBI / AZW3, PDF (text layer: paragraphs, headings by font size, running headers and page numbers hidden, bookmarks as contents, page labels), scanned PDF and CBZ comics. Page documents have one section per page whose first block is the page image (block type and section kind `page`); `createReaderDocument({ pages })` builds one from an image buffer.
+  - `<ReaderView pageDisplay>`: `'text'`, `'image'` (full-width pages, the page's text counts as visible where it is on the page), `'imageAndText'` or `'auto'`. Page heights are known before a page is rendered; comic pages and PDF pages are decoded on demand.
+  - `getReaderToc(doc)`: contents with levels (EPUB, FB2, PDF bookmarks).
+  - OCR text for page images: `recognizeReaderPages(doc, ocr, { scope: 'around' | 'all' | { sections }, force })` recognizes page by page and attaches the text (`s{n}.b0.t{j}` blocks with headings, running headers flagged and their places on the page); `onProgress` reports per page whether the model returned text (`hasText`); `attachReaderPageText` attaches a finished OCR buffer.
+  - Highlights, search hits and read-aloud on page images are drawn over the page, from the OCR or PDF line boxes (words estimated within a line).
+  - `createReaderTextSlice(doc, { from, maxLength })` puts the text from a position on (file text, OCR text, app sections; across page breaks) into a new text buffer for TTS; `createReadAloudTimeline` / `mapTextRanges` take the slice.
+  - `saveReaderRecognition` / `loadReaderRecognition`: recognized pages in a sidecar file, written and read natively (`ERR_READER_SIDECAR_INVALID`, `ERR_READER_SIDECAR_MISMATCH`).
+  - See `docs/reader.md`.
+* **reader:** Italic and bold are kept for EPUB, MOBI / AZW3 and FB2: each text block carries style runs (`ReaderBlock.styles`: `{ start, end, italic?, bold? }`, UTF-16 in the block text, from `getReaderBlocks(…, { includeText: true })`) and `<ReaderView>` draws them with the italic / bold faces of the theme font (synthetic when a custom family has none). The text, `textHash`, block IDs, offsets and `structureVersion` are unchanged.
+* **pdf:** `extractPdfTextLayer(source, out, { layout: 'paragraphs' })` joins lines into paragraphs and attaches a reading structure (headings, running headers and page numbers, bookmarks, metadata, page labels).
+* **document:** `extractDocumentImages(…, { strategy: 'lazy-lru' })` decodes comic pages on demand; frame info has `expectedWidth` / `expectedHeight` before a frame is decoded.
+* **tts:** `synthesize(…, { timeline: true })` returns where each text segment landed in the output audio (UTF-16 range, start sample, sample count).
+* **document:** `extractDocumentText` attaches a reading structure (sections, blocks, TOC titles, `dc:` metadata) to EPUB text buffers and returns its summary as `structure`. `extractDocumentImages(source, { scope: 'all' })` also decodes the images inside EPUB text sections.
 * **diarization:** Opt-in per-segment silhouette `confidence` (`clustering.computeConfidence`, default **false**, upstream parity). Ported into the shared offline C++ core — not via Kotlin `OfflineSpeakerDiarization`.
 * **pcm:** Standalone PCM player: `createPcmPlayer({ sampleRate, feed, ttsInstanceId? })` — play any mono float PCM, not just TTS output. Import from `react-native-sherpa-onnx/pcm`.
 * **pcm:** Player controls: `pause()`, `resume()`, `destroy()` on `PcmPlayer`.

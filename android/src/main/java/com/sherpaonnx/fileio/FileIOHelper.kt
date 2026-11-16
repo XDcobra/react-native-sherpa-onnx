@@ -178,11 +178,12 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
     bytes: ByteArray,
     destination: ReadableMap,
     overwrite: Boolean,
+    createParentDirectories: Boolean = false,
   ): WritableMap {
     val writeHandle = resolver.resolveDestination(
       destination = destination,
       overwrite = overwrite,
-      createParentDirectories = false,
+      createParentDirectories = createParentDirectories,
     )
     return writeHandle.use { wh ->
       val outputKind: String

@@ -1,0 +1,14 @@
+# reader structure v1, textHash v1: id type level textHash
+s0.b0 heading 1 3e93ded328010c26
+s0.b1 heading 2 cbb69e648b247a95
+s0.b2 paragraph 0 6834b1e61e2e3ddb
+s0.b3 paragraph 0 553b4e3a6c74af40
+s0.b4 image 0 b807541603bedd4d
+s0.b5 separator 0 33bb972d8af6c11a
+s0.b6 paragraph 0 9aa8d589956083b4
+s0.b7 paragraph 0 575872b02cedf46f
+s1.b0 image 0 a0e33384fa6468b8
+s2.b0 heading 3 641d24edc4860832
+s2.b1 paragraph 0 866254e29051be71
+s2.b2 image 0 b807541603bedd4d
+s2.b3 paragraph 0 ee16dc0697e5d302

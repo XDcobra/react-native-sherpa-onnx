@@ -2,7 +2,7 @@
 
 This app is the integration playground for [react-native-sherpa-onnx](../README.md) inside the monorepo `example/` folder. It is used to validate model setup, runtime behavior, and UI flows against the current SDK APIs on Android and iOS.
 
-The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse / paddleocr_vl), video preview, Video → OCR, e-document read-aloud (EPUB / FB2 / CBZ / PDF), and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
+The screens cover both offline and streaming pipelines, including STT, TTS, enhancement, source separation, punctuation, VAD, keyword spotting (KWS), timestamp/alignment generation, spoken language identification, OCR (ppocr / doctr / doc_vlm / nemotron_parse / paddleocr_vl), video preview, Video → OCR, e-document read-aloud (EPUB / FB2 / CBZ / PDF), a native EPUB reader with React Native inserts, and model lifecycle workflows such as runtime downloads and extraction. The app also includes pipeline buffer flows (audio/text/segment/image buffers), live ingestion paths, and execution-provider diagnostics in Settings.
 
 For SDK-level feature docs, start from [docs/README.md](../docs/README.md) and then open the feature guides linked in each section below.
 
@@ -41,7 +41,7 @@ If you do not want to download models at runtime via the **Download Manager Show
 | **Codec samples**          | `android/app/src/main/assets/test_codec/`        | `ios/sherpa_models/test_codec/`        |
 | **Test images (OCR / File I/O)** | `android/app/src/main/assets/test_images/`  | `ios/sherpa_models/test_images/`       |
 | **Test PDFs (text layer)** | `android/app/src/main/assets/test_pdfs/`         | `ios/sherpa_models/test_pdfs/`         |
-| **Test e-docs (Read aloud)** | `android/app/src/main/assets/test_edocs/`      | `ios/sherpa_models/test_edocs/`        |
+| **Test e-docs (Read aloud, Reader)** | `android/app/src/main/assets/test_edocs/` | `ios/sherpa_models/test_edocs/`        |
 | **Test videos (Preview / OCR / File I/O)** | `android/app/src/main/assets/test_videos/`   | `ios/sherpa_models/test_videos/`       |
 
 > **Cross-Platform Sharing:** You do not need to duplicate large model files into both platform folders manually:
@@ -309,6 +309,15 @@ Home section **Documents (EPUB, MOBI, PDF, …)** → **Read aloud**. Extract EP
 
 Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/hello.mobi`, `test_edocs/hello.azw3`, `test_edocs/drm.mobi`, `test_edocs/mixed.epub`, `test_edocs/manga.cbz`, plus the digital and scan-only PDFs from `test_pdfs/`.
 
+Books with a reading structure (EPUB, FB2, MOBI / AZW3) open in the native `ReaderView` (see [Reader](#reader)):
+- Tap a paragraph to start reading there. Synthesis runs in text slices of whole blocks (`createReaderTextSlice`), and the next chunk is prepared while one plays.
+- The sentence and word being spoken are highlighted from the TTS timeline (`createReadAloudTimeline`, `useReadAloudHighlights`).
+- Chips switch the granularity (sentence / word / both), the style of each (background / underline / text color) and follow scrolling (`keepVisible` / `center` / `off`).
+- Scrolling by hand pauses following; **Back to reading position** resumes it.
+- The Reader books (`frankenstein.epub`, `long.epub`, `structure.epub`) are listed here too.
+
+See [docs/reader.md](../docs/reader.md#read-aloud).
+
 1. Text EPUB / FB2 / DRM-free MOBI / AZW3 → `extractDocumentText` → OfflineTextBuffer (`origin: markup`) → `tts.synthesize` → playback. The current block span is highlighted from playback position.
 2. PDF with a text layer → `extractPdfTextLayer` → same TTS path (`origin: textLayer`).
 3. Scan-only PDF → `ERR_PDF_NO_TEXT_LAYER`. This screen does not rasterize, extract images, or run OCR; use Vision → OCR.
@@ -319,3 +328,32 @@ Bundled fixtures: `test_edocs/hello.epub`, `test_edocs/hello.fb2`, `test_edocs/h
 OCR detect/init on this screen is the same panel and engine cache as Vision → OCR. Recognize is a separate button, not automatic.
 
 See [docs/document-offline.md](../docs/document-offline.md) and [docs/pdf-offline.md](../docs/pdf-offline.md). Android bundled assets use `app:apkAsset` (the SDK copies them into app cache on first open).
+
+## Reader
+
+| ![Reader 1](../docs/images/example/reader_1.png) | ![Reader 2](../docs/images/example/reader_2.png) | ![Reader 3](../docs/images/example/reader_3.png) |
+| ------------------------------------------------ | ------------------------------------------------ | ------------------------------------------------ |
+| Marks, selection, chapter-end card, progress     | Note inserted after a paragraph                  | Search with all hits marked                      |
+
+Home section **Documents (EPUB, MOBI, PDF, …)** → **Reader**. Pick an example book (or your own EPUB, FB2, MOBI / AZW3, PDF or CBZ) in the shared document picker; `loadReaderDocument` turns it into a `ReaderDocument` with stable block IDs, shown in the native `ReaderView` (New Architecture). Everything around the text is app UI built with the public API:
+
+- **Contents:** all sections with titles from the book's contents (PDF: bookmarks and page labels); tap one to jump (`scrollTo`). Finished chapters (`onSectionEnd`) are ticked, the section with the furthest read position (`onFurthestPositionChange`) is marked. The sheet also inserts / removes an app section (`insertSection` / `removeSection`) without losing the reading position.
+- **Aa:** theme (paper / sepia / night), font, text size (system or fixed scale), line height, alignment and margins (`ReaderTheme`); for PDFs and comics, **Pages** switches between text, page images and both (`pageDisplay`). The first visible line stays in place on every change.
+- **Search:** finds a word in the whole book (`getReaderBlocks` with text), marks every hit in text color, the current one with a background, and steps through them (`scrollTo` with an offset). On page images the hits are drawn over the page.
+- **OCR** (books with page images): pick an OCR model (any pack from the Download Manager; a note says what each family gives the reader), the reading order (left to right, or right to left for manga) and the pages: **This page** (recognized again, to compare models), **Around here** or **Whole book**, with progress and **Stop** (`recognizeReaderPages`). **Save** / **Load saved text** keep the recognized pages in a sidecar file (`saveReaderRecognition` / `loadReaderRecognition`). PaddleOCR-VL loads with the phone-sized input (`PADDLEOCR_VL_MOBILE_MAX_PIXELS`).
+- **Listen:** pick and load a voice, then **Play** reads from the top of the view or the tapped paragraph; the spoken sentence and word are highlighted and followed (also over page images and across page breaks). Text slices (`createReaderTextSlice`) are synthesized chunk by chunk with a TTS timeline (`createReadAloudTimeline`, `useReadAloudHighlights`).
+- **Tap a paragraph:** it is underlined and a bar offers **Mark** (background highlight), **Add note** and **▶ Listen**. Notes are React Native views inserted after the paragraph (`inserts`, `afterBlock`); each chapter ends with a card that continues to the next one (`sectionEnd`).
+- **Footer:** current chapter or page and position in the book (`onVisibleRangeChange`); after a jump, **Back to …** returns to where you were (`onJump`).
+- **Resume:** open another book and come back; the reader opens at the last position (`initialLocator`, `furthestLocator`).
+
+Bundled books (`test_edocs/`, `test_pdfs/`):
+- `frankenstein.epub`: Mary Shelley, *Frankenstein* (Standard Ebooks, public domain / CC0): a real book with contents, a title page image, front and back matter.
+- `long.epub`: 40 chapters, 6160 blocks for fast scrolling, jumps and search.
+- `book.pdf`: a PDF with a text layer: paragraphs, headings, bookmarks, page labels, running header and page numbers, two columns, a plate.
+- `book_scan.pdf`: the same pages as images only (a scanned book) for OCR; `scan_only_multipage.pdf`: three short scanned pages.
+- `manga.cbz`: comic pages, decoded on demand, read right to left.
+- `structure.epub`, `mixed.epub`, `hello.epub`, `hello.fb2`, `hello.mobi`, `hello.azw3`: headings, an inline image, a separator, preformatted text and image pages; short books per format.
+
+The **Read aloud** screen (see [Documents (read aloud)](#documents-read-aloud)) shows the same read-aloud on an extracted book next to the plain extraction pipeline.
+
+Implementation: `example/src/screens/reader/ReaderScreen.tsx`, `ReaderPanels.tsx` (OCR and Listen panels) and `useReaderReadAloud.ts`; `example/src/screens/documents/ReaderReadAloudPanel.tsx`. API reference: [docs/reader.md](../docs/reader.md).

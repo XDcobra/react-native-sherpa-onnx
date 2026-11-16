@@ -221,10 +221,18 @@ std::string CodeLanguageFromTag(const std::string& name) {
   return name.substr(1, name.size() - 2);
 }
 
+/**
+ * Grouping tags without text of their own: their children (list items, text)
+ * are parsed as usual. `page_break` separates pages in multi-page output.
+ */
+bool IsTransparentTag(const std::string& name) {
+  return name == "doctag" || name == "table" || name == "ordered_list" ||
+         name == "unordered_list" || name == "group" || name == "page_break";
+}
+
 bool IsKnownOpenName(const std::string& name) {
   return IsTextTag(name) || IsMediaTag(name) || name == "otsl" ||
-         name == "table" || name == "doctag" || IsOtslCell(name) ||
-         IsCodeLanguageTag(name);
+         IsTransparentTag(name) || IsOtslCell(name) || IsCodeLanguageTag(name);
 }
 
 void ThrowIfUnknownOpen(const Tok& tok) {
@@ -539,11 +547,7 @@ void Walk(const std::vector<Tok>& toks, std::vector<Item>& items) {
   size_t i = 0;
   while (i < toks.size()) {
     const Tok& t = toks[i];
-    if (t.kind == TokKind::Open && (t.name == "doctag" || t.name == "table")) {
-      ++i;
-      continue;
-    }
-    if (t.kind == TokKind::Close && (t.name == "doctag" || t.name == "table")) {
+    if ((t.kind == TokKind::Open || t.kind == TokKind::Close) && IsTransparentTag(t.name)) {
       ++i;
       continue;
     }
@@ -596,7 +600,8 @@ DocTagsParse ParseDocTags(const std::string& doctags, int frame_w, int frame_h,
     if (item.in_text) {
       parsed.text_utf8 += item.text;
       ++text_seen;
-      if (text_seen < text_count) parsed.text_utf8.push_back('\n');
+      // Items are blocks: paragraphs are separated by a blank line.
+      if (text_seen < text_count) parsed.text_utf8 += "\n\n";
     }
     for (const ItemSpan& spec : item.spans) {
       OcrSpan span;

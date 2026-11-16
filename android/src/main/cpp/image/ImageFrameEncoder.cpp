@@ -68,10 +68,10 @@ const char* ExportFormatName(ExportFormat format) {
 
 bool CopyFrameRgb(const std::string& bufferId, int frameIndex, int maxSide,
                   RgbFrame& out) {
-  int w = 0;
-  int h = 0;
-  const uint8_t* ptr =
-      ImageRegistry::Instance().GetFrameRgbPtr(bufferId, frameIndex, &w, &h);
+  auto pin = ImageRegistry::Instance().PinFrame(bufferId, frameIndex);
+  const uint8_t* ptr = pin.data();
+  const int w = pin.width();
+  const int h = pin.height();
   if (!ptr || w <= 0 || h <= 0) {
     return false;
   }
@@ -84,13 +84,13 @@ bool CopyFrameRgb(const std::string& bufferId, int frameIndex, int maxSide,
 
 bool ResolveFrameRgb(const std::string& bufferId, int frameIndex, int maxSide,
                      RgbFrame& scratch, const uint8_t** outPtr, int* outW,
-                     int* outH) {
+                     int* outH, ImageRegistry::FramePin* pin) {
   if (!outPtr || !outW || !outH) return false;
   *outPtr = nullptr;
   *outW = 0;
   *outH = 0;
 
-  if (maxSide > 0) {
+  if (maxSide > 0 || pin == nullptr) {
     if (!CopyFrameRgb(bufferId, frameIndex, maxSide, scratch)) return false;
     *outPtr = scratch.rgb.data();
     *outW = scratch.width;
@@ -98,14 +98,11 @@ bool ResolveFrameRgb(const std::string& bufferId, int frameIndex, int maxSide,
     return true;
   }
 
-  int w = 0;
-  int h = 0;
-  const uint8_t* ptr =
-      ImageRegistry::Instance().GetFrameRgbPtr(bufferId, frameIndex, &w, &h);
-  if (!ptr || w <= 0 || h <= 0) return false;
-  *outPtr = ptr;
-  *outW = w;
-  *outH = h;
+  *pin = ImageRegistry::Instance().PinFrame(bufferId, frameIndex);
+  if (!pin->data() || pin->width() <= 0 || pin->height() <= 0) return false;
+  *outPtr = pin->data();
+  *outW = pin->width();
+  *outH = pin->height();
   return true;
 }
 

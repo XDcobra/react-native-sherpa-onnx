@@ -28,6 +28,8 @@ Pod::Spec.new do |s|
 
   s.source_files = [
     "ios/**/*.{h,m,mm,swift,cpp}",
+    # Hand-written Fabric shadow node for ReaderView insert hosts (shared with Android codegen).
+    "cpp/fabric/**/*.{h,cpp}",
     # Shared with Android NDK: portable model_detect C++ (detection/validation/catalog).
     # Android-only JNI marshalling (*-wrapper.cpp, detect-jni-common.cpp) is excluded below — iOS uses ios/**/\*.mm bridges.
     "android/src/main/cpp/jni/model_detect/**/*.cpp",
@@ -93,6 +95,10 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/ort/**/*.{h,cpp}",
     # Shared PDF text-layer core (JNI excluded below).
     "android/src/main/cpp/pdf/**/*.{h,cpp}",
+    # Portable SHA-256 (reader textHash / documentKey; Android archive checksums).
+    "android/src/main/cpp/crypto/*.{h,cpp}",
+    # Shared reader core (ReaderDocument registry, textHash, reading tracker).
+    "android/src/main/cpp/reader/*.{h,cpp}",
     # Shared e-document extractor (EPUB/FB2/CBZ/CBR). JNI excluded below.
     "android/src/main/cpp/document/*.{h,hpp,cpp}",
     # Shared seekable FileSource (document/ + pdf/).
@@ -144,6 +150,7 @@ Pod::Spec.new do |s|
     "android/src/main/cpp/jni/ocr/**/*",
     "android/src/main/cpp/jni/pdf/**/*",
     "android/src/main/cpp/jni/document/**/*",
+    "android/src/main/cpp/jni/reader/**/*",
     # stb is included from ImageDecoder.cpp; do not compile as a separate TU.
     "android/src/main/cpp/image/decode/vendor/**/*"
   ]
@@ -156,6 +163,7 @@ Pod::Spec.new do |s|
   # `*.h` only would still leak `*.hpp` (pugixml, alignment, ios C++ helpers).
   private_headers += Dir.glob(File.join(pod_root, "android", "src", "main", "cpp", "**", "*.{h,hpp}"))
   private_headers += Dir.glob(File.join(pod_root, "ios", "**", "*.hpp"))
+  private_headers += Dir.glob(File.join(pod_root, "cpp", "fabric", "**", "*.h"))
   private_headers += Dir.glob(File.join(pod_root, "third_party", "pugixml", "src", "**", "*.{h,hpp}"))
   private_headers += Dir.glob(File.join(pod_root, "third_party", "libyuv", "include", "**", "*.h"))
   s.private_header_files = private_headers.map { |path| path.sub("#{pod_root}/", "") }
@@ -293,6 +301,7 @@ Pod::Spec.new do |s|
 
   header_search_paths = [
     "$(inherited)",
+    "\"#{pod_root}/cpp/fabric\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/common\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/stt\"",
     "\"#{pod_root}/android/src/main/cpp/jni/model_detect/tts\"",

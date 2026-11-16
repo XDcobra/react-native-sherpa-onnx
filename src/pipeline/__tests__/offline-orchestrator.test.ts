@@ -903,6 +903,63 @@ describe('offline orchestrator', () => {
       'live_acc',
       'off_tmp_out'
     );
+    expect(result.timeline).toEqual([
+      {
+        segmentIndex: 0,
+        utf16Start: 0,
+        utf16End: 4,
+        startSample: 0,
+        numSamples: 4,
+        skipped: false,
+      },
+    ]);
+  });
+
+  it('text->audio timeline accumulates sample offsets across segments', async () => {
+    const seg = (i: number, start: number, end: number) => ({
+      segmentId: `txt_seg_${i}`,
+      domain: 'text',
+      startOffset: start,
+      endOffset: end,
+      reason: 'boundary',
+      source: 'external',
+      createdAtMs: Date.now(),
+      segmentIndex: i,
+      text: 'x'.repeat(end - start),
+      utf16Length: end - start,
+    });
+    segment.getSegments.mockResolvedValue([seg(0, 0, 10), seg(1, 10, 25)]);
+    const sizes = [1600, 3200];
+    let call = 0;
+    audio.getPipelineAudioBufferInfo.mockImplementation(() =>
+      Promise.resolve({
+        bufferId: 'off_tmp_out',
+        kind: 'offlinePcmBuffer',
+        state: 'immutable',
+        sampleRate: 16000,
+        channelCount: 1,
+        numSamples: sizes[call++] ?? 0,
+        durationMs: 0,
+      })
+    );
+
+    const result = await runOfflineTextToAudioPipeline(
+      'txt_in',
+      jest.fn().mockResolvedValue(undefined),
+      { segmentation: { mode: 'auto' }, sampleRate: 16000, channels: 1 }
+    );
+
+    expect(
+      result.timeline.map((t) => [
+        t.utf16Start,
+        t.utf16End,
+        t.startSample,
+        t.numSamples,
+      ])
+    ).toEqual([
+      [0, 10, 0, 1600],
+      [10, 25, 1600, 3200],
+    ]);
   });
 
   it('text->audio skip recovery inserts silence checkpoint and reports skip', async () => {
@@ -935,6 +992,16 @@ describe('offline orchestrator', () => {
     expect(result.skippedSegments).toHaveLength(1);
     expect(result.segmentMappings).toHaveLength(0);
     expect(audio.appendSamplesToLiveAudioBuffer).toHaveBeenCalled();
+    expect(result.timeline).toEqual([
+      {
+        segmentIndex: 0,
+        utf16Start: 0,
+        utf16End: 4,
+        startSample: 0,
+        numSamples: 1600,
+        skipped: true,
+      },
+    ]);
   });
 
   describe('runOfflineAudioMultiOutputPipeline', () => {

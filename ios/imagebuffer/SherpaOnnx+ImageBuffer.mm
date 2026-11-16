@@ -140,6 +140,10 @@ NSDictionary *FrameInfoDict(const sherpa_onnx::image::ImageFrameInfo &info) {
     @"storageKind" :
         [NSString stringWithUTF8String:sherpa_onnx::image::StorageKindName(info.storageKind)],
   } mutableCopy];
+  if (info.expectedWidth > 0 && info.expectedHeight > 0) {
+    dict[@"expectedWidth"] = @(info.expectedWidth);
+    dict[@"expectedHeight"] = @(info.expectedHeight);
+  }
   if (info.pageNumber > 0) {
     dict[@"pageNumber"] = @(info.pageNumber);
   }

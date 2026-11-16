@@ -29,8 +29,16 @@ export interface OfflineImageBufferInfo {
 
 export interface OfflineImageFrameInfo {
   index: number;
+  /** Decoded size; 0 while a lazy frame is cold (see `expectedWidth`). */
   width: number;
   height: number;
+  /**
+   * Size the frame has once decoded, known before decoding for lazy PDF pages
+   * and lazy comic pages (lay out pages without decoding them). Equals
+   * `width` / `height` when resident; absent when unknown.
+   */
+  expectedWidth?: number;
+  expectedHeight?: number;
   byteSize: number;
   storageKind: ImageStorageKind;
   /** 1-based PDF page number when frame came from rasterizePdfPages. */

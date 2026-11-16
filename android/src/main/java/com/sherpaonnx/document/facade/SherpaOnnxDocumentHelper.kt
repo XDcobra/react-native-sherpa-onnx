@@ -8,13 +8,13 @@ import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableArray
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
+import com.sherpaonnx.bridge.JniWritables
 import com.sherpaonnx.document.DocumentNative
 import com.sherpaonnx.document.NativeDocProgress
 import com.sherpaonnx.fileio.FileIOHelper
 import com.sherpaonnx.fileio.SeekableOpenedSource
 import com.sherpaonnx.image.ImageBufferService
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
-import com.sherpaonnx.text.pipeline.TextSpatialSpan
 import java.util.concurrent.Executors
 
 class SherpaOnnxDocumentHelper(
@@ -34,6 +34,29 @@ class SherpaOnnxDocumentHelper(
         doExtractText(source, textOutBufferId, promise)
       } catch (e: Exception) {
         Log.e(TAG, "extractDocumentText failed", e)
+        promise.reject(ERR_OPEN, e.message, e)
+      }
+    }
+  }
+
+  fun detectDocumentFormat(source: ReadableMap, promise: Promise) {
+    executor.execute {
+      try {
+        val opened = openSeekable(source, promise) ?: return@execute
+        val raw =
+          try {
+            DocumentNative.nativeDetectFormat(opened.path, opened.fd)
+          } finally {
+            opened.close()
+          }
+        if (raw["ok"] as? Boolean != true) {
+          val code = raw["errorCode"] as? String ?: ERR_OPEN
+          promise.reject(code, "$code: ${raw["errorMessage"] as? String ?: "cannot read the file"}")
+          return@execute
+        }
+        promise.resolve(raw["format"] as? String ?: "")
+      } catch (e: Exception) {
+        Log.e(TAG, "detectDocumentFormat failed", e)
         promise.reject(ERR_OPEN, e.message, e)
       }
     }
@@ -80,7 +103,7 @@ class SherpaOnnxDocumentHelper(
     }
     val raw =
       try {
-        DocumentNative.nativeExtractText(opened.path, opened.fd, progress)
+        DocumentNative.nativeExtractTextInto(opened.path, opened.fd, textOutBufferId, progress)
       } finally {
         opened.close()
       }
@@ -92,34 +115,14 @@ class SherpaOnnxDocumentHelper(
       return
     }
 
-    val text = raw["text"] as? String ?: ""
-    val spanMaps = raw["spans"] as? List<*> ?: emptyList<Any>()
-    val spans = spanMaps.mapNotNull { item ->
-      (item as? Map<*, *>)?.let { mapSpan(it) }
-    }
-    try {
-      textEntry.populate(
-        text = text,
-        tokens = emptyArray(),
-        timestamps = floatArrayOf(),
-        durations = floatArrayOf(),
-        lang = "",
-        emotion = "",
-        event = "",
-        spatialSpans = spans,
-      )
-    } catch (e: IllegalStateException) {
-      promise.reject(ERR_INVALID, e.message, e)
-      return
-    }
-
     emitProgress(1, 1, "done")
     val result = Arguments.createMap()
     result.putString("format", raw["format"] as? String ?: "")
     result.putInt("sectionCount", (raw["sectionCount"] as? Number)?.toInt() ?: 0)
-    result.putInt("spatialSpanCount", spans.size)
+    result.putInt("spatialSpanCount", (raw["spatialSpanCount"] as? Number)?.toInt() ?: 0)
     result.putArray("sections", sectionArray(raw["sections"]))
     result.putArray("imageOnlySections", sectionArray(raw["imageOnlySections"]))
+    (raw["structure"] as? Map<*, *>)?.let { result.putMap("structure", JniWritables.map(it)) }
     promise.resolve(result)
   }
 
@@ -134,13 +137,33 @@ class SherpaOnnxDocumentHelper(
     } else {
       4096
     }
+    val allImages =
+      options != null && options.hasKey("scope") && !options.isNull("scope") &&
+        options.getString("scope") == "all"
+    val lazy =
+      options != null && options.hasKey("strategy") && !options.isNull("strategy") &&
+        options.getString("strategy") == "lazy-lru"
+    val hotFrames =
+      if (options != null && options.hasKey("hotFrames") && !options.isNull("hotFrames")) {
+        options.getDouble("hotFrames").toInt()
+      } else {
+        0 // native default 8
+      }
     val opened = openSeekable(source, promise) ?: return
     val progress = NativeDocProgress { done, total, phase ->
       emitProgress(done, total, phase)
     }
     val raw =
       try {
-        DocumentNative.nativeExtractImages(opened.path, opened.fd, maxSide, progress)
+        DocumentNative.nativeExtractImages(
+          opened.path,
+          opened.fd,
+          maxSide,
+          allImages,
+          lazy,
+          hotFrames,
+          progress,
+        )
       } finally {
         opened.close()
       }
@@ -161,29 +184,6 @@ class SherpaOnnxDocumentHelper(
 
   private fun openSeekable(source: ReadableMap, promise: Promise): SeekableOpenedSource? =
     fileIO.openSeekableSourceOrReject(source, promise, ERR_OPEN, TAG)
-
-  private fun mapSpan(raw: Map<*, *>): TextSpatialSpan? {
-    val start = (raw["utf16Start"] as? Number)?.toInt() ?: return null
-    val end = (raw["utf16End"] as? Number)?.toInt() ?: start
-    val href = raw["href"] as? String
-    val sectionIndex = (raw["sectionIndex"] as? Number)?.toInt()
-    return TextSpatialSpan(
-      utf16Start = start,
-      utf16End = end,
-      level = raw["level"] as? String ?: "block",
-      sourceImageBufferId = "",
-      frameIndex = 0,
-      quad = FloatArray(8),
-      confidence = null,
-      origin = "markup",
-      pageNumber = null,
-      ptsMs = null,
-      pageWidth = null,
-      pageHeight = null,
-      sectionIndex = sectionIndex,
-      href = href?.takeIf { it.isNotEmpty() },
-    )
-  }
 
   private fun sectionArray(raw: Any?): WritableArray {
     val arr = Arguments.createArray()

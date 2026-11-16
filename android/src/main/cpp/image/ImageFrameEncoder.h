@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ImageRegistry.h"
 #include "ImageTypes.h"
 
 #include <cstdint>
@@ -49,13 +50,15 @@ bool CopyFrameRgb(const std::string& bufferId, int frameIndex, int maxSide,
 
 /**
  * Resolve frame RGB for read-only consumers.
- * - maxSide <= 0: [outPtr]/outW]/outH] point at registry memory (no heap clone).
+ * - maxSide <= 0 and [pin] given: [outPtr] points at registry memory, kept
+ *   valid by [pin] (no heap clone). Without [pin] the frame is copied into
+ *   [scratch], because another thread could evict it.
  * - maxSide > 0: clones + downscales into [scratch]; [outPtr] points at scratch.rgb.
  * Returns false if buffer/frame missing.
  */
 bool ResolveFrameRgb(const std::string& bufferId, int frameIndex, int maxSide,
                      RgbFrame& scratch, const uint8_t** outPtr, int* outW,
-                     int* outH);
+                     int* outH, ImageRegistry::FramePin* pin = nullptr);
 
 /**
  * Encode packed RGB8 (row-major, stride = width*3) to [outPath].

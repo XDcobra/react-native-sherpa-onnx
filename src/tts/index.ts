@@ -6,6 +6,7 @@ import {
   type TtsUpdateOptions,
   type TtsSynthesisOptions,
   type TtsSynthesisResult,
+  type TtsTimeline,
   type TTSModelInfo,
   type TtsEngine,
   type TtsPipelineHandle,
@@ -36,12 +37,16 @@ import {
 import { readNonEmptyDetectPathsMap } from '../detect/detectModelOutput';
 import { ModelCategory } from '../download/types';
 import {
+  getPipelineAudioBufferInfo,
   liveAudioNotifyToSpeechSegment,
   releasePipelineAudioBuffer,
   resolvePipelineAudioBufferId,
   subscribeLiveAudioBufferEvents,
 } from '../audiobuffer';
-import { resolvePipelineTextBufferId } from '../textbuffer';
+import {
+  getPipelineTextBufferInfo,
+  resolvePipelineTextBufferId,
+} from '../textbuffer';
 import { addSegmentLink, createSegmentLinkMap } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
 import type {
@@ -275,6 +280,36 @@ async function synthesizeLiveOverload(
  * }
  * ```
  */
+
+/** Timeline of a whole-text synthesis (`segmentation.mode: 'off'`). */
+async function wholeTextTimeline(
+  textBufferId: string,
+  audioBufferId: string
+): Promise<TtsTimeline> {
+  const [text, audio] = await Promise.all([
+    getPipelineTextBufferInfo(textBufferId),
+    getPipelineAudioBufferInfo(audioBufferId),
+  ]);
+  const utf16End =
+    (text as { utf16Length?: number }).utf16Length != null
+      ? (text as { utf16Length: number }).utf16Length
+      : 0;
+  const isPcm = audio.kind === 'offlinePcmBuffer';
+  return {
+    sampleRate: isPcm ? audio.sampleRate : 0,
+    exact: true,
+    segments: [
+      {
+        utf16Start: 0,
+        utf16End,
+        startSample: 0,
+        numSamples: isPcm ? audio.numSamples : 0,
+        skipped: false,
+      },
+    ],
+  };
+}
+
 export async function detectTtsModel(
   source: FileSource,
   options?: { modelType?: TTSModelType; quantization?: QuantizationPreference }
@@ -511,12 +546,16 @@ export async function createTTS(
           generateFraction: 1,
           elapsedMs: Date.now() - startedAtMs,
         });
+        const offTimeline = batchOpts?.timeline
+          ? await wholeTextTimeline(textInId, audioOutId)
+          : undefined;
         return {
           status: 'complete',
           totalSegments: 1,
           completedSegments: 1,
           skippedSegments: [],
           processingTimeMs: Date.now() - startedAtMs,
+          ...(offTimeline ? { timeline: offTimeline } : {}),
           linkMap: batchOpts?.linkMap,
         };
       }
@@ -559,7 +598,27 @@ export async function createTTS(
         }
       }
 
+      let timeline: TtsTimeline | undefined;
+      if (batchOpts?.timeline) {
+        const audioInfo = await getPipelineAudioBufferInfo(audioOutId);
+        timeline = {
+          sampleRate:
+            audioInfo.kind === 'offlinePcmBuffer' ? audioInfo.sampleRate : 0,
+          exact:
+            !(batchOpts.overlapChars && batchOpts.overlapChars > 0) &&
+            segmentation.policy?.evaluator !== 'text_punctuation_assisted',
+          segments: orchestrated.timeline.map((t) => ({
+            utf16Start: t.utf16Start,
+            utf16End: t.utf16End,
+            startSample: t.startSample,
+            numSamples: t.numSamples,
+            skipped: t.skipped,
+          })),
+        };
+      }
+
       return {
+        ...(timeline ? { timeline } : {}),
         status: orchestrated.status,
         totalSegments: orchestrated.totalSegments,
         completedSegments: orchestrated.completedSegments,
@@ -667,6 +726,8 @@ export type {
   TtsSynthesisOptions,
   TtsSynthesisProgress,
   TtsSynthesisResult,
+  TtsTimeline,
+  TtsTimelineSegment,
   TtsExecutionProvider,
   TtsVoiceClone,
   TtsVoiceCloneZipvoice,

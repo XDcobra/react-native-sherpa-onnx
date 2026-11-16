@@ -1,6 +1,7 @@
 const mockNative = {
   extractDocumentText: jest.fn(),
   extractDocumentImages: jest.fn(),
+  detectDocumentFormat: jest.fn(),
 };
 
 jest.mock('react-native', () => ({
@@ -20,6 +21,7 @@ jest.mock('../../textbuffer', () => ({
 
 import {
   DocumentErrorCode,
+  detectDocumentFormat,
   extractDocumentImages,
   extractDocumentText,
 } from '../index';
@@ -122,6 +124,78 @@ describe('document offline api', () => {
     );
   });
 
+  it('extractDocumentText maps the EPUB structure summary', async () => {
+    mockNative.extractDocumentText.mockResolvedValue({
+      format: 'epub',
+      sectionCount: 2,
+      sections: [],
+      imageOnlySections: [],
+      spatialSpanCount: 3,
+      structure: {
+        version: 1,
+        blockCount: 4,
+        sections: [
+          {
+            sectionIndex: 0,
+            href: 'OEBPS/ch1.xhtml',
+            kind: 'text',
+            title: 'Chapter One',
+            titleSource: 'toc',
+            utf16Start: 0,
+            utf16End: 42,
+            firstBlock: 0,
+            blockCount: 3,
+          },
+          {
+            sectionIndex: 1,
+            href: 'OEBPS/plate.png',
+            kind: 'image',
+            titleSource: 'bogus',
+            utf16Start: 42,
+            utf16End: 42,
+            firstBlock: 3,
+            blockCount: 1,
+          },
+        ],
+        metadata: { title: 'Book', creator: '', language: 'en' },
+      },
+    });
+    const r = await extractDocumentText(
+      { kind: 'fs', path: '/tmp/book.epub' },
+      TEXT_OUT
+    );
+    expect(r.structure?.blockCount).toBe(4);
+    expect(r.structure?.sections[0]).toEqual({
+      sectionIndex: 0,
+      href: 'OEBPS/ch1.xhtml',
+      kind: 'text',
+      title: 'Chapter One',
+      titleSource: 'toc',
+      utf16Start: 0,
+      utf16End: 42,
+      firstBlock: 0,
+      blockCount: 3,
+    });
+    expect(r.structure?.sections[1]?.titleSource).toBe('none');
+    expect(r.structure?.sections[1]?.title).toBeUndefined();
+    expect(r.structure?.metadata).toEqual({ title: 'Book', language: 'en' });
+  });
+
+  it('extractDocumentText has no structure for other formats', async () => {
+    mockNative.extractDocumentText.mockResolvedValue({
+      format: 'fb2',
+      sectionCount: 1,
+      sections: [],
+      imageOnlySections: [],
+      spatialSpanCount: 1,
+    });
+    const r = await extractDocumentText(
+      { kind: 'fs', path: '/tmp/book.fb2' },
+      TEXT_OUT
+    );
+    expect(r.structure).toBeUndefined();
+  });
+
   it('extractDocumentText maps mobi format', async () => {
     mockNative.extractDocumentText.mockResolvedValue({
       format: 'mobi',
@@ -157,6 +231,44 @@ describe('document offline api', () => {
     );
   });
 
+  it('extractDocumentImages forwards the lazy strategy', async () => {
+    mockNative.extractDocumentImages.mockResolvedValue({
+      bufferId: 'img_off_00000000-0000-0000-0000-0000000000ac',
+      format: 'cbz',
+      frameCount: 200,
+    });
+    await extractDocumentImages(
+      { kind: 'fs', path: '/tmp/a.cbz' },
+      { strategy: 'lazy-lru', hotFrames: 6 }
+    );
+    expect(mockNative.extractDocumentImages).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/a.cbz' },
+      { strategy: 'lazy-lru', hotFrames: 6 }
+    );
+    await expect(
+      extractDocumentImages(
+        { kind: 'fs', path: '/tmp/a.cbz' },
+        { strategy: 'stream' as unknown as 'lazy-lru' }
+      )
+    ).rejects.toMatchObject({ code: 'ERR_DOC_INVALID_ARGUMENT' });
+  });
+
+  it('extractDocumentImages forwards scope all', async () => {
+    mockNative.extractDocumentImages.mockResolvedValue({
+      bufferId: 'img_off_00000000-0000-0000-0000-0000000000ab',
+      format: 'epub',
+      frameCount: 2,
+    });
+    await extractDocumentImages(
+      { kind: 'fs', path: '/tmp/a.epub' },
+      { scope: 'all', maxSide: 2048 }
+    );
+    expect(mockNative.extractDocumentImages).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/a.epub' },
+      { scope: 'all', maxSide: 2048 }
+    );
+  });
+
   it('maps no-images native error', async () => {
     mockNative.extractDocumentImages.mockRejectedValue(
       new Error('ERR_DOC_NO_IMAGES: no image-only sections')
@@ -166,9 +278,39 @@ describe('document offline api', () => {
     ).rejects.toMatchObject({ code: DocumentErrorCode.NO_IMAGES });
   });
 
-  it('does not export detectDocumentFormat', async () => {
+  it('detectDocumentFormat returns the content format', async () => {
+    mockNative.detectDocumentFormat.mockResolvedValue('pdf');
+    const source = { kind: 'contentUri' as const, uri: 'content://x/1' };
+    await expect(detectDocumentFormat(source)).resolves.toBe('pdf');
+    expect(mockNative.detectDocumentFormat).toHaveBeenCalledWith(source);
+  });
+
+  it('detectDocumentFormat returns null for other content', async () => {
+    mockNative.detectDocumentFormat.mockResolvedValue('');
+    await expect(
+      detectDocumentFormat({ kind: 'fs', path: '/tmp/notes.txt' })
+    ).resolves.toBeNull();
+    mockNative.detectDocumentFormat.mockResolvedValue('html');
+    await expect(
+      detectDocumentFormat({ kind: 'fs', path: '/tmp/page.html' })
+    ).resolves.toBeNull();
+  });
+
+  it('detectDocumentFormat checks the source and maps native errors', async () => {
+    await expect(detectDocumentFormat(null as never)).rejects.toMatchObject({
+      code: DocumentErrorCode.INVALID_ARGUMENT,
+    });
+    expect(mockNative.detectDocumentFormat).not.toHaveBeenCalled();
+    mockNative.detectDocumentFormat.mockRejectedValue(
+      Object.assign(new Error('cannot open'), { code: 'ERR_DOC_OPEN_FAILED' })
+    );
+    await expect(
+      detectDocumentFormat({ kind: 'fs', path: '/tmp/missing.pdf' })
+    ).rejects.toMatchObject({ code: DocumentErrorCode.OPEN_FAILED });
+  });
+
+  it('does not export isLibarchiveEnabled', async () => {
     const mod = await import('../index');
-    expect('detectDocumentFormat' in mod).toBe(false);
     expect('isLibarchiveEnabled' in mod).toBe(false);
   });
 });

@@ -19,6 +19,8 @@ For offline transcription writing into text buffers, see [stt-offline.md](stt-of
 
 Offline buffers are read-heavy: you create/populate once, then access content with **slice APIs** instead of copying large payloads through JS.
 
+An offline buffer filled by `extractDocumentText` from an **EPUB** also carries a native **reading structure** (sections, blocks, TOC titles, metadata). It is read by `createReaderDocument` / `loadReaderDocument` in the [reader API](reader.md); read its blocks with `getReaderBlocks`, which adds stable block IDs. Other buffers have no structure.
+
 ---
 
 ## Quick start

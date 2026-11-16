@@ -353,6 +353,14 @@ export type OcrRecognizeOptionsBase = {
   frames?: number[];
   /** Span level filter (default `'line'`). */
   granularity?: OcrGranularity;
+  /**
+   * Reading order for families that detect text lines (`ppocr`, `doctr`,
+   * `paddleocr_vl` spotting): lines are put into columns and paragraphs from
+   * their boxes. `'ltr'` (default) reads columns left to right; `'rtl'` reads
+   * them right to left, also for vertical text (manga). VLM families keep the
+   * model's own order.
+   */
+  readingDirection?: 'ltr' | 'rtl';
   /** Engine-level crop applied before family preprocessing. */
   crop?: OcrPixelRect;
   onProgress?: (progress: OcrProgress) => void;

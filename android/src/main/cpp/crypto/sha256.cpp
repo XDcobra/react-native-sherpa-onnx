@@ -4,9 +4,12 @@
  * Purpose: SHA-256 implementation for file hashing. Used by the archive helper (Android) for
  * integrity verification of extracted model archives.
  */
-#include "crypto/sha256.h"
+#include "sha256.h"
 
 #include <cstring>
+
+namespace sherpa_onnx {
+namespace crypto {
 
 namespace {
 constexpr uint32_t kInitState[8] = {
@@ -172,3 +175,6 @@ void sha256_final(Sha256Context* ctx, uint8_t out[32]) {
     out[i * 4 + 3] = static_cast<uint8_t>(ctx->state[i] & 0xFFu);
   }
 }
+
+}  // namespace crypto
+}  // namespace sherpa_onnx

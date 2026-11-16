@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
-# Fetch pdfium-binaries iOS slices and assemble pdfium.xcframework
+# Fetch the PDFium iOS slices and assemble pdfium.xcframework
 # (device arm64 + universal simulator arm64/x86_64) as pdfium.framework.
 #
-# Usage: ./create_pdfium_ios_xcframework.sh [chromium-version]
-# Default version reads IOS_RELEASE_TAG (pdfium-ios-v8100-1 → chromium/8100).
-# Trailing -N is our rebuild counter and is stripped for the upstream fetch.
+# Slices come from https://github.com/XDcobra/pdfium-binaries (release sdk-<version>), a
+# fork of bblanchon/pdfium-binaries built with iOS 15.1 as the deployment target
+# (upstream needs iOS 17.0); override the base with PDFIUM_BINARIES_URL.
+#
+# Usage: ./create_pdfium_ios_xcframework.sh [version]
+# Version is the PDFium branch number (8152 for chromium/8152). Default reads
+# IOS_RELEASE_TAG (pdfium-ios-v8152-1 → 8152); trailing -N is our rebuild counter.
+# IOS_MIN (default 15.1): fails when a binary needs a newer iOS.
+#
+# MinimumOSVersion of each pdfium.framework is READ from the binary (vtool minos): App Store
+# Connect rejects a framework whose binary needs another OS than its Info.plist states.
 #
 # Output: third_party/pdfium_prebuilt/pdfium.xcframework
-# Requires: macOS with Xcode (lipo, install_name_tool, xcodebuild).
+# Requires: macOS with Xcode (lipo, install_name_tool, vtool, xcodebuild).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -20,18 +28,25 @@ if [[ -z "$VERSION" ]]; then
     VERSION="${RELEASE_TAG#pdfium-ios-v}"
   fi
 fi
-VERSION="$(strip_rebuild "${VERSION:-8100}")"
+VERSION="$(strip_rebuild "${VERSION:-8152}")"
+IOS_MIN="${IOS_MIN:-15.1}"
 
-BASE_URL="https://github.com/bblanchon/pdfium-binaries/releases/download/chromium%2F${VERSION}"
+BASE_URL="${PDFIUM_BINARIES_URL:-https://github.com/XDcobra/pdfium-binaries/releases/download}/sdk-${VERSION}"
 WORK="$ROOT/.ios-xc-build"
 OUT_XCFW="$ROOT/pdfium.xcframework"
 
 rm -rf "$WORK" "$OUT_XCFW"
 mkdir -p "$WORK"
 
+# Highest minos over all architectures of a binary.
+binary_minos() {
+  xcrun vtool -show-build "$1" | awk '$1 == "minos" { print $2 }' | sort -uV | tail -1
+}
+
 write_framework_plist() {
   local plist="$1"
   local platform="$2"
+  local minos="$3"
   cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -54,7 +69,7 @@ write_framework_plist() {
   <key>CFBundleVersion</key>
   <string>1</string>
   <key>MinimumOSVersion</key>
-  <string>13.0</string>
+  <string>${minos}</string>
   <key>CFBundleSupportedPlatforms</key>
   <array>
     <string>${platform}</string>
@@ -83,11 +98,23 @@ assemble_pdfium_framework() {
     return 1
   fi
 
+  local minos
+  minos="$(binary_minos "$binary")"
+  if [[ -z "$minos" ]]; then
+    echo "ERROR: no minos in $binary" >&2
+    return 1
+  fi
+  if [[ "$(printf '%s\n%s\n' "$minos" "$IOS_MIN" | sort -V | tail -1)" != "$IOS_MIN" ]]; then
+    echo "ERROR: $platform binary needs iOS $minos, but IOS_MIN is $IOS_MIN" >&2
+    return 1
+  fi
+  echo "$platform: minos $minos -> MinimumOSVersion $minos"
+
   rm -rf "$out_fw"
   mkdir -p "$out_fw/Headers"
   cp "$binary" "$out_fw/pdfium"
   cp -R "$headers"/. "$out_fw/Headers/"
-  write_framework_plist "$out_fw/Info.plist" "$platform"
+  write_framework_plist "$out_fw/Info.plist" "$platform" "$minos"
   install_name_tool -id '@rpath/pdfium.framework/pdfium' "$out_fw/pdfium"
   codesign --force --sign - --timestamp=none "$out_fw/pdfium" >/dev/null 2>&1 || true
 }
@@ -159,6 +186,16 @@ if [[ ! -f "$OUT_XCFW/ios-arm64/pdfium.framework/pdfium" ]] \
   find "$OUT_XCFW" -maxdepth 4 2>/dev/null || true
   exit 1
 fi
+
+# Final check on what is inside the xcframework: SDK functions exported, minos within IOS_MIN,
+# and Info.plist agrees with the binary.
+"$ROOT/verify_pdfium.sh" "$OUT_XCFW/ios-arm64/pdfium.framework/pdfium" --ios-min "$IOS_MIN"
+for fw in "$OUT_XCFW"/*/pdfium.framework; do
+  plist_min="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$fw/Info.plist")"
+  bin_min="$(binary_minos "$fw/pdfium")"
+  [[ "$plist_min" == "$bin_min" ]] \
+    || { echo "ERROR: $fw MinimumOSVersion $plist_min != binary minos $bin_min" >&2; exit 1; }
+done
 
 rm -rf "$WORK"
 echo "Done: $OUT_XCFW"

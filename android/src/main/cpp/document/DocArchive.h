@@ -42,6 +42,14 @@ class ArchiveReader {
   bool ReadIndex(size_t catalog_index, std::vector<uint8_t>* data,
                  std::string* err_code, std::string* err_message);
 
+  /**
+   * One pass over the archive: up to `max_bytes` of each named entry
+   * (`out[i]` for `names[i]`; empty when not found).
+   */
+  bool ReadPrefixes(const std::vector<std::string>& names, size_t max_bytes,
+                    std::vector<std::vector<uint8_t>>* out, std::string* err_code,
+                    std::string* err_message);
+
  private:
   bool LoadCatalog(std::string* err_code, std::string* err_message);
   bool OpenFresh(void** archive_out, std::string* err_code,

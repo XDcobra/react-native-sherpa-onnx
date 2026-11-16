@@ -118,6 +118,14 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 ---
 
+## Reader
+
+| Guide | Description |
+|-------|-------------|
+| [reader.md](./reader.md) | Reader API: EPUB → `ReaderDocument` with stable block IDs → native Fabric `ReaderView` with themes, React Native inserts, highlights, reading events and read-aloud highlighting |
+
+---
+
 ## Speaker Identification & Diarization
 
 | Guide | Description |

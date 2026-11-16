@@ -151,6 +151,14 @@ bool ArchiveReader::ReadIndex(size_t, std::vector<uint8_t>*,
   return false;
 }
 
+bool ArchiveReader::ReadPrefixes(const std::vector<std::string>&, size_t,
+                                 std::vector<std::vector<uint8_t>>*, std::string* err_code,
+                                 std::string* err_message) {
+  if (err_code) *err_code = kErrArchiveDisabled;
+  if (err_message) *err_message = "libarchive is not linked";
+  return false;
+}
+
 bool ArchiveReader::LoadCatalog(std::string*, std::string*) { return false; }
 bool ArchiveReader::OpenFresh(void**, std::string*, std::string*) {
   return false;
@@ -353,6 +361,46 @@ bool ArchiveReader::ReadNamed(const std::string& name, std::vector<uint8_t>* dat
   if (err_code) *err_code = kErrParseFailed;
   if (err_message) *err_message = "Archive entry not found: " + want;
   return false;
+}
+
+bool ArchiveReader::ReadPrefixes(const std::vector<std::string>& names, size_t max_bytes,
+                                 std::vector<std::vector<uint8_t>>* out, std::string* err_code,
+                                 std::string* err_message) {
+  if (!out) return false;
+  out->assign(names.size(), {});
+  std::vector<std::pair<std::string, size_t>> want;
+  want.reserve(names.size());
+  for (size_t i = 0; i < names.size(); ++i) want.emplace_back(NormalizeArchivePath(names[i]), i);
+  std::sort(want.begin(), want.end());
+  void* raw = nullptr;
+  if (!OpenFresh(&raw, err_code, err_message)) return false;
+  archive* a = static_cast<archive*>(raw);
+  archive_entry* entry = nullptr;
+  int rc;
+  std::vector<char> tmp(64 * 1024);
+  while ((rc = archive_read_next_header(a, &entry)) == ARCHIVE_OK) {
+    const char* pathname = archive_entry_pathname(entry);
+    const std::string got = NormalizeArchivePath(pathname ? pathname : "");
+    auto it = std::lower_bound(want.begin(), want.end(), std::make_pair(got, size_t{0}));
+    if (it == want.end() || it->first != got) continue;  // next_header skips the data
+#if ARCHIVE_VERSION_NUMBER >= 3002000
+    if (archive_entry_is_encrypted(entry)) continue;
+#endif
+    std::vector<uint8_t>& buf = (*out)[it->second];
+    while (buf.size() < max_bytes) {
+      const size_t room = std::min(tmp.size(), max_bytes - buf.size());
+      const la_ssize_t n = archive_read_data(a, tmp.data(), room);
+      if (n <= 0) break;
+      buf.insert(buf.end(), tmp.data(), tmp.data() + n);
+    }
+  }
+  CloseFresh(raw);
+  if (rc != ARCHIVE_EOF) {
+    if (err_code) *err_code = kErrOpenFailed;
+    if (err_message) *err_message = "Failed to read archive entries";
+    return false;
+  }
+  return true;
 }
 
 #endif  // HAVE_LIBARCHIVE

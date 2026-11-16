@@ -229,7 +229,7 @@ console.log(frame.width, frame.height, frame.byteSize, frame.storageKind);
 // PDF rasters may also set frame.pageNumber, frame.dpi
 ```
 
-Per-frame metadata. For `'lazy'` buffers, `width` / `height` may be `0` until [`ensureOfflineImageBufferFrame`](#ensureofflineimagebufferframebuffer-frameindex) (or FrameView / OCR) has run for that index.
+Per-frame metadata. For `'lazy'` buffers, `width` / `height` may be `0` until [`ensureOfflineImageBufferFrame`](#ensureofflineimagebufferframebuffer-frameindex) (or FrameView / OCR) has run for that index. `expectedWidth` / `expectedHeight` give the size the frame has once decoded, without decoding it. They are set for lazy PDF pages, lazy comic pages and bytes, and equal `width` / `height` once the frame is resident. Use them to lay out pages that are not decoded yet.
 
 #### `ensureOfflineImageBufferFrame(buffer, frameIndex)`
 

@@ -1,0 +1,216 @@
+import { Platform, StyleSheet } from 'react-native';
+
+export const panelStyles = StyleSheet.create({
+  card: {
+    marginHorizontal: 16,
+    padding: 14,
+    borderRadius: 12,
+    backgroundColor: '#F8FAFC',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E2E8F0',
+    gap: 12,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  title: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  lead: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#475569',
+  },
+  badge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#E2E8F0',
+  },
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  badgeDone: {
+    backgroundColor: '#DCFCE7',
+  },
+  badgeDoneText: {
+    color: '#166534',
+  },
+  group: {
+    gap: 6,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: '#64748B',
+  },
+  chips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+    backgroundColor: '#FFFFFF',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chipActive: {
+    borderColor: '#2563EB',
+    backgroundColor: '#EFF6FF',
+  },
+  chipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  chipTextActive: {
+    color: '#1D4ED8',
+  },
+  readyDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#16A34A',
+  },
+  caption: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#475569',
+  },
+  captionStrong: {
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  primary: {
+    flex: 1,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  secondary: {
+    flex: 1,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2563EB',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secondaryText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#2563EB',
+  },
+  quiet: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quietText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  disabled: {
+    opacity: 0.45,
+  },
+  pressed: {
+    opacity: 0.7,
+  },
+  ready: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 44,
+  },
+  readyText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#166534',
+  },
+  progressTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#E2E8F0',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#2563EB',
+  },
+  progressText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+    minWidth: 64,
+    textAlign: 'right',
+  },
+  status: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#0F172A',
+  },
+  statusError: {
+    color: '#B91C1C',
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E2E8F0',
+  },
+  api: {
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#0F172A',
+    gap: 2,
+  },
+  apiLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: '#94A3B8',
+  },
+  apiLine: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: '#E2E8F0',
+    fontFamily: Platform.select({ ios: 'Menlo', default: 'monospace' }),
+  },
+});

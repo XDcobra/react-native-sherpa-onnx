@@ -1,0 +1,16 @@
+# text identity, structure v1, textHash v1: book blocks textSha blocksSha
+structure.epub 13 f6419038068b5417 667b292babae0428
+structure-ncx.epub 2 0a71cac460e54c35 bd5f63fe0692e56c
+mixed.epub 17 bf28c564dc90999b d219ea2198b5b142
+long.epub 6160 ddcd5a8d095fe286 006503436bab1717
+styles.epub 11 73d568be144ba575 611afb50e4200ed6
+structure.fb2 18 c6f075d84afec269 e46753fd6181f869
+north-wind.fb2 11 ab2eaf44c94f3e3f 725a91d09bb62dfd
+styles.fb2 5 6935d4b93b352084 cd05fc36afbc638a
+structure.mobi 8 0fcaade3415b8960 60242aa77419d881
+structure.azw3 5 4ff1fc5a719af19e ed9beb9b73e763ca
+tiny.mobi 15 6930207e89ce1b11 4e565a1096273e5d
+tiny.azw3 13 17155ae23af86147 4034028942e534d9
+fdst.azw3 4 cde27d9196775010 fa91651dbba27011
+kf8-skel.azw3 2 a29f886c4d3c9ee4 9d3821107c4e4c4a
+frankenstein.epub 848 aa60bc2fc92ded2a 19259d75da6f77f3

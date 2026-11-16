@@ -2,6 +2,7 @@
 
 #include "OcrBackend.h"
 #include "OcrRecognizeContext.h"
+#include "OcrReadingOrder.h"
 #include "OcrTypes.h"
 
 #include <atomic>
@@ -32,6 +33,11 @@ class OcrEngine {
     int progress_min_interval_ms = kOcrProgressMinIntervalMs;
     /** `v1;family=…` from TS. Empty → family default instruction. */
     std::string recognize_spec;
+    /**
+     * Reading order for line-level families (ppocr, doctr, paddleocr_vl
+     * spotting): columns left→right (ltr) or right→left (rtl, e.g. manga).
+     */
+    OcrReadingDirection reading_direction = OcrReadingDirection::kLtr;
   };
 
   struct RecognizeOutcome {

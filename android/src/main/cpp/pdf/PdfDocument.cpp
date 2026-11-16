@@ -32,6 +32,11 @@ struct PdfDocument::FileAccess {
 #endif
 };
 
+std::recursive_mutex& PdfiumMutex() {
+  static std::recursive_mutex mu;
+  return mu;
+}
+
 #if defined(HAVE_PDFIUM) && HAVE_PDFIUM
 
 namespace {
@@ -100,6 +105,7 @@ PdfDocument::PdfDocument(PdfDocument&& other) noexcept
 PdfDocument& PdfDocument::operator=(PdfDocument&& other) noexcept {
   if (this != &other) {
     if (doc_) {
+      std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
       FPDF_CloseDocument(doc_);
       doc_ = nullptr;
     }
@@ -113,6 +119,7 @@ PdfDocument& PdfDocument::operator=(PdfDocument&& other) noexcept {
 
 PdfDocument::~PdfDocument() {
   if (doc_) {
+    std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
     FPDF_CloseDocument(doc_);
     doc_ = nullptr;
   }
@@ -122,7 +129,9 @@ PdfDocument::~PdfDocument() {
 bool PdfDocument::ok() const { return doc_ != nullptr; }
 
 int PdfDocument::page_count() const {
-  return doc_ ? FPDF_GetPageCount(doc_) : 0;
+  if (!doc_) return 0;
+  std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
+  return FPDF_GetPageCount(doc_);
 }
 
 PdfDocument PdfDocument::OpenPath(
@@ -138,6 +147,7 @@ PdfDocument PdfDocument::OpenPath(
   EnsurePdfiumInit();
   const char* pw = PdfPasswordOrNull(password);
   PDF_LOGI("OpenPath path=%s hasPassword=%d", path, pw ? 1 : 0);
+  std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
   FPDF_DOCUMENT doc = FPDF_LoadDocument(path, pw);
   if (!doc) {
     SetOpenError(FPDF_GetLastError(), err_code, err_message);
@@ -186,6 +196,7 @@ PdfDocument PdfDocument::OpenFd(
   PDF_LOGI(
       "OpenFd fd=%d dup=%d len=%lld hasPassword=%d", fd, dupfd,
       static_cast<long long>(st.st_size), pw ? 1 : 0);
+  std::lock_guard<std::recursive_mutex> lock(PdfiumMutex());
   FPDF_DOCUMENT doc = FPDF_LoadCustomDocument(&access->access, pw);
   if (!doc) {
     SetOpenError(FPDF_GetLastError(), err_code, err_message);

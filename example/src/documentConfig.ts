@@ -8,6 +8,11 @@ export const TEST_EDOC_FILES = {
   DRM_MOBI: 'test_edocs/drm.mobi',
   MIXED_EPUB: 'test_edocs/mixed.epub',
   MANGA_CBZ: 'test_edocs/manga.cbz',
+  STRUCTURE_EPUB: 'test_edocs/structure.epub',
+  LONG_EPUB: 'test_edocs/long.epub',
+  FRANKENSTEIN_EPUB: 'test_edocs/frankenstein.epub',
+  STYLES_EPUB: 'test_edocs/styles.epub',
+  STYLES_FB2: 'test_edocs/styles.fb2',
 } as const;
 
 export type DocumentExtractKind = 'document' | 'pdf';
@@ -117,5 +122,126 @@ export const DOCUMENT_FILES: DocumentFileInfo[] = [
     extract: 'pdf',
     expect: 'noTextLayer',
     section: 'PDF no text layer',
+  },
+];
+
+/** Books for the Reader screen (native ReaderView): EPUB, FB2, MOBI / AZW3, PDF, comics. */
+export const READER_FILES: DocumentFileInfo[] = [
+  {
+    id: TEST_EDOC_FILES.FRANKENSTEIN_EPUB,
+    name: 'Frankenstein — EPUB',
+    description:
+      'A real book (Standard Ebooks, public domain): contents, title page image, front and back matter',
+    extract: 'document',
+    expect: 'text',
+    section: 'Books',
+  },
+  {
+    id: TEST_EDOC_FILES.LONG_EPUB,
+    name: 'Long book — EPUB',
+    description: '40 chapters, 6160 blocks: fast scrolling, jumps and search',
+    extract: 'document',
+    expect: 'text',
+    section: 'Books',
+  },
+  {
+    id: TEST_PDF_FILES.BOOK,
+    name: 'Book — PDF',
+    description:
+      'Text layer: paragraphs, headings, bookmarks as contents, page labels, two columns, a plate',
+    extract: 'pdf',
+    expect: 'text',
+    section: 'PDF and comics',
+  },
+  {
+    id: TEST_PDF_FILES.BOOK_SCAN,
+    name: 'Scanned book — PDF',
+    description:
+      'The same book as page images only: OCR gives it headings and paragraphs, per model',
+    extract: 'pdf',
+    expect: 'imagesOnly',
+    section: 'PDF and comics',
+  },
+  {
+    id: TEST_PDF_FILES.SCAN_ONLY_MULTIPAGE,
+    name: 'Scan — PDF',
+    description: 'No text layer: the pages are shown as images',
+    extract: 'pdf',
+    expect: 'imagesOnly',
+    section: 'PDF and comics',
+  },
+  {
+    id: TEST_EDOC_FILES.MANGA_CBZ,
+    name: 'Manga — CBZ',
+    description: 'Comic pages, decoded on demand, full width',
+    extract: 'document',
+    expect: 'imagesOnly',
+    section: 'PDF and comics',
+  },
+  {
+    id: TEST_EDOC_FILES.STRUCTURE_EPUB,
+    name: 'Structure — EPUB',
+    description:
+      'Headings, inline image, separator, preformatted text and an image page',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.STYLES_EPUB,
+    name: 'Inline styles — EPUB',
+    description:
+      'Italic and bold: nested, across line breaks and blocks, inline style, links',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.STYLES_FB2,
+    name: 'Inline styles — FB2',
+    description: 'emphasis and strong in titles, paragraphs and verses',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.MIXED_EPUB,
+    name: 'Mixed — EPUB',
+    description: 'Text chapters and an image-only page',
+    extract: 'document',
+    expect: 'mixed',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.HELLO_EPUB,
+    name: 'Hello — EPUB',
+    description: 'Short text-only EPUB',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.HELLO_FB2,
+    name: 'Hello — FB2',
+    description: 'FictionBook: title, sections and contents',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.HELLO_MOBI,
+    name: 'Hello — MOBI',
+    description: 'MOBI6 with metadata',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.HELLO_AZW3,
+    name: 'Hello — AZW3',
+    description: 'KF8 / AZW3',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
   },
 ];

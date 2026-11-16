@@ -49,6 +49,18 @@ bool RasterizePdfPage(
     std::string* err_message);
 
 /**
+ * Pixel size RasterizePdfPage produces for a 1-based page, from the page
+ * size alone (the page is not loaded or rendered).
+ */
+bool PdfPagePixelSize(
+    const PdfDocument& doc,
+    int page_1based,
+    int dpi,
+    int max_side,
+    int* width,
+    int* height);
+
+/**
  * Rasterize PDF pages to packed RGB8 frames (top-left, y-down).
  * Each frame has pageNumber (1-based) and dpi set.
  * When PDFium is not compiled in, returns ERR_PDF_PDFIUM_DISABLED.

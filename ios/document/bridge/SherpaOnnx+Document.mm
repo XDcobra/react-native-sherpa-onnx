@@ -3,6 +3,10 @@
 #import "../../fileio/FileIOSeekable.h"
 #include "TextRegistry.h"
 
+#import "SherpaDocStructureSummary.h"
+#import "../../pdf/bridge/PdfLazyIo.h"
+#include "DocImagePopulate.h"
+#include "DocTextPopulate.h"
 #include "DocumentExtractor.h"
 #include "ImageRegistry.h"
 
@@ -42,6 +46,11 @@ dispatch_queue_t DocQueue() {
 }
 
 }  // namespace
+
+
+static NSString *SherpaDocNS(const std::string &s) {
+  return [NSString stringWithUTF8String:s.c_str()] ?: @"";
+}
 
 @implementation SherpaOnnx (Document)
 
@@ -109,27 +118,9 @@ RCT_EXPORT_METHOD(extractDocumentText : (NSDictionary *)source textOutBufferId :
       return;
     }
 
-    std::vector<TxtSpatialSpan> spans;
-    spans.reserve(result.spans.size());
-    for (const auto &s : result.spans) {
-      TxtSpatialSpan t;
-      t.utf16Start = s.utf16_start;
-      t.utf16End = s.utf16_end;
-      t.level = s.level.empty() ? "block" : s.level;
-      t.sourceImageBufferId = "";
-      t.frameIndex = 0;
-      t.origin = "markup";
-      t.hasSectionIndex = true;
-      t.sectionIndex = s.section_index;
-      t.href = s.href;
-      spans.push_back(t);
-    }
-
     std::string popErr;
-    const bool ok = txt_populate_offline_if_empty(
-        [textOutBufferId UTF8String], result.text, {}, {}, {}, "", "", "",
-        spans, &popErr);
-    if (!ok) {
+    if (!sherpa_onnx::document::PopulateTextBufferFromDocument(
+            [textOutBufferId UTF8String], result, &popErr)) {
       reject(@"ERR_DOC_INVALID_ARGUMENT",
              popErr.empty()
                  ? @"Failed to populate text buffer"
@@ -159,13 +150,49 @@ RCT_EXPORT_METHOD(extractDocumentText : (NSDictionary *)source textOutBufferId :
       [imageOnly addObject:m];
     }
 
-    resolve(@{
+    NSMutableDictionary *out = [@{
       @"format" : [NSString stringWithUTF8String:result.format.c_str()] ?: @"",
       @"sectionCount" : @((NSInteger)result.sections.size()),
       @"sections" : sections,
       @"imageOnlySections" : imageOnly,
       @"spatialSpanCount" : @((NSInteger)result.spans.size()),
-    });
+    } mutableCopy];
+    if (result.structure) {
+      out[@"structure"] = SherpaDocStructureSummary(*result.structure);
+    }
+    resolve(out);
+  });
+}
+
+RCT_EXPORT_METHOD(detectDocumentFormat : (NSDictionary *)source resolve : (
+                      RCTPromiseResolveBlock)resolve reject : (RCTPromiseRejectBlock)reject) {
+  dispatch_async(DocQueue(), ^{
+    NSString *ioErr = nil;
+    NSString *ioMsg = nil;
+    FileIOReadHandle *handle = [FileIOResolver resolveSource:source error:&ioErr message:&ioMsg];
+    if (!handle) {
+      reject(ioErr ?: @"ERR_DOC_OPEN_FAILED", ioMsg ?: @"Failed to resolve FileSource", nil);
+      return;
+    }
+    NSString *seekErr = nil;
+    NSString *seekMsg = nil;
+    const auto src = SherpaOnnxSeekableSourceFromHandle(handle, @"ERR_DOC_OPEN_FAILED",
+                                                        @"SherpaOnnx:doc", &seekErr, &seekMsg);
+    if (src.path.empty()) {
+      [handle cleanup];
+      reject(seekErr ?: @"ERR_DOC_OPEN_FAILED", seekMsg ?: @"Source is not seekable", nil);
+      return;
+    }
+    std::string code;
+    std::string msg;
+    const std::string format = sherpa_onnx::document::DetectDocumentFormat(src, &code, &msg);
+    [handle cleanup];
+    if (!code.empty()) {
+      NSString *c = SherpaDocNS(code);
+      reject(c, [NSString stringWithFormat:@"%@: %@", c, SherpaDocNS(msg)], nil);
+      return;
+    }
+    resolve(SherpaDocNS(format));
   });
 }
 
@@ -205,6 +232,18 @@ RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
     if ([maxSideVal respondsToSelector:@selector(intValue)]) {
       opt.max_side = [maxSideVal intValue];
     }
+    id scopeVal = options[@"scope"];
+    if ([scopeVal isKindOfClass:NSString.class] && [scopeVal isEqualToString:@"all"]) {
+      opt.all_images = true;
+    }
+    id strategyVal = options[@"strategy"];
+    opt.lazy = [strategyVal isKindOfClass:NSString.class] &&
+               [strategyVal isEqualToString:@"lazy-lru"];
+    int hotFrames = 0;
+    id hotVal = options[@"hotFrames"];
+    if ([hotVal respondsToSelector:@selector(intValue)]) {
+      hotFrames = [hotVal intValue];
+    }
     opt.on_progress = [strongSelf](int done, int total, const char *phase) {
       if (![strongSelf respondsToSelector:@selector(sendEventWithName:body:)]) {
         return;
@@ -219,8 +258,12 @@ RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
     };
 
     auto result = sherpa_onnx::document::ExtractDocumentImages(src, opt);
-    [handle cleanup];
+    const bool lazyResult = !result.frames.empty() && result.frames.front().load;
+    // Lazy pages read from the file later: keep the (security-scoped) handle
+    // until the buffer is released.
+    if (!lazyResult) [handle cleanup];
     if (!result.ok) {
+      if (lazyResult) [handle cleanup];
       NSString *code =
           result.error_code.empty()
               ? @"ERR_DOC_OPEN_FAILED"
@@ -233,16 +276,16 @@ RCT_EXPORT_METHOD(extractDocumentImages : (NSDictionary *)source options : (
       return;
     }
 
-    std::vector<sherpa_onnx::image::RgbFrame> frames;
-    frames.reserve(result.frames.size());
-    for (auto &fr : result.frames) {
-      fr.rgb.sectionIndex = fr.section_index;
-      fr.rgb.href = fr.href;
-      fr.rgb.pageNumber = fr.page_number;
-      frames.push_back(std::move(fr.rgb));
+    auto created = sherpa_onnx::document::CreateImageBufferFromDocument(result, opt.max_side,
+                                                                        hotFrames);
+    if (lazyResult) {
+      if (created.ok) {
+        SherpaOnnxPdfRetainLazyHandle(
+            [NSString stringWithUTF8String:created.info.bufferId.c_str()], handle);
+      } else {
+        [handle cleanup];
+      }
     }
-    auto created = ImageRegistry::Instance().CreateFromRgbFrames(
-        std::move(frames), ImageThresholdPathType::FileOrigin);
     if (!created.ok) {
       NSString *code = created.errorCode.empty()
                            ? @"ERR_DOC_OPEN_FAILED"

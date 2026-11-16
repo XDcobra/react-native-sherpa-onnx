@@ -494,6 +494,10 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeGetFrameInfo(
   PutInt(env, map, put, "index", info.index);
   PutInt(env, map, put, "width", info.width);
   PutInt(env, map, put, "height", info.height);
+  if (info.expectedWidth > 0 && info.expectedHeight > 0) {
+    PutInt(env, map, put, "expectedWidth", info.expectedWidth);
+    PutInt(env, map, put, "expectedHeight", info.expectedHeight);
+  }
   PutLong(env, map, put, "byteSize", info.byteSize);
   PutString(env, map, put, "storageKind",
             sherpa_onnx::image::StorageKindName(info.storageKind));
@@ -702,9 +706,10 @@ Java_com_sherpaonnx_image_ImageBufferNative_nativeCreateFrameBitmap(
   const uint8_t* rgb = nullptr;
   int width = 0;
   int height = 0;
+  sherpa_onnx::image::ImageRegistry::FramePin pin;
   if (!sherpa_onnx::image::ResolveFrameRgb(JstringToStd(env, jBufferId),
                                            frameIndex, maxSide, scratch, &rgb,
-                                           &width, &height) ||
+                                           &width, &height, &pin) ||
       !rgb || width <= 0 || height <= 0) {
     return nullptr;
   }

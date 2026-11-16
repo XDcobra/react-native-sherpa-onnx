@@ -2,6 +2,7 @@
 #include "jni/jni_utf8.h"
 #include "OcrDetect.h"
 #include "OcrEngine.h"
+#include "OcrTextPopulate.h"
 #include "OcrTypes.h"
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-detect.h"
@@ -470,7 +471,8 @@ JNIEXPORT jobject JNICALL
 Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
     JNIEnv* env, jclass /*clazz*/, jstring instanceId, jstring imageBufferId,
     jintArray frameIndices, jstring granularity, jstring operationId,
-    jint progressMinIntervalMs, jstring recognizeSpec) {
+    jint progressMinIntervalMs, jstring recognizeSpec, jstring readingDirection,
+    jstring textOutBufferId) {
   const std::string id = JstringToStd(env, instanceId);
   const std::string imageId = JstringToStd(env, imageBufferId);
   const std::string opId = JstringToStd(env, operationId);
@@ -493,6 +495,10 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
   opts.progress_min_interval_ms =
       progressMinIntervalMs < 0 ? 0 : static_cast<int>(progressMinIntervalMs);
   opts.recognize_spec = JstringToStd(env, recognizeSpec);
+  if (JstringToStd(env, readingDirection) == "rtl") {
+    opts.reading_direction = sherpa_onnx::ocr::OcrReadingDirection::kRtl;
+  }
+  const std::string textId = JstringToStd(env, textOutBufferId);
   if (frameIndices != nullptr) {
     const jsize n = env->GetArrayLength(frameIndices);
     jint* elems = env->GetIntArrayElements(frameIndices, nullptr);
@@ -548,10 +554,23 @@ Java_com_sherpaonnx_ocr_OcrNative_nativeRecognize(
     sherpa_onnx::ocr::OcrCancelRegistry::Instance().End(opId);
   }
 
+  // Shared with iOS: text, spans with frame metadata, OCR layout.
+  if (outcome.ok && !textId.empty()) {
+    std::string code;
+    std::string message;
+    if (!sherpa_onnx::ocr::PopulateTextFromOcr(textId, imageId, outcome.family, outcome.result,
+                                               &code, &message)) {
+      outcome.ok = false;
+      outcome.errorCode = code;
+      outcome.errorMessage = message;
+    }
+  }
+
   PutBool(env, map, put, "ok", outcome.ok ? JNI_TRUE : JNI_FALSE);
   PutBool(env, map, put, "cancelled", outcome.cancelled ? JNI_TRUE : JNI_FALSE);
   PutString(env, map, put, "errorCode", outcome.errorCode);
   PutString(env, map, put, "errorMessage", outcome.errorMessage);
+  PutInt(env, map, put, "spanCount", static_cast<int>(outcome.result.spans.size()));
   PutString(env, map, put, "family", outcome.family);
   PutString(env, map, put, "text", outcome.result.text_utf8);
   PutString(env, map, put, "raw", outcome.result.raw_utf8);

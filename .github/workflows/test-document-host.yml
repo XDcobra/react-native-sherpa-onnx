@@ -1,4 +1,5 @@
-# Host e-document extractor tests (C++ GTest): EPUB/FB2/CBZ/CBR/MOBI.
+# Host e-document extractor tests (C++ GTest): EPUB/FB2/CBZ/CBR/MOBI, and the
+# reader core on those fixtures and on book.pdf (real PDFium, downloaded by CMake).
 
 name: Test – Document host (C++)
 
@@ -8,9 +9,15 @@ on:
       - main
     paths:
       - 'android/src/main/cpp/document/**'
+      - 'android/src/main/cpp/reader/**'
+      - 'android/src/main/cpp/pdf/**'
+      - 'android/src/main/cpp/textbuffer/TxtStructure.h'
       - 'test/cpp/document/**'
+      - 'test/cpp/reader/**'
       - 'test/cpp/CMakeLists.txt'
       - 'test/fixtures/document/**'
+      - 'test/fixtures/reader/**'
+      - 'test/fixtures/pdf/**'
       - 'third_party/pugixml'
       - 'third_party/lexbor'
       - 'third_party/lexbor_prebuilt/**'
@@ -20,9 +27,15 @@ on:
       - main
     paths:
       - 'android/src/main/cpp/document/**'
+      - 'android/src/main/cpp/reader/**'
+      - 'android/src/main/cpp/pdf/**'
+      - 'android/src/main/cpp/textbuffer/TxtStructure.h'
       - 'test/cpp/document/**'
+      - 'test/cpp/reader/**'
       - 'test/cpp/CMakeLists.txt'
       - 'test/fixtures/document/**'
+      - 'test/fixtures/reader/**'
+      - 'test/fixtures/pdf/**'
       - 'third_party/pugixml'
       - 'third_party/lexbor'
       - 'third_party/lexbor_prebuilt/**'
@@ -49,13 +62,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake build-essential libgtest-dev libarchive-dev pkg-config
 
-      - name: Configure and build document_host_test
+      - name: Configure and build document_host_test and reader_host_test
         run: |
           mkdir -p test/cpp/build && cd test/cpp/build
           cmake .. -DCMAKE_BUILD_TYPE=Release
-          cmake --build . --target document_host_test
+          cmake --build . --target document_host_test reader_host_test
 
-      - name: Run document host tests
+      - name: Run document and reader host tests
         working-directory: ${{ github.workspace }}
         run: |
-          ctest --test-dir test/cpp/build -R document_host_test --output-on-failure
+          ctest --test-dir test/cpp/build -R "document_host_test|reader_host_test" --output-on-failure

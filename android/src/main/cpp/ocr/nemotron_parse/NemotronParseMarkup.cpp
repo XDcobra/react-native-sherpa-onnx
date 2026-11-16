@@ -1,5 +1,7 @@
 #include "NemotronParseMarkup.h"
 
+#include "../markup/OcrMarkdownText.h"
+
 #include "../OcrGeometry.h"
 #include "../OcrTextUtils.h"
 #include "../markup/OcrElementKind.h"
@@ -447,8 +449,15 @@ void ApplyNemotronOutput(OcrResult& result, const NemotronParseMarkup& parsed,
   result.elements = parsed.elements;
 
   if (output.layout == NemotronParseLayout::kNone) {
+    // No geometry: the reading text comes from the Markdown lines (one block
+    // per line, `#` headings → heading elements, blank line between blocks).
     result.spans.clear();
     result.elements.clear();
+    if (output.text != NemotronParseText::kNone) {
+      OcrReadingText reading = MarkdownToReadingText(parsed.text_utf8, /*soft_wrap=*/false, 0);
+      result.text_utf8 = std::move(reading.text_utf8);
+      result.elements = std::move(reading.elements);
+    }
   } else if (output.layout == NemotronParseLayout::kBoxes) {
     result.elements.clear();
   }

@@ -48,6 +48,9 @@ internal object OcrNative {
     operationId: String?,
     progressMinIntervalMs: Int,
     recognizeSpec: String?,
+    readingDirection: String?,
+    /** Filled natively (text, spans, OCR layout) when the recognize succeeds. */
+    textOutBufferId: String,
   ): HashMap<String, Any>?
 
   @JvmStatic external fun nativeCancelRecognize(operationId: String)

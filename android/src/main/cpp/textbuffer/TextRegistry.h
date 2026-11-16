@@ -97,6 +97,22 @@ bool txt_populate_offline_if_empty(const std::string &bufferId, const std::strin
                                    const std::vector<TxtSpatialSpan> &spatialSpans,
                                    std::string *error = nullptr);
 
+/** Attaches a reading structure to a populated offline buffer (once). */
+bool txt_set_offline_structure(const std::string &bufferId,
+                               std::shared_ptr<const TxtStructure> structure,
+                               std::string *error = nullptr);
+
+/** Reading structure of an offline buffer, or nullptr. */
+std::shared_ptr<const TxtStructure> txt_get_offline_structure(const std::string &bufferId);
+
+/** Attaches the OCR layout to a populated offline buffer (once). */
+bool txt_set_offline_ocr_layout(const std::string &bufferId,
+                                std::shared_ptr<const TxtOcrLayout> layout,
+                                std::string *error = nullptr);
+
+/** OCR layout of an offline buffer, or nullptr. */
+std::shared_ptr<const TxtOcrLayout> txt_get_offline_ocr_layout(const std::string &bufferId);
+
 bool txt_create_empty_offline(std::string *bufferIdOut, std::string *error = nullptr);
 bool txt_create_offline_from_text(const std::string &text, const std::string &lang,
                                   const std::string &emotion, const std::string &event,

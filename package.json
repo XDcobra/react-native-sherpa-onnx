@@ -185,6 +185,11 @@
       "types": "./lib/typescript/src/document/index.d.ts",
       "default": "./lib/module/document/index.js"
     },
+    "./reader": {
+      "source": "./src/reader/index.ts",
+      "types": "./lib/typescript/src/reader/index.d.ts",
+      "default": "./lib/module/reader/index.js"
+    },
     "./segment": {
       "source": "./src/segment/index.ts",
       "types": "./lib/typescript/src/segment/index.d.ts",
@@ -343,10 +348,16 @@
   },
   "codegenConfig": {
     "name": "SherpaOnnxSpec",
-    "type": "modules",
+    "type": "all",
     "jsSrcsDir": "src",
     "android": {
       "javaPackageName": "com.sherpaonnx"
+    },
+    "ios": {
+      "componentProvider": {
+        "SherpaReaderView": "SherpaReaderComponentView",
+        "SherpaReaderInsertView": "SherpaReaderInsertComponentView"
+      }
     }
   },
   "prettier": {

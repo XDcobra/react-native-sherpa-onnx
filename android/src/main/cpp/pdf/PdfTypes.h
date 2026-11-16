@@ -1,10 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "../fileio/SeekableSource.h"
+
+struct TxtStructure;  // textbuffer/TxtStructure.h
 
 namespace sherpa_onnx {
 namespace pdf {
@@ -52,6 +55,8 @@ struct PdfTextLayerResult {
   std::vector<PdfTextSpan> spans;
   int page_count = 0;
   int pages_with_text = 0;
+  /** Layout "paragraphs" only: reading structure (format "pdf"). */
+  std::shared_ptr<const ::TxtStructure> structure;
 };
 
 }  // namespace pdf

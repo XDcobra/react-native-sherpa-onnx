@@ -156,6 +156,79 @@ describe('pdf offline api', () => {
     expect(mockNative.extractPdfTextLayer).not.toHaveBeenCalled();
   });
 
+  it('extractPdfTextLayer forwards layout and maps the pdf structure', async () => {
+    mockNative.extractPdfTextLayer.mockResolvedValue({
+      pageCount: 2,
+      pagesWithText: 1,
+      utf16Length: 12,
+      spatialSpanCount: 1,
+      structure: {
+        format: 'pdf',
+        version: 1,
+        blockCount: 3,
+        sections: [
+          {
+            sectionIndex: 0,
+            href: 'page:1',
+            kind: 'page',
+            title: 'Preface',
+            titleSource: 'toc',
+            label: 'i',
+            utf16Start: 0,
+            utf16End: 12,
+            firstBlock: 0,
+            blockCount: 2,
+          },
+          {
+            sectionIndex: 1,
+            href: 'page:2',
+            kind: 'page',
+            titleSource: 'none',
+            utf16Start: 12,
+            utf16End: 12,
+            firstBlock: 2,
+            blockCount: 1,
+          },
+        ],
+        metadata: { title: 'A Book', creator: 'Ada', language: 'en-GB' },
+      },
+    });
+    const r = await extractPdfTextLayer(
+      { kind: 'fs', path: '/tmp/a.pdf' },
+      'txt_off_00000000-0000-0000-0000-000000000001',
+      { layout: 'paragraphs' }
+    );
+    expect(mockNative.extractPdfTextLayer).toHaveBeenCalledWith(
+      { kind: 'fs', path: '/tmp/a.pdf' },
+      'txt_off_00000000-0000-0000-0000-000000000001',
+      { layout: 'paragraphs' }
+    );
+    expect(r.structure?.format).toBe('pdf');
+    expect(r.structure?.metadata).toEqual({
+      title: 'A Book',
+      creator: 'Ada',
+      language: 'en-GB',
+    });
+    expect(r.structure?.sections[0]).toMatchObject({
+      kind: 'page',
+      label: 'i',
+      title: 'Preface',
+      titleSource: 'toc',
+    });
+    expect(r.structure?.sections[1]?.label).toBeUndefined();
+  });
+
+  it('extractPdfTextLayer rejects an unknown layout', async () => {
+    await expect(
+      extractPdfTextLayer(
+        { kind: 'fs', path: '/tmp/a.pdf' },
+        'txt_off_00000000-0000-0000-0000-000000000001',
+        { layout: 'columns' as unknown as 'lines' }
+      )
+    ).rejects.toMatchObject({ code: PdfErrorCode.INVALID_ARGUMENT });
+    expect(mockNative.extractPdfTextLayer).not.toHaveBeenCalled();
+  });
+
   it('rasterizePdfPages maps disabled error', async () => {
     mockNative.rasterizePdfPages.mockRejectedValue(
       new Error('ERR_PDF_PDFIUM_DISABLED: PDFium is not linked')

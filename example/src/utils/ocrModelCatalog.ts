@@ -9,6 +9,7 @@ import {
   listModelsAtPath,
 } from 'react-native-sherpa-onnx/utils';
 import {
+  getModelPath,
   listDownloadedModels,
   ModelCategory,
 } from 'react-native-sherpa-onnx/download';
@@ -38,6 +39,8 @@ export type OcrCatalogSnapshot = {
   padModelsPath: string | null;
   bundledFolders: string[];
   downloadedIds: string[];
+  /** Model folder of each downloaded pack (inside its source folder). */
+  downloadedPaths: Record<string, string>;
 };
 
 export function isOcrModelFolder(folder: string, hint?: string): boolean {
@@ -131,7 +134,11 @@ export function resolveOcrModelSource(
   modelId: string,
   ctx: Pick<
     OcrCatalogSnapshot,
-    'padModelIds' | 'padModelsPath' | 'bundledFolders' | 'downloadedIds'
+    | 'padModelIds'
+    | 'padModelsPath'
+    | 'bundledFolders'
+    | 'downloadedIds'
+    | 'downloadedPaths'
   >
 ): FileSource {
   if (ctx.padModelIds.includes(modelId)) {
@@ -140,7 +147,10 @@ export function resolveOcrModelSource(
       : getFileModelPath(modelId, ModelCategory.Ocr);
   }
   if (ctx.downloadedIds.includes(modelId)) {
-    return getFileModelPath(modelId, ModelCategory.Ocr);
+    const path = ctx.downloadedPaths[modelId];
+    return path
+      ? { kind: 'fs', path }
+      : getFileModelPath(modelId, ModelCategory.Ocr);
   }
   if (ctx.bundledFolders.includes(modelId)) {
     return getAssetModelPath(modelId);
@@ -175,6 +185,14 @@ export async function loadOcrModelCatalog(): Promise<OcrCatalogSnapshot> {
     () => []
   );
   const downloadedIds = downloaded.map((model) => model.id);
+  // Downloads live in a source folder, often one level deeper (archive root).
+  const downloadedPaths: Record<string, string> = {};
+  for (const model of downloaded) {
+    const path = await getModelPath(ModelCategory.Ocr, model.id, {
+      source: model.sourceId,
+    }).catch(() => null);
+    if (path) downloadedPaths[model.id] = path;
+  }
 
   const combinedIds: string[] = [];
   const pushId = (id: string) => {
@@ -216,5 +234,6 @@ export async function loadOcrModelCatalog(): Promise<OcrCatalogSnapshot> {
     padModelsPath: resolvedPadPath,
     bundledFolders,
     downloadedIds,
+    downloadedPaths,
   };
 }

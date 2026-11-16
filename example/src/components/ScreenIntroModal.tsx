@@ -141,6 +141,10 @@ const INTRO_COPY: Record<ScreenId, ScreenIntroCopy> = {
     title: 'Read documents aloud',
     body: 'This screen shows document-to-speech with the SDK: extract text, then speak it with offline TTS. Supported formats are EPUB, FB2, MOBI, AZW3, PDF, and image-based mixed EPUB or CBZ via OCR.',
   },
+  Reader: {
+    title: 'Native reader',
+    body: 'This screen shows the reader API: an EPUB, FB2, MOBI / AZW3, PDF, scan or comic becomes a ReaderDocument with stable block IDs and is shown in the native ReaderView. Change the appearance and how pages are shown, jump through the contents, search, mark paragraphs and add notes. Scanned pages and comics get their text from OCR, page by page or for the whole book, and can keep it in a saved file. Listen reads any book aloud with the spoken sentence and word highlighted, also over page images.',
+  },
 };
 
 const STORAGE_FILE = `${DocumentDirectoryPath}/example-screen-intros.json`;
