@@ -693,6 +693,58 @@ def structure_fb2() -> str:
 """
 
 
+STYLES_CH1 = """<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>styles</title></head>
+<body>
+  <h1>The <i>North</i> Wind</h1>
+  <p>Plain <em>italic</em> and <strong>bold</strong> text.</p>
+  <p><i>Italic with <b>bold inside</b> it</i>, then <b>bold <i>and both</i></b><i> italic</i>.</p>
+  <p>   <em>  Leading   space </em>   collapses   </p>
+  <p><em>First line<br/>
+     second line</em> plain<br/><b> bold after a break </b></p>
+  <p>Café <em>naïve 😀 smile</em> end.</p>
+  <i><p>One italic paragraph.</p><p>Another <b>one</b>.</p></i>
+  <p><span style="font-style: italic">Inline italic</span>, <span style="font-weight:700">inline bold</span>, <em>not <span style="font-style:normal">this</span></em>.</p>
+  <p>A <a href="#n1"><i>linked</i> word</a> and a <cite>cited title</cite>.</p>
+  <pre>  keep <i>this</i>   spacing</pre>
+</body></html>
+"""
+
+
+def styles_files() -> list[tuple[str, bytes]]:
+    items = """    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>"""
+    spine = """    <itemref idref="ch1"/>"""
+    return [
+        ("META-INF/container.xml", CONTAINER.encode()),
+        ("OEBPS/content.opf", reader_opf(items, spine).encode()),
+        ("OEBPS/text/ch1.xhtml", STYLES_CH1.encode()),
+    ]
+
+
+def styles_fb2() -> str:
+    return """<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>Styles</book-title>
+      <author><first-name>Ada</first-name><last-name>Example</last-name></author>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <section id="ch1">
+      <title><p>The <emphasis>North</emphasis></p><p><strong>Wind</strong></p></title>
+      <p>Plain <emphasis>italic</emphasis> and <strong>bold <emphasis>both</emphasis></strong>.</p>
+      <p>   <emphasis>  Leading   space </emphasis>   collapses   </p>
+      <p>A <style name="note">named style</style> and a <a l:href="#n1"><emphasis>link</emphasis></a>.</p>
+      <poem><stanza><v><emphasis>The tide</emphasis> comes in,</v><v>the tide <strong>goes out.</strong></v></stanza></poem>
+    </section>
+  </body>
+</FictionBook>
+"""
+
+
 def write_reader_fixtures() -> None:
     (HERE / "structure.fb2").write_text(structure_fb2(), encoding="utf-8")
     (HERE / "structure.mobi").write_bytes(
@@ -706,6 +758,8 @@ def write_reader_fixtures() -> None:
     write_epub_fixed(HERE / "structure.epub", structure_files())
     write_epub_fixed(HERE / "structure-ncx.epub", ncx_files())
     write_epub_fixed(HERE / "long.epub", long_files())
+    write_epub_fixed(HERE / "styles.epub", styles_files())
+    (HERE / "styles.fb2").write_text(styles_fb2(), encoding="utf-8")
 
 
 def main() -> None:

@@ -13,6 +13,8 @@
 #include "ReaderTextSlice.h"
 #include "ReaderTracker.h"
 
+#include "crypto/sha256.h"
+
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -223,6 +225,71 @@ void ExpectGolden(const char* fixture, const char* golden, const std::vector<std
 }
 
 }  // namespace
+
+namespace {
+
+std::string Sha256Hex16(const std::string& bytes) {
+  sherpa_onnx::crypto::Sha256Context ctx;
+  sherpa_onnx::crypto::sha256_init(&ctx);
+  sherpa_onnx::crypto::sha256_update(&ctx, reinterpret_cast<const uint8_t*>(bytes.data()),
+                                     bytes.size());
+  uint8_t digest[32];
+  sherpa_onnx::crypto::sha256_final(&ctx, digest);
+  static const char* kHex = "0123456789abcdef";
+  std::string out;
+  for (int i = 0; i < 8; ++i) {
+    out.push_back(kHex[digest[i] >> 4]);
+    out.push_back(kHex[digest[i] & 15]);
+  }
+  return out;
+}
+
+}  // namespace
+
+/**
+ * Text identity: the text buffer and every block's ID, type, level, textHash and
+ * UTF-16 range, hashed per book. Recorded before inline styles were extracted, so
+ * style runs provably leave the text, IDs, hashes and offsets untouched.
+ */
+TEST(ReaderDocument, TextIdentityGolden) {
+  const char* kBooks[] = {
+      "structure.epub", "structure-ncx.epub", "mixed.epub", "long.epub", "styles.epub",
+      "structure.fb2", "north-wind.fb2", "styles.fb2", "structure.mobi", "structure.azw3",
+      "tiny.mobi", "tiny.azw3", "fdst.azw3", "kf8-skel.azw3",
+      "../../../example/ios/sherpa_models/test_edocs/frankenstein.epub",
+  };
+  std::ostringstream got;
+  got << "# text identity, structure v" << kStructureVersion << ", textHash v" << kTextHashVersion
+      << ": book blocks textSha blocksSha\n";
+  for (const char* book : kBooks) {
+    auto entry = LoadEntry(book);
+    ReaderError err;
+    const std::string id = ReaderRegistry::Instance().Create(entry, "img_off_test", {}, "key", &err);
+    ASSERT_FALSE(id.empty()) << book << ": " << err.code << " " << err.message;
+    auto snap = ReaderRegistry::Instance().Snapshot(id);
+    std::ostringstream lines;
+    for (int i = 0; i < static_cast<int>(snap->blocks.size()); ++i) {
+      const auto& b = snap->blocks[i];
+      lines << b.id << ' ' << ReaderBlockTypeName(b.type) << ' ' << b.headingLevel << ' '
+            << b.textHash << ' ' << b.utf16Start << ' ' << b.utf16End << ' '
+            << snap->BlockLength(i) << ' ' << snap->BlockText(i) << '\n';
+    }
+    std::string name = book;
+    name = name.substr(name.rfind('/') + 1);
+    got << name << ' ' << snap->blocks.size() << ' ' << Sha256Hex16(entry->text) << ' '
+        << Sha256Hex16(lines.str()) << '\n';
+    ReaderRegistry::Instance().Release(id);
+  }
+  const std::string path = RepoPath("test/fixtures/reader/text-identity.reader-v1.txt");
+  if (std::getenv("SHERPA_UPDATE_GOLDEN")) {
+    std::ofstream(path) << got.str();
+  }
+  std::ifstream f(path);
+  ASSERT_TRUE(f.good()) << "missing golden " << path << " (run with SHERPA_UPDATE_GOLDEN=1)";
+  std::stringstream want;
+  want << f.rdbuf();
+  EXPECT_EQ(got.str(), want.str());
+}
 
 namespace {
 
