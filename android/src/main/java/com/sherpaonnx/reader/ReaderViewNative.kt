@@ -50,6 +50,9 @@ internal object ReaderViewNative {
 
   @JvmStatic external fun nativeBlockText(handle: Long, index: Int): String?
 
+  /** Inline styles: (start, end, flags) per run, UTF-16 in the block text; flags 1 italic, 2 bold. */
+  @JvmStatic external fun nativeBlockStyles(handle: Long, index: Int): IntArray
+
   @JvmStatic external fun nativeBlockAlt(handle: Long, index: Int): String?
 
   @JvmStatic external fun nativeImageBufferId(handle: Long): String

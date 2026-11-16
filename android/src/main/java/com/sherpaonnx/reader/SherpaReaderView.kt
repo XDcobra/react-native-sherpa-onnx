@@ -16,6 +16,7 @@ import android.text.TextPaint
 import android.text.style.BackgroundColorSpan
 import android.text.style.CharacterStyle
 import android.text.style.ForegroundColorSpan
+import android.text.style.MetricAffectingSpan
 import android.text.style.UpdateAppearance
 import android.util.LruCache
 import android.util.TypedValue
@@ -72,6 +73,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   private data class Theme(
     val fontSizePx: Float,
     val typeface: Typeface,
+    /** Faces for inline styles, indexed by flags (1 italic, 2 bold, 3 both); [0] = [typeface]. */
+    val styledFaces: List<Typeface>,
     val lineHeight: Float,
     val paragraphSpacingPx: Int,
     val marginHorizontalPx: Int,
@@ -156,6 +159,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   private var imageBufferId = ""
   private var locale: Locale? = null
   private val textCache = LruCache<Int, String>(256)
+  private val styleCache = LruCache<Int, IntArray>(256)
 
   private var rebuildPosted = false
   private var initialApplied = false
@@ -654,10 +658,24 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     return out
   }
 
-  /** Text with highlight spans (colors default to the theme accent). */
-  private fun styled(text: String, spans: List<Span>?, t: Theme): CharSequence {
-    if (spans.isNullOrEmpty()) return text
+  /**
+   * Text with inline styles and highlight spans (colors default to the theme
+   * accent). Styles are part of every bind, so the measured height includes them.
+   */
+  private fun styled(text: String, styles: IntArray, heading: Boolean, spans: List<Span>?, t: Theme): CharSequence {
+    if (spans.isNullOrEmpty() && styles.isEmpty()) return text
     val out = SpannableString(text)
+    var k = 0
+    while (k + 2 < styles.size) {
+      val start = styles[k].coerceIn(0, text.length)
+      val end = styles[k + 1].coerceIn(start, text.length)
+      // Headings are bold already: italic there means bold italic.
+      val flags = (styles[k + 2] and 3) or (if (heading) 2 else 0)
+      k += 3
+      if (end <= start || flags == 0) continue
+      out.setSpan(ReaderFaceSpan(t.styledFaces[flags], flags), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+    if (spans.isNullOrEmpty()) return out
     for (sp in spans) {
       val start = sp.start.coerceIn(0, text.length)
       val end = sp.end.coerceIn(start, text.length)
@@ -699,9 +717,30 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       } else {
         Typeface.SERIF
       }
+    // Inline styles: the family's italic / bold faces (custom fonts through
+    // ReactFontManager, e.g. assets/fonts/<family>_italic.ttf); a family without
+    // the face falls back to a synthetic one (see ReaderFaceSpan).
+    val styledFaces =
+      List(4) { flags ->
+        val style =
+          when (flags) {
+            1 -> Typeface.ITALIC
+            2 -> Typeface.BOLD
+            3 -> Typeface.BOLD_ITALIC
+            else -> Typeface.NORMAL
+          }
+        if (style == Typeface.NORMAL) {
+          typeface
+        } else if (fontFamily.isNotEmpty()) {
+          ReactFontManager.getInstance().getTypeface(fontFamily, style, reactContext.assets)
+        } else {
+          Typeface.create(typeface, style)
+        }
+      }
     return Theme(
       fontSizePx = sizePx,
       typeface = typeface,
+      styledFaces = styledFaces,
       lineHeight = if (lineHeight > 0) lineHeight else 1.5f,
       paragraphSpacingPx = ((if (paragraphSpacing >= 0) paragraphSpacing else 0.75f) * sizePx).toInt(),
       marginHorizontalPx = PixelUtil.toPixelFromDIP(marginHorizontal).toInt(),
@@ -864,6 +903,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     }
     releaseSnapshot()
     textCache.evictAll()
+    styleCache.evictAll()
     snapshot = next
     if (snapshot == 0L) {
       blockTable = IntArray(0)
@@ -1019,6 +1059,13 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
   private fun blockText(i: Int): String =
     textCache.get(i) ?: (ReaderViewNative.nativeBlockText(snapshot, i) ?: "").also { textCache.put(i, it) }
+
+  private fun blockStyles(i: Int): IntArray =
+    styleCache.get(i) ?: ReaderViewNative.nativeBlockStyles(snapshot, i).also { styleCache.put(i, it) }
+
+  /** Block text with its inline styles and current highlights. */
+  private fun styledBlock(i: Int, t: Theme): CharSequence =
+    styled(blockText(i), blockStyles(i), blockType(i) == TYPE_HEADING, spansByBlock[i], t)
 
   /** Runs after a RecyclerView layout pass: finishes pending scrolls, then samples. */
   private val afterLayout =
@@ -1249,6 +1296,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     removeCallbacks(afterLayout)
     releaseSnapshot()
     textCache.evictAll()
+    styleCache.evictAll()
     blockTable = IntArray(0)
     sectionTable = IntArray(0)
   }
@@ -1480,8 +1528,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int, payloads: MutableList<Any>) {
       val r = rows.getOrNull(position)
       if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_HIGHLIGHT } && holder is TextHolder && r is Row.Block) {
-        // Highlight-only change: same text and fonts, so the row height stays.
-        holder.text.text = styled(blockText(r.index), spansByBlock[r.index], theme)
+        // Highlight-only change: same text, styles and fonts, so the row height stays.
+        holder.text.text = styledBlock(r.index, theme)
         return
       }
       if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_HIGHLIGHT } && holder is ImageHolder && r is Row.Block) {
@@ -1532,7 +1580,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
           if (t.justify && level == 0) Layout.JUSTIFICATION_MODE_INTER_WORD else Layout.JUSTIFICATION_MODE_NONE
       }
       tv.textLocale = locale ?: Locale.getDefault()
-      tv.text = styled(blockText(index), spansByBlock[index], t)
+      tv.text = styledBlock(index, t)
       ViewCompat.setAccessibilityHeading(tv, level > 0)
     }
 
@@ -1587,6 +1635,25 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   }
 
   /** Underline with its own color and thickness (API 29+; older versions use the text color). */
+  /**
+   * An inline italic / bold run: the family's face for [flags] (1 italic, 2 bold).
+   * What the face still lacks is synthesized like StyleSpan does (fake bold,
+   * skew), which keeps a family without italic or bold files readable.
+   */
+  private class ReaderFaceSpan(private val face: Typeface, private val flags: Int) : MetricAffectingSpan() {
+    override fun updateDrawState(tp: TextPaint) = apply(tp)
+
+    override fun updateMeasureState(tp: TextPaint) = apply(tp)
+
+    private fun apply(tp: TextPaint) {
+      tp.typeface = face
+      val want = (if (flags and 1 != 0) Typeface.ITALIC else 0) or (if (flags and 2 != 0) Typeface.BOLD else 0)
+      val fake = want and face.style.inv()
+      if (fake and Typeface.BOLD != 0) tp.isFakeBoldText = true
+      if (fake and Typeface.ITALIC != 0) tp.textSkewX = -0.25f
+    }
+  }
+
   private class UnderlineColorSpan(private val color: Int, private val thickness: Float) :
     CharacterStyle(), UpdateAppearance {
     override fun updateDrawState(tp: TextPaint) {

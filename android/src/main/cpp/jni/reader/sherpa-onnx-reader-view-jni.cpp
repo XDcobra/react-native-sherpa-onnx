@@ -179,6 +179,20 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeBlockText(JNIEnv* env, jclass,
   return sherpaonnx::NewJStringUtf8(env, s->BlockText(i));
 }
 
+/** Inline styles of a block: (start, end, flags) per run, UTF-16 in the block text; flags 1 italic, 2 bold. */
+JNIEXPORT jintArray JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativeBlockStyles(JNIEnv* env, jclass, jlong h, jint i) {
+  const auto* s = Snap(h);
+  std::vector<jint> out;
+  if (!s || i < 0 || i >= static_cast<jint>(s->blocks.size())) return Ints(env, out);
+  const auto& styles = s->blocks[i].styles;
+  out.reserve(styles.size() * 3);
+  for (const auto& r : styles) {
+    out.insert(out.end(), {r.start, r.end, static_cast<jint>(r.flags)});
+  }
+  return Ints(env, out);
+}
+
 /** Alt text, or null when the image has none (decorative). */
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_reader_ReaderViewNative_nativeBlockAlt(JNIEnv* env, jclass, jlong h, jint i) {
