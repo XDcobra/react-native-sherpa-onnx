@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+  <description>
+    <title-info>
+      <book-title>Styles</book-title>
+      <author><first-name>Ada</first-name><last-name>Example</last-name></author>
+      <lang>en</lang>
+    </title-info>
+  </description>
+  <body>
+    <section id="ch1">
+      <title><p>The <emphasis>North</emphasis></p><p><strong>Wind</strong></p></title>
+      <p>Plain <emphasis>italic</emphasis> and <strong>bold <emphasis>both</emphasis></strong>.</p>
+      <p>   <emphasis>  Leading   space </emphasis>   collapses   </p>
+      <p>A <style name="note">named style</style> and a <a l:href="#n1"><emphasis>link</emphasis></a>.</p>
+      <poem><stanza><v><emphasis>The tide</emphasis> comes in,</v><v>the tide <strong>goes out.</strong></v></stanza></poem>
+    </section>
+  </body>
+</FictionBook>

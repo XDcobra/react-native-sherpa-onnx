@@ -11,6 +11,8 @@ export const TEST_EDOC_FILES = {
   STRUCTURE_EPUB: 'test_edocs/structure.epub',
   LONG_EPUB: 'test_edocs/long.epub',
   FRANKENSTEIN_EPUB: 'test_edocs/frankenstein.epub',
+  STYLES_EPUB: 'test_edocs/styles.epub',
+  STYLES_FB2: 'test_edocs/styles.fb2',
 } as const;
 
 export type DocumentExtractKind = 'document' | 'pdf';
@@ -181,6 +183,23 @@ export const READER_FILES: DocumentFileInfo[] = [
     name: 'Structure — EPUB',
     description:
       'Headings, inline image, separator, preformatted text and an image page',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.STYLES_EPUB,
+    name: 'Inline styles — EPUB',
+    description:
+      'Italic and bold: nested, across line breaks and blocks, inline style, links',
+    extract: 'document',
+    expect: 'text',
+    section: 'Structure samples',
+  },
+  {
+    id: TEST_EDOC_FILES.STYLES_FB2,
+    name: 'Inline styles — FB2',
+    description: 'emphasis and strong in titles, paragraphs and verses',
     extract: 'document',
     expect: 'text',
     section: 'Structure samples',
