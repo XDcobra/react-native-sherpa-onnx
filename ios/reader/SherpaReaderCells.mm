@@ -5,7 +5,22 @@
 @implementation SherpaReaderHighlightSpan
 @end
 
-@implementation SherpaReaderTheme
+@implementation SherpaReaderStyleSpan
+@end
+
+/** A row font with italic / bold, and what has to be synthesized when the family lacks the face. */
+@interface SherpaReaderStyledFont : NSObject
+@property (nonatomic, strong) UIFont *font;
+@property (nonatomic, assign) BOOL obliqueFallback;
+@property (nonatomic, assign) BOOL strokeFallback;
+@end
+
+@implementation SherpaReaderStyledFont
+@end
+
+@implementation SherpaReaderTheme {
+  NSMutableDictionary<NSNumber *, SherpaReaderStyledFont *> *_styledFonts;
+}
 
 - (UIFont *)fontForHeadingLevel:(NSInteger)level {
   if (level <= 0) return self.bodyFont;
@@ -14,6 +29,49 @@
   UIFontDescriptor *d =
       [self.bodyFont.fontDescriptor fontDescriptorWithSymbolicTraits:UIFontDescriptorTraitBold];
   return d ? [UIFont fontWithDescriptor:d size:size] : [UIFont boldSystemFontOfSize:size];
+}
+
+- (SherpaReaderStyledFont *)styledFontForLevel:(NSInteger)level italic:(BOOL)italic bold:(BOOL)bold {
+  NSNumber *key = @(level * 4 + (italic ? 1 : 0) + (bold ? 2 : 0));
+  if (!_styledFonts) _styledFonts = [NSMutableDictionary new];
+  SherpaReaderStyledFont *cached = _styledFonts[key];
+  if (cached) return cached;
+  UIFont *base = [self fontForHeadingLevel:level];
+  UIFontDescriptorSymbolicTraits want = base.fontDescriptor.symbolicTraits;
+  if (italic) want |= UIFontDescriptorTraitItalic;
+  if (bold) want |= UIFontDescriptorTraitBold;
+  UIFont *font = base;
+  UIFontDescriptor *d = [base.fontDescriptor fontDescriptorWithSymbolicTraits:want];
+  if (d) {
+    UIFont *f = [UIFont fontWithDescriptor:d size:base.pointSize];
+    if (f) font = f;
+  }
+  // Custom families: the descriptor may fall back to another family or face. Keep
+  // the row's family and fake what it does not have.
+  if (![font.familyName isEqualToString:base.familyName]) font = base;
+  const UIFontDescriptorSymbolicTraits got = font.fontDescriptor.symbolicTraits;
+  SherpaReaderStyledFont *out = [SherpaReaderStyledFont new];
+  out.font = font;
+  out.obliqueFallback = italic && !(got & UIFontDescriptorTraitItalic);
+  out.strokeFallback = bold && !(got & UIFontDescriptorTraitBold);
+  _styledFonts[key] = out;
+  return out;
+}
+
+- (void)applyStyles:(NSArray<SherpaReaderStyleSpan *> *)styles
+              level:(NSInteger)level
+                 to:(NSMutableAttributedString *)s {
+  const NSUInteger len = s.length;
+  for (SherpaReaderStyleSpan *st in styles) {
+    if (st.range.location >= len || (!st.italic && !st.bold)) continue;
+    const NSRange r = NSMakeRange(st.range.location, MIN(st.range.length, len - st.range.location));
+    if (r.length == 0) continue;
+    SherpaReaderStyledFont *f = [self styledFontForLevel:level italic:st.italic bold:st.bold];
+    [s addAttribute:NSFontAttributeName value:f.font range:r];
+    if (f.obliqueFallback) [s addAttribute:NSObliquenessAttributeName value:@0.2 range:r];
+    // Negative stroke width = fill and stroke: a heavier glyph with the same advance.
+    if (f.strokeFallback) [s addAttribute:NSStrokeWidthAttributeName value:@(-3.0) range:r];
+  }
 }
 
 - (void)applyHighlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights
@@ -43,6 +101,13 @@
 - (NSAttributedString *)attributedText:(NSString *)text
                           headingLevel:(NSInteger)level
                             highlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights {
+  return [self attributedText:text headingLevel:level styles:nil highlights:highlights];
+}
+
+- (NSAttributedString *)attributedText:(NSString *)text
+                          headingLevel:(NSInteger)level
+                                styles:(NSArray<SherpaReaderStyleSpan *> *)styles
+                            highlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights {
   NSMutableParagraphStyle *p = [NSMutableParagraphStyle new];
   p.lineHeightMultiple = self.lineHeightMultiple;
   p.alignment = level > 0 ? NSTextAlignmentNatural : self.alignment;
@@ -55,10 +120,11 @@
   if (self.language.length > 0) {
     attrs[NSLanguageIdentifierAttributeName] = self.language;
   }
-  if (highlights.count == 0) {
+  if (highlights.count == 0 && styles.count == 0) {
     return [[NSAttributedString alloc] initWithString:text attributes:attrs];
   }
   NSMutableAttributedString *s = [[NSMutableAttributedString alloc] initWithString:text attributes:attrs];
+  if (styles.count > 0) [self applyStyles:styles level:level to:s];
   [self applyHighlights:highlights to:s];
   return s;
 }
@@ -79,6 +145,7 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   NSArray<NSLayoutConstraint *> *_pins;
   NSString *_text;
   NSInteger _level;
+  NSArray<SherpaReaderStyleSpan *> *_styles;
 }
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
@@ -111,8 +178,17 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
              headingLevel:(NSInteger)level
                highlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights
                     theme:(SherpaReaderTheme *)theme {
+  [self configureWithText:text headingLevel:level styles:nil highlights:highlights theme:theme];
+}
+
+- (void)configureWithText:(NSString *)text
+             headingLevel:(NSInteger)level
+                   styles:(NSArray<SherpaReaderStyleSpan *> *)styles
+               highlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights
+                    theme:(SherpaReaderTheme *)theme {
   _text = [text copy];
   _level = level;
+  _styles = [styles copy];
   const CGFloat top = level > 0 ? theme.paragraphSpacing : 0;
   UIEdgeInsets insets = UIEdgeInsetsMake(top, theme.marginHorizontal, theme.paragraphSpacing,
                                          theme.marginHorizontal);
@@ -125,7 +201,10 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
     [_textView.bottomAnchor constraintEqualToAnchor:self.contentView.bottomAnchor constant:-insets.bottom],
   ];
   [NSLayoutConstraint activateConstraints:_pins];
-  _textView.attributedText = [theme attributedText:text headingLevel:level highlights:highlights];
+  _textView.attributedText = [theme attributedText:text
+                                       headingLevel:level
+                                             styles:_styles
+                                         highlights:highlights];
   self.accessibilityLabel = text;
   self.accessibilityTraits = level > 0 ? UIAccessibilityTraitHeader : UIAccessibilityTraitStaticText;
 }
@@ -133,9 +212,12 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 - (void)updateHighlights:(NSArray<SherpaReaderHighlightSpan *> *)highlights
                    theme:(SherpaReaderTheme *)theme {
   if (_text == nil) return;
-  // Same string and fonts: only color / underline attributes change, so the
-  // text layout (and the row height) stays the same.
-  _textView.attributedText = [theme attributedText:_text headingLevel:_level highlights:highlights];
+  // Same string, styles and fonts: only color / underline attributes change, so
+  // the text layout (and the row height) stays the same.
+  _textView.attributedText = [theme attributedText:_text
+                                      headingLevel:_level
+                                            styles:_styles
+                                        highlights:highlights];
 }
 
 - (NSInteger)characterOffsetAtPoint:(CGPoint)point {

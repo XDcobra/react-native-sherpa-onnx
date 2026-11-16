@@ -18,6 +18,13 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
 @property (nonatomic, strong, nullable) UIColor *color;
 @end
 
+/** Inline style inside one block: UTF-16 range of the block text, italic and / or bold. */
+@interface SherpaReaderStyleSpan : NSObject
+@property (nonatomic, assign) NSRange range;
+@property (nonatomic, assign) BOOL italic;
+@property (nonatomic, assign) BOOL bold;
+@end
+
 /** Resolved typography and colors of a ReaderView (from the `theme` props). */
 @interface SherpaReaderTheme : NSObject
 @property (nonatomic, strong) UIFont *bodyFont;
@@ -35,6 +42,15 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
 - (NSAttributedString *)attributedText:(NSString *)text
                           headingLevel:(NSInteger)level
                             highlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights;
+/**
+ * Text with inline styles and highlights. Styles pick the italic / bold face of
+ * the row font; a family without that face gets a synthetic one (oblique /
+ * stroke) that keeps the glyph advances, so the layout matches the real face.
+ */
+- (NSAttributedString *)attributedText:(NSString *)text
+                          headingLevel:(NSInteger)level
+                                styles:(nullable NSArray<SherpaReaderStyleSpan *> *)styles
+                            highlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights;
 @end
 
 /** Paragraph / heading row: non-editable TextKit 1 text view (offset ↔ point). */
@@ -44,7 +60,13 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
              headingLevel:(NSInteger)level
                highlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights
                     theme:(SherpaReaderTheme *)theme;
-/** Re-applies highlights only (same text and theme; the layout does not change). */
+/** Inline styles are part of the first layout, so the measured row height includes them. */
+- (void)configureWithText:(NSString *)text
+             headingLevel:(NSInteger)level
+                   styles:(nullable NSArray<SherpaReaderStyleSpan *> *)styles
+               highlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights
+                    theme:(SherpaReaderTheme *)theme;
+/** Re-applies highlights only (same text, styles and theme; the layout does not change). */
 - (void)updateHighlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights
                    theme:(SherpaReaderTheme *)theme;
 /** UTF-16 offset of the character at `point` (cell coordinates). */

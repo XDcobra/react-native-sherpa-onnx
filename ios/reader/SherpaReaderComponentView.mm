@@ -100,6 +100,22 @@ NSString *ToNS(const std::string &s)
   return [NSString stringWithUTF8String:s.c_str()] ?: @"";
 }
 
+/** Inline italic / bold of a block (nil when it has none). */
+NSArray<SherpaReaderStyleSpan *> *StyleSpans(const rdr::ReaderBlock &b)
+{
+  if (b.styles.empty()) return nil;
+  NSMutableArray<SherpaReaderStyleSpan *> *out = [NSMutableArray arrayWithCapacity:b.styles.size()];
+  for (const TxtStyleRun &r : b.styles) {
+    if (r.end <= r.start) continue;
+    SherpaReaderStyleSpan *span = [SherpaReaderStyleSpan new];
+    span.range = NSMakeRange((NSUInteger)r.start, (NSUInteger)(r.end - r.start));
+    span.italic = (r.flags & kTxtStyleItalic) != 0;
+    span.bold = (r.flags & kTxtStyleBold) != 0;
+    [out addObject:span];
+  }
+  return out;
+}
+
 }  // namespace
 
 static NSString *const kTextCellId = @"SherpaReaderTextCell";
@@ -907,6 +923,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
                                                                        forIndexPath:indexPath];
   [cell configureWithText:ToNS(_snap->BlockText(row.blockIndex))
              headingLevel:(b.type == rdr::ReaderBlockType::Heading ? b.headingLevel : 0)
+                   styles:StyleSpans(b)
                highlights:[self spansForBlock:row.blockIndex]
                     theme:_theme];
   return cell;
