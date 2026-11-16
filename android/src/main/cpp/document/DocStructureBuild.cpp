@@ -71,6 +71,7 @@ void AppendStructureSection(ExtractTextResult* r, TxtStructure* st,
       b.type = item.kind == HtmlBlockKind::Heading ? TxtBlockType::Heading
                                                    : TxtBlockType::Paragraph;
       b.headingLevel = item.level;
+      b.styles = item.styles;
       b.utf16Start = start;
       b.utf16End = start + len;
       if (!has_text) sec.utf16Start = start;

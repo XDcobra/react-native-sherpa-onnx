@@ -55,6 +55,9 @@ std::string AttrVal(lxb_dom_element_t* el, const char* name) {
 struct WalkState {
   HtmlExtract* out = nullptr;
   std::string cur;  // text of the block being collected
+  // Style flags (TxtStyleFlags) of each byte of `cur`, for the block's style runs.
+  std::vector<uint8_t> cur_flags;
+  uint8_t style = 0;  // flags of the text being walked
   int block_depth = 0;  // open block elements
   int pre_depth = 0;
   // Kind of the innermost open block (paragraph at body level).
@@ -67,6 +70,7 @@ void AppendText(WalkState* st, const char* data, size_t len) {
   if (!data || len == 0) return;
   if (st->pre_depth > 0) {
     st->cur.append(data, len);
+    st->cur_flags.insert(st->cur_flags.end(), len, st->style);
     return;
   }
   for (size_t i = 0; i < len; ++i) {
@@ -79,14 +83,19 @@ void AppendText(WalkState* st, const char* data, size_t len) {
     } else {
       st->cur.push_back(c);
     }
+    st->cur_flags.push_back(st->style);
   }
 }
 
 void AppendBreak(WalkState* st) {
   if (st->pre_depth == 0) {
-    while (!st->cur.empty() && st->cur.back() == ' ') st->cur.pop_back();
+    while (!st->cur.empty() && st->cur.back() == ' ') {
+      st->cur.pop_back();
+      st->cur_flags.pop_back();
+    }
   }
   st->cur.push_back('\n');
+  st->cur_flags.push_back(st->style);
 }
 
 /** Removes spaces next to line breaks (collapsed text only). */
@@ -104,13 +113,50 @@ std::string TidyLines(const std::string& s) {
   return out;
 }
 
+bool IsTrimWs(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+/**
+ * TrimWs + TidyLines over `cur` that keeps each byte's style flags, so style
+ * runs are computed on the final block string.
+ */
+void TrimAndTidyFlags(const std::string& cur, const std::vector<uint8_t>& cur_flags, bool pre,
+                      std::string* text, std::vector<uint8_t>* flags) {
+  size_t a = 0;
+  size_t b = cur.size();
+  while (a < b && IsTrimWs(cur[a])) ++a;
+  while (b > a && IsTrimWs(cur[b - 1])) --b;
+  text->clear();
+  flags->clear();
+  text->reserve(b - a);
+  flags->reserve(b - a);
+  for (size_t i = a; i < b; ++i) {
+    const char c = cur[i];
+    if (!pre && c == ' ' && ((i + 1 < b && cur[i + 1] == '\n') ||
+                             (!text->empty() && text->back() == '\n'))) {
+      continue;
+    }
+    text->push_back(c);
+    flags->push_back(cur_flags[i]);
+  }
+}
+
 void FlushBlock(WalkState* st, const HtmlBlock& kind, bool pre) {
   std::string t = TrimWs(st->cur);
-  st->cur.clear();
   if (!pre) t = TidyLines(t);
+  std::vector<TxtStyleRun> styles;
+  if (!t.empty() && st->cur_flags.size() == st->cur.size()) {
+    std::string styled;
+    std::vector<uint8_t> flags;
+    TrimAndTidyFlags(st->cur, st->cur_flags, pre, &styled, &flags);
+    // The text stays exactly what TrimWs / TidyLines give; styles only when they line up.
+    if (styled == t) styles = StyleRunsFromByteFlags(t, flags);
+  }
+  st->cur.clear();
+  st->cur_flags.clear();
   if (!t.empty()) {
     HtmlBlock b = kind;
     b.text = t;
+    b.styles = std::move(styles);
     st->out->blocks.push_back(t);
     st->out->items.push_back(std::move(b));
   }
@@ -159,6 +205,65 @@ HtmlBlock ImageItem(lxb_dom_element_t* el, bool svg) {
     }
   }
   return b;
+}
+
+/** Lowercase copy without ASCII whitespace ("Font-Style : Italic" → "font-style:italic"). */
+std::string CompactLower(const std::string& s) {
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
+    if (IsWs(c)) continue;
+    out.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c);
+  }
+  return out;
+}
+
+/** Value of a declaration in a compacted inline `style` (last one wins); "" if absent. */
+std::string CssValue(const std::string& css, const std::string& prop) {
+  std::string value;
+  size_t pos = 0;
+  while ((pos = css.find(prop + ":", pos)) != std::string::npos) {
+    const bool start = pos == 0 || css[pos - 1] == ';' || css[pos - 1] == '{';
+    const size_t v = pos + prop.size() + 1;
+    if (start) {
+      const size_t e = css.find_first_of(";!", v);
+      value = css.substr(v, e == std::string::npos ? std::string::npos : e - v);
+    }
+    pos = v;
+  }
+  return value;
+}
+
+/**
+ * Style flags inside an element: em / i / cite / dfn / var add italic, strong / b
+ * add bold, and an inline `style` with font-style / font-weight sets or clears
+ * them. Stylesheets and classes are not read.
+ */
+uint8_t ElementStyle(lxb_dom_element_t* el, lxb_tag_id_t id, uint8_t parent) {
+  uint8_t f = parent;
+  if (id == LXB_TAG_EM || id == LXB_TAG_I || id == LXB_TAG_CITE || id == LXB_TAG_DFN ||
+      id == LXB_TAG_VAR) {
+    f |= kTxtStyleItalic;
+  } else if (id == LXB_TAG_STRONG || id == LXB_TAG_B) {
+    f |= kTxtStyleBold;
+  }
+  const std::string css = CompactLower(AttrVal(el, "style"));
+  if (css.empty()) return f;
+  const std::string fs = CssValue(css, "font-style");
+  if (fs == "italic" || fs == "oblique" || fs.rfind("oblique", 0) == 0) {
+    f |= kTxtStyleItalic;
+  } else if (fs == "normal") {
+    f &= static_cast<uint8_t>(~kTxtStyleItalic);
+  }
+  const std::string fw = CssValue(css, "font-weight");
+  if (fw == "bold" || fw == "bolder" || fw == "600" || fw == "700" || fw == "800" ||
+      fw == "900") {
+    f |= kTxtStyleBold;
+  } else if (fw == "normal" || fw == "lighter" || fw == "100" || fw == "200" || fw == "300" ||
+             fw == "400" || fw == "500") {
+    f &= static_cast<uint8_t>(~kTxtStyleBold);
+  }
+  return f;
 }
 
 void Walk(lxb_dom_node_t* node, WalkState* st, bool skipping) {
@@ -215,7 +320,10 @@ void Walk(lxb_dom_node_t* node, WalkState* st, bool skipping) {
       if (pre) ++st->pre_depth;
     }
     if (n->first_child) {
+      const uint8_t outer = st->style;
+      st->style = ElementStyle(el, id, outer);
       Walk(n->first_child, st, false);
+      st->style = outer;
     }
     if (block) {
       FlushBlock(st, CurrentKind(*st), st->pre_depth > 0);

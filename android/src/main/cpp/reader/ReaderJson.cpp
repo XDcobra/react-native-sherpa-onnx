@@ -140,6 +140,18 @@ std::string BlocksJson(const ReaderSnapshot& snap, int start, int max, bool incl
     }
     if (includeText && (b.type == ReaderBlockType::Paragraph || b.type == ReaderBlockType::Heading)) {
       Field(&out, "text", snap.BlockText(i), &f);
+      if (!b.styles.empty()) {
+        out += ",\"styles\":[";
+        for (size_t k = 0; k < b.styles.size(); ++k) {
+          const TxtStyleRun& r = b.styles[k];
+          if (k > 0) out.push_back(',');
+          out += "{\"start\":" + std::to_string(r.start) + ",\"end\":" + std::to_string(r.end);
+          if (r.flags & kTxtStyleItalic) out += ",\"italic\":true";
+          if (r.flags & kTxtStyleBold) out += ",\"bold\":true";
+          out.push_back('}');
+        }
+        out.push_back(']');
+      }
     }
     out.push_back('}');
   }

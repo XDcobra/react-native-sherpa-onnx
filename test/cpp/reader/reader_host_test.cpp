@@ -293,6 +293,91 @@ TEST(ReaderDocument, TextIdentityGolden) {
 
 namespace {
 
+/** "text|[start,end)ib ..." per text block: the styled substrings with their flags. */
+std::string StyleDump(const char* fixture) {
+  const std::string id = CreateDoc(fixture);
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  std::ostringstream out;
+  for (int i = 0; i < static_cast<int>(snap->blocks.size()); ++i) {
+    const auto& b = snap->blocks[i];
+    if (b.type != ReaderBlockType::Paragraph && b.type != ReaderBlockType::Heading) continue;
+    out << b.id << ':';
+    const std::string text = snap->BlockText(i);
+    int last = 0;
+    for (const auto& r : b.styles) {
+      EXPECT_LE(last, r.start) << b.id << " runs sorted, not overlapping";
+      EXPECT_LT(r.start, r.end) << b.id;
+      EXPECT_LE(r.end, snap->BlockLength(i)) << b.id;
+      last = r.end;
+      out << " [" << txt_utf16_slice(text, r.start, r.end - r.start) << ']' << ((r.flags & kTxtStyleItalic) ? "i" : "") << ((r.flags & kTxtStyleBold) ? "b" : "");
+    }
+    out << '\n';
+  }
+  ReaderRegistry::Instance().Release(id);
+  return out.str();
+}
+
+}  // namespace
+
+// Nested and overlapping tags, a <br> inside a run, collapsed / trimmed whitespace,
+// a tag around whole blocks, inline style="", a styled link, cite and pre.
+TEST(ReaderStyles, EpubItalicBoldRunsOnTheFinalText) {
+  EXPECT_EQ(StyleDump("styles.epub"),
+            "s0.b0: [North]i\n"
+            "s0.b1: [italic]i [bold]b\n"
+            "s0.b2: [Italic with ]i [bold inside]ib [ it]i [bold ]b [and both]ib [ italic]i\n"
+            "s0.b3: [Leading space ]i\n"
+            "s0.b4: [First line\nsecond line]i [bold after a break]b\n"
+            "s0.b5: [na\xC3\xAFve \xF0\x9F\x98\x80 smile]i\n"
+            "s0.b6: [One italic paragraph.]i\n"
+            "s0.b7: [Another ]i [one]ib [.]i\n"
+            "s0.b8: [Inline italic]i [inline bold]b [not ]i\n"
+            "s0.b9: [linked]i [cited title]i\n"
+            "s0.b10: [this]i\n");
+  // UTF-16 offsets: "Caf\u00e9 " is 5 units, the emoji 2.
+  const std::string id = CreateDoc("styles.epub");
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  const ReaderBlock& cafe = snap->blocks[snap->BlockIndex("s0.b5")];
+  ASSERT_EQ(cafe.styles.size(), 1u);
+  EXPECT_EQ(cafe.styles[0].start, 5);
+  EXPECT_EQ(cafe.styles[0].end, 19);
+  // JSON: only with text, flags as booleans.
+  const int i = snap->BlockIndex("s0.b1");
+  EXPECT_NE(BlocksJson(*snap, i, 1, true).find(
+                "\"styles\":[{\"start\":6,\"end\":12,\"italic\":true},"
+                "{\"start\":17,\"end\":21,\"bold\":true}]"),
+            std::string::npos);
+  EXPECT_EQ(BlocksJson(*snap, i, 1, false).find("styles"), std::string::npos);
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderStyles, Fb2EmphasisAndStrong) {
+  EXPECT_EQ(StyleDump("styles.fb2"),
+            "s0.b0: [North]i [Wind]b\n"
+            "s0.b1: [italic]i [bold ]b [both]ib\n"
+            "s0.b2: [Leading space ]i\n"
+            "s0.b3: [link]i\n"
+            "s0.b4: [The tide]i [goes out.]b\n");
+}
+
+TEST(ReaderStyles, PlainFormatsAndAppBlocksHaveNone) {
+  const std::string id = CreateDoc("structure.epub");
+  ReaderAppSectionInput app;
+  app.after = "s0";
+  app.id = "app:guide";
+  app.blocks.push_back({"intro", ReaderBlockType::Paragraph, "Plain app text.", 0});
+  ReaderError err;
+  ASSERT_TRUE(ReaderRegistry::Instance().InsertSection(id, app, &err)) << err.message;
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  int styled = 0;
+  for (const auto& b : snap->blocks) styled += b.styles.empty() ? 0 : 1;
+  EXPECT_EQ(styled, 1);  // "<em>striking</em>" in s0.b2
+  EXPECT_TRUE(snap->blocks[snap->BlockIndex("app:guide.intro")].styles.empty());
+  ReaderRegistry::Instance().Release(id);
+}
+
+namespace {
+
 /** book.pdf, layout "paragraphs", as a populated text entry. */
 std::shared_ptr<TxtOfflineEntry> LoadPdfEntry() {
   sherpa_onnx::pdf::PdfSource src;

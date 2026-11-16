@@ -10,6 +10,7 @@
 
 #include "pugixml.hpp"
 
+#include <cstring>
 #include <fstream>
 #include <algorithm>
 #include <map>
@@ -184,6 +185,89 @@ std::string Collapse(const std::string& raw) {
   return TrimWs(out);
 }
 
+/** Text with one TxtStyleFlags byte per UTF-8 byte (inline styles of a block). */
+struct StyledText {
+  std::string text;
+  std::vector<uint8_t> flags;
+};
+
+/** Fb2InnerText that also records <emphasis> (italic) and <strong> (bold) per byte. */
+void Fb2InnerStyled(pugi::xml_node node, uint8_t style, StyledText* acc) {
+  for (pugi::xml_node ch : node.children()) {
+    if (ch.type() == pugi::node_pcdata || ch.type() == pugi::node_cdata) {
+      const size_t n = std::strlen(ch.value());
+      acc->text.append(ch.value(), n);
+      acc->flags.insert(acc->flags.end(), n, style);
+    } else {
+      if (XmlNameIs(ch, "image") || XmlNameIs(ch, "binary")) continue;
+      uint8_t inner = style;
+      if (XmlNameIs(ch, "emphasis")) inner |= kTxtStyleItalic;
+      if (XmlNameIs(ch, "strong")) inner |= kTxtStyleBold;
+      Fb2InnerStyled(ch, inner, acc);
+    }
+  }
+}
+
+/** Collapse() that keeps each byte's flags. */
+StyledText CollapseStyled(const StyledText& raw) {
+  StyledText out;
+  out.text.reserve(raw.text.size());
+  out.flags.reserve(raw.text.size());
+  for (size_t i = 0; i < raw.text.size(); ++i) {
+    const char c = raw.text[i];
+    const bool ws = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f';
+    if (ws) {
+      if (!out.text.empty() && out.text.back() != ' ') {
+        out.text.push_back(' ');
+        out.flags.push_back(raw.flags[i]);
+      }
+    } else {
+      out.text.push_back(c);
+      out.flags.push_back(raw.flags[i]);
+    }
+  }
+  // TrimWs: space, tab, newline, carriage return at both ends.
+  auto trim = [](char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; };
+  size_t a = 0;
+  size_t b = out.text.size();
+  while (a < b && trim(out.text[a])) ++a;
+  while (b > a && trim(out.text[b - 1])) --b;
+  out.text = out.text.substr(a, b - a);
+  out.flags = std::vector<uint8_t>(out.flags.begin() + static_cast<std::ptrdiff_t>(a),
+                                   out.flags.begin() + static_cast<std::ptrdiff_t>(b));
+  return out;
+}
+
+/**
+ * Collapsed text of an element with its flags. The text is always
+ * Collapse(Fb2InnerText(node)); the flags are dropped if they do not line up.
+ */
+StyledText Fb2BlockText(pugi::xml_node node) {
+  StyledText raw;
+  Fb2InnerStyled(node, 0, &raw);
+  StyledText out = CollapseStyled(raw);
+  const std::string plain = Collapse(Fb2InnerText(node));
+  if (out.text != plain) {
+    out.text = plain;
+    out.flags.clear();
+  }
+  return out;
+}
+
+/** Appends `line` to `out`, "\n" between lines (unstyled). */
+void AppendLine(StyledText* out, const StyledText& line) {
+  if (!out->text.empty()) {
+    out->text += "\n";
+    out->flags.push_back(0);
+  }
+  out->text += line.text;
+  if (line.flags.size() == line.text.size()) {
+    out->flags.insert(out->flags.end(), line.flags.begin(), line.flags.end());
+  } else {
+    out->flags.insert(out->flags.end(), line.text.size(), 0);
+  }
+}
+
 HtmlBlock Fb2Image(pugi::xml_node img) {
   HtmlBlock b;
   b.kind = HtmlBlockKind::Image;
@@ -197,36 +281,36 @@ HtmlBlock Fb2Image(pugi::xml_node img) {
 }
 
 void PushText(std::vector<HtmlBlock>* items, HtmlBlockKind kind, int level,
-              const std::string& text) {
-  if (text.empty()) return;
+              const StyledText& text) {
+  if (text.text.empty()) return;
   HtmlBlock b;
   b.kind = kind;
   b.level = kind == HtmlBlockKind::Heading ? std::max(1, std::min(6, level)) : 0;
-  b.text = text;
+  b.text = text.text;
+  b.styles = StyleRunsFromByteFlags(text.text, text.flags);
   items->push_back(std::move(b));
 }
 
 /** A paragraph-like element plus the inline images it holds (after it). */
 void PushParagraph(std::vector<HtmlBlock>* items, pugi::xml_node p) {
-  PushText(items, HtmlBlockKind::Paragraph, 0, Collapse(Fb2InnerText(p)));
+  PushText(items, HtmlBlockKind::Paragraph, 0, Fb2BlockText(p));
   for (pugi::xpath_node img : p.select_nodes(".//*[local-name()='image']")) {
     items->push_back(Fb2Image(img.node()));
   }
 }
 
 /** Lines of a <title> / stanza title (<p> children, else its own text) joined by "\n". */
-std::string TitleText(pugi::xml_node title) {
-  std::string out;
+StyledText TitleText(pugi::xml_node title) {
+  StyledText out;
   bool any_p = false;
   for (pugi::xml_node p : title.children()) {
     if (!XmlNameIs(p, "p")) continue;
     any_p = true;
-    const std::string line = Collapse(Fb2InnerText(p));
-    if (line.empty()) continue;
-    if (!out.empty()) out += "\n";
-    out += line;
+    const StyledText line = Fb2BlockText(p);
+    if (line.text.empty()) continue;
+    AppendLine(&out, line);
   }
-  return any_p ? out : Collapse(Fb2InnerText(title));
+  return any_p ? out : Fb2BlockText(title);
 }
 
 void WalkFb2(pugi::xml_node container, int depth, bool intro, std::vector<HtmlBlock>* items);
@@ -238,15 +322,14 @@ void WalkPoem(pugi::xml_node poem, int depth, std::vector<HtmlBlock>* items) {
     } else if (XmlNameIs(ch, "epigraph")) {
       WalkFb2(ch, depth, false, items);
     } else if (XmlNameIs(ch, "stanza")) {
-      std::string lines;
+      StyledText lines;
       for (pugi::xml_node v : ch.children()) {
         if (XmlNameIs(v, "title") || XmlNameIs(v, "subtitle")) {
           PushText(items, HtmlBlockKind::Heading, depth + 2, TitleText(v));
         } else if (XmlNameIs(v, "v")) {
-          const std::string line = Collapse(Fb2InnerText(v));
-          if (line.empty()) continue;
-          if (!lines.empty()) lines += "\n";
-          lines += line;
+          const StyledText line = Fb2BlockText(v);
+          if (line.text.empty()) continue;
+          AppendLine(&lines, line);
         }
       }
       PushText(items, HtmlBlockKind::Paragraph, 0, lines);
@@ -275,7 +358,7 @@ void WalkFb2(pugi::xml_node container, int depth, bool intro, std::vector<HtmlBl
       // Section titles are the book's contents (not the body's own title).
       if (!intro && items->size() > before) items->back().toc_level = std::max(1, std::min(6, depth));
     } else if (XmlNameIs(ch, "subtitle")) {
-      PushText(items, HtmlBlockKind::Heading, depth + 1, Collapse(Fb2InnerText(ch)));
+      PushText(items, HtmlBlockKind::Heading, depth + 1, Fb2BlockText(ch));
     } else if (XmlNameIs(ch, "p") || XmlNameIs(ch, "text-author") || XmlNameIs(ch, "date")) {
       PushParagraph(items, ch);
     } else if (XmlNameIs(ch, "empty-line")) {
@@ -390,7 +473,7 @@ ExtractTextResult ExtractFb2Text(const DocumentSource& src, ArchiveReader* zip,
     // FB2 titles are the book's contents.
     pugi::xml_node title = XmlChild(sec.node, "title");
     if (title) {
-      std::string t = TitleText(title);
+      std::string t = TitleText(title).text;
       std::replace(t.begin(), t.end(), '\n', ' ');
       in.toc_title = t;
     }

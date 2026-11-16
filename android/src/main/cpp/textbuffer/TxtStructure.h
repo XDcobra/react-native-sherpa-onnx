@@ -34,6 +34,24 @@ enum TxtBlockFlags : uint32_t {
   kTxtBlockFurniture = 1u << 0,  // running header / footer / page number
 };
 
+/** TxtStyleRun::flags. */
+enum TxtStyleFlags : uint32_t {
+  kTxtStyleItalic = 1u << 0,
+  kTxtStyleBold = 1u << 1,
+};
+
+/**
+ * An inline style over [start, end) UTF-16 units of a block's text (relative to
+ * the block, not the buffer). A layer next to the text: it never changes the
+ * text, its ranges, hashes or IDs. Runs are sorted, do not overlap and carry
+ * the combined flags (bold inside italic = one run with both).
+ */
+struct TxtStyleRun {
+  int start = 0;
+  int end = 0;
+  uint32_t flags = 0;  // TxtStyleFlags
+};
+
 struct TxtStructBlock {
   TxtBlockType type = TxtBlockType::Paragraph;
   int sectionIndex = 0;
@@ -50,6 +68,8 @@ struct TxtStructBlock {
   std::string imageHref;  // archive path of the image (images only)
   std::string alt;
   bool hasAlt = false;
+  /** Inline italic / bold of a text block (EPUB, MOBI, FB2); empty otherwise. */
+  std::vector<TxtStyleRun> styles;
 };
 
 struct TxtStructSection {

@@ -3,6 +3,9 @@
 #include "DocTypes.h"
 #include "DocUtf16.h"
 
+#include "../textbuffer/TxtStructure.h"
+
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -21,6 +24,8 @@ struct HtmlBlock {
   bool has_alt = false;
   /** > 0: this heading is an entry of the book's contents at that level (FB2 titles). */
   int toc_level = 0;
+  /** Inline italic / bold over `text` (UTF-16, relative to the block); text blocks only. */
+  std::vector<TxtStyleRun> styles;
 };
 
 struct HtmlExtract {
@@ -48,6 +53,43 @@ std::string FirstImageHref(const uint8_t* data, size_t size);
 
 /** First Kindle `recindex` on an img (1-based resource id as decimal string). */
 std::string FirstImageRecindex(const uint8_t* data, size_t size);
+
+/**
+ * Style runs of a final block string from one flag byte per UTF-8 byte
+ * (`flags.size() == text.size()`; a code point takes the flags of its lead
+ * byte). Adjacent units with the same flags merge; unstyled units make no run.
+ * Returns no runs when the sizes differ.
+ */
+inline std::vector<TxtStyleRun> StyleRunsFromByteFlags(const std::string& text,
+                                                       const std::vector<uint8_t>& flags) {
+  std::vector<TxtStyleRun> runs;
+  if (flags.size() != text.size()) return runs;
+  int u16 = 0;
+  for (size_t i = 0; i < text.size();) {
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+    size_t bytes = 1;
+    int units = 1;
+    if ((c >> 5) == 0x6) {
+      bytes = 2;
+    } else if ((c >> 4) == 0xE) {
+      bytes = 3;
+    } else if ((c >> 3) == 0x1E) {
+      bytes = 4;
+      units = 2;
+    }
+    const uint32_t f = flags[i];
+    if (f != 0) {
+      if (!runs.empty() && runs.back().end == u16 && runs.back().flags == f) {
+        runs.back().end += units;
+      } else {
+        runs.push_back({u16, u16 + units, f});
+      }
+    }
+    u16 += units;
+    i += bytes;
+  }
+  return runs;
+}
 
 inline bool HtmlIsImageOnly(const HtmlExtract& e) { return IsWsOnly(e.text); }
 

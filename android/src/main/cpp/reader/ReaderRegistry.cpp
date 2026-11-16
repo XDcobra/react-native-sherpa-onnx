@@ -299,6 +299,7 @@ std::string ReaderRegistry::Create(std::shared_ptr<TxtOfflineEntry> text,
       b.id = sec.id + ".b" + std::to_string(sb.blockIndex);
       b.type = static_cast<ReaderBlockType>(sb.type);
       b.headingLevel = sb.headingLevel;
+      b.styles = sb.styles;
       b.utf16Start = sb.utf16Start;
       b.utf16End = sb.utf16End;
       b.imageHref = sb.imageHref;

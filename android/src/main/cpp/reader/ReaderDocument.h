@@ -62,6 +62,12 @@ struct ReaderBlock {
   int textByteStart = 0;
   int textByteEnd = 0;
   int textUtf16Len = 0;
+  /**
+   * Inline italic / bold over the block text ([start, end) UTF-16 in the block,
+   * sorted, non-overlapping). File blocks of EPUB, MOBI and FB2 only; a layer
+   * next to the text that never changes it, its hash or its ranges.
+   */
+  std::vector<TxtStyleRun> styles;
   uint32_t flags = 0;  // ReaderBlockFlags
   /** Normalized rectangle on its page / image (x, y, w, h in 0..1), if known. */
   bool hasRect = false;
