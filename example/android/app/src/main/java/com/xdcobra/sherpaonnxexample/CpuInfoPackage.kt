@@ -1,4 +1,4 @@
-package com.xdcobra.voiceexample
+package com.xdcobra.sherpaonnxexample
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule
