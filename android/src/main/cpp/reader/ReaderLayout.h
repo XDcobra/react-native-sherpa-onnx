@@ -40,18 +40,25 @@ struct ReaderRow {
  */
 std::vector<ReaderRow> PlanRows(const ReaderSnapshot& snap, PageDisplay mode);
 
+/** When a block counts as visible. */
+enum class VisibleRule : int {
+  /** At least half of min(its height, the viewport) is on screen: reading progress. */
+  kRead = 0,
+  /** Any part (at least 1 px) is in the window: the visible range reported to the app. */
+  kShown = 1,
+};
+
 /**
- * Blocks of one row that count as visible, from the part of the row on screen
- * ([visibleTop, visibleBottom] in px from the row's top), its height and the
- * viewport height. A block counts when at least half of min(its height, the
- * viewport) is on screen. On a page image that stands for its text, text
- * blocks use their rectangle on the page; the page block counts while the
- * page's top is on screen or when no text block counts. Blocks without a
+ * Blocks of one row that count as visible, from the part of the row in the
+ * window ([visibleTop, visibleBottom] in px from the row's top), its height and
+ * the viewport height, by `rule`. On a page image that stands for its text,
+ * text blocks use their rectangle on the page; the page block counts while the
+ * page's top is in the window or when no text block counts. Blocks without a
  * rectangle count with the row. False when nothing counts.
  */
 bool RowVisibleBlocks(const ReaderSnapshot& snap, const ReaderRow& row, float visibleTop,
                       float visibleBottom, float rowHeight, float viewport, int* first,
-                      int* last);
+                      int* last, VisibleRule rule = VisibleRule::kRead);
 
 /** Index of the row that stands for `block` (shows or covers it), -1 if none. */
 int RowOfBlock(const std::vector<ReaderRow>& rows, int block);

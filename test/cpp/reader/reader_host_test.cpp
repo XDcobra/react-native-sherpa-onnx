@@ -577,6 +577,11 @@ TEST(ReaderLayout, VisibleBlocksOnAPageImageFollowTheirRectangles) {
   EXPECT_EQ(snap->blocks[first].id, "s2.b0");
   EXPECT_EQ(snap->blocks[last].id, "s2.b3");
   EXPECT_FALSE(RowVisibleBlocks(*snap, heading, 30, 40, 40, 800, &first, &last));
+  // The shown rule (visible range): any part counts, a sliver of the page too.
+  ASSERT_TRUE(RowVisibleBlocks(*snap, heading, 30, 40, 40, 800, &first, &last, VisibleRule::kShown));
+  EXPECT_EQ(snap->blocks[last].id, "s2.b3");
+  EXPECT_FALSE(RowVisibleBlocks(*snap, heading, 39.5f, 40, 40, 800, &first, &last, VisibleRule::kShown));
+  ASSERT_TRUE(RowVisibleBlocks(*snap, page3, 990, 1000, 1000, 400, &first, &last, VisibleRule::kShown));
   ReaderRegistry::Instance().Release(id);
 }
 
@@ -1072,6 +1077,31 @@ TEST(ReaderTracker, FrontierFromAppAndReadingBack) {
   ev = t.Sample(20, 24, ScrollPhase::Drag);  // reading back
   EXPECT_EQ(Count(ev, Kind::Furthest), 0);
   EXPECT_EQ(t.Frontier(), 33);
+}
+
+TEST(ReaderTracker, VisibleRangeReportsShownBlocksProgressUsesReadBlocks) {
+  ReaderTracker t({9}, 20);
+  // Blocks 2..6 at least half on screen; 1 (top) and 7 (bottom) only partly.
+  auto ev = t.Sample(2, 6, ScrollPhase::Layout, 1, 7);
+  ASSERT_TRUE(Find(ev, Kind::VisibleRange));
+  EXPECT_EQ(Find(ev, Kind::VisibleRange)->first, 1);
+  EXPECT_EQ(Find(ev, Kind::VisibleRange)->last, 7);
+  EXPECT_EQ(t.Frontier(), 6) << "a partly shown block is not read";
+  // Only the shown range changes: a visible-range event, no progress.
+  ev = t.Sample(2, 6, ScrollPhase::Drag, 2, 8);
+  ASSERT_TRUE(Find(ev, Kind::VisibleRange));
+  EXPECT_EQ(Find(ev, Kind::VisibleRange)->last, 8);
+  EXPECT_EQ(Count(ev, Kind::Furthest), 0);
+  EXPECT_EQ(Count(ev, Kind::SectionEnd), 0);
+  // The section's last block only peeks in: no section end until it is read.
+  ev = t.Sample(4, 8, ScrollPhase::Drag, 3, 9);
+  EXPECT_EQ(Count(ev, Kind::SectionEnd), 0);
+  ev = t.Sample(5, 9, ScrollPhase::Drag, 4, 10);
+  EXPECT_EQ(Count(ev, Kind::SectionEnd), 1);
+  // Nothing half on screen (one tall block scrolled past): the shown range stands in.
+  ev = t.Sample(-1, -1, ScrollPhase::Drag, 10, 10);
+  ASSERT_TRUE(Find(ev, Kind::VisibleRange));
+  EXPECT_EQ(Find(ev, Kind::VisibleRange)->first, 10);
 }
 
 // ---- Bridge helpers -------------------------------------------------------

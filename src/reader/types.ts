@@ -186,9 +186,11 @@ export type ReaderTheme = {
 };
 
 export type ReaderVisibleRange = {
+  /** Block with the line at the top of the reading area (also when cut off). */
   first: ReaderLocator;
+  /** Last block with any part in the reading area (also when cut off). */
   last: ReaderLocator;
-  /** UTF-16 offset of the first visible character in `first`. */
+  /** UTF-16 offset of the first character on the top line of `first` (settled only). */
   firstOffset: number;
   /** True once scrolling has stopped. */
   settled: boolean;

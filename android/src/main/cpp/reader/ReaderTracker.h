@@ -34,8 +34,9 @@ struct TrackerEvent {
  * Reading-progress rules shared by the iOS and Android ReaderView
  * (docs/reader.md, "JS Events"). Indices are flat block indices (inserts excluded).
  *
- * - Visible range: emitted when first/last change (`settled` for idle and
- *   layout samples), and on every idle sample.
+ * - Visible range: the shown blocks (any part in the reading area), emitted
+ *   when they change (`settled` for idle and layout samples) and on every idle
+ *   sample. All other rules use the read range (VisibleRule::kRead).
  * - Jump: a move of more than N blocks without continuous visibility —
  *   while dragging ("scroll"), a fling that lands further than N blocks from
  *   where the finger lifted ("fling"), or any programmatic scroll ("scrollTo").
@@ -57,7 +58,14 @@ class ReaderTracker {
   void SetFrontier(int blockIndex);
   int Frontier() const { return frontier_; }
 
-  std::vector<TrackerEvent> Sample(int first, int last, ScrollPhase phase);
+  /**
+   * @param first, last read range (blocks at least half on screen), for progress and jumps.
+   * @param shownFirst, shownLast shown range (any part in the reading area) for the
+   *        visible-range event; -1 uses the read range. An empty read range falls back
+   *        to the shown range.
+   */
+  std::vector<TrackerEvent> Sample(int first, int last, ScrollPhase phase, int shownFirst = -1,
+                                   int shownLast = -1);
 
  private:
   void Extend(int first, int last, std::vector<TrackerEvent>* out);
@@ -71,6 +79,8 @@ class ReaderTracker {
   bool hasPrev_ = false;
   int prevFirst_ = -1;
   int prevLast_ = -1;
+  int prevShownFirst_ = -1;
+  int prevShownLast_ = -1;
   int segStart_ = -1;
   int segEnd_ = -1;
   bool inFling_ = false;

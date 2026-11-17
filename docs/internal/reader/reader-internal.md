@@ -87,7 +87,7 @@ This is the part most likely to break with React Native updates. Background: [in
 
 ### Reading events (`ReaderTracker`)
 
-The view samples `(firstVisibleBlock, lastVisibleBlock, phase)` and the tracker returns events; the view only translates indices to locators and dispatches them.
+The view samples `(readFirst, readLast, phase, shownFirst, shownLast)` and the tracker returns events; the view only translates indices to locators and dispatches them.
 
 | Phase | Source |
 |---|---|
@@ -100,7 +100,9 @@ The view samples `(firstVisibleBlock, lastVisibleBlock, phase)` and the tracker 
 
 Rules (tested in `reader_host_test`):
 
-- A block is visible when ≥ 50 % of `min(blockHeight, viewportHeight)` is on screen; inserts are reported separately and never count as blocks. The views ask `RowVisibleBlocks` per row: a plain row reports its cover range; a page image that stands for its text reports the blocks whose rectangle is visible (the page block while the page's top is on screen, or when no text block is).
+- Two ranges per sample, both from `RowVisibleBlocks` per row: a plain row reports its cover range; a page image that stands for its text reports the blocks whose rectangle is visible (the page block while the page's top is on screen, or when no text block is). Inserts are reported separately and never count as blocks.
+  - **Read** (`VisibleRule::kRead`, whole view): a block counts when ≥ 50 % of `min(blockHeight, viewportHeight)` is on screen. Furthest position, section ends and jumps use this range.
+  - **Shown** (`VisibleRule::kShown`, reading area between the vertical margins): any part (≥ 1 px) counts. `onVisibleRangeChange` reports this range, so `first` is the block with the line at the reading top, where `scrollTo` puts a line and where `firstOffset` is measured (save / restore round-trips), and `last` includes a block cut off at the bottom. If no block is read (one tall block scrolled past), the shown range stands in.
 - **Jump:** a move of more than `jumpThreshold` blocks without continuous visibility: during a drag (`scroll`), a fling landing that far from where the finger lifted (`fling`), any programmatic scroll (`scrollTo`, always reported), or a far follow scroll (`follow`).
 - **Furthest:** the end of the continuously read stretch, advanced only while that stretch starts at or before frontier + 1. The app can set the frontier (`furthestLocator`).
 - **Section end:** the last block of a section enters the visible range during continuous reading; once per transition.

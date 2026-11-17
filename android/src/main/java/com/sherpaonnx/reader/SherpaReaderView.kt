@@ -1110,14 +1110,23 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   // ---- Visibility and events ----
 
   /**
-   * First / last visible block (flat indices). A block counts when at least
-   * half of min(its height, the viewport) is on screen.
+   * Visible blocks (flat indices) as [readFirst, readLast, shownFirst, shownLast]
+   * (-1 when none). Read: at least half of min(its height, the viewport) on
+   * screen (reading progress). Shown: any part in the reading area, between the
+   * vertical margins (the visible range; its first block holds the line at the
+   * reading top, where scrollToLocator puts a line).
    */
   private fun visibleBlocks(insertKeys: MutableList<String>): IntArray? {
     val viewport = recycler.height
     if (viewport <= 0) return null
-    var first = -1
-    var last = -1
+    val readTop = recycler.paddingTop
+    val readBottom = viewport - recycler.paddingBottom
+    val out = intArrayOf(-1, -1, -1, -1)
+    fun merge(range: IntArray, at: Int) {
+      if (range.size < 2) return
+      if (out[at] < 0 || range[0] < out[at]) out[at] = range[0]
+      if (range[1] > out[at + 1]) out[at + 1] = range[1]
+    }
     for (c in 0 until recycler.childCount) {
       val child = recycler.getChildAt(c)
       val row = rows.getOrNull(recycler.getChildAdapterPosition(child)) ?: continue
@@ -1128,9 +1137,9 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       }
       if (child.height <= 0 || shown <= 0) continue
       val r = row as Row.Block
-      // Shared rule (half of min(height, viewport); blocks on a page image by
-      // their rectangle); covered blocks count with their row.
-      val range =
+      // Shared rules (blocks on a page image by their rectangle); covered
+      // blocks count with their row.
+      val read =
         ReaderViewNative.nativeRowVisibleBlocks(
           snapshot,
           r.index,
@@ -1141,12 +1150,27 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
           min(child.height, viewport - child.top).toFloat(),
           child.height.toFloat(),
           viewport.toFloat(),
+          false,
         )
-      if (range.size < 2) continue
-      if (first < 0 || range[0] < first) first = range[0]
-      if (range[1] > last) last = range[1]
+      merge(read, 0)
+      if (child.bottom > readTop && child.top < readBottom) {
+        val inArea =
+          ReaderViewNative.nativeRowVisibleBlocks(
+            snapshot,
+            r.index,
+            r.coverFirst,
+            r.coverLast,
+            r.page,
+            max(0, readTop - child.top).toFloat(),
+            min(child.height, readBottom - child.top).toFloat(),
+            child.height.toFloat(),
+            viewport.toFloat(),
+            true,
+          )
+        merge(inArea, 2)
+      }
     }
-    return if (first >= 0) intArrayOf(first, last) else null
+    return if (out[0] >= 0 || out[2] >= 0) out else null
   }
 
   /** UTF-16 offset of the first visible character in the first visible block. */
@@ -1168,7 +1192,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     if (tracker == 0L || snapshot == 0L || blockCount == 0) return
     val insertKeys = ArrayList<String>()
     val range = visibleBlocks(insertKeys) ?: return
-    val ev = ReaderViewNative.nativeTrackerSample(tracker, range[0], range[1], phase)
+    val ev = ReaderViewNative.nativeTrackerSample(tracker, range[0], range[1], phase, range[2], range[3])
     var k = 0
     while (k + 5 < ev.size) {
       when (ev[k]) {

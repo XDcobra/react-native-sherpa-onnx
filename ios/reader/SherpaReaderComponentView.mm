@@ -1037,16 +1037,27 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 #pragma mark - Visibility and events
 
 /**
- * First / last visible block (flat indices). A block counts when at least half
- * of min(its height, the viewport) is on screen.
+ * Visible blocks (flat indices). Read range: at least half of min(its height,
+ * the viewport) on screen (reading progress). Shown range: any part in the
+ * reading area between the vertical margins (the visible range; its first block
+ * holds the line at the reading top, where scrollTo puts a line). -1 when none.
  */
-- (BOOL)visibleBlocksFirst:(int *)first last:(int *)last inserts:(std::vector<std::string> *)inserts
+- (BOOL)visibleBlocksRead:(int *)first
+                     last:(int *)last
+                shownFirst:(int *)shownFirst
+                 shownLast:(int *)shownLast
+                   inserts:(std::vector<std::string> *)inserts
 {
-  *first = -1;
-  *last = -1;
+  *first = *last = *shownFirst = *shownLast = -1;
   const CGFloat top = _tableView.contentOffset.y;
   const CGFloat bottom = top + _tableView.bounds.size.height;
   const CGFloat viewport = _tableView.bounds.size.height;
+  const CGFloat readTop = top + _tableView.contentInset.top;
+  const CGFloat readBottom = bottom - _tableView.contentInset.bottom;
+  auto merge = [](int f, int l, int *a, int *b) {
+    if (*a < 0 || f < *a) *a = f;
+    if (l > *b) *b = l;
+  };
   for (NSIndexPath *path in _tableView.indexPathsForVisibleRows) {
     const auto &row = _rows[path.row];
     const CGRect r = [_tableView rectForRowAtIndexPath:path];
@@ -1056,23 +1067,27 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
       continue;
     }
     if (r.size.height <= 0 || shown <= 0) continue;
-    // Shared rule (half of min(height, viewport); blocks on a page image by
-    // their rectangle); covered blocks count with their row.
+    // Shared rules (blocks on a page image by their rectangle); covered blocks
+    // count with their row.
     const rdr::ReaderRow plan{row.blockIndex, row.coverFirst, row.coverLast, row.page};
+    const CGFloat minY = CGRectGetMinY(r);
     int f = -1;
     int l = -1;
-    if (!rdr::RowVisibleBlocks(*_snap, plan, (float)MAX(0, top - CGRectGetMinY(r)),
-                               (float)(MIN(CGRectGetMaxY(r), bottom) - CGRectGetMinY(r)),
-                               (float)r.size.height, (float)viewport, &f, &l)) {
-      continue;
+    if (rdr::RowVisibleBlocks(*_snap, plan, (float)MAX(0, top - minY), (float)(MIN(CGRectGetMaxY(r), bottom) - minY),
+                              (float)r.size.height, (float)viewport, &f, &l)) {
+      merge(f, l, first, last);
     }
-    if (*first < 0 || f < *first) *first = f;
-    if (l > *last) *last = l;
+    if (CGRectGetMaxY(r) > readTop && minY < readBottom &&
+        rdr::RowVisibleBlocks(*_snap, plan, (float)MAX(0, readTop - minY),
+                              (float)(MIN(CGRectGetMaxY(r), readBottom) - minY), (float)r.size.height,
+                              (float)viewport, &f, &l, rdr::VisibleRule::kShown)) {
+      merge(f, l, shownFirst, shownLast);
+    }
   }
-  return *first >= 0;
+  return *first >= 0 || *shownFirst >= 0;
 }
 
-/** UTF-16 offset of the first visible character in the first visible block. */
+/** UTF-16 offset of the first character on the line at the reading top, in the first shown block. */
 - (int)firstVisibleOffset:(int)firstBlock
 {
   const NSInteger row = [self rowForBlock:firstBlock];
@@ -1080,8 +1095,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   if (row == NSNotFound || _rows[row].blockIndex != firstBlock) return 0;
   UITableViewCell *cell = [_tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:row inSection:0]];
   if (![cell isKindOfClass:SherpaReaderTextCell.class]) return 0;
+  // Measured from the reading top (below the vertical margin), where
+  // scrollToBlock:offset: puts the line, so save / restore round-trips.
   const CGPoint top = [_tableView convertPoint:CGPointMake(_theme.marginHorizontal + 1,
-                                                           _tableView.contentOffset.y + 1)
+                                                           _tableView.contentOffset.y + _tableView.contentInset.top + 1)
                                         toView:cell.contentView];
   if (top.y <= 0) return 0;
   return (int)[(SherpaReaderTextCell *)cell characterOffsetAtPoint:top];
@@ -1092,10 +1109,14 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   if (!_snap || _snap->blocks.empty()) return;
   int first = -1;
   int last = -1;
+  int shownFirst = -1;
+  int shownLast = -1;
   std::vector<std::string> inserts;
-  if (![self visibleBlocksFirst:&first last:&last inserts:&inserts]) return;
+  if (![self visibleBlocksRead:&first last:&last shownFirst:&shownFirst shownLast:&shownLast inserts:&inserts]) {
+    return;
+  }
   auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter);
-  const auto events = _tracker->Sample(first, last, phase);
+  const auto events = _tracker->Sample(first, last, phase, shownFirst, shownLast);
   if (!emitter) return;
   auto sectionOf = [&](int block) { return _snap->sections[_snap->blocks[block].section].id; };
   for (const auto &e : events) {
@@ -1271,7 +1292,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     const CGFloat maxY = MAX(-_tableView.contentInset.top,
                              _tableView.contentSize.height + _tableView.contentInset.bottom -
                                  _tableView.bounds.size.height);
-    _tableView.contentOffset = CGPointMake(0, MIN(maxY, r.origin.y + dy));
+    _tableView.contentOffset = CGPointMake(0, MIN(maxY, r.origin.y + dy - _tableView.contentInset.top));
   } else if (offset > 0) {
     UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
     if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
@@ -1280,7 +1301,8 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
       const CGFloat maxY = MAX(-_tableView.contentInset.top,
                                _tableView.contentSize.height + _tableView.contentInset.bottom -
                                    _tableView.bounds.size.height);
-      _tableView.contentOffset = CGPointMake(0, MIN(maxY, r.origin.y + lineTop));
+      // At the reading top (below the vertical margin), like a row without offset.
+      _tableView.contentOffset = CGPointMake(0, MIN(maxY, r.origin.y + lineTop - _tableView.contentInset.top));
     }
   }
   [self syncInsertOrigins];

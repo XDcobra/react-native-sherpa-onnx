@@ -19,7 +19,10 @@ internal object ReaderViewNative {
   /** 4 ints per row: block, coverFirst, coverLast, page (see reader/ReaderLayout.h). */
   @JvmStatic external fun nativePlanRows(handle: Long, pageDisplay: String): IntArray
 
-  /** [first, last] visible blocks of a row, or an empty array. */
+  /**
+   * [first, last] visible blocks of a row, or an empty array. [shown]: any part in the
+   * window counts (visible range); else at least half (reading progress).
+   */
   @JvmStatic external fun nativeRowVisibleBlocks(
     handle: Long,
     block: Int,
@@ -30,6 +33,7 @@ internal object ReaderViewNative {
     visibleBottom: Float,
     rowHeight: Float,
     viewport: Float,
+    shown: Boolean,
   ): IntArray
 
   /** 4 floats per rect (x, y, w, h normalized to the page) of [start, end) of a block's text. */
@@ -86,7 +90,15 @@ internal object ReaderViewNative {
     flags: IntArray,
   ): IntArray
 
-  @JvmStatic external fun nativeTrackerSample(handle: Long, first: Int, last: Int, phase: Int): IntArray
+  /** [first, last]: read range (progress, jumps); [shownFirst, shownLast]: the visible range. */
+  @JvmStatic external fun nativeTrackerSample(
+    handle: Long,
+    first: Int,
+    last: Int,
+    phase: Int,
+    shownFirst: Int,
+    shownLast: Int,
+  ): IntArray
 
   const val PHASE_DRAG = 0
   const val PHASE_MOMENTUM = 1

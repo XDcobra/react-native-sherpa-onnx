@@ -19,8 +19,10 @@ bool IsPageSection(const ReaderSnapshot& snap, const ReaderSection& sec) {
   return sec.blockCount > 0 && snap.blocks[sec.firstBlock].type == ReaderBlockType::Page;
 }
 
-bool Counts(float shown, float height, float viewport) {
-  return height > 0 && shown >= 0.5f * std::min(height, viewport);
+bool Counts(float shown, float height, float viewport, VisibleRule rule) {
+  if (height <= 0) return false;
+  if (rule == VisibleRule::kShown) return shown >= 1.f;
+  return shown >= 0.5f * std::min(height, viewport);
 }
 
 }  // namespace
@@ -83,9 +85,9 @@ std::vector<ReaderRow> PlanRows(const ReaderSnapshot& snap, PageDisplay mode) {
 
 bool RowVisibleBlocks(const ReaderSnapshot& snap, const ReaderRow& row, float visibleTop,
                       float visibleBottom, float rowHeight, float viewport, int* first,
-                      int* last) {
+                      int* last, VisibleRule rule) {
   const float rowShown = std::max(0.f, std::min(visibleBottom, rowHeight) - std::max(visibleTop, 0.f));
-  const bool rowCounts = Counts(rowShown, rowHeight, viewport);
+  const bool rowCounts = Counts(rowShown, rowHeight, viewport, rule);
   const bool byRect = row.page && row.coverLast > row.block;
   if (!byRect) {
     if (!rowCounts) return false;
@@ -110,7 +112,7 @@ bool RowVisibleBlocks(const ReaderSnapshot& snap, const ReaderRow& row, float vi
     const float top = b.rect[1] * rowHeight;
     const float height = std::max(1.f, b.rect[3] * rowHeight);
     const float shown = std::min(visibleBottom, top + height) - std::max(visibleTop, top);
-    if (Counts(shown, height, viewport)) add(i);
+    if (Counts(shown, height, viewport, rule)) add(i);
   }
   // The page itself: while its top edge is on screen, or as the fallback.
   const bool topOnScreen = visibleTop <= 0.5f && visibleBottom > 0;

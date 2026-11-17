@@ -508,7 +508,7 @@ When the theme changes, the first visible line stays in place. The same holds fo
 | Callback | Payload | Fires when |
 |---|---|---|
 | `onReady` | `{ blockCount, sectionCount }` | The first layout of a document is done and `initialLocator` is applied. |
-| `onVisibleRangeChange` | `ReaderVisibleRange` | The first or last visible block changes, and once more with `settled: true` when scrolling stops. `firstOffset` (settled only) is the UTF-16 offset of the first visible line. |
+| `onVisibleRangeChange` | `ReaderVisibleRange` | The first or last visible block changes, and once more with `settled: true` when scrolling stops. `first` is the block with the line at the top of the reading area, `last` the last block with any part in it. `firstOffset` (settled only) is the UTF-16 offset of that first line. |
 | `onFurthestPositionChange` | `ReaderLocator` | The frontier advanced while reading continuously. |
 | `onSectionEnd` | `{ sectionId, blockId }` | The last block of a section came into view while reading continuously. Fires once per transition into view. |
 | `onJump` | `ReaderJump` | The position moved more than `jumpThreshold` blocks. The app decides whether the jump counts as read. |
@@ -518,7 +518,8 @@ When the theme changes, the first visible line stays in place. The same holds fo
 
 Rules (shared C++ tracker, identical on iOS and Android):
 
-- **Visible:** a block counts when at least 50 % of `min(blockHeight, viewportHeight)` is on screen. Inserts are listed in `visibleInserts`, not as blocks.
+- **Visible range:** `first` / `last` cover every block with any part in the reading area (between the vertical margins), also when it is cut off. Inserts are listed in `visibleInserts`, not as blocks.
+- **Read:** for the furthest position, section ends and jumps a block counts when at least 50 % of `min(blockHeight, viewportHeight)` is on screen, so a block that only peeks in is not read yet.
 - **Furthest position:** advances only while the visible range touches the current frontier. A jump does not move it; set `furthestLocator` to accept one.
 - **Jump causes** (`ReaderJump.cause`):
   - `'scroll'`: the visible range moved more than `jumpThreshold` blocks without continuous visibility, for example by dragging the scroll indicator.

@@ -65,16 +65,28 @@ void ReaderTracker::Extend(int first, int last, std::vector<TrackerEvent>* out) 
   }
 }
 
-std::vector<TrackerEvent> ReaderTracker::Sample(int first, int last, ScrollPhase phase) {
+std::vector<TrackerEvent> ReaderTracker::Sample(int first, int last, ScrollPhase phase,
+                                                int shownFirst, int shownLast) {
   std::vector<TrackerEvent> out;
-  if (first < 0 || last < first) return out;
+  const bool hasShown = shownFirst >= 0 && shownLast >= shownFirst;
+  if (first < 0 || last < first) {
+    if (!hasShown) return out;
+    first = shownFirst;
+    last = shownLast;
+  }
+  if (!hasShown) {
+    shownFirst = first;
+    shownLast = last;
+  }
 
-  const bool changed = !hasPrev_ || first != prevFirst_ || last != prevLast_;
+  const bool changed = !hasPrev_ || shownFirst != prevShownFirst_ || shownLast != prevShownLast_;
+  prevShownFirst_ = shownFirst;
+  prevShownLast_ = shownLast;
   if (changed || phase == ScrollPhase::Idle) {
     TrackerEvent v;
     v.kind = TrackerEvent::Kind::VisibleRange;
-    v.first = first;
-    v.last = last;
+    v.first = shownFirst;
+    v.last = shownLast;
     // Layout changes (reflow, theme, data) happen at rest, so they are settled too.
     v.settled = phase == ScrollPhase::Idle || phase == ScrollPhase::Layout;
     out.push_back(v);

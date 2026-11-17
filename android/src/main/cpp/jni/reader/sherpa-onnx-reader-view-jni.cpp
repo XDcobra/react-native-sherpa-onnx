@@ -104,7 +104,7 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativePlanRows(JNIEnv* env, jclass, 
 JNIEXPORT jintArray JNICALL
 Java_com_sherpaonnx_reader_ReaderViewNative_nativeRowVisibleBlocks(
     JNIEnv* env, jclass, jlong h, jint block, jint coverFirst, jint coverLast, jboolean page,
-    jfloat visibleTop, jfloat visibleBottom, jfloat rowHeight, jfloat viewport) {
+    jfloat visibleTop, jfloat visibleBottom, jfloat rowHeight, jfloat viewport, jboolean shown) {
   const auto* s = Snap(h);
   std::vector<jint> out;
   const int n = s ? static_cast<int>(s->blocks.size()) : 0;
@@ -114,7 +114,9 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeRowVisibleBlocks(
   const rdr::ReaderRow row{block, coverFirst, coverLast, page == JNI_TRUE};
   int first = -1;
   int last = -1;
-  if (rdr::RowVisibleBlocks(*s, row, visibleTop, visibleBottom, rowHeight, viewport, &first, &last)) {
+  const auto rule = shown == JNI_TRUE ? rdr::VisibleRule::kShown : rdr::VisibleRule::kRead;
+  if (rdr::RowVisibleBlocks(*s, row, visibleTop, visibleBottom, rowHeight, viewport, &first, &last,
+                            rule)) {
     out = {first, last};
   }
   return Ints(env, out);
@@ -270,11 +272,12 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeTrackerFrontier(JNIEnv*, jclas
  */
 JNIEXPORT jintArray JNICALL
 Java_com_sherpaonnx_reader_ReaderViewNative_nativeTrackerSample(JNIEnv* env, jclass, jlong h,
-                                                                jint first, jint last, jint phase) {
+                                                                jint first, jint last, jint phase,
+                                                                jint shownFirst, jint shownLast) {
   std::vector<jint> out;
   auto* t = reinterpret_cast<rdr::ReaderTracker*>(h);
   if (!t) return Ints(env, out);
-  for (const auto& e : t->Sample(first, last, static_cast<rdr::ScrollPhase>(phase))) {
+  for (const auto& e : t->Sample(first, last, static_cast<rdr::ScrollPhase>(phase), shownFirst, shownLast)) {
     switch (e.kind) {
       case rdr::TrackerEvent::Kind::VisibleRange:
         out.insert(out.end(), {0, e.first, e.last, e.settled ? 1 : 0, 0, 0});
