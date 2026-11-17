@@ -48,6 +48,8 @@ android-codegen-out/
 # AI
 .cursor/
 .claude/
+# Local MCP servers (may reference API keys)
+.mcp.json
 .chatgpt/
 .deepseek/
 .gemini/
