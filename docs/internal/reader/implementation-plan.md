@@ -316,7 +316,7 @@ Echte `SherpaReaderView` mit `debugRowCount` Testzeilen. Die Einschübe werden p
 ### Phase 7: Smoke-Tests ohne den User, danach `fix(reader): …`-Commits
 **iOS**
 - Metro mit `yarn example start` im Hintergrund.
-- Bauen mit `xcodebuild` (Workspace `example/ios/VoiceLabOfflineTools.xcworkspace`, Scheme `VoiceLabOfflineTools`), dann `simctl install` und `simctl launch com.xdcobra.voiceexample`.
+- Bauen mit `xcodebuild` (Workspace `example/ios/SherpaOnnxExample.xcworkspace`, Scheme `SherpaOnnxExample`), dann `simctl install` und `simctl launch com.xdcobra.sherpaonnxexample`.
 - Steuerung über ein Python-MCP-Client-Skript im Scratchpad (wird nicht committet), das mit `xcrun mcpbridge` spricht:
   - `DeviceInteractionStartSession` mit iPhone 17 Pro.
   - `DeviceInteractionSynthesize`: tippen und wischen nach dem UI-Baum. Jeder Aufruf liefert Screenshot und Hierarchie.

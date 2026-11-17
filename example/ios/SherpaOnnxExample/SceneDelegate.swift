@@ -16,7 +16,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     let window = UIWindow(windowScene: windowScene)
     self.window = window
     appDelegate.reactNativeFactory?.startReactNative(
-      withModuleName: "VoiceLabOfflineTools",
+      withModuleName: "SherpaOnnxExample",
       in: window,
       launchOptions: appDelegate.launchOptions
     )

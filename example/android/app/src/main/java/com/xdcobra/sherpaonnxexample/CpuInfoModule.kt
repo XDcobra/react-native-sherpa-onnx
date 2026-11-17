@@ -1,4 +1,4 @@
-package com.xdcobra.voiceexample
+package com.xdcobra.sherpaonnxexample
 
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext

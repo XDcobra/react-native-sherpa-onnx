@@ -81,9 +81,9 @@ android {
 
     assetPacks = [":sherpa_models"]
 
-    namespace = "com.xdcobra.voiceexample"
+    namespace = "com.xdcobra.sherpaonnxexample"
     defaultConfig {
-        applicationId = "com.xdcobra.voicelab"
+        applicationId = "com.xdcobra.sherpaonnxexample"
         minSdkVersion = rootProject.ext.minSdkVersion
         targetSdkVersion = rootProject.ext.targetSdkVersion
         def resolvedVersionCode = project.findProperty('VERSION_CODE') ?: "1"

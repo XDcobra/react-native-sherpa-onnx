@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0C80B921A6F3F58F76C31292 /* libPods-VoiceLabOfflineTools.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-VoiceLabOfflineTools.a */; };
+		0C80B921A6F3F58F76C31292 /* libPods-SherpaOnnxExample.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-SherpaOnnxExample.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		761780F12CA45674006654EE /* CpuInfo.m in Sources */ = {isa = PBXBuildFile; fileRef = 761780F02CA45674006654EE /* CpuInfo.m */; };
@@ -18,19 +18,19 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		13B07F961A680F5B00A75B9A /* VoiceLabOfflineTools.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VoiceLabOfflineTools.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = VoiceLabOfflineTools/Images.xcassets; sourceTree = "<group>"; };
-		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = VoiceLabOfflineTools/Info.plist; sourceTree = "<group>"; };
-		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = VoiceLabOfflineTools/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		3B4392A12AC88292D35C810B /* Pods-VoiceLabOfflineTools.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VoiceLabOfflineTools.debug.xcconfig"; path = "Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools.debug.xcconfig"; sourceTree = "<group>"; };
-		5709B34CF0A7D63546082F79 /* Pods-VoiceLabOfflineTools.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-VoiceLabOfflineTools.release.xcconfig"; path = "Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools.release.xcconfig"; sourceTree = "<group>"; };
-		5DCACB8F33CDC322A6C60F78 /* libPods-VoiceLabOfflineTools.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-VoiceLabOfflineTools.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = VoiceLabOfflineTools/AppDelegate.swift; sourceTree = "<group>"; };
-		761780F02CA45674006654EE /* CpuInfo.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = CpuInfo.m; path = VoiceLabOfflineTools/CpuInfo.m; sourceTree = "<group>"; };
-		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = VoiceLabOfflineTools/LaunchScreen.storyboard; sourceTree = "<group>"; };
-		C4E91B2F8D4A6B9C1E03D5A7 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SceneDelegate.swift; path = VoiceLabOfflineTools/SceneDelegate.swift; sourceTree = "<group>"; };
+		13B07F961A680F5B00A75B9A /* SherpaOnnxExample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SherpaOnnxExample.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = SherpaOnnxExample/Images.xcassets; sourceTree = "<group>"; };
+		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = SherpaOnnxExample/Info.plist; sourceTree = "<group>"; };
+		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = SherpaOnnxExample/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		3B4392A12AC88292D35C810B /* Pods-SherpaOnnxExample.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SherpaOnnxExample.debug.xcconfig"; path = "Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample.debug.xcconfig"; sourceTree = "<group>"; };
+		5709B34CF0A7D63546082F79 /* Pods-SherpaOnnxExample.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-SherpaOnnxExample.release.xcconfig"; path = "Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample.release.xcconfig"; sourceTree = "<group>"; };
+		5DCACB8F33CDC322A6C60F78 /* libPods-SherpaOnnxExample.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-SherpaOnnxExample.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = SherpaOnnxExample/AppDelegate.swift; sourceTree = "<group>"; };
+		761780F02CA45674006654EE /* CpuInfo.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = CpuInfo.m; path = SherpaOnnxExample/CpuInfo.m; sourceTree = "<group>"; };
+		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = SherpaOnnxExample/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		C4E91B2F8D4A6B9C1E03D5A7 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SceneDelegate.swift; path = SherpaOnnxExample/SceneDelegate.swift; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		F3A7B8C9D0012345678A010 /* tts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = tts; path = VoiceLabOfflineTools/tts; sourceTree = "<group>"; };
+		F3A7B8C9D0012345678A010 /* tts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = tts; path = SherpaOnnxExample/tts; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -38,14 +38,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0C80B921A6F3F58F76C31292 /* libPods-VoiceLabOfflineTools.a in Frameworks */,
+				0C80B921A6F3F58F76C31292 /* libPods-SherpaOnnxExample.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		13B07FAE1A68108700A75B9A /* VoiceLabOfflineTools */ = {
+		13B07FAE1A68108700A75B9A /* SherpaOnnxExample */ = {
 			isa = PBXGroup;
 			children = (
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
@@ -57,14 +57,14 @@
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
 				F3A7B8C9D0012345678A010 /* tts */,
 			);
-			name = VoiceLabOfflineTools;
+			name = SherpaOnnxExample;
 			sourceTree = "<group>";
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				5DCACB8F33CDC322A6C60F78 /* libPods-VoiceLabOfflineTools.a */,
+				5DCACB8F33CDC322A6C60F78 /* libPods-SherpaOnnxExample.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -79,7 +79,7 @@
 		83CBB9F61A601CBA00E9B192 = {
 			isa = PBXGroup;
 			children = (
-				13B07FAE1A68108700A75B9A /* VoiceLabOfflineTools */,
+				13B07FAE1A68108700A75B9A /* SherpaOnnxExample */,
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
@@ -93,7 +93,7 @@
 		83CBBA001A601CBA00E9B192 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				13B07F961A680F5B00A75B9A /* VoiceLabOfflineTools.app */,
+				13B07F961A680F5B00A75B9A /* SherpaOnnxExample.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -101,8 +101,8 @@
 		BBD78D7AC51CEA395F1C20DB /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				3B4392A12AC88292D35C810B /* Pods-VoiceLabOfflineTools.debug.xcconfig */,
-				5709B34CF0A7D63546082F79 /* Pods-VoiceLabOfflineTools.release.xcconfig */,
+				3B4392A12AC88292D35C810B /* Pods-SherpaOnnxExample.debug.xcconfig */,
+				5709B34CF0A7D63546082F79 /* Pods-SherpaOnnxExample.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -110,9 +110,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		13B07F861A680F5B00A75B9A /* VoiceLabOfflineTools */ = {
+		13B07F861A680F5B00A75B9A /* SherpaOnnxExample */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "VoiceLabOfflineTools" */;
+			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "SherpaOnnxExample" */;
 			buildPhases = (
 				C38B50BA6285516D6DCD4F65 /* [CP] Check Pods Manifest.lock */,
 				13B07F871A680F5B00A75B9A /* Sources */,
@@ -129,9 +129,9 @@
 			);
 			dependencies = (
 			);
-			name = VoiceLabOfflineTools;
-			productName = VoiceLabOfflineTools;
-			productReference = 13B07F961A680F5B00A75B9A /* VoiceLabOfflineTools.app */;
+			name = SherpaOnnxExample;
+			productName = SherpaOnnxExample;
+			productReference = 13B07F961A680F5B00A75B9A /* SherpaOnnxExample.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -147,7 +147,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "VoiceLabOfflineTools" */;
+			buildConfigurationList = 83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "SherpaOnnxExample" */;
 			compatibilityVersion = "Xcode 12.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -160,7 +160,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				13B07F861A680F5B00A75B9A /* VoiceLabOfflineTools */,
+				13B07F861A680F5B00A75B9A /* SherpaOnnxExample */,
 			);
 		};
 /* End PBXProject section */
@@ -202,15 +202,15 @@
 			files = (
 			);
 			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+				"${PODS_ROOT}/Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+				"${PODS_ROOT}/Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample-frameworks-${CONFIGURATION}-output-files.xcfilelist",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-frameworks.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample-frameworks.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		3CFAAEC43510D76FC7C14205 /* [CP-User] [SherpaOnnx] Embed pdfium.framework */ = {
@@ -259,7 +259,7 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(DERIVED_FILE_DIR)/Pods-VoiceLabOfflineTools-checkManifestLockResult.txt",
+				"$(DERIVED_FILE_DIR)/Pods-SherpaOnnxExample-checkManifestLockResult.txt",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -272,15 +272,15 @@
 			files = (
 			);
 			inputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-resources-${CONFIGURATION}-input-files.xcfilelist",
+				"${PODS_ROOT}/Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
-				"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-resources-${CONFIGURATION}-output-files.xcfilelist",
+				"${PODS_ROOT}/Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample-resources-${CONFIGURATION}-output-files.xcfilelist",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-VoiceLabOfflineTools/Pods-VoiceLabOfflineTools-resources.sh\"\n";
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-SherpaOnnxExample/Pods-SherpaOnnxExample-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		F2A6B1C2D3E4F5061728394A /* Download SherpaOnnx Models */ = {
@@ -317,13 +317,13 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3B4392A12AC88292D35C810B /* Pods-VoiceLabOfflineTools.debug.xcconfig */;
+			baseConfigurationReference = 3B4392A12AC88292D35C810B /* Pods-SherpaOnnxExample.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_BITCODE = NO;
-				INFOPLIST_FILE = VoiceLabOfflineTools/Info.plist;
+				INFOPLIST_FILE = SherpaOnnxExample/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -335,9 +335,9 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.xdcobra.voiceexample;
-				PRODUCT_MODULE_NAME = VoiceLabOfflineTools;
-				PRODUCT_NAME = VoiceLabOfflineTools;
+				PRODUCT_BUNDLE_IDENTIFIER = com.xdcobra.sherpaonnxexample;
+				PRODUCT_MODULE_NAME = SherpaOnnxExample;
+				PRODUCT_NAME = SherpaOnnxExample;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -347,12 +347,12 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 5709B34CF0A7D63546082F79 /* Pods-VoiceLabOfflineTools.release.xcconfig */;
+			baseConfigurationReference = 5709B34CF0A7D63546082F79 /* Pods-SherpaOnnxExample.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				INFOPLIST_FILE = VoiceLabOfflineTools/Info.plist;
+				INFOPLIST_FILE = SherpaOnnxExample/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -364,9 +364,9 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.xdcobra.voiceexample;
-				PRODUCT_MODULE_NAME = VoiceLabOfflineTools;
-				PRODUCT_NAME = VoiceLabOfflineTools;
+				PRODUCT_BUNDLE_IDENTIFIER = com.xdcobra.sherpaonnxexample;
+				PRODUCT_MODULE_NAME = SherpaOnnxExample;
+				PRODUCT_NAME = SherpaOnnxExample;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";
@@ -522,7 +522,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "VoiceLabOfflineTools" */ = {
+		13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "SherpaOnnxExample" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				13B07F941A680F5B00A75B9A /* Debug */,
@@ -531,7 +531,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "VoiceLabOfflineTools" */ = {
+		83CBB9FA1A601CBA00E9B192 /* Build configuration list for PBXProject "SherpaOnnxExample" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				83CBBA201A601CBA00E9B192 /* Debug */,
