@@ -678,14 +678,18 @@ static std::string pa_tempDir() {
           int64_t framesDecoded, int64_t totalEstimate, int percent) {
         SherpaOnnx *strongSelf = weakSelf;
         if (!strongSelf) return;
+        // Copy now: srcSampleRate/srcChannels live on the decode block's stack
+        // (captured by reference), which is gone when the main queue runs this.
+        const int sampleRate = srcSampleRate;
+        const int channels = srcChannels;
         dispatch_async(dispatch_get_main_queue(), ^{
           [strongSelf sendEventWithName:@"decodeProgress" body:@{
             @"operationId": operationId,
             @"framesDecoded": @((double)framesDecoded),
             @"totalFramesEstimate": @((double)totalEstimate),
             @"percent": @(percent),
-            @"sourceSampleRate": @(srcSampleRate),
-            @"sourceChannels": @(srcChannels),
+            @"sourceSampleRate": @(sampleRate),
+            @"sourceChannels": @(channels),
           }];
         });
       };
@@ -2737,14 +2741,18 @@ static std::string pa_encodeViaDecodeFile(
         status->percent = percent;
         SherpaOnnx *strongSelf = weakSelf;
         if (!strongSelf) return;
+        // Copy now: srcSampleRate/srcChannels live on the decode block's stack
+        // (captured by reference), which is gone when the main queue runs this.
+        const int sampleRate = srcSampleRate;
+        const int channels = srcChannels;
         dispatch_async(dispatch_get_main_queue(), ^{
           [strongSelf sendEventWithName:@"decodeProgress" body:@{
             @"operationId": operationId,
             @"framesDecoded": @((double)framesDecoded),
             @"totalFramesEstimate": @((double)totalEstimate),
             @"percent": @(percent),
-            @"sourceSampleRate": @(srcSampleRate),
-            @"sourceChannels": @(srcChannels),
+            @"sourceSampleRate": @(sampleRate),
+            @"sourceChannels": @(channels),
           }];
         });
       };
