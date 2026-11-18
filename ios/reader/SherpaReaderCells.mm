@@ -548,6 +548,9 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   SherpaReaderMarkerOverlay *_markerOverlay;
   NSArray<SherpaReaderMarker *> *_markers;
   CGFloat _markerInset;
+  // The alt text, kept apart: reading self.accessibilityLabel without one makes
+  // UIKit build a label from the cell, which asks isAccessibilityElement again.
+  NSString *_alt;
 }
 
 - (instancetype)initWithStyle:(UITableViewCellStyle)style reuseIdentifier:(NSString *)reuseIdentifier {
@@ -592,7 +595,8 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   _overlay.marks = @[];
   _markerInset = page ? 0 : theme.marginHorizontal;
   // Images without alt text are decorative: hidden from VoiceOver.
-  self.accessibilityLabel = alt;
+  _alt = alt.length > 0 ? [alt copy] : nil;
+  self.accessibilityLabel = _alt;
   self.accessibilityTraits = UIAccessibilityTraitImage;
 }
 
@@ -645,16 +649,16 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 // text, then the marker views top to bottom. Without alt text the image is
 // decorative.
 - (BOOL)isAccessibilityElement {
-  return self.accessibilityLabel.length > 0 && (_markerOverlay == nil || _markerOverlay.placedHosts.count == 0);
+  return _alt.length > 0 && (_markerOverlay == nil || _markerOverlay.placedHosts.count == 0);
 }
 
 - (NSArray *)accessibilityElements {
   NSArray<UIView *> *hosts = _markerOverlay.placedHosts;
   if (hosts.count == 0) return nil;
   NSMutableArray *elements = [NSMutableArray array];
-  if (self.accessibilityLabel.length > 0) {
+  if (_alt.length > 0) {
     UIAccessibilityElement *img = [[UIAccessibilityElement alloc] initWithAccessibilityContainer:self];
-    img.accessibilityLabel = self.accessibilityLabel;
+    img.accessibilityLabel = _alt;
     img.accessibilityTraits = UIAccessibilityTraitImage;
     img.accessibilityFrameInContainerSpace = [self.contentView convertRect:_frameView.frame toView:self];
     [elements addObject:img];
