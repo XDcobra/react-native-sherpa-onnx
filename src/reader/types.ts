@@ -241,6 +241,64 @@ export type ReaderHighlight = {
   follow?: boolean;
 };
 
+/**
+ * A label in the margin next to a block (e.g. a count or a symbol). Markers
+ * never change the text or the row height.
+ */
+export type ReaderMarker = {
+  /** Stable ID; changing a marker means passing the same ID with new values. */
+  id: string;
+  blockId: string;
+  /**
+   * UTF-16 range in the block text. Without `start` / `end` the marker belongs
+   * to the block and sits at its first line; with a range it sits at the line
+   * of the range's last character.
+   */
+  start?: number;
+  /** Exclusive. */
+  end?: number;
+  /** Short text in the marker (a count, a symbol). */
+  label: string;
+  /** Read by VoiceOver / TalkBack instead of `label` (e.g. "3 notes"). */
+  accessibilityLabel?: string;
+  /** Default: the theme's accent color. */
+  color?: ColorValue;
+  /** Default: white. */
+  textColor?: ColorValue;
+};
+
+/** How a text selection is widened while the user selects. */
+export type ReaderSelectionSnap = 'none' | 'sentence' | 'block';
+
+/** An app action in the text selection menu (shown before the system items). */
+export type ReaderSelectionMenuItem = {
+  id: string;
+  title: string;
+  /** iOS: SF Symbol name shown with the title. Ignored on Android. */
+  systemImage?: string;
+};
+
+/** A selection menu item was chosen (`onSelectionAction`). */
+export type ReaderSelectionAction = {
+  itemId: string;
+  blockId: string;
+  /** Selected UTF-16 range in the block text (after snapping). */
+  start: number;
+  end: number;
+  /** The selected text. */
+  text: string;
+  /** The sentences the selection touches, as one UTF-16 range in the block. */
+  sentenceStart: number;
+  sentenceEnd: number;
+};
+
+/** A tap on the text (`onTap`). */
+export type ReaderTap = {
+  blockId: string;
+  /** UTF-16 offset of the tapped character in the block; absent on rows without text. */
+  offset?: number;
+};
+
 /** Follow scrolling: keeps the followed highlight in view. */
 export type ReaderFollowOptions = {
   /**
@@ -304,6 +362,18 @@ export type ReaderViewProps = {
   follow?: ReaderFollowOptions;
   /** How pages of PDFs, comics and scans are shown. Default `'auto'`. */
   pageDisplay?: ReaderPageDisplay;
+  /**
+   * Lets the user select text with a long press (within one block). Default
+   * false. The system menu keeps its items (copy, look up, …);
+   * `selectionMenuItems` adds the app's actions.
+   */
+  selectable?: boolean;
+  /** Widens a selection to whole sentences or the whole block. Default `'none'`. */
+  selectionSnap?: ReaderSelectionSnap;
+  /** App actions in the selection menu; a choice calls `onSelectionAction`. */
+  selectionMenuItems?: ReaderSelectionMenuItem[];
+  /** Labels in the trailing margin next to blocks or ranges. */
+  markers?: ReaderMarker[];
   style?: StyleProp<ViewStyle>;
   testID?: string;
   onReady?: (info: { blockCount: number; sectionCount: number }) => void;
@@ -311,10 +381,15 @@ export type ReaderViewProps = {
   onFurthestPositionChange?: (locator: ReaderLocator) => void;
   onSectionEnd?: (info: { sectionId: string; blockId: string }) => void;
   onJump?: (jump: ReaderJump) => void;
-  onTap?: (info: { blockId: string }) => void;
+  /** A tap on a row that is not a marker (also when not `selectable`). */
+  onTap?: (tap: ReaderTap) => void;
   onError?: (error: { code: string; message: string }) => void;
   /** Follow scrolling paused or resumed. */
   onFollowChange?: (change: ReaderFollowChange) => void;
+  /** A `selectionMenuItems` entry was chosen; the selection is cleared afterwards. */
+  onSelectionAction?: (action: ReaderSelectionAction) => void;
+  /** A marker was tapped (or activated with VoiceOver / TalkBack). */
+  onMarkerPress?: (marker: { id: string; blockId: string }) => void;
   /** @internal Spike/testing only: render N placeholder rows without a document. */
   __debugRowCount?: number;
 };

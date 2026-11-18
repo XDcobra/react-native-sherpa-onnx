@@ -32,6 +32,45 @@ type HighlightSpec = Readonly<{
   follow: boolean;
 }>;
 
+type MarkerSpec = Readonly<{
+  id: string;
+  blockId: string;
+  /** -1 with `end` -1: a marker for the whole block. */
+  start: CodegenTypes.Int32;
+  /** Exclusive; -1: see `start`. */
+  end: CodegenTypes.Int32;
+  label: string;
+  /** "" = `label`. */
+  accessibilityLabel: string;
+  /** ARGB as a signed 32-bit int (processColor); ignored unless `hasColor`. */
+  color: CodegenTypes.Int32;
+  hasColor: boolean;
+  textColor: CodegenTypes.Int32;
+  hasTextColor: boolean;
+}>;
+
+type SelectionMenuItemSpec = Readonly<{
+  id: string;
+  title: string;
+  /** SF Symbol name (iOS); "" = none. */
+  systemImage: string;
+}>;
+
+type SelectionActionEvent = Readonly<{
+  itemId: string;
+  blockId: string;
+  start: CodegenTypes.Int32;
+  end: CodegenTypes.Int32;
+  text: string;
+  sentenceStart: CodegenTypes.Int32;
+  sentenceEnd: CodegenTypes.Int32;
+}>;
+
+type MarkerPressEvent = Readonly<{
+  id: string;
+  blockId: string;
+}>;
+
 type FollowChangeEvent = Readonly<{
   following: boolean;
   reason: string;
@@ -74,6 +113,8 @@ type JumpEvent = Readonly<{
 
 type TapEvent = Readonly<{
   blockId: string;
+  /** UTF-16 offset in the block's text; -1 on rows without text. */
+  offset: CodegenTypes.Int32;
 }>;
 
 type ErrorEvent = Readonly<{
@@ -114,6 +155,11 @@ export interface NativeProps extends ViewProps {
   followPauseOnUserScroll?: CodegenTypes.WithDefault<boolean, true>;
   /** `text` | `image` | `imageAndText` (`auto` is resolved in ReaderView). */
   pageDisplay?: CodegenTypes.WithDefault<string, 'text'>;
+  selectable?: CodegenTypes.WithDefault<boolean, false>;
+  /** `none` | `sentence` | `block`. */
+  selectionSnap?: CodegenTypes.WithDefault<string, 'none'>;
+  selectionMenuItems?: ReadonlyArray<SelectionMenuItemSpec>;
+  markers?: ReadonlyArray<MarkerSpec>;
   /** Spike/testing only: placeholder rows when there is no document. */
   debugRowCount?: CodegenTypes.WithDefault<CodegenTypes.Int32, 0>;
   onReaderReady?: CodegenTypes.DirectEventHandler<ReadyEvent>;
@@ -124,6 +170,8 @@ export interface NativeProps extends ViewProps {
   onReaderTap?: CodegenTypes.DirectEventHandler<TapEvent>;
   onReaderError?: CodegenTypes.DirectEventHandler<ErrorEvent>;
   onFollowChange?: CodegenTypes.DirectEventHandler<FollowChangeEvent>;
+  onSelectionAction?: CodegenTypes.DirectEventHandler<SelectionActionEvent>;
+  onMarkerPress?: CodegenTypes.DirectEventHandler<MarkerPressEvent>;
 }
 
 type ComponentType = HostComponent<NativeProps>;

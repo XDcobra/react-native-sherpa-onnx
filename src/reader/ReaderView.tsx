@@ -22,6 +22,9 @@ import type {
   ReaderInsert,
   ReaderJumpCause,
   ReaderLocator,
+  ReaderMarker,
+  ReaderSelectionMenuItem,
+  ReaderTap,
   ReaderViewHandle,
   ReaderViewProps,
 } from './types';
@@ -80,6 +83,71 @@ export function highlightSpecFor(h: ReaderHighlight): {
   };
 }
 
+/** A color prop as the native (color, hasColor) pair. */
+function colorSpec(c: ReaderMarker['color']): {
+  color: number;
+  hasColor: boolean;
+} {
+  const processed = c != null ? processColor(c) : null;
+  return typeof processed === 'number'
+    ? { color: toInt32(processed), hasColor: true }
+    : { color: 0, hasColor: false };
+}
+
+/** Flat native form of a margin marker (-1 = no range; colors as ARGB ints). */
+export function markerSpecFor(m: ReaderMarker): {
+  id: string;
+  blockId: string;
+  start: number;
+  end: number;
+  label: string;
+  accessibilityLabel: string;
+  color: number;
+  hasColor: boolean;
+  textColor: number;
+  hasTextColor: boolean;
+} {
+  const fill = colorSpec(m.color);
+  const text = colorSpec(m.textColor);
+  const start = m.start != null && m.start >= 0 ? Math.trunc(m.start) : -1;
+  const end = m.end != null && m.end >= 0 ? Math.trunc(m.end) : -1;
+  return {
+    id: m.id,
+    blockId: m.blockId,
+    start,
+    end,
+    label: m.label,
+    accessibilityLabel: m.accessibilityLabel ?? '',
+    color: fill.color,
+    hasColor: fill.hasColor,
+    textColor: text.color,
+    hasTextColor: text.hasColor,
+  };
+}
+
+/** Flat native form of a selection menu item. */
+export function selectionMenuItemSpecFor(item: ReaderSelectionMenuItem): {
+  id: string;
+  title: string;
+  systemImage: string;
+} {
+  return {
+    id: item.id,
+    title: item.title,
+    systemImage: item.systemImage ?? '',
+  };
+}
+
+/** `onTap` payload from the native event (`offset` -1: a row without text). */
+export function tapFromNative(n: {
+  blockId: string;
+  offset: number;
+}): ReaderTap {
+  return n.offset >= 0
+    ? { blockId: n.blockId, offset: n.offset }
+    : { blockId: n.blockId };
+}
+
 function locator(
   sectionId: string,
   blockId: string,
@@ -107,6 +175,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       highlights,
       follow,
       pageDisplay,
+      selectable,
+      selectionSnap,
+      selectionMenuItems,
+      markers,
       style,
       testID,
       onReady,
@@ -117,6 +189,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       onTap,
       onError,
       onFollowChange,
+      onSelectionAction,
+      onMarkerPress,
       __debugRowCount,
     } = props;
     const nativeRef = useRef<ElementRef<typeof SherpaReaderView>>(null);
@@ -157,6 +231,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     const highlightSpecs = useMemo(
       () => (highlights ?? []).map(highlightSpecFor),
       [highlights]
+    );
+    const markerSpecs = useMemo(
+      () => (markers ?? []).map(markerSpecFor),
+      [markers]
+    );
+    const menuItemSpecs = useMemo(
+      () => (selectionMenuItems ?? []).map(selectionMenuItemSpecFor),
+      [selectionMenuItems]
     );
 
     const handleReady = useCallback(
@@ -213,8 +295,31 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     );
     const handleTap = useCallback(
       (e: NativeSyntheticEvent<NativeEvent<'onReaderTap'>>) =>
-        onTap?.({ blockId: e.nativeEvent.blockId }),
+        onTap?.(tapFromNative(e.nativeEvent)),
       [onTap]
+    );
+    const handleSelectionAction = useCallback(
+      (e: NativeSyntheticEvent<NativeEvent<'onSelectionAction'>>) => {
+        const n = e.nativeEvent;
+        onSelectionAction?.({
+          itemId: n.itemId,
+          blockId: n.blockId,
+          start: n.start,
+          end: n.end,
+          text: n.text,
+          sentenceStart: n.sentenceStart,
+          sentenceEnd: n.sentenceEnd,
+        });
+      },
+      [onSelectionAction]
+    );
+    const handleMarkerPress = useCallback(
+      (e: NativeSyntheticEvent<NativeEvent<'onMarkerPress'>>) =>
+        onMarkerPress?.({
+          id: e.nativeEvent.id,
+          blockId: e.nativeEvent.blockId,
+        }),
+      [onMarkerPress]
     );
     const handleError = useCallback(
       (e: NativeSyntheticEvent<NativeEvent<'onReaderError'>>) =>
@@ -281,6 +386,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         followAnchor={Math.min(1, Math.max(0, follow?.anchor ?? 0.3))}
         followPauseOnUserScroll={follow?.pauseOnUserScroll ?? true}
         pageDisplay={resolvedPageDisplay}
+        selectable={selectable ?? false}
+        selectionSnap={selectionSnap ?? 'none'}
+        selectionMenuItems={menuItemSpecs}
+        markers={markerSpecs}
         debugRowCount={__debugRowCount ?? 0}
         onReaderReady={handleReady}
         onVisibleRangeChange={handleVisible}
@@ -290,6 +399,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         onReaderTap={handleTap}
         onReaderError={handleError}
         onFollowChange={handleFollowChange}
+        onSelectionAction={handleSelectionAction}
+        onMarkerPress={handleMarkerPress}
       >
         {renderInsert
           ? insertSpecs.map((spec) => (
