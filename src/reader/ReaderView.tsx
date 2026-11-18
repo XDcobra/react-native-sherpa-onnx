@@ -1,14 +1,22 @@
 import {
   forwardRef,
+  memo,
   useCallback,
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
   type ElementRef,
+  type ReactNode,
 } from 'react';
 import {
+  Platform,
   processColor,
   StyleSheet,
+  type AccessibilityActionEvent,
+  type GestureResponderEvent,
+  type Insets,
+  type LayoutChangeEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
 
@@ -83,47 +91,154 @@ export function highlightSpecFor(h: ReaderHighlight): {
   };
 }
 
-/** A color prop as the native (color, hasColor) pair. */
-function colorSpec(c: ReaderMarker['color']): {
-  color: number;
-  hasColor: boolean;
-} {
-  const processed = c != null ? processColor(c) : null;
-  return typeof processed === 'number'
-    ? { color: toInt32(processed), hasColor: true }
-    : { color: 0, hasColor: false };
-}
-
-/** Flat native form of a margin marker (-1 = no range; colors as ARGB ints). */
+/** Flat native form of a margin marker (-1 = no range). */
 export function markerSpecFor(m: ReaderMarker): {
   id: string;
   blockId: string;
   start: number;
   end: number;
-  label: string;
-  accessibilityLabel: string;
-  color: number;
-  hasColor: boolean;
-  textColor: number;
-  hasTextColor: boolean;
 } {
-  const fill = colorSpec(m.color);
-  const text = colorSpec(m.textColor);
   const start = m.start != null && m.start >= 0 ? Math.trunc(m.start) : -1;
   const end = m.end != null && m.end >= 0 ? Math.trunc(m.end) : -1;
-  return {
-    id: m.id,
-    blockId: m.blockId,
-    start,
-    end,
-    label: m.label,
-    accessibilityLabel: m.accessibilityLabel ?? '',
-    color: fill.color,
-    hasColor: fill.hasColor,
-    textColor: text.color,
-    hasTextColor: text.hasColor,
-  };
+  return { id: m.id, blockId: m.blockId, start, end };
 }
+
+/**
+ * Marker views kept mounted after their rows left the native window, so a
+ * short scroll back does not remount them.
+ */
+export const MARKER_WINDOW_BUFFER = 16;
+
+/**
+ * Marker IDs whose views are mounted next: everything the native window asks
+ * for, plus up to `buffer` of the previously mounted ones (most recently
+ * requested first). IDs that are no longer in `known` are dropped.
+ */
+export function nextMarkerWindow(
+  prev: readonly string[],
+  requested: readonly string[],
+  known: ReadonlySet<string>,
+  buffer: number = MARKER_WINDOW_BUFFER
+): string[] {
+  const next: string[] = [];
+  const seen = new Set<string>();
+  for (const id of requested) {
+    if (known.has(id) && !seen.has(id)) {
+      seen.add(id);
+      next.push(id);
+    }
+  }
+  let kept = 0;
+  for (const id of prev) {
+    if (kept >= buffer) break;
+    if (known.has(id) && !seen.has(id)) {
+      seen.add(id);
+      next.push(id);
+      kept += 1;
+    }
+  }
+  if (next.length === prev.length && next.every((id, i) => id === prev[i])) {
+    return prev as string[];
+  }
+  return next;
+}
+
+/** Minimum touch target of a marker (HIG 44 pt, Material 48 dp). */
+function markerMinTarget(): number {
+  return Platform.OS === 'android' ? 48 : 44;
+}
+
+/** Hit slop that grows a `width` × `height` marker view to `target`. */
+export function markerHitSlop(
+  width: number,
+  height: number,
+  target: number = markerMinTarget()
+): Insets | undefined {
+  const x = Math.max(0, Math.ceil((target - width) / 2));
+  const y = Math.max(0, Math.ceil((target - height) / 2));
+  if (x === 0 && y === 0) return undefined;
+  return { top: y, bottom: y, left: x, right: x };
+}
+
+/** A touch that moved further than this (pt) is a drag, not a press. */
+const MARKER_TAP_SLOP = 10;
+const MARKER_A11Y_ACTIONS = [{ name: 'activate' }];
+
+type MarkerHostProps = {
+  marker: ReaderMarker;
+  onPress?: (marker: { id: string; blockId: string }) => void;
+  children: ReactNode;
+};
+
+/**
+ * Host of one marker view. The native list places it at the marker's line;
+ * a tap that no pressable child takes fires `onMarkerPress`.
+ */
+const MarkerHost = memo(function MarkerHost({
+  marker,
+  onPress,
+  children,
+}: MarkerHostProps) {
+  const [slop, setSlop] = useState<Insets | undefined>(undefined);
+  const touch = useRef<{ x: number; y: number } | null>(null);
+  const { id, blockId } = marker;
+  const press = useCallback(
+    () => onPress?.({ id, blockId }),
+    [onPress, id, blockId]
+  );
+  const handleLayout = useCallback((e: LayoutChangeEvent) => {
+    const { width, height } = e.nativeEvent.layout;
+    const next = markerHitSlop(width, height);
+    setSlop((prev) =>
+      prev?.top === next?.top && prev?.left === next?.left ? prev : next
+    );
+  }, []);
+  const handleAction = useCallback(
+    (e: AccessibilityActionEvent) => {
+      if (e.nativeEvent.actionName === 'activate') press();
+    },
+    [press]
+  );
+  return (
+    <SherpaReaderInsertView
+      markerId={id}
+      collapsable={false}
+      style={styles.markerHost}
+      hitSlop={slop}
+      onLayout={handleLayout}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={marker.accessibilityLabel}
+      accessibilityActions={MARKER_A11Y_ACTIONS}
+      onAccessibilityAction={handleAction}
+      // Bubbling: a pressable inside the app's view claims the touch first.
+      onStartShouldSetResponder={() => true}
+      onResponderTerminationRequest={() => true}
+      onResponderGrant={(e: GestureResponderEvent) => {
+        touch.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+      }}
+      onResponderMove={(e: GestureResponderEvent) => {
+        const t = touch.current;
+        if (
+          t &&
+          Math.hypot(e.nativeEvent.pageX - t.x, e.nativeEvent.pageY - t.y) >
+            MARKER_TAP_SLOP
+        ) {
+          touch.current = null;
+        }
+      }}
+      onResponderRelease={() => {
+        if (touch.current) press();
+        touch.current = null;
+      }}
+      onResponderTerminate={() => {
+        touch.current = null;
+      }}
+    >
+      {children}
+    </SherpaReaderInsertView>
+  );
+});
 
 /** Flat native form of a selection menu item. */
 export function selectionMenuItemSpecFor(item: ReaderSelectionMenuItem): {
@@ -159,8 +274,9 @@ function locator(
 }
 
 /**
- * Native, virtualized reader (Fabric only). Inserts are rendered as React
- * children and placed into the reading flow by the native list.
+ * Native, virtualized reader (Fabric only). Inserts and marker views are
+ * rendered as React children and placed by the native list: inserts into the
+ * reading flow, marker views into the trailing margin.
  */
 export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
   function ReaderView(props, ref) {
@@ -179,6 +295,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       selectionSnap,
       selectionMenuItems,
       markers,
+      renderMarker,
       style,
       testID,
       onReady,
@@ -236,6 +353,22 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       () => (markers ?? []).map(markerSpecFor),
       [markers]
     );
+    // Virtualized marker views: the native list reports the markers of the
+    // rows in and around the visible range; only those are mounted.
+    const markerIds = useMemo(
+      () => new Set((markers ?? []).map((m) => m.id)),
+      [markers]
+    );
+    const knownMarkers = useRef(markerIds);
+    knownMarkers.current = markerIds;
+    const [markerWindow, setMarkerWindow] = useState<string[]>([]);
+    const mountedMarkers = useMemo(() => {
+      if (!renderMarker || !markers || markerWindow.length === 0) return [];
+      const ids = new Set(markerWindow);
+      // In `markers` order: the window only adds and removes hosts, it never
+      // reorders them (a reorder would remount native views).
+      return markers.filter((m) => ids.has(m.id));
+    }, [renderMarker, markers, markerWindow]);
     const menuItemSpecs = useMemo(
       () => (selectionMenuItems ?? []).map(selectionMenuItemSpecFor),
       [selectionMenuItems]
@@ -313,13 +446,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       },
       [onSelectionAction]
     );
-    const handleMarkerPress = useCallback(
-      (e: NativeSyntheticEvent<NativeEvent<'onMarkerPress'>>) =>
-        onMarkerPress?.({
-          id: e.nativeEvent.id,
-          blockId: e.nativeEvent.blockId,
-        }),
-      [onMarkerPress]
+    const handleMarkerWindow = useCallback(
+      (e: NativeSyntheticEvent<NativeEvent<'onMarkerWindowChange'>>) => {
+        const requested = [...e.nativeEvent.markerIds];
+        setMarkerWindow((prev) =>
+          nextMarkerWindow(prev, requested, knownMarkers.current)
+        );
+      },
+      []
     );
     const handleError = useCallback(
       (e: NativeSyntheticEvent<NativeEvent<'onReaderError'>>) =>
@@ -400,7 +534,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         onReaderError={handleError}
         onFollowChange={handleFollowChange}
         onSelectionAction={handleSelectionAction}
-        onMarkerPress={handleMarkerPress}
+        onMarkerWindowChange={renderMarker ? handleMarkerWindow : undefined}
       >
         {renderInsert
           ? insertSpecs.map((spec) => (
@@ -414,6 +548,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
               </SherpaReaderInsertView>
             ))
           : null}
+        {renderMarker
+          ? mountedMarkers.map((m) => (
+              <MarkerHost key={m.id} marker={m} onPress={onMarkerPress}>
+                {renderMarker(m.id)}
+              </MarkerHost>
+            ))
+          : null}
       </SherpaReaderView>
     );
   }
@@ -424,4 +565,6 @@ const styles = StyleSheet.create({
   // Laid out by Yoga at full reader width; the native list moves the host
   // into its row, so its on-screen position comes from the list.
   insertHost: { position: 'absolute', top: 0, left: 0, right: 0 },
+  // Sized by its content; the native list places it at the marker's line.
+  markerHost: { position: 'absolute', top: 0, left: 0 },
 });

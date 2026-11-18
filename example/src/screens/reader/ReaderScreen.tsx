@@ -656,7 +656,17 @@ export default function ReaderScreen() {
     [listenFrom, loadTexts, tts.currentModelFolder]
   );
 
-  // One marker per group of notes on the same sentences, labelled with the count.
+  // One marker per group of notes on the same sentences, drawn with the count.
+  const markerCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const n of notes) {
+      const id = `notes:${n.blockId}:${n.sentenceStart}-${n.sentenceEnd}`;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    testMarkers.forEach((m, i) => counts.set(m.id, i + 1));
+    return counts;
+  }, [notes, testMarkers]);
+
   const markers = useMemo<ReaderMarker[]>(() => {
     const groups = new Map<string, Note[]>();
     for (const n of notes) {
@@ -668,7 +678,6 @@ export default function ReaderScreen() {
       blockId: group[0]!.blockId,
       start: group[0]!.sentenceStart,
       end: group[0]!.sentenceEnd,
-      label: String(group.length),
       accessibilityLabel: `${group.length} ${
         group.length === 1 ? 'note' : 'notes'
       }`,
@@ -703,6 +712,19 @@ export default function ReaderScreen() {
     [notes]
   );
 
+  // The app's own marker look: a small speech bubble with the count.
+  const renderMarker = useCallback(
+    (id: string) => (
+      <MarkerBubble
+        count={markerCounts.get(id) ?? 0}
+        color={colors.accent}
+        background={colors.background}
+        test={id.startsWith('test:')}
+      />
+    ),
+    [markerCounts, colors.accent, colors.background]
+  );
+
   const toggleTestMarkers = useCallback(
     async (on: boolean) => {
       if (!on) {
@@ -725,8 +747,7 @@ export default function ReaderScreen() {
         list.push({
           id: `test:${b.id}`,
           blockId: b.id,
-          label: String(list.length + 1),
-          color: list.length % 2 === 0 ? undefined : '#16A34A',
+          accessibilityLabel: `Test marker ${list.length + 1}`,
         });
       }
       setTestMarkers(list);
@@ -1239,6 +1260,7 @@ export default function ReaderScreen() {
                   onSelectionAction(a).catch(() => {});
                 }}
                 markers={markers}
+                renderMarker={renderMarker}
                 onMarkerPress={onMarkerPress}
                 onError={(e) => setError(`${e.code}: ${e.message}`)}
               />
@@ -1503,5 +1525,34 @@ function ToolbarButton({
         {label}
       </Text>
     </Pressable>
+  );
+}
+
+/** Speech-bubble marker of the example: outlined for notes, filled for test markers. */
+function MarkerBubble({
+  count,
+  color,
+  background,
+  test,
+}: {
+  count: number;
+  color: string;
+  background: string;
+  test: boolean;
+}) {
+  const fill = test ? color : background;
+  const ink = test ? background : color;
+  return (
+    <View style={styles.markerBubble}>
+      <View
+        style={[
+          styles.markerBubbleBody,
+          { backgroundColor: fill, borderColor: color },
+        ]}
+      >
+        <Text style={[styles.markerBubbleText, { color: ink }]}>{count}</Text>
+      </View>
+      <View style={[styles.markerBubbleTail, { borderTopColor: color }]} />
+    </View>
   );
 }

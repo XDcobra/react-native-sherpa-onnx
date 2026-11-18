@@ -242,11 +242,12 @@ export type ReaderHighlight = {
 };
 
 /**
- * A label in the margin next to a block (e.g. a count or a symbol). Markers
- * never change the text or the row height.
+ * A place in the trailing margin next to a block or a range (e.g. a note
+ * count). The SDK only places it; the app draws it with `renderMarker`.
+ * Markers never change the text or the row height.
  */
 export type ReaderMarker = {
-  /** Stable ID; changing a marker means passing the same ID with new values. */
+  /** Stable, unique ID; `renderMarker` and `onMarkerPress` get it. */
   id: string;
   blockId: string;
   /**
@@ -257,14 +258,8 @@ export type ReaderMarker = {
   start?: number;
   /** Exclusive. */
   end?: number;
-  /** Short text in the marker (a count, a symbol). */
-  label: string;
-  /** Read by VoiceOver / TalkBack instead of `label` (e.g. "3 notes"). */
+  /** Read by VoiceOver / TalkBack (e.g. "3 notes"). Default: the text inside the marker view. */
   accessibilityLabel?: string;
-  /** Default: the theme's accent color. */
-  color?: ColorValue;
-  /** Default: white. */
-  textColor?: ColorValue;
 };
 
 /** How a text selection is widened while the user selects. */
@@ -372,8 +367,13 @@ export type ReaderViewProps = {
   selectionSnap?: ReaderSelectionSnap;
   /** App actions in the selection menu; a choice calls `onSelectionAction`. */
   selectionMenuItems?: ReaderSelectionMenuItem[];
-  /** Labels in the trailing margin next to blocks or ranges. */
+  /** Places in the trailing margin next to blocks or ranges; drawn by `renderMarker`. */
   markers?: ReaderMarker[];
+  /**
+   * The app's view for a marker. It is mounted only while its row is near the
+   * visible range. Without it markers are not shown.
+   */
+  renderMarker?: (id: string) => ReactNode;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   onReady?: (info: { blockCount: number; sectionCount: number }) => void;
@@ -381,14 +381,17 @@ export type ReaderViewProps = {
   onFurthestPositionChange?: (locator: ReaderLocator) => void;
   onSectionEnd?: (info: { sectionId: string; blockId: string }) => void;
   onJump?: (jump: ReaderJump) => void;
-  /** A tap on a row that is not a marker (also when not `selectable`). */
+  /** A tap on a row outside markers and inserts (also when not `selectable`). */
   onTap?: (tap: ReaderTap) => void;
   onError?: (error: { code: string; message: string }) => void;
   /** Follow scrolling paused or resumed. */
   onFollowChange?: (change: ReaderFollowChange) => void;
   /** A `selectionMenuItems` entry was chosen; the selection is cleared afterwards. */
   onSelectionAction?: (action: ReaderSelectionAction) => void;
-  /** A marker was tapped (or activated with VoiceOver / TalkBack). */
+  /**
+   * A marker view was tapped (outside its own pressable children) or
+   * activated with VoiceOver / TalkBack.
+   */
   onMarkerPress?: (marker: { id: string; blockId: string }) => void;
   /** @internal Spike/testing only: render N placeholder rows without a document. */
   __debugRowCount?: number;

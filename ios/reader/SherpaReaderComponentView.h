@@ -11,8 +11,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 /**
  * Fabric ReaderView: a native table of reader blocks. React children are insert
- * hosts (SherpaReaderInsertComponentView); they are not added as subviews but
- * moved into the rows that the `inserts` prop assigns to them.
+ * and marker hosts (SherpaReaderInsertComponentView); they are not added as
+ * subviews but moved into the rows that the `inserts` prop assigns to them, or
+ * into the marker overlay of the row a marker sits in.
  */
 @interface SherpaReaderComponentView : RCTViewComponentView
 

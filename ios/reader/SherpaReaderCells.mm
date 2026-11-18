@@ -11,130 +11,116 @@
 @implementation SherpaReaderMarker
 @end
 
-/** VoiceOver element of a marker: activating it presses the marker. */
-@interface SherpaReaderMarkerElement : UIAccessibilityElement
-@property (nonatomic, copy) NSString *markerId;
-@property (nonatomic, weak) id<SherpaReaderCellDelegate> delegate;
-@end
-
-@implementation SherpaReaderMarkerElement
-
-- (BOOL)accessibilityActivate {
-  [self.delegate cellDidActivateMarker:self.markerId];
-  return YES;
-}
-
-@end
-
 /**
- * Margin markers of one row: a pill per marker in the trailing margin, at the
- * vertical center the row gives. Markers on the same line are placed below
- * one another. Drawn only; touches go to the row (hit test: markerIdAtPoint:).
+ * Margin markers of one row: holds the marker hosts (the app's React views)
+ * and places each in the trailing margin, vertically centered on the line the
+ * row gives. Markers on the same line go below one another. Touches outside
+ * the hosts fall through to the row.
  */
 @interface SherpaReaderMarkerOverlay : UIView
-@property (nonatomic, copy, readonly) NSArray<SherpaReaderMarker *> *markers;
-/** Pill frames in overlay coordinates, parallel to `markers`. */
-@property (nonatomic, copy, readonly) NSArray<NSValue *> *frames;
-- (void)setMarkers:(NSArray<SherpaReaderMarker *> *)markers
-           centers:(NSArray<NSNumber *> *)centers
-     trailingInset:(CGFloat)inset
-              font:(UIFont *)font;
-- (nullable NSString *)markerIdAtPoint:(CGPoint)point;
+/** Moves the mounted hosts of `markers` in (and hosts of other markers out). */
+- (void)attachMarkers:(NSArray<SherpaReaderMarker *> *)markers;
+/** Places the attached hosts; `centers` parallel to `markers`. */
+- (void)placeMarkers:(NSArray<SherpaReaderMarker *> *)markers
+             centers:(NSArray<NSNumber *> *)centers
+       trailingInset:(CGFloat)inset;
+/** Attached hosts, top to bottom (VoiceOver order). */
+- (NSArray<UIView *> *)placedHosts;
+/** Hands every host back (cell reuse). */
+- (void)detachAll;
 @end
 
-@implementation SherpaReaderMarkerOverlay {
-  UIFont *_font;
-}
+@implementation SherpaReaderMarkerOverlay
 
 - (instancetype)initWithFrame:(CGRect)frame {
   if (self = [super initWithFrame:frame]) {
     self.opaque = NO;
     self.backgroundColor = UIColor.clearColor;
-    self.userInteractionEnabled = NO;
-    self.contentMode = UIViewContentModeRedraw;
     self.isAccessibilityElement = NO;
-    _markers = @[];
-    _frames = @[];
   }
   return self;
 }
 
-- (void)setMarkers:(NSArray<SherpaReaderMarker *> *)markers
-           centers:(NSArray<NSNumber *> *)centers
-     trailingInset:(CGFloat)inset
-              font:(UIFont *)font {
-  _markers = [markers copy] ?: @[];
-  _font = font;
-  const CGFloat height = ceil(font.lineHeight + 6);
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+  UIView *hit = [super hitTest:point withEvent:event];
+  return hit == self ? nil : hit;
+}
+
+- (void)attachMarkers:(NSArray<SherpaReaderMarker *> *)markers {
+  NSHashTable<UIView *> *wanted = [NSHashTable weakObjectsHashTable];
+  for (SherpaReaderMarker *m in markers) {
+    UIView *host = m.host;
+    if (!host) continue;
+    [wanted addObject:host];
+    if (host.superview != self) {
+      // From another (recycled or off-screen) row: the host moves, React keeps it.
+      [host removeFromSuperview];
+      [self addSubview:host];
+    }
+  }
+  for (UIView *sub in [self.subviews copy]) {
+    if (![wanted containsObject:sub]) [sub removeFromSuperview];
+  }
+}
+
+- (void)detachAll {
+  for (UIView *sub in [self.subviews copy]) [sub removeFromSuperview];
+}
+
+- (void)placeMarkers:(NSArray<SherpaReaderMarker *> *)markers
+             centers:(NSArray<NSNumber *> *)centers
+       trailingInset:(CGFloat)inset {
+  NSArray<UIView *> *before = self.placedHosts;
+  [self placeMarkersOnly:markers centers:centers trailingInset:inset];
+  // Screen readers cache a row's elements: tell them when the marker views
+  // (or their order) changed.
+  if (![before isEqualToArray:self.placedHosts]) {
+    UIAccessibilityPostNotification(UIAccessibilityLayoutChangedNotification, nil);
+  }
+}
+
+- (void)placeMarkersOnly:(NSArray<SherpaReaderMarker *> *)markers
+                 centers:(NSArray<NSNumber *> *)centers
+           trailingInset:(CGFloat)inset {
   const CGFloat width = self.bounds.size.width;
   // Top to bottom; a marker on the line of the one before goes below it.
-  NSMutableArray<NSNumber *> *order = [NSMutableArray arrayWithCapacity:_markers.count];
-  for (NSUInteger i = 0; i < _markers.count; ++i) [order addObject:@(i)];
+  NSMutableArray<NSNumber *> *order = [NSMutableArray arrayWithCapacity:markers.count];
+  for (NSUInteger i = 0; i < markers.count; ++i) [order addObject:@(i)];
   [order sortWithOptions:NSSortStable
          usingComparator:^NSComparisonResult(NSNumber *a, NSNumber *b) {
            return [centers[a.unsignedIntegerValue] compare:centers[b.unsignedIntegerValue]];
          }];
-  NSMutableArray<NSValue *> *frames = [NSMutableArray arrayWithCapacity:_markers.count];
-  for (NSUInteger i = 0; i < _markers.count; ++i) [frames addObject:[NSValue valueWithCGRect:CGRectZero]];
   CGFloat lastBottom = -CGFLOAT_MAX;
   for (NSNumber *n in order) {
-    const NSUInteger i = n.unsignedIntegerValue;
-    const CGSize text = [_markers[i].label sizeWithAttributes:@{NSFontAttributeName : font}];
-    const CGFloat w = MAX(height, ceil(text.width) + 10);
-    const CGFloat cy = MAX(centers[i].doubleValue, lastBottom + 2 + height / 2);
-    // Centered in the margin when it fits; else at the trailing edge.
-    const CGFloat x = inset >= w + 4 ? width - inset / 2 - w / 2 : width - 2 - w;
-    const CGRect f = CGRectMake(x, cy - height / 2, w, height);
-    frames[i] = [NSValue valueWithCGRect:f];
+    SherpaReaderMarker *m = markers[n.unsignedIntegerValue];
+    UIView *host = m.host;
+    if (!host || host.superview != self) continue;
+    const CGSize size = m.hostSize;
+    if (size.width <= 0 || size.height <= 0) continue;  // not laid out by Yoga yet
+    const CGFloat cy = MAX(centers[n.unsignedIntegerValue].doubleValue, lastBottom + 2 + size.height / 2);
+    // Centered in the margin; a view wider than the margin stays inside the
+    // row (it then overlaps the text).
+    CGFloat x = inset > 0 ? width - inset / 2 - size.width / 2 : width - size.width;
+    x = MAX(0, MIN(x, width - size.width));
+    const CGRect f = CGRectMake(round(x), round(cy - size.height / 2), size.width, size.height);
+    if (!CGRectEqualToRect(host.frame, f)) host.frame = f;
     lastBottom = CGRectGetMaxY(f);
   }
-  _frames = frames;
-  [self setNeedsDisplay];
 }
 
-- (void)drawRect:(CGRect)rect {
-  if (!_font) return;
-  NSMutableParagraphStyle *p = [NSMutableParagraphStyle new];
-  p.alignment = NSTextAlignmentCenter;
-  for (NSUInteger i = 0; i < _markers.count; ++i) {
-    SherpaReaderMarker *m = _markers[i];
-    const CGRect f = _frames[i].CGRectValue;
-    [m.fillColor setFill];
-    [[UIBezierPath bezierPathWithRoundedRect:f cornerRadius:f.size.height / 2] fill];
-    NSDictionary *attrs = @{
-      NSFontAttributeName : _font,
-      NSForegroundColorAttributeName : m.labelColor,
-      NSParagraphStyleAttributeName : p,
-    };
-    const CGFloat textH = _font.lineHeight;
-    [m.label drawInRect:CGRectMake(f.origin.x, f.origin.y + (f.size.height - textH) / 2, f.size.width, textH)
-         withAttributes:attrs];
+- (NSArray<UIView *> *)placedHosts {
+  if (self.hidden) return @[];
+  NSMutableArray<UIView *> *placed = [NSMutableArray array];
+  for (UIView *v in self.subviews) {
+    if (v.frame.size.width > 0 && v.frame.size.height > 0) [placed addObject:v];
   }
-}
-
-- (NSString *)markerIdAtPoint:(CGPoint)point {
-  NSString *best = nil;
-  CGFloat bestDistance = CGFLOAT_MAX;
-  for (NSUInteger i = 0; i < _markers.count; ++i) {
-    const CGRect f = _frames[i].CGRectValue;
-    // At least 44 × 44 pt to tap (HIG).
-    const CGRect hit = CGRectInset(f, MIN(0, (f.size.width - 44) / 2), MIN(0, (f.size.height - 44) / 2));
-    if (!CGRectContainsPoint(hit, point)) continue;
-    const CGFloat d = hypot(point.x - CGRectGetMidX(f), point.y - CGRectGetMidY(f));
-    if (d < bestDistance) {
-      bestDistance = d;
-      best = _markers[i].markerId;
-    }
-  }
-  return best;
+  [placed sortUsingComparator:^NSComparisonResult(UIView *a, UIView *b) {
+    return [@(a.frame.origin.y) compare:@(b.frame.origin.y)];
+  }];
+  return placed;
 }
 
 @end
-
-/** Marker label font of a theme: a small semibold system font. */
-static UIFont *MarkerFont(SherpaReaderTheme *theme) {
-  return [UIFont systemFontOfSize:MAX(11, round(theme.bodyFont.pointSize * 0.6)) weight:UIFontWeightSemibold];
-}
 
 /** A row font with italic / bold, and what has to be synthesized when the family lacks the face. */
 @interface SherpaReaderStyledFont : NSObject
@@ -279,7 +265,6 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   NSArray<SherpaReaderStyleSpan *> *_styles;
   SherpaReaderMarkerOverlay *_overlay;
   NSArray<SherpaReaderMarker *> *_markers;
-  UIFont *_markerFont;
   CGFloat _markerInset;
   BOOL _snapping;
 }
@@ -305,7 +290,6 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
     _textView.showsVerticalScrollIndicator = NO;
     _textView.showsHorizontalScrollIndicator = NO;
     _textView.delegate = self;
-    self.isAccessibilityElement = YES;
     [self.contentView addSubview:_textView];
     _overlay = [[SherpaReaderMarkerOverlay alloc] initWithFrame:CGRectZero];
     _overlay.hidden = YES;
@@ -318,6 +302,7 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   [super prepareForReuse];
   [self clearSelection];
   _markers = nil;
+  [_overlay detachAll];
   _overlay.hidden = YES;
 }
 
@@ -364,8 +349,8 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 
 - (void)updateMarkers:(NSArray<SherpaReaderMarker *> *)markers theme:(SherpaReaderTheme *)theme {
   _markers = markers.count > 0 ? [markers copy] : nil;
-  _markerFont = MarkerFont(theme);
   _markerInset = theme.marginHorizontal;
+  [_overlay attachMarkers:_markers ?: @[]];
   [self setNeedsLayout];
   if (_markers == nil) [self layoutMarkers];
 }
@@ -389,7 +374,7 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   // Baseline of the line, then the middle of the font's ascender / descender box
   // (line height multiples add space above the glyphs).
   const CGFloat baseline = line.origin.y + [lm locationForGlyphAtIndex:glyph].y;
-  UIFont *font = [_textView.textStorage attribute:NSFontAttributeName atIndex:idx effectiveRange:nil] ?: _markerFont;
+  UIFont *font = [_textView.textStorage attribute:NSFontAttributeName atIndex:idx effectiveRange:nil] ?: _textView.font;
   const CGFloat center = baseline - (font.ascender + font.descender) / 2;
   return [_textView convertPoint:CGPointMake(0, center) toView:self.contentView].y;
 }
@@ -397,8 +382,6 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 - (void)layoutMarkers {
   if (_markers.count == 0) {
     _overlay.hidden = YES;
-    self.accessibilityElements = nil;
-    self.isAccessibilityElement = YES;
     return;
   }
   _overlay.frame = self.contentView.bounds;
@@ -408,29 +391,24 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   for (SherpaReaderMarker *m in _markers) {
     [centers addObject:@([self lineCenterForCharacterOffset:m.offset])];
   }
-  [_overlay setMarkers:_markers centers:centers trailingInset:_markerInset font:_markerFont];
-  // VoiceOver: the text, then one button per marker.
-  self.isAccessibilityElement = NO;
+  [_overlay placeMarkers:_markers centers:centers trailingInset:_markerInset];
+}
+
+// VoiceOver: built when asked, from the hosts' current places (they move in
+// and get their size after this row was laid out). The text, then the marker
+// views top to bottom (each one element, from JS).
+- (BOOL)isAccessibilityElement {
+  return _overlay.placedHosts.count == 0;
+}
+
+- (NSArray *)accessibilityElements {
+  NSArray<UIView *> *hosts = _overlay.placedHosts;
+  if (hosts.count == 0) return nil;
   UIAccessibilityElement *text = [[UIAccessibilityElement alloc] initWithAccessibilityContainer:self];
   text.accessibilityLabel = _text;
   text.accessibilityTraits = _level > 0 ? UIAccessibilityTraitHeader : UIAccessibilityTraitStaticText;
   text.accessibilityFrameInContainerSpace = [self.contentView convertRect:_textView.frame toView:self];
-  NSMutableArray *elements = [NSMutableArray arrayWithObject:text];
-  for (NSUInteger i = 0; i < _markers.count; ++i) {
-    SherpaReaderMarkerElement *e = [[SherpaReaderMarkerElement alloc] initWithAccessibilityContainer:self];
-    e.markerId = _markers[i].markerId;
-    e.delegate = self.delegate;
-    e.accessibilityLabel = _markers[i].spokenLabel ?: _markers[i].label;
-    e.accessibilityTraits = UIAccessibilityTraitButton;
-    e.accessibilityFrameInContainerSpace = [_overlay convertRect:_overlay.frames[i].CGRectValue toView:self];
-    [elements addObject:e];
-  }
-  self.accessibilityElements = elements;
-}
-
-- (NSString *)markerIdAtPoint:(CGPoint)point {
-  if (_overlay.hidden) return nil;
-  return [_overlay markerIdAtPoint:[self.contentView convertPoint:point toView:_overlay]];
+  return [@[ text ] arrayByAddingObjectsFromArray:hosts];
 }
 
 - (void)configureWithText:(NSString *)text
@@ -569,7 +547,6 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   SherpaReaderPageOverlay *_overlay;
   SherpaReaderMarkerOverlay *_markerOverlay;
   NSArray<SherpaReaderMarker *> *_markers;
-  UIFont *_markerFont;
   CGFloat _markerInset;
 }
 
@@ -615,7 +592,6 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   _overlay.marks = @[];
   _markerInset = page ? 0 : theme.marginHorizontal;
   // Images without alt text are decorative: hidden from VoiceOver.
-  self.isAccessibilityElement = alt.length > 0;
   self.accessibilityLabel = alt;
   self.accessibilityTraits = UIAccessibilityTraitImage;
 }
@@ -627,12 +603,17 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 - (void)prepareForReuse {
   [super prepareForReuse];
   _markers = nil;
+  [_markerOverlay detachAll];
   _markerOverlay.hidden = YES;
 }
 
 - (void)updateMarkers:(NSArray<SherpaReaderMarker *> *)markers theme:(SherpaReaderTheme *)theme {
   _markers = markers.count > 0 ? [markers copy] : nil;
-  _markerFont = MarkerFont(theme);
+  if (_markers != nil && _markerOverlay == nil) {
+    _markerOverlay = [[SherpaReaderMarkerOverlay alloc] initWithFrame:CGRectZero];
+    [self.contentView addSubview:_markerOverlay];
+  }
+  [_markerOverlay attachMarkers:_markers ?: @[]];
   [self setNeedsLayout];
   if (_markers == nil) [self layoutMarkers];
 }
@@ -645,52 +626,41 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
 - (void)layoutMarkers {
   if (_markers.count == 0) {
     _markerOverlay.hidden = YES;
-    self.accessibilityElements = nil;
-    self.isAccessibilityElement = self.accessibilityLabel.length > 0;
     return;
-  }
-  if (_markerOverlay == nil) {
-    _markerOverlay = [[SherpaReaderMarkerOverlay alloc] initWithFrame:CGRectZero];
-    [self.contentView addSubview:_markerOverlay];
   }
   _markerOverlay.frame = self.contentView.bounds;
   _markerOverlay.hidden = NO;
   [self.contentView bringSubviewToFront:_markerOverlay];
   const CGRect image = _frameView.frame;
-  const CGFloat pill = ceil(_markerFont.lineHeight + 6);
   NSMutableArray<NSNumber *> *centers = [NSMutableArray arrayWithCapacity:_markers.count];
   for (SherpaReaderMarker *m in _markers) {
     const CGFloat y = m.pageHeight > 0 ? image.origin.y + (m.pageY + m.pageHeight / 2) * image.size.height
-                                       : image.origin.y + pill / 2 + 4;
+                                       : image.origin.y + m.hostSize.height / 2 + 4;
     [centers addObject:@(y)];
   }
-  [_markerOverlay setMarkers:_markers centers:centers trailingInset:_markerInset font:_markerFont];
-  // VoiceOver: the image (when it has alt text), then one button per marker.
+  [_markerOverlay placeMarkers:_markers centers:centers trailingInset:_markerInset];
+}
+
+// VoiceOver (built when asked, like text rows): the image when it has alt
+// text, then the marker views top to bottom. Without alt text the image is
+// decorative.
+- (BOOL)isAccessibilityElement {
+  return self.accessibilityLabel.length > 0 && (_markerOverlay == nil || _markerOverlay.placedHosts.count == 0);
+}
+
+- (NSArray *)accessibilityElements {
+  NSArray<UIView *> *hosts = _markerOverlay.placedHosts;
+  if (hosts.count == 0) return nil;
   NSMutableArray *elements = [NSMutableArray array];
   if (self.accessibilityLabel.length > 0) {
     UIAccessibilityElement *img = [[UIAccessibilityElement alloc] initWithAccessibilityContainer:self];
     img.accessibilityLabel = self.accessibilityLabel;
     img.accessibilityTraits = UIAccessibilityTraitImage;
-    img.accessibilityFrameInContainerSpace = [self.contentView convertRect:image toView:self];
+    img.accessibilityFrameInContainerSpace = [self.contentView convertRect:_frameView.frame toView:self];
     [elements addObject:img];
   }
-  for (NSUInteger i = 0; i < _markers.count; ++i) {
-    SherpaReaderMarkerElement *e = [[SherpaReaderMarkerElement alloc] initWithAccessibilityContainer:self];
-    e.markerId = _markers[i].markerId;
-    e.delegate = self.delegate;
-    e.accessibilityLabel = _markers[i].spokenLabel ?: _markers[i].label;
-    e.accessibilityTraits = UIAccessibilityTraitButton;
-    e.accessibilityFrameInContainerSpace =
-        [_markerOverlay convertRect:_markerOverlay.frames[i].CGRectValue toView:self];
-    [elements addObject:e];
-  }
-  self.isAccessibilityElement = NO;
-  self.accessibilityElements = elements;
-}
-
-- (NSString *)markerIdAtPoint:(CGPoint)point {
-  if (_markerOverlay == nil || _markerOverlay.hidden) return nil;
-  return [_markerOverlay markerIdAtPoint:[self.contentView convertPoint:point toView:_markerOverlay]];
+  [elements addObjectsFromArray:hosts];
+  return elements;
 }
 
 @end

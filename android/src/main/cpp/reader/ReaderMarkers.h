@@ -20,7 +20,7 @@ struct MarkerInput {
 
 /** Where a marker sits in its block. */
 struct MarkerAnchor {
-  /** Index into the inputs (labels and colors stay with the platform). */
+  /** Index into the inputs (the marker views stay with the platform / JS). */
   int input = 0;
   /**
    * UTF-16 offset whose line the marker is drawn at: the last character of

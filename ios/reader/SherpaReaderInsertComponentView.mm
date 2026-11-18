@@ -14,6 +14,7 @@ using namespace facebook::react;
 
 @implementation SherpaReaderInsertComponentView {
   NSString *_insertKey;
+  NSString *_markerId;
   SherpaReaderInsertShadowNode::ConcreteState::Shared _state;
   CGPoint _lastOrigin;
 }
@@ -36,8 +37,19 @@ using namespace facebook::react;
     static const auto defaultProps = std::make_shared<const SherpaReaderInsertViewProps>();
     _props = defaultProps;
     _insertKey = @"";
+    _markerId = @"";
   }
   return self;
+}
+
+- (NSString *)markerId
+{
+  return _markerId;
+}
+
+- (CGSize)yogaSize
+{
+  return CGSizeMake(_layoutMetrics.frame.size.width, _layoutMetrics.frame.size.height);
 }
 
 - (NSString *)insertKey
@@ -74,8 +86,10 @@ using namespace facebook::react;
 {
   const auto &newProps = static_cast<const SherpaReaderInsertViewProps &>(*props);
   NSString *key = [NSString stringWithUTF8String:newProps.insertKey.c_str()] ?: @"";
-  BOOL keyChanged = ![key isEqualToString:_insertKey];
+  NSString *markerId = [NSString stringWithUTF8String:newProps.markerId.c_str()] ?: @"";
+  BOOL keyChanged = ![key isEqualToString:_insertKey] || ![markerId isEqualToString:_markerId];
   _insertKey = key;
+  _markerId = markerId;
   [super updateProps:props oldProps:oldProps];
   if (keyChanged) {
     [self.reader insertHostDidChangeKey:self];
@@ -85,13 +99,20 @@ using namespace facebook::react;
 - (void)updateLayoutMetrics:(const LayoutMetrics &)layoutMetrics
            oldLayoutMetrics:(const LayoutMetrics &)oldLayoutMetrics
 {
-  [super updateLayoutMetrics:layoutMetrics oldLayoutMetrics:oldLayoutMetrics];
   // Yoga places the host at the reader's origin; the row decides where it is
-  // on screen, so keep the origin at the cell's top-left.
+  // on screen: inserts at the cell's top-left, markers where the row put them.
+  const CGPoint placed = _markerId.length > 0 ? self.frame.origin : CGPointZero;
+  [super updateLayoutMetrics:layoutMetrics oldLayoutMetrics:oldLayoutMetrics];
   CGRect frame = self.frame;
-  frame.origin = CGPointZero;
+  frame.origin = placed;
   self.frame = frame;
-  if (layoutMetrics.frame.size.height != oldLayoutMetrics.frame.size.height) {
+  // Sub-point changes are layout noise (every Yoga pass over the reader's
+  // children can move a height by ~1e-5); a row update for each would stall.
+  const auto &now = layoutMetrics.frame.size;
+  const auto &was = oldLayoutMetrics.frame.size;
+  const bool heightChanged = fabs(now.height - was.height) >= 0.5;
+  const bool resized = _markerId.length > 0 ? heightChanged || fabs(now.width - was.width) >= 0.5 : heightChanged;
+  if (resized) {
     [self.reader insertHostDidResize:self];
   }
 }
@@ -100,6 +121,7 @@ using namespace facebook::react;
 {
   [super prepareForRecycle];
   _insertKey = @"";
+  _markerId = @"";
   _state.reset();
   _lastOrigin = CGPointZero;
   self.reader = nil;

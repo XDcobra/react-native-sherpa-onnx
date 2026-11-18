@@ -10,7 +10,7 @@ Import from `react-native-sherpa-onnx/reader`.
 | --- | --- | --- |
 | Highlights · chapter-end insert · progress | Note insert after a paragraph | Search with all hits marked |
 
-The screenshots are from the [example app](../example/README.md#reader) (`ReaderScreen`). Cards, notes, toolbar and panels are app UI built with the public API; the SDK draws the text, page images, highlights, the text selection and margin markers.
+The screenshots are from the [example app](../example/README.md#reader) (`ReaderScreen`). Cards, notes, toolbar, panels and the margin marker views are app UI built with the public API; the SDK draws the text, page images, highlights and the text selection, and places the marker views.
 
 What the SDK gives you:
 
@@ -20,7 +20,7 @@ What the SDK gives you:
 - **App sections**: text that is not in the file (a preface, a reading guide, generated content), inserted between the book's sections.
 - **Reading events**: visible range, furthest position, section end, jumps and taps, computed by one shared C++ tracker on both platforms.
 - **Highlights and follow scrolling**: any number of marked ranges in three styles; one of them can be kept in view.
-- **Text selection and margin markers**: native selection inside a paragraph (optionally snapped to sentences) with the app's own menu actions, and small labels in the margin next to paragraphs or sentences (for example a note count).
+- **Text selection and margin markers**: native selection inside a paragraph (optionally snapped to sentences) with the app's own menu actions, and the app's own views in the margin next to paragraphs or sentences (for example a note count).
 - **Read aloud**: maps a TTS timeline onto the reader for sentence and word highlights.
 
 Requirements:
@@ -440,7 +440,8 @@ The native reading view. All props:
 | `selectable` | `boolean` | `false` | Long-press text selection inside a block; see [Text selection](#text-selection). |
 | `selectionSnap` | `'none' \| 'sentence' \| 'block'` | `'none'` | Widens a selection to whole sentences or the whole block while the user selects. |
 | `selectionMenuItems` | `ReaderSelectionMenuItem[]` | `[]` | App actions in the selection menu, before the system items; a choice fires `onSelectionAction`. |
-| `markers` | `ReaderMarker[]` | `[]` | Labels in the trailing margin; see [Margin markers](#margin-markers). |
+| `markers` | `ReaderMarker[]` | `[]` | Places in the trailing margin next to blocks or ranges; see [Margin markers](#margin-markers). |
+| `renderMarker` | `(id: string) => ReactNode` | | The app's view for a marker, mounted only near the visible range. Without it markers are not shown. |
 | `mode` | `'scroll'` | `'scroll'` | Layout mode. |
 | `style`, `testID` | | | As for `View`. |
 | `onReady`, `onVisibleRangeChange`, `onFurthestPositionChange`, `onSectionEnd`, `onJump`, `onTap`, `onFollowChange`, `onSelectionAction`, `onMarkerPress`, `onError` | | | See [JS Events](#js-events). |
@@ -554,9 +555,9 @@ When the theme changes, the first visible line stays in place. The same holds fo
 | `onFurthestPositionChange` | `ReaderLocator` | The frontier advanced while reading continuously. |
 | `onSectionEnd` | `{ sectionId, blockId }` | The last block of a section came into view while reading continuously. Fires once per transition into view. |
 | `onJump` | `ReaderJump` | The position moved more than `jumpThreshold` blocks. The app decides whether the jump counts as read. |
-| `onTap` | `ReaderTap` `{ blockId, offset? }` | A tap on a row (not on inserts, not on a marker), for example to toggle toolbars. `offset` is the UTF-16 offset of the tapped character in the block; absent on image and separator rows. A tap that only ends a text selection does not fire. |
+| `onTap` | `ReaderTap` `{ blockId, offset? }` | A tap on a row (not on inserts, not on a marker view), for example to toggle toolbars. `offset` is the UTF-16 offset of the tapped character in the block; absent on image and separator rows. A tap that only ends a text selection does not fire. |
 | `onSelectionAction` | `ReaderSelectionAction` `{ itemId, blockId, start, end, text, sentenceStart, sentenceEnd }` | A `selectionMenuItems` entry was chosen. `start` / `end` is the (snapped) selection in the block, `sentenceStart` / `sentenceEnd` the sentences it touches as one range. The selection is cleared afterwards. |
-| `onMarkerPress` | `{ id, blockId }` | A marker was tapped or activated with VoiceOver / TalkBack. |
+| `onMarkerPress` | `{ id, blockId }` | A marker view was tapped (outside its own pressable children) or activated with VoiceOver / TalkBack. |
 | `onFollowChange` | `{ following, reason }` | Follow scrolling paused (`'user'`) or resumed (`'resumed'`, `'command'`). |
 | `onError` | `{ code, message }` | For example `ERR_READER_NOT_FOUND` for a released document, or `ERR_READER_INVALID_ARGUMENT` for a highlight with unknown block IDs. |
 
@@ -611,24 +612,33 @@ With `selectable`, a long press selects text with the platform's handles and men
 
 <p align="center"><img src="./images/example/reader_markers_cut.png" alt="A paragraph marker and a sentence marker in the margin" width="300" /></p>
 
-`markers` places short labels (a count, a symbol) in the trailing margin, next to a block or a sentence. They never change the text or the row height.
+`markers` says where; `renderMarker` draws. The SDK has no marker look of its own: it places the app's React view in the trailing margin, next to a block or a sentence. Markers never change the text or the row height.
 
 ```tsx
 <ReaderView
   document={doc}
   markers={[
-    { id: 'p12', blockId: 's3.b12', label: '3', accessibilityLabel: '3 notes' }, // the paragraph
-    { id: 'p12:s2', blockId: 's3.b12', start: 40, end: 97, label: '1' }, // a sentence
+    { id: 'p12', blockId: 's3.b12', accessibilityLabel: '3 notes' }, // the paragraph
+    { id: 'p12:s2', blockId: 's3.b12', start: 40, end: 97 }, // a sentence
   ]}
+  renderMarker={(id) => <NoteBubble count={counts.get(id) ?? 0} />}
   onMarkerPress={({ id }) => openNotes(id)}
 />
 ```
 
-- **Position:** without `start` / `end` a marker sits at the block's first line; with a range, at the line of the range's last character. Markers on the same line are placed below one another, so combine them in the app (one marker with a count) to keep the margin tidy. On page images markers sit at the trailing edge of the page at the block's line.
-- **Look:** a pill with `color` (default: the theme's `accent`) and `textColor` (default white). It is centered in the trailing margin when it fits; a long label reaches into the text, so keep labels short (1–2 characters).
-- **Touch:** a tap on a marker (44 / 48 pt target) fires `onMarkerPress` instead of `onTap`.
-- **Accessibility:** each marker is a button for VoiceOver with `accessibilityLabel` (default `label`); on Android each marker is a custom TalkBack action of its row.
-- **Cost:** markers are compared by `id`; a change redraws only the affected visible rows (no relayout), so hundreds of markers scroll smoothly.
+| Prop / field | Description |
+| --- | --- |
+| `markers[].id` | Unique, stable ID; passed to `renderMarker` and `onMarkerPress`. |
+| `markers[].blockId`, `start?`, `end?` | Anchor: the block's first line, or the line of the range's last character (UTF-16, `end` exclusive). |
+| `markers[].accessibilityLabel` | Read by VoiceOver / TalkBack; default: the text inside the view. |
+| `renderMarker(id)` | Any view, any size. Without it markers are not shown, not tappable and not read by screen readers. |
+
+- **Position:** the view is centered in the trailing margin and vertically on its anchor line. A view wider than the margin is moved in so it stays on screen and then overlaps the text. Markers on the same line are placed below one another, so combine them in the app (one marker with a count) to keep the margin tidy. On page images markers sit at the trailing edge of the page at the block's line.
+- **Virtualized:** only the views of markers in and around the visible range are mounted (one screen above and below, plus up to 16 recently shown ones). `renderMarker` runs when a marker comes near, so keep it cheap and read its data from a map by ID. A view appears one to two frames after the document's first layout.
+- **Touch:** a tap anywhere on the view fires `onMarkerPress` instead of `onTap`. A `Pressable` inside the view takes its own taps first. Small views get a hit slop up to 44 pt (iOS) / 48 dp (Android).
+- **Accessibility:** each marker view is one button for VoiceOver / TalkBack with `accessibilityLabel`; activating it fires `onMarkerPress`. VoiceOver reads it after its row's text; TalkBack reads the visible marker views after the visible rows.
+- **Cost:** markers are compared by `id` and anchor; a change re-places only the affected visible rows (no relayout). Only a few dozen views are mounted at a time, however many markers there are; flinging through 200 markers in the example stays smooth.
+- **Measure:** `measure` / `measureInWindow` inside a marker view return its on-screen position once the list is at rest (not while it scrolls).
 - A marker with an unknown block ID or a reversed range is skipped and reported through `onError` (`ERR_READER_INVALID_ARGUMENT`).
 
 ## Follow scrolling
@@ -832,7 +842,7 @@ SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 - VoiceOver and TalkBack read the blocks in order; inserts sit between them and stay accessible.
 - Headings carry the header trait (`accessibilityHeading` on Android).
 - Image blocks use `alt`; images without `alt` are hidden from screen readers.
-- Margin markers are buttons for VoiceOver (after the row's text) and custom actions of the row for TalkBack, read with their `accessibilityLabel`.
+- Margin marker views are buttons, read with their `accessibilityLabel` (VoiceOver: after the row's text; TalkBack: after the visible rows).
 - `fontScale: 'system'` follows Dynamic Type and the Android font size.
 
 ## Limits
@@ -840,7 +850,7 @@ SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 - Scroll mode only; no zoom.
 - Text selection stays inside one block (no selection across paragraphs) and does not autoscroll the list; app menu items need iOS 16+. Page images (`pageDisplay: 'image'`) have no selection.
 - Sentence rules know only a built-in English / German abbreviation list; a real end after a title (`on Main St. Then`) or an initial (`plan B. Then`) is merged.
-- Margin markers on the same line stack downward; long labels overlap the text.
+- Margin markers on the same line stack downward; a marker view wider than the margin overlaps the text. TalkBack does not interleave marker views with the rows.
 - On page images, a highlight inside a line (a word) is placed by estimate; OCR models without positions mark the whole page.
 - Of the inline formatting only italic and bold are kept ([Inline styles](#inline-styles)); links, footnote markers, underline, small caps, colors and CSS classes are not. PDF, OCR and plain text blocks have no inline styles.
 - An image is scaled to the text width and is at most 90 % of the viewport high.
@@ -903,7 +913,7 @@ import type {
 | `ReaderInsert` / `ReaderInsertTarget` | `{ key, at }` / `{ sectionEnd } \| { beforeBlock } \| { afterBlock }` |
 | `ReaderTheme` | See [Theme](#theme) |
 | `ReaderHighlight` | `{ id, from, to, style?, color?, follow? }` |
-| `ReaderMarker` | `{ id, blockId, start?, end?, label, accessibilityLabel?, color?, textColor? }` |
+| `ReaderMarker` | `{ id, blockId, start?, end?, accessibilityLabel? }` (drawn by `renderMarker`) |
 | `ReaderSelectionMenuItem` | `{ id, title, systemImage? }` |
 | `ReaderSelectionAction` | `{ itemId, blockId, start, end, text, sentenceStart, sentenceEnd }` |
 | `ReaderSentence` | `{ blockId, index, start, end }` |
@@ -1009,15 +1019,19 @@ Select text (snapped to sentences), add a note from the menu, show the count in 
 type Note = { id: string; blockId: string; start: number; end: number; quote: string };
 const [notes, setNotes] = useState<Note[]>([]);
 
-// One marker per sentence, labelled with its number of notes.
-const markers = useMemo(() => {
-  const groups = new Map<string, Note[]>();
+// One marker per sentence; the app draws it with its number of notes.
+const groups = useMemo(() => {
+  const out = new Map<string, Note[]>();
   for (const n of notes) {
     const key = `${n.blockId}:${n.start}-${n.end}`;
-    groups.set(key, [...(groups.get(key) ?? []), n]);
+    out.set(key, [...(out.get(key) ?? []), n]);
   }
-  return [...groups].map(([key, g]) => ({ id: key, blockId: g[0]!.blockId, start: g[0]!.start, end: g[0]!.end, label: String(g.length) }));
+  return out;
 }, [notes]);
+const markers = useMemo(
+  () => [...groups].map(([key, g]) => ({ id: key, blockId: g[0]!.blockId, start: g[0]!.start, end: g[0]!.end })),
+  [groups]
+);
 
 <ReaderView
   document={doc}
@@ -1028,7 +1042,8 @@ const markers = useMemo(() => {
     setNotes((all) => [...all, { id: `${Date.now()}`, blockId: a.blockId, start: a.sentenceStart, end: a.sentenceEnd, quote: a.text }])
   }
   markers={markers}
-  onMarkerPress={({ id }) => showNotes(notes.filter((n) => `${n.blockId}:${n.start}-${n.end}` === id))}
+  renderMarker={(id) => <NoteBubble count={groups.get(id)?.length ?? 0} />}
+  onMarkerPress={({ id }) => showNotes(groups.get(id) ?? [])}
   inserts={notes.map((n) => ({ key: n.id, at: { afterBlock: n.blockId } }))}
   renderInsert={(key) => <NoteCard note={notes.find((n) => n.id === key)!} />}
 />;

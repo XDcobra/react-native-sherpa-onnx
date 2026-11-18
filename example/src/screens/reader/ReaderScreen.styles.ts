@@ -313,4 +313,33 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     color: '#64748b',
   },
+  // Margin marker (renderMarker): a speech bubble with a tail at the bottom left.
+  markerBubble: {
+    alignItems: 'flex-start',
+  },
+  markerBubbleBody: {
+    minWidth: 20,
+    height: 17,
+    paddingHorizontal: 4,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerBubbleText: {
+    fontSize: 10,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  markerBubbleTail: {
+    marginLeft: 4,
+    marginTop: -1,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 0,
+    borderRightWidth: 5,
+    borderTopWidth: 5,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+  },
 });

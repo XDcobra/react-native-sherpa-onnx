@@ -39,14 +39,6 @@ type MarkerSpec = Readonly<{
   start: CodegenTypes.Int32;
   /** Exclusive; -1: see `start`. */
   end: CodegenTypes.Int32;
-  label: string;
-  /** "" = `label`. */
-  accessibilityLabel: string;
-  /** ARGB as a signed 32-bit int (processColor); ignored unless `hasColor`. */
-  color: CodegenTypes.Int32;
-  hasColor: boolean;
-  textColor: CodegenTypes.Int32;
-  hasTextColor: boolean;
 }>;
 
 type SelectionMenuItemSpec = Readonly<{
@@ -66,9 +58,9 @@ type SelectionActionEvent = Readonly<{
   sentenceEnd: CodegenTypes.Int32;
 }>;
 
-type MarkerPressEvent = Readonly<{
-  id: string;
-  blockId: string;
+type MarkerWindowEvent = Readonly<{
+  /** Markers of the rows in and around the visible range (top to bottom). */
+  markerIds: string[];
 }>;
 
 type FollowChangeEvent = Readonly<{
@@ -171,7 +163,8 @@ export interface NativeProps extends ViewProps {
   onReaderError?: CodegenTypes.DirectEventHandler<ErrorEvent>;
   onFollowChange?: CodegenTypes.DirectEventHandler<FollowChangeEvent>;
   onSelectionAction?: CodegenTypes.DirectEventHandler<SelectionActionEvent>;
-  onMarkerPress?: CodegenTypes.DirectEventHandler<MarkerPressEvent>;
+  /** The markers whose views JS should mount changed. */
+  onMarkerWindowChange?: CodegenTypes.DirectEventHandler<MarkerWindowEvent>;
 }
 
 type ComponentType = HostComponent<NativeProps>;

@@ -1,4 +1,5 @@
 jest.mock('react-native', () => ({
+  Platform: { OS: 'ios' },
   processColor: (c: unknown) =>
     c === '#FF0000'
       ? 0xffff0000
@@ -18,64 +19,103 @@ jest.mock('react-native', () => ({
 jest.mock('../SherpaReaderInsertViewNativeComponent', () => 'Insert');
 
 import {
+  markerHitSlop,
   markerSpecFor,
+  nextMarkerWindow,
   selectionMenuItemSpecFor,
   tapFromNative,
 } from '../ReaderView';
 
 describe('markerSpecFor', () => {
-  it('flattens a block marker with defaults', () => {
-    expect(markerSpecFor({ id: 'm1', blockId: 's0.b1', label: '3' })).toEqual({
+  it('flattens a block marker', () => {
+    expect(markerSpecFor({ id: 'm1', blockId: 's0.b1' })).toEqual({
       id: 'm1',
       blockId: 's0.b1',
       start: -1,
       end: -1,
-      label: '3',
-      accessibilityLabel: '',
-      color: 0,
-      hasColor: false,
-      textColor: 0,
-      hasTextColor: false,
     });
   });
 
-  it('keeps the range and resolves colors to signed ARGB ints', () => {
+  it('keeps the range (truncated) and leaves accessibility to JS', () => {
     expect(
       markerSpecFor({
         id: 'm2',
         blockId: 's0.b2',
         start: 4.7,
         end: 12,
-        label: '•',
         accessibilityLabel: '2 notes',
-        color: '#FF0000',
-        textColor: '#FFFFFF',
       })
-    ).toEqual({
-      id: 'm2',
-      blockId: 's0.b2',
-      start: 4,
-      end: 12,
-      label: '•',
-      accessibilityLabel: '2 notes',
-      color: 0xffff0000 - 0x100000000,
-      hasColor: true,
-      textColor: -1,
-      hasTextColor: true,
+    ).toEqual({ id: 'm2', blockId: 's0.b2', start: 4, end: 12 });
+  });
+
+  it('drops negative offsets', () => {
+    const spec = markerSpecFor({ id: 'm3', blockId: 's0.b3', start: -5 });
+    expect(spec.start).toBe(-1);
+    expect(spec.end).toBe(-1);
+  });
+});
+
+describe('nextMarkerWindow', () => {
+  const known = new Set(['a', 'b', 'c', 'd', 'e', 'f']);
+
+  it('mounts what the native window asks for, in its order', () => {
+    expect(nextMarkerWindow([], ['c', 'a'], known)).toEqual(['c', 'a']);
+  });
+
+  it('keeps recently mounted markers as a buffer', () => {
+    expect(nextMarkerWindow(['a', 'b'], ['c'], known)).toEqual(['c', 'a', 'b']);
+  });
+
+  it('caps the buffer, dropping the least recently requested', () => {
+    expect(nextMarkerWindow(['b', 'c', 'd', 'e'], ['a'], known, 2)).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+    // Scrolling on: the oldest leave first, the window always stays.
+    let mounted: string[] = [];
+    for (const id of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      mounted = nextMarkerWindow(mounted, [id], known, 2);
+    }
+    expect(mounted).toEqual(['f', 'e', 'd']);
+  });
+
+  it('drops IDs that are no longer markers and ignores duplicates', () => {
+    expect(
+      nextMarkerWindow(['gone', 'a'], ['b', 'b', 'unknown'], known)
+    ).toEqual(['b', 'a']);
+  });
+
+  it('returns the previous array when nothing changed (no re-render)', () => {
+    const prev = ['a', 'b'];
+    expect(nextMarkerWindow(prev, ['a', 'b'], known)).toBe(prev);
+    expect(nextMarkerWindow(prev, ['a'], known)).toBe(prev);
+  });
+
+  it('can unmount everything', () => {
+    expect(nextMarkerWindow(['a', 'b'], [], known, 0)).toEqual([]);
+    expect(nextMarkerWindow(['a', 'b'], [], new Set())).toEqual([]);
+  });
+});
+
+describe('markerHitSlop', () => {
+  it('grows small views to the minimum target', () => {
+    expect(markerHitSlop(24, 20, 44)).toEqual({
+      top: 12,
+      bottom: 12,
+      left: 10,
+      right: 10,
+    });
+    expect(markerHitSlop(60, 30, 44)).toEqual({
+      top: 7,
+      bottom: 7,
+      left: 0,
+      right: 0,
     });
   });
 
-  it('drops negative offsets and colors processColor cannot flatten', () => {
-    const spec = markerSpecFor({
-      id: 'm3',
-      blockId: 's0.b3',
-      start: -5,
-      label: 'x',
-      color: 'semantic',
-    });
-    expect(spec.start).toBe(-1);
-    expect(spec.end).toBe(-1);
-    expect(spec.hasColor).toBe(false);
+  it('needs no slop for large views', () => {
+    expect(markerHitSlop(48, 48, 44)).toBeUndefined();
   });
 });
 

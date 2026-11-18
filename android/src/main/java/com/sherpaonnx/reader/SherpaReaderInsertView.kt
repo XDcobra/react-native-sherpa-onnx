@@ -9,12 +9,21 @@ import com.facebook.react.views.view.ReactViewGroup
 import kotlin.math.abs
 
 /**
- * Fabric host for one ReaderView insert. Fabric measures it with the size Yoga
- * computed (full reader width); [SherpaReaderView] moves it into a list row and
- * lays it out there.
+ * Fabric host for one ReaderView insert or margin marker. Fabric measures it
+ * with the size Yoga computed (inserts: full reader width; markers: their
+ * content); [SherpaReaderView] moves it into a list row (inserts) or into its
+ * marker layer next to the marker's line (markers) and lays it out there.
  */
 class SherpaReaderInsertView(context: Context) : ReactViewGroup(context) {
   var insertKey: String = ""
+    set(value) {
+      if (field == value) return
+      field = value
+      reader?.onInsertKeyChanged(this)
+    }
+
+  /** Non-empty for a marker host. */
+  var markerId: String = ""
     set(value) {
       if (field == value) return
       field = value
@@ -62,10 +71,11 @@ class SherpaReaderInsertView(context: Context) : ReactViewGroup(context) {
         View.MeasureSpec.getMode(heightMeasureSpec) == View.MeasureSpec.EXACTLY
     super.onMeasure(widthMeasureSpec, heightMeasureSpec)
     if (fromYoga && (w != yogaWidth || h != yogaHeight)) {
-      val heightChanged = h != yogaHeight
+      // Insert rows depend on the height only; marker views on both.
+      val resized = h != yogaHeight || (markerId.isNotEmpty() && w != yogaWidth)
       yogaWidth = w
       yogaHeight = h
-      if (heightChanged) {
+      if (resized) {
         reader?.onInsertResized(this)
       }
     }
