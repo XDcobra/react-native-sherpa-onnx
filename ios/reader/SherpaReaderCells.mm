@@ -375,17 +375,23 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   [self layoutMarkers];
 }
 
-/** Line rect of `offset` (-1: the first line) in content view coordinates. */
-- (CGRect)lineRectForCharacterOffset:(NSInteger)offset {
+/** Vertical center of the glyphs on the line of `offset` (-1: the first line), in content view coordinates. */
+- (CGFloat)lineCenterForCharacterOffset:(NSInteger)offset {
   NSLayoutManager *lm = _textView.layoutManager;
   NSTextContainer *tc = _textView.textContainer;
   const NSUInteger len = _textView.textStorage.length;
   if (!lm || !tc || len == 0) {
-    return CGRectMake(0, _textView.frame.origin.y, 0, _textView.font.lineHeight ?: 20);
+    return _textView.frame.origin.y + (_textView.font.lineHeight ?: 20) / 2;
   }
   const NSUInteger idx = MIN((NSUInteger)MAX(0, offset), len - 1);
-  CGRect line = [lm lineFragmentUsedRectForGlyphAtIndex:[lm glyphIndexForCharacterAtIndex:idx] effectiveRange:nil];
-  return [_textView convertRect:line toView:self.contentView];
+  const NSUInteger glyph = [lm glyphIndexForCharacterAtIndex:idx];
+  const CGRect line = [lm lineFragmentRectForGlyphAtIndex:glyph effectiveRange:nil];
+  // Baseline of the line, then the middle of the font's ascender / descender box
+  // (line height multiples add space above the glyphs).
+  const CGFloat baseline = line.origin.y + [lm locationForGlyphAtIndex:glyph].y;
+  UIFont *font = [_textView.textStorage attribute:NSFontAttributeName atIndex:idx effectiveRange:nil] ?: _markerFont;
+  const CGFloat center = baseline - (font.ascender + font.descender) / 2;
+  return [_textView convertPoint:CGPointMake(0, center) toView:self.contentView].y;
 }
 
 - (void)layoutMarkers {
@@ -400,7 +406,7 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   [self.contentView bringSubviewToFront:_overlay];
   NSMutableArray<NSNumber *> *centers = [NSMutableArray arrayWithCapacity:_markers.count];
   for (SherpaReaderMarker *m in _markers) {
-    [centers addObject:@(CGRectGetMidY([self lineRectForCharacterOffset:m.offset]))];
+    [centers addObject:@([self lineCenterForCharacterOffset:m.offset])];
   }
   [_overlay setMarkers:_markers centers:centers trailingInset:_markerInset font:_markerFont];
   // VoiceOver: the text, then one button per marker.
