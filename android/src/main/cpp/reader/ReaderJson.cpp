@@ -1,5 +1,6 @@
 #include "ReaderJson.h"
 
+#include "ReaderSentences.h"
 #include "ReaderTextHash.h"
 
 #include <algorithm>
@@ -280,6 +281,30 @@ std::string SliceJson(const ReaderSnapshot& snap, const ReaderTextSlice& slice,
   return "{\"bufferId\":" + JsonEscape(bufferId) + ",\"length\":" + std::to_string(slice.length) +
          ",\"from\":" + LocatorJson(snap, a, first.blockOffset) +
          ",\"to\":" + LocatorJson(snap, z, last.blockOffset + last.length) + "}";
+}
+
+bool SentencesJson(const ReaderSnapshot& snap, const std::vector<std::string>& blockIds,
+                   std::string* json, std::string* unknownId) {
+  std::string out = "[";
+  bool first = true;
+  for (const std::string& id : blockIds) {
+    const int block = snap.BlockIndex(id);
+    if (block < 0) {
+      if (unknownId) *unknownId = id;
+      return false;
+    }
+    const std::vector<SentenceRange> sents = BlockSentences(snap, block);
+    for (size_t i = 0; i < sents.size(); ++i) {
+      if (!first) out += ',';
+      first = false;
+      out += "{\"blockId\":" + JsonEscape(id) + ",\"index\":" + std::to_string(i) +
+             ",\"start\":" + std::to_string(sents[i].start) + ",\"end\":" +
+             std::to_string(sents[i].end) + "}";
+    }
+  }
+  out += ']';
+  *json = std::move(out);
+  return true;
 }
 
 }  // namespace reader

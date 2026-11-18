@@ -165,6 +165,11 @@ internal class SherpaOnnxReaderHelper(reactContext: ReactApplicationContext) {
   fun getReaderToc(documentId: String, promise: Promise) =
     run(promise) { ReaderNative.nativeGetToc(documentId) }
 
+  fun getReaderSentences(documentId: String, blockIds: ReadableArray, promise: Promise) {
+    val ids = Array(blockIds.size()) { blockIds.getString(it) ?: "" }
+    run(promise) { ReaderNative.nativeGetSentences(documentId, ids) }
+  }
+
   fun releaseReaderDocument(documentId: String, promise: Promise) {
     promise.resolve(ReaderNative.nativeReleaseDocument(documentId))
   }

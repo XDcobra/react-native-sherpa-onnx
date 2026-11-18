@@ -116,44 +116,6 @@ export const styles = StyleSheet.create({
   reader: {
     flex: 1,
   },
-  actionBar: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    borderRadius: 12,
-    backgroundColor: '#1F2937',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-    shadowColor: '#000000',
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
-  },
-  actionQuote: {
-    fontSize: 13,
-    color: '#D1D5DB',
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  actionButton: {
-    minHeight: 40,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    backgroundColor: '#374151',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
-  },
   followButton: {
     position: 'absolute',
     alignSelf: 'center',
@@ -350,5 +312,34 @@ export const styles = StyleSheet.create({
   sectionRowMeta: {
     fontSize: 12,
     color: '#64748b',
+  },
+  // Margin marker (renderMarker): a speech bubble with a tail at the bottom left.
+  markerBubble: {
+    alignItems: 'flex-start',
+  },
+  markerBubbleBody: {
+    minWidth: 20,
+    height: 17,
+    paddingHorizontal: 4,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  markerBubbleText: {
+    fontSize: 10,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  markerBubbleTail: {
+    marginLeft: 4,
+    marginTop: -1,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 0,
+    borderRightWidth: 5,
+    borderTopWidth: 5,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
   },
 });

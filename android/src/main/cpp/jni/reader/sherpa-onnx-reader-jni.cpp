@@ -250,6 +250,23 @@ Java_com_sherpaonnx_reader_ReaderNative_nativeGetToc(JNIEnv* env, jclass, jstrin
   return Result(env, ok, json, err);
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_sherpaonnx_reader_ReaderNative_nativeGetSentences(JNIEnv* env, jclass, jstring docId,
+                                                           jobjectArray blockIds) {
+  std::vector<std::string> ids;
+  const jsize n = blockIds ? env->GetArrayLength(blockIds) : 0;
+  ids.reserve(static_cast<size_t>(n));
+  for (jsize i = 0; i < n; ++i) {
+    auto* js = static_cast<jstring>(env->GetObjectArrayElement(blockIds, i));
+    ids.push_back(Std(env, js));
+    if (js) env->DeleteLocalRef(js);
+  }
+  std::string json;
+  sherpa_onnx::reader::ReaderError err;
+  const bool ok = sherpa_onnx::reader::BridgeGetSentences(Std(env, docId), ids, &json, &err);
+  return Result(env, ok, json, err);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_sherpaonnx_reader_ReaderNative_nativeReleaseDocument(JNIEnv* env, jclass,
                                                               jstring docId) {

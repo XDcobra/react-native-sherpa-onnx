@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Platform,
   Pressable,
@@ -29,8 +30,12 @@ import {
   type ReaderHighlight,
   type ReaderInsert,
   type ReaderLocator,
+  type ReaderMarker,
   type ReaderPageDisplay,
   type ReaderSectionInfo,
+  type ReaderSelectionAction,
+  type ReaderSelectionMenuItem,
+  type ReaderSelectionSnap,
   type ReaderTheme,
   type ReaderViewHandle,
   useReadAloudHighlights,
@@ -129,9 +134,22 @@ type Note = {
   key: string;
   blockId: string;
   sectionId: string;
+  /** The sentences the selection touched (the note's marker sits at their end). */
+  sentenceStart: number;
+  sentenceEnd: number;
   quote: string;
   time: string;
 };
+
+/** App actions in the text selection menu (before copy, look up, …). */
+const SELECTION_MENU: ReaderSelectionMenuItem[] = [
+  { id: 'note', title: 'Note', systemImage: 'text.bubble' },
+  { id: 'mark', title: 'Mark', systemImage: 'highlighter' },
+  { id: 'listen', title: 'Listen', systemImage: 'play' },
+];
+
+/** Marker test: one numbered marker per paragraph, from the reading position on. */
+const TEST_MARKER_COUNT = 200;
 
 type Hit = { from: ReaderLocator; to: ReaderLocator };
 
@@ -256,12 +274,11 @@ export default function ReaderScreen() {
   const [notice, setNotice] = useState<string | null>(null);
 
   // Marks, notes, selection, search
-  const [selected, setSelected] = useState<{
-    locator: ReaderLocator;
-    quote: string;
-  } | null>(null);
-  const [marks, setMarks] = useState<Record<string, ReaderLocator>>({});
+  const [selectionSnap, setSelectionSnap] =
+    useState<ReaderSelectionSnap>('sentence');
+  const [marks, setMarks] = useState<Record<string, Hit>>({});
   const [notes, setNotes] = useState<Note[]>([]);
+  const [testMarkers, setTestMarkers] = useState<ReaderMarker[]>([]);
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<Hit[]>([]);
   const [hitIndex, setHitIndex] = useState(0);
@@ -494,9 +511,9 @@ export default function ReaderScreen() {
       setPosition(null);
       setFinished(new Set());
       setJumpBack(null);
-      setSelected(null);
       setMarks({});
       setNotes([]);
+      setTestMarkers([]);
       setHits([]);
       setQuery('');
       setPanel('none');
@@ -591,20 +608,151 @@ export default function ReaderScreen() {
     return textsRef.current;
   }, []);
 
-  const select = useCallback(
-    async (blockId: string) => {
+  // ---- Selection menu and markers ----
+
+  const onSelectionAction = useCallback(
+    async (a: ReaderSelectionAction) => {
       const blocks = await loadTexts();
-      const block = blocks.find((b) => b.id === blockId);
-      if (!block?.text) {
-        setSelected(null);
+      const sectionId = blocks.find((b) => b.id === a.blockId)?.sectionId;
+      if (!sectionId) return;
+      const at = (offset: number): ReaderLocator => ({
+        sectionId,
+        blockId: a.blockId,
+        offset,
+      });
+      if (a.itemId === 'note') {
+        const now = new Date();
+        setNotes((all) => [
+          ...all,
+          {
+            key: `note:${now.getTime()}`,
+            blockId: a.blockId,
+            sectionId,
+            sentenceStart: a.sentenceStart,
+            sentenceEnd: a.sentenceEnd,
+            quote: a.text.length > 140 ? `${a.text.slice(0, 140)}…` : a.text,
+            time: now.toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          },
+        ]);
+      } else if (a.itemId === 'mark') {
+        const key = `${a.blockId}:${a.start}-${a.end}`;
+        setMarks((m) => {
+          const next = { ...m };
+          if (next[key]) delete next[key];
+          else next[key] = { from: at(a.start), to: at(a.end) };
+          return next;
+        });
+      } else if (a.itemId === 'listen') {
+        if (!tts.currentModelFolder) {
+          setPanel('listen');
+          return;
+        }
+        listenFrom(at(a.start));
+      }
+    },
+    [listenFrom, loadTexts, tts.currentModelFolder]
+  );
+
+  // One marker per group of notes on the same sentences, drawn with the count.
+  const markerCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const n of notes) {
+      const id = `notes:${n.blockId}:${n.sentenceStart}-${n.sentenceEnd}`;
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    testMarkers.forEach((m, i) => counts.set(m.id, i + 1));
+    return counts;
+  }, [notes, testMarkers]);
+
+  const markers = useMemo<ReaderMarker[]>(() => {
+    const groups = new Map<string, Note[]>();
+    for (const n of notes) {
+      const id = `notes:${n.blockId}:${n.sentenceStart}-${n.sentenceEnd}`;
+      groups.set(id, [...(groups.get(id) ?? []), n]);
+    }
+    const list: ReaderMarker[] = [...groups].map(([id, group]) => ({
+      id,
+      blockId: group[0]!.blockId,
+      start: group[0]!.sentenceStart,
+      end: group[0]!.sentenceEnd,
+      accessibilityLabel: `${group.length} ${
+        group.length === 1 ? 'note' : 'notes'
+      }`,
+    }));
+    return testMarkers.length > 0 ? [...list, ...testMarkers] : list;
+  }, [notes, testMarkers]);
+
+  const onMarkerPress = useCallback(
+    ({ id }: { id: string; blockId: string }) => {
+      if (id.startsWith('test:')) {
+        Alert.alert('Marker', `${id} (block marker)`);
         return;
       }
-      setSelected({
-        locator: { sectionId: block.sectionId, blockId: block.id },
-        quote: block.text,
-      });
+      const group = notes.filter(
+        (n) => `notes:${n.blockId}:${n.sentenceStart}-${n.sentenceEnd}` === id
+      );
+      if (group.length === 0) return;
+      Alert.alert(
+        group.length === 1 ? '1 note' : `${group.length} notes`,
+        group.map((n) => `${n.time}: “${n.quote}”`).join('\n\n'),
+        [
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: () =>
+              setNotes((all) => all.filter((n) => !group.includes(n))),
+          },
+          { text: 'OK', style: 'cancel' },
+        ]
+      );
     },
-    [loadTexts]
+    [notes]
+  );
+
+  // The app's own marker look: a small speech bubble with the count.
+  const renderMarker = useCallback(
+    (id: string) => (
+      <MarkerBubble
+        count={markerCounts.get(id) ?? 0}
+        color={colors.accent}
+        background={colors.background}
+        test={id.startsWith('test:')}
+      />
+    ),
+    [markerCounts, colors.accent, colors.background]
+  );
+
+  const toggleTestMarkers = useCallback(
+    async (on: boolean) => {
+      if (!on) {
+        setTestMarkers([]);
+        return;
+      }
+      const blocks = await loadTexts();
+      const from = Math.max(
+        0,
+        blocks.findIndex((b) => b.id === position?.blockId)
+      );
+      const list: ReaderMarker[] = [];
+      for (
+        let i = from;
+        i < blocks.length && list.length < TEST_MARKER_COUNT;
+        i++
+      ) {
+        const b = blocks[i]!;
+        if (!b.text) continue;
+        list.push({
+          id: `test:${b.id}`,
+          blockId: b.id,
+          accessibilityLabel: `Test marker ${list.length + 1}`,
+        });
+      }
+      setTestMarkers(list);
+    },
+    [loadTexts, position?.blockId]
   );
 
   const runSearch = useCallback(async () => {
@@ -656,10 +804,10 @@ export default function ReaderScreen() {
 
   const highlights = useMemo<ReaderHighlight[]>(() => {
     const list: ReaderHighlight[] = Object.entries(marks).map(
-      ([blockId, at]) => ({
-        id: `mark:${blockId}`,
-        from: at,
-        to: at,
+      ([key, range]) => ({
+        id: `mark:${key}`,
+        from: range.from,
+        to: range.to,
         style: 'background',
         color: MARK_COLOR,
       })
@@ -683,18 +831,10 @@ export default function ReaderScreen() {
         color: HIT_ACTIVE_COLOR,
       });
     }
-    if (selected) {
-      list.push({
-        id: 'selection',
-        from: selected.locator,
-        to: selected.locator,
-        style: 'underline',
-      });
-    }
     // Read aloud: the spoken sentence and word (the word is followed).
     list.push(...spoken);
     return list;
-  }, [hitIndex, hits, marks, selected, spoken]);
+  }, [hitIndex, hits, marks, spoken]);
 
   // ---- Inserts: chapter ends and notes ----
 
@@ -945,21 +1085,14 @@ export default function ReaderScreen() {
                 tts={tts}
                 playing={listen.playing}
                 busy={listen.busy}
-                startsAt={
-                  selected
-                    ? 'Starts at the underlined paragraph.'
-                    : 'Starts at the top of the view. Tap a paragraph to start there.'
-                }
+                startsAt="Starts at the top of the view. Select text and choose Listen to start there."
                 show={show}
                 onShow={setShow}
                 follow={followMode}
                 onFollow={setFollowMode}
                 status={listenStatus}
                 onPlay={() => {
-                  listenFrom(
-                    selected?.locator ?? position ?? firstLocator(doc)
-                  );
-                  setSelected(null);
+                  listenFrom(position ?? firstLocator(doc));
                 }}
                 onStop={() => {
                   listen.stop().catch(() => {});
@@ -1004,6 +1137,20 @@ export default function ReaderScreen() {
                   options={['narrow', 'normal', 'wide'] as const}
                   value={marginName}
                   onChange={setMarginName}
+                />
+                <OcrChoiceRow
+                  label="Selection snaps to"
+                  options={['none', 'sentence', 'block'] as const}
+                  value={selectionSnap}
+                  onChange={setSelectionSnap}
+                />
+                <OcrChoiceRow
+                  label={`Test markers (${TEST_MARKER_COUNT})`}
+                  options={['off', 'on'] as const}
+                  value={testMarkers.length > 0 ? 'on' : 'off'}
+                  onChange={(v) => {
+                    toggleTestMarkers(v === 'on').catch(() => {});
+                  }}
                 />
                 {doc.sections.some((s) => s.kind === 'page') ? (
                   <OcrChoiceRow
@@ -1106,81 +1253,18 @@ export default function ReaderScreen() {
                   )
                 }
                 onJump={(j) => setJumpBack(j.from)}
-                onTap={({ blockId }) => {
-                  select(blockId).catch(() => {});
+                selectable
+                selectionSnap={selectionSnap}
+                selectionMenuItems={SELECTION_MENU}
+                onSelectionAction={(a) => {
+                  onSelectionAction(a).catch(() => {});
                 }}
+                markers={markers}
+                renderMarker={renderMarker}
+                onMarkerPress={onMarkerPress}
                 onError={(e) => setError(`${e.code}: ${e.message}`)}
               />
-              {selected ? (
-                <View style={styles.actionBar} testID="reader-selection-bar">
-                  <Text style={styles.actionQuote} numberOfLines={1}>
-                    {selected.quote}
-                  </Text>
-                  <View style={styles.actionButtons}>
-                    <ActionButton
-                      id="reader-mark"
-                      label={
-                        marks[selected.locator.blockId] ? 'Unmark' : 'Mark'
-                      }
-                      onPress={() => {
-                        const { locator } = selected;
-                        setMarks((m) => {
-                          const next = { ...m };
-                          if (next[locator.blockId])
-                            delete next[locator.blockId];
-                          else next[locator.blockId] = locator;
-                          return next;
-                        });
-                        setSelected(null);
-                      }}
-                    />
-                    <ActionButton
-                      id="reader-note"
-                      label="Add note"
-                      onPress={() => {
-                        const { locator, quote } = selected;
-                        const now = new Date();
-                        setNotes((all) => [
-                          ...all,
-                          {
-                            key: `note:${now.getTime()}`,
-                            blockId: locator.blockId,
-                            sectionId: locator.sectionId,
-                            quote:
-                              quote.length > 140
-                                ? `${quote.slice(0, 140)}…`
-                                : quote,
-                            time: now.toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            }),
-                          },
-                        ]);
-                        setSelected(null);
-                      }}
-                    />
-                    <ActionButton
-                      id="reader-listen-here"
-                      label="▶ Listen"
-                      onPress={() => {
-                        const { locator } = selected;
-                        setSelected(null);
-                        if (!tts.currentModelFolder) {
-                          setPanel('listen');
-                          return;
-                        }
-                        listenFrom(locator);
-                      }}
-                    />
-                    <ActionButton
-                      id="reader-selection-close"
-                      label="✕"
-                      onPress={() => setSelected(null)}
-                    />
-                  </View>
-                </View>
-              ) : null}
-              {listen.playing && followPaused && !selected ? (
+              {listen.playing && followPaused ? (
                 <Pressable
                   testID="reader-resume-follow"
                   accessibilityRole="button"
@@ -1260,7 +1344,8 @@ export default function ReaderScreen() {
         {doc ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Try it</Text>
-            <Hint text="Tap a paragraph to mark it or attach a note. Notes and the chapter-end cards are React Native views inside the native list (inserts)." />
+            <Hint text="Long-press to select text (it snaps to whole sentences; Aa changes that). The menu adds Note, Mark and Listen before the system items." />
+            <Hint text="A note adds a card after its paragraph and a count in the margin next to its sentence; tap the count to read or remove the notes. Cards and chapter-end cards are React Native views inside the native list (inserts)." />
             <Hint text="Contents jumps to a chapter with scrollTo(); a jump offers a way back (onJump)." />
             <Hint
               text={`“${GUIDE_TITLE}” is an app section: text that is not in the EPUB, added with insertSection().`}
@@ -1443,24 +1528,31 @@ function ToolbarButton({
   );
 }
 
-function ActionButton({
-  id,
-  label,
-  onPress,
+/** Speech-bubble marker of the example: outlined for notes, filled for test markers. */
+function MarkerBubble({
+  count,
+  color,
+  background,
+  test,
 }: {
-  id: string;
-  label: string;
-  onPress: () => void;
+  count: number;
+  color: string;
+  background: string;
+  test: boolean;
 }) {
+  const fill = test ? color : background;
+  const ink = test ? background : color;
   return (
-    <Pressable
-      testID={id}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      onPress={onPress}
-      style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
-    >
-      <Text style={styles.actionButtonText}>{label}</Text>
-    </Pressable>
+    <View style={styles.markerBubble}>
+      <View
+        style={[
+          styles.markerBubbleBody,
+          { backgroundColor: fill, borderColor: color },
+        ]}
+      >
+        <Text style={[styles.markerBubbleText, { color: ink }]}>{count}</Text>
+      </View>
+      <View style={[styles.markerBubbleTail, { borderTopColor: color }]} />
+    </View>
   );
 }

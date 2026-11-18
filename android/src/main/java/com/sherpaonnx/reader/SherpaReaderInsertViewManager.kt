@@ -8,7 +8,7 @@ import com.facebook.react.uimanager.annotations.ReactProp
 import com.facebook.react.views.view.ReactViewGroup
 import com.facebook.react.views.view.ReactViewManager
 
-/** Insert host: a regular React view group plus the `insertKey` prop. */
+/** Insert / marker host: a regular React view group plus the `insertKey` and `markerId` props. */
 @ReactModule(name = SherpaReaderInsertViewManager.REACT_CLASS)
 class SherpaReaderInsertViewManager : ReactViewManager() {
   override fun getName(): String = REACT_CLASS
@@ -28,6 +28,11 @@ class SherpaReaderInsertViewManager : ReactViewManager() {
   @ReactProp(name = "insertKey")
   fun setInsertKey(view: ReactViewGroup, value: String?) {
     (view as? SherpaReaderInsertView)?.insertKey = value ?: ""
+  }
+
+  @ReactProp(name = "markerId")
+  fun setMarkerId(view: ReactViewGroup, value: String?) {
+    (view as? SherpaReaderInsertView)?.markerId = value ?: ""
   }
 
   companion object {

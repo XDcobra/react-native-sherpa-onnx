@@ -10,7 +10,7 @@ Import from `react-native-sherpa-onnx/reader`.
 | --- | --- | --- |
 | Highlights · chapter-end insert · progress | Note insert after a paragraph | Search with all hits marked |
 
-The screenshots are from the [example app](../example/README.md#reader) (`ReaderScreen`). Cards, notes, toolbar, panels and selection bar are app UI built with the public API; the SDK draws the text, page images and highlights.
+The screenshots are from the [example app](../example/README.md#reader) (`ReaderScreen`). Cards, notes, toolbar, panels and the margin marker views are app UI built with the public API; the SDK draws the text, page images, highlights and the text selection, and places the marker views.
 
 What the SDK gives you:
 
@@ -20,6 +20,7 @@ What the SDK gives you:
 - **App sections**: text that is not in the file (a preface, a reading guide, generated content), inserted between the book's sections.
 - **Reading events**: visible range, furthest position, section end, jumps and taps, computed by one shared C++ tracker on both platforms.
 - **Highlights and follow scrolling**: any number of marked ranges in three styles; one of them can be kept in view.
+- **Text selection and margin markers**: native selection inside a paragraph (optionally snapped to sentences) with the app's own menu actions, and the app's own views in the margin next to paragraphs or sentences (for example a note count).
 - **Read aloud**: maps a TTS timeline onto the reader for sentence and word highlights.
 
 Requirements:
@@ -200,7 +201,18 @@ function recognizeReaderPages(
 doc = await recognizeReaderPages(doc, ocr, { scope: 'around', at: position, onDocument: setDoc });
 ```
 
-Recognizes page images one page per `recognize` call and attaches each page's text as it is done. `scope: 'around'` (default) does the page at `at`, `ahead` pages after it (default 2) and `behind` pages before it (default 1). `'all'` does the whole book from the first page, and `{ sections }` does the pages you name. Pages that already have text are skipped unless `force` is set. `onDocument` receives new document values at most every `updateIntervalMs` (default 300) and once at the end. `recognize` passes options such as `readingDirection: 'rtl'` (manga) or a VLM `instruction` to every call. `onProgress` reports `{ done, total, sectionId, hasText }` after each page; `hasText: false` means the model returned no text for the page, which keeps showing only its image. With `signal`, the run stops after the page in progress, and recognized pages keep their text. Run one at a time per document.
+Runs OCR on page images, one page per call, and attaches each page's text as it is done.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `scope` | `'around'` | `'around'`: page at `at` plus `ahead` (2) after and `behind` (1) before · `'all'`: whole book · `{ sections }`: the named pages |
+| `force` | `false` | also redo pages that already have text |
+| `onDocument` | — | new document values, at most every `updateIntervalMs` (300) and once at the end |
+| `recognize` | — | passed to every call, e.g. `readingDirection: 'rtl'`, a VLM `instruction` |
+| `onProgress` | — | `{ done, total, sectionId, hasText }` per page; `hasText: false` = page keeps only its image |
+| `signal` | — | stops after the page in progress; done pages keep their text |
+
+Note: one run at a time per document.
 
 #### `saveReaderRecognition(doc, destination, options?)` / `loadReaderRecognition(doc, source, options?)`
 
@@ -291,6 +303,32 @@ const blocks = await getReaderBlocks(doc, 0, doc.blockCount, { includeText: true
 ```
 
 Blocks in reading order with ID, type, `textHash`, `textRange` and optionally the text. With `includeText`, blocks with italic or bold also carry `styles` ([Inline styles](#inline-styles)). Use it for search, quotes, word counts or your own table of contents. Large ranges are paged natively in chunks of 4096.
+
+#### `getReaderSentences(doc, blockIds)`
+
+```ts
+function getReaderSentences(doc: ReaderDocument, blockIds: readonly string[]): Promise<ReaderSentence[]>;
+// ReaderSentence = { blockId, index, start, end } (UTF-16 in the block text, end exclusive)
+```
+
+```ts
+const sentences = await getReaderSentences(doc, ['s3.b12']);
+```
+
+Sentence ranges of the given blocks, by the same shared rules as `selectionSnap: 'sentence'` and `onSelectionAction`, so they match on both platforms.
+
+| Rule / case | Behaviour |
+|---|---|
+| Boundaries | `. ! ? ; :`, line break, `。！？｡ ؟ । ॥` (as in `src/segment`) |
+| ASCII marks | end a sentence only before whitespace or end of text (`3.14`, `10:30` stay whole) |
+| Runs and closers | `?!`, `...` and following quotes/brackets belong to the sentence; whitespace trimmed |
+| Abbreviations | built-in English / German list (`Mr.`, `Dr.`, `e.g.`, `z.B.`, `vgl.`) does not end a sentence before the next word; `No.`, `Nr.`, `S.`, `Fig.` only before a digit; `etc.`, `usw.`, `u.a.`, `Jr.` only before a lower-case word or digit; no app list |
+| Initials and ordinals | `J. R. R. Tolkien`, `A. Smith` stay whole (not `I.`); `1. Januar`, `3. und`, `19. Jh.` stay whole, `5. Danach` ends |
+| Line break, end of text | always end a sentence, also after an abbreviation (`Call the Dr.`) |
+| Blocks without text | no sentences (images, pages, separators) |
+| Unknown block ID | rejects with `ERR_READER_INVALID_ARGUMENT` |
+
+Note: read-aloud sentences come from the TTS segments, not from these rules.
 
 #### `mapTextRanges(doc, ranges, options?)`
 
@@ -399,9 +437,14 @@ The native reading view. All props:
 | `follow` | `ReaderFollowOptions` | `{ mode: 'keepVisible' }` | Keeps the highlight with `follow: true` in view; see [Follow scrolling](#follow-scrolling). |
 | `jumpThreshold` | `number` | `20` | Blocks; a larger move is reported as `onJump`. |
 | `pageDisplay` | `'auto' \| 'text' \| 'image' \| 'imageAndText'` | `'auto'` | How pages of PDFs, comics and scans are shown; see [Pages](#pages). |
+| `selectable` | `boolean` | `false` | Long-press text selection inside a block; see [Text selection](#text-selection). |
+| `selectionSnap` | `'none' \| 'sentence' \| 'block'` | `'none'` | Widens a selection to whole sentences or the whole block while the user selects. |
+| `selectionMenuItems` | `ReaderSelectionMenuItem[]` | `[]` | App actions in the selection menu, before the system items; a choice fires `onSelectionAction`. |
+| `markers` | `ReaderMarker[]` | `[]` | Places in the trailing margin next to blocks or ranges; see [Margin markers](#margin-markers). |
+| `renderMarker` | `(id: string) => ReactNode` | | The app's view for a marker, mounted only near the visible range. Without it markers are not shown. |
 | `mode` | `'scroll'` | `'scroll'` | Layout mode. |
 | `style`, `testID` | | | As for `View`. |
-| `onReady`, `onVisibleRangeChange`, `onFurthestPositionChange`, `onSectionEnd`, `onJump`, `onTap`, `onFollowChange`, `onError` | | | See [JS Events](#js-events). |
+| `onReady`, `onVisibleRangeChange`, `onFurthestPositionChange`, `onSectionEnd`, `onJump`, `onTap`, `onFollowChange`, `onSelectionAction`, `onMarkerPress`, `onError` | | | See [JS Events](#js-events). |
 
 #### `reader.scrollTo(locator, options?)`
 
@@ -512,7 +555,9 @@ When the theme changes, the first visible line stays in place. The same holds fo
 | `onFurthestPositionChange` | `ReaderLocator` | The frontier advanced while reading continuously. |
 | `onSectionEnd` | `{ sectionId, blockId }` | The last block of a section came into view while reading continuously. Fires once per transition into view. |
 | `onJump` | `ReaderJump` | The position moved more than `jumpThreshold` blocks. The app decides whether the jump counts as read. |
-| `onTap` | `{ blockId }` | A tap on text (not on inserts), for example to select a paragraph or toggle toolbars. |
+| `onTap` | `ReaderTap` `{ blockId, offset? }` | A tap on a row (not on inserts, not on a marker view), for example to toggle toolbars. `offset` is the UTF-16 offset of the tapped character in the block; absent on image and separator rows. A tap that only ends a text selection does not fire. |
+| `onSelectionAction` | `ReaderSelectionAction` `{ itemId, blockId, start, end, text, sentenceStart, sentenceEnd }` | A `selectionMenuItems` entry was chosen. `start` / `end` is the (snapped) selection in the block, `sentenceStart` / `sentenceEnd` the sentences it touches as one range. The selection is cleared afterwards. |
+| `onMarkerPress` | `{ id, blockId }` | A marker view was tapped (outside its own pressable children) or activated with VoiceOver / TalkBack. |
 | `onFollowChange` | `{ following, reason }` | Follow scrolling paused (`'user'`) or resumed (`'resumed'`, `'command'`). |
 | `onError` | `{ code, message }` | For example `ERR_READER_NOT_FOUND` for a released document, or `ERR_READER_INVALID_ARGUMENT` for a highlight with unknown block IDs. |
 
@@ -541,6 +586,61 @@ Rules (shared C++ tracker, identical on iOS and Android):
 - **Cost:** a change redraws only the affected rows. The text layout does not change, so the reading position stays.
 - Offsets are clamped to the block and never split a surrogate pair. A highlight with an unknown block ID is skipped and reported through `onError`.
 
+## Text selection
+
+<p align="center"><img src="./images/example/reader_selection_cut.png" alt="A sentence selected, with Note, Mark and Listen before the system items" width="300" /></p>
+
+With `selectable`, a long press selects text with the platform's handles and menu (copy, look up, share, … stay available). The app adds its own actions with `selectionMenuItems` and gets the choice in `onSelectionAction`.
+
+```tsx
+<ReaderView
+  document={doc}
+  selectable
+  selectionSnap="sentence"
+  selectionMenuItems={[{ id: 'note', title: 'Note', systemImage: 'text.bubble' }]}
+  onSelectionAction={(a) => addNote(a.blockId, a.sentenceStart, a.sentenceEnd, a.text)}
+/>
+```
+
+- **One block:** a selection stays inside one paragraph or heading. A new selection elsewhere ends the previous one; a tap ends it without firing `onTap`.
+- **Snapping** (`selectionSnap`) is applied while the selection changes: `'sentence'` widens it to the sentences it touches ([sentence rules](#getreadersentencesdoc-blockids)), `'block'` to the whole block, `'none'` keeps the platform's word selection.
+- **Menu:** app items come first, then the system items. `systemImage` is an SF Symbol name (iOS only). iOS 16+ (`UITextView` edit menu); on iOS 15 only the system items are shown. Android uses the selection `ActionMode`.
+- Highlights can change while text is selected (read-aloud keeps running); the selection stays.
+- Scrolling, taps and markers keep working; the selection is not autoscrolled past the visible rows.
+
+## Margin markers
+
+<p align="center"><img src="./images/example/reader_markers_cut.png" alt="A paragraph marker and a sentence marker in the margin" width="300" /></p>
+
+`markers` says where; `renderMarker` draws. The SDK has no marker look of its own: it places the app's React view in the trailing margin, next to a block or a sentence. Markers never change the text or the row height.
+
+```tsx
+<ReaderView
+  document={doc}
+  markers={[
+    { id: 'p12', blockId: 's3.b12', accessibilityLabel: '3 notes' }, // the paragraph
+    { id: 'p12:s2', blockId: 's3.b12', start: 40, end: 97 }, // a sentence
+  ]}
+  renderMarker={(id) => <NoteBubble count={counts.get(id) ?? 0} />}
+  onMarkerPress={({ id }) => openNotes(id)}
+/>
+```
+
+| Prop / field | Description |
+| --- | --- |
+| `markers[].id` | Unique, stable ID; passed to `renderMarker` and `onMarkerPress`. |
+| `markers[].blockId`, `start?`, `end?` | Anchor: the block's first line, or the line of the range's last character (UTF-16, `end` exclusive). |
+| `markers[].accessibilityLabel` | Read by VoiceOver / TalkBack; default: the text inside the view. |
+| `renderMarker(id)` | Any view, any size. Without it markers are not shown, not tappable and not read by screen readers. |
+
+- **Position:** the view is centered in the trailing margin and vertically on its anchor line. A view wider than the margin is moved in so it stays on screen and then overlaps the text. Markers on the same line are placed below one another, so combine them in the app (one marker with a count) to keep the margin tidy. On page images markers sit at the trailing edge of the page at the block's line.
+- **Virtualized:** only the views of markers in and around the visible range are mounted (one screen above and below, plus up to 16 recently shown ones). `renderMarker` runs when a marker comes near, so keep it cheap and read its data from a map by ID. A view appears one to two frames after the document's first layout.
+- **Touch:** a tap anywhere on the view fires `onMarkerPress` instead of `onTap`. A `Pressable` inside the view takes its own taps first. Small views get a hit slop up to 44 pt (iOS) / 48 dp (Android).
+- **Accessibility:** each marker view is one button for VoiceOver / TalkBack with `accessibilityLabel`; activating it fires `onMarkerPress`. VoiceOver reads it after its row's text; TalkBack reads the visible marker views after the visible rows.
+- **Cost:** markers are compared by `id` and anchor; a change re-places only the affected visible rows (no relayout). Only a few dozen views are mounted at a time, however many markers there are; flinging through 200 markers in the example stays smooth.
+- **Measure:** `measure` / `measureInWindow` inside a marker view return its on-screen position once the list is at rest (not while it scrolls).
+- A marker with an unknown block ID or a reversed range is skipped and reported through `onError` (`ERR_READER_INVALID_ARGUMENT`).
+
 ## Follow scrolling
 
 The first highlight with `follow: true` is kept in view while it moves, for example the word being read aloud.
@@ -554,6 +654,8 @@ The first highlight with `follow: true` is kept in view while it moves, for exam
 Follow scrolling counts as continuous reading: no `onJump` for short moves, and the furthest position and section ends advance.
 
 ## Inserts
+
+<p align="center"><img src="./images/example/reader_insert_cut.png" alt="A note card as a React Native view after a paragraph" width="300" /></p>
 
 An insert is a React Native view placed between blocks. It is full width, takes the height Yoga gives it, scrolls with the text and keeps presses, accessibility and state.
 
@@ -602,6 +704,13 @@ Page sections (PDF pages, comic pages) start with their page image; `pageDisplay
 | `'image'` | One full-width page image per page | The page's text blocks: they count as visible where they are on the page |
 | `'imageAndText'` | The page image, then its text | Running headers, footers and page numbers |
 | `'auto'` (default) | `'image'` for page documents (`format: 'pages'`), else `'text'` | |
+
+The same PDF page in each mode (`'auto'` shows this PDF as `'text'`):
+
+| `'text'` | `'image'` | `'imageAndText'` |
+| --- | --- | --- |
+| <img src="./images/example/reader_pages_text.png" alt="The page's text, without running header and page number" width="160" /> | <img src="./images/example/reader_pages_image.png" alt="Page images, one after another" width="160" /> | <img src="./images/example/reader_pages_image_and_text.png" alt="The page image, then its text" width="160" /> |
+| Text, no running header or page number | Page images, one after another | The page image, then its text |
 
 Hidden blocks still count for reading progress, so `onFurthestPositionChange` and `onSectionEnd` see every block. In `'image'` mode a block counts as visible where it is on the page, and `scrollTo` a block puts its place on the page at the top.
 
@@ -733,11 +842,15 @@ SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 - VoiceOver and TalkBack read the blocks in order; inserts sit between them and stay accessible.
 - Headings carry the header trait (`accessibilityHeading` on Android).
 - Image blocks use `alt`; images without `alt` are hidden from screen readers.
+- Margin marker views are buttons, read with their `accessibilityLabel` (VoiceOver: after the row's text; TalkBack: after the visible rows).
 - `fontScale: 'system'` follows Dynamic Type and the Android font size.
 
 ## Limits
 
-- Scroll mode only; no zoom and no text selection (use `onTap` and highlights for paragraph-level selection).
+- Scroll mode only; no zoom.
+- Text selection stays inside one block (no selection across paragraphs) and does not autoscroll the list; app menu items need iOS 16+. Page images (`pageDisplay: 'image'`) have no selection.
+- Sentence rules know only a built-in English / German abbreviation list; a real end after a title (`on Main St. Then`) or an initial (`plan B. Then`) is merged.
+- Margin markers on the same line stack downward; a marker view wider than the margin overlaps the text. TalkBack does not interleave marker views with the rows.
 - On page images, a highlight inside a line (a word) is placed by estimate; OCR models without positions mark the whole page.
 - Of the inline formatting only italic and bold are kept ([Inline styles](#inline-styles)); links, footnote markers, underline, small caps, colors and CSS classes are not. PDF, OCR and plain text blocks have no inline styles.
 - An image is scaled to the text width and is at most 90 % of the viewport high.
@@ -759,6 +872,7 @@ import {
   removeSection, // remove an app section
   releaseReaderDocument, // free the native document
   getReaderBlocks, // blocks in reading order (optionally with text)
+  getReaderSentences, // sentence ranges of blocks (shared rules)
   mapTextRanges, // text-buffer ranges → reader ranges
   locatorAtTextOffset, // text-buffer offset → locator
   remapLocator, // find a stored block again by textHash
@@ -778,6 +892,7 @@ import type {
   ReaderLocator, ReaderRange, ReaderAppSection, ReaderAppBlock, ReaderInsert, ReaderInsertTarget,
   ReaderTheme, ReaderHighlight, ReaderHighlightStyle, ReaderFollowOptions, ReaderFollowChange,
   ReaderVisibleRange, ReaderJump, ReaderJumpCause, ReaderViewProps, ReaderViewHandle, ReaderPageDisplay,
+  ReaderTap, ReaderMarker, ReaderSelectionSnap, ReaderSelectionMenuItem, ReaderSelectionAction, ReaderSentence,
   CreateReaderDocumentOptions, LoadReaderDocumentOptions, RecognizeReaderPagesOptions, ReaderTextSlice,
   ReadAloudTimeline, ReadAloudUnit, ReadAloudPosition, ReadAloudAlignedWord,
   CreateReadAloudTimelineOptions, ReadAloudHighlightOptions, ReaderErrorCodeValue,
@@ -798,6 +913,11 @@ import type {
 | `ReaderInsert` / `ReaderInsertTarget` | `{ key, at }` / `{ sectionEnd } \| { beforeBlock } \| { afterBlock }` |
 | `ReaderTheme` | See [Theme](#theme) |
 | `ReaderHighlight` | `{ id, from, to, style?, color?, follow? }` |
+| `ReaderMarker` | `{ id, blockId, start?, end?, accessibilityLabel? }` (drawn by `renderMarker`) |
+| `ReaderSelectionMenuItem` | `{ id, title, systemImage? }` |
+| `ReaderSelectionAction` | `{ itemId, blockId, start, end, text, sentenceStart, sentenceEnd }` |
+| `ReaderSentence` | `{ blockId, index, start, end }` |
+| `ReaderTap` | `{ blockId, offset? }` |
 | `ReaderHighlightStyle` | `'background' \| 'underline' \| 'textColor'` |
 | `ReaderFollowOptions` / `ReaderFollowChange` | `{ mode?, anchor?, pauseOnUserScroll? }` / `{ following, reason }` |
 | `ReaderVisibleRange` | `{ first, last, firstOffset, settled, visibleInserts }` |
@@ -891,19 +1011,40 @@ const renderInsert = (sectionId: string) => {
 </details>
 
 <details>
-<summary>Notes attached to a paragraph</summary>
+<summary>Notes on a sentence</summary>
 
-Select a paragraph with `onTap`, underline it while selected, and show each note as an insert after its block.
+Select text (snapped to sentences), add a note from the menu, show the count in the margin and each note as an insert after its block.
 
 ```tsx
-const [selected, setSelected] = useState<ReaderLocator | null>(null);
-const [notes, setNotes] = useState<Array<{ id: string; at: ReaderLocator; text: string }>>([]);
+type Note = { id: string; blockId: string; start: number; end: number; quote: string };
+const [notes, setNotes] = useState<Note[]>([]);
+
+// One marker per sentence; the app draws it with its number of notes.
+const groups = useMemo(() => {
+  const out = new Map<string, Note[]>();
+  for (const n of notes) {
+    const key = `${n.blockId}:${n.start}-${n.end}`;
+    out.set(key, [...(out.get(key) ?? []), n]);
+  }
+  return out;
+}, [notes]);
+const markers = useMemo(
+  () => [...groups].map(([key, g]) => ({ id: key, blockId: g[0]!.blockId, start: g[0]!.start, end: g[0]!.end })),
+  [groups]
+);
 
 <ReaderView
   document={doc}
-  onTap={({ blockId }) => setSelected({ sectionId: parseBlockId(blockId)!.sectionId, blockId })}
-  highlights={selected ? [{ id: 'selection', from: selected, to: selected, style: 'underline' }] : []}
-  inserts={notes.map((n) => ({ key: n.id, at: { afterBlock: n.at.blockId } }))}
+  selectable
+  selectionSnap="sentence"
+  selectionMenuItems={[{ id: 'note', title: 'Note', systemImage: 'text.bubble' }]}
+  onSelectionAction={(a) =>
+    setNotes((all) => [...all, { id: `${Date.now()}`, blockId: a.blockId, start: a.sentenceStart, end: a.sentenceEnd, quote: a.text }])
+  }
+  markers={markers}
+  renderMarker={(id) => <NoteBubble count={groups.get(id)?.length ?? 0} />}
+  onMarkerPress={({ id }) => showNotes(groups.get(id) ?? [])}
+  inserts={notes.map((n) => ({ key: n.id, at: { afterBlock: n.blockId } }))}
   renderInsert={(key) => <NoteCard note={notes.find((n) => n.id === key)!} />}
 />;
 ```
@@ -1065,7 +1206,7 @@ The first visible line stays in place when the theme changes.
 | ![Example 1](./images/example/reader_1.png) | ![Example 2](./images/example/reader_2.png) | ![Example 3](./images/example/reader_3.png) |
 | --- | --- | --- |
 
-The monorepo example exposes **Reader** (`example/src/screens/reader/ReaderScreen.tsx`) as a developer showcase for this API: a book picker for every format, appearance and page display, contents, an app section, chapter-end and note inserts, marks, search, progress, jump back and resume, an **OCR** panel (model, reading order, this page / around here / whole book, save and load) and **Listen** (read-aloud with sentence and word highlights, `useReaderReadAloud.ts`). See [example/README.md](../example/README.md#reader).
+The monorepo example exposes **Reader** (`example/src/screens/reader/ReaderScreen.tsx`) as a developer showcase for this API: a book picker for every format, appearance and page display, contents, an app section, chapter-end and note inserts, text selection with Note / Mark / Listen menu items, notes counted in the margin (markers) and a 200-marker test, marks, search, progress, jump back and resume, an **OCR** panel (model, reading order, this page / around here / whole book, save and load) and **Listen** (read-aloud with sentence and word highlights, `useReaderReadAloud.ts`). See [example/README.md](../example/README.md#reader).
 
 ---
 

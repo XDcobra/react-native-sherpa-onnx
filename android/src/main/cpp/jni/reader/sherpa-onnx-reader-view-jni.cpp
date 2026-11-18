@@ -4,6 +4,7 @@
 #include <jni.h>
 #include "jni/jni_utf8.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
@@ -11,6 +12,8 @@
 #include "image/ImageRegistry.h"
 #include "reader/ReaderHighlights.h"
 #include "reader/ReaderLayout.h"
+#include "reader/ReaderMarkers.h"
+#include "reader/ReaderSentences.h"
 #include "reader/ReaderRegistry.h"
 #include "reader/ReaderTracker.h"
 
@@ -363,6 +366,74 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeResolveHighlights(
       out.insert(out.end(), {sp.start, sp.end, static_cast<jint>(sp.style), static_cast<jint>(sp.color),
                              sp.hasColor ? 1 : 0});
     }
+  }
+  return Ints(env, out);
+}
+
+/**
+ * Margin markers: [invalidCount, invalid input indices…, then per resolved
+ * marker: block, input index, offset (-1 = the block's first line)].
+ */
+JNIEXPORT jintArray JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativeResolveMarkers(JNIEnv* env, jclass, jlong h,
+                                                                 jobjectArray ids,
+                                                                 jobjectArray blockIds,
+                                                                 jintArray starts, jintArray ends) {
+  std::vector<jint> out;
+  const auto* s = Snap(h);
+  const jsize n = ids ? env->GetArrayLength(ids) : 0;
+  if (!s) {
+    out.push_back(0);
+    return Ints(env, out);
+  }
+  std::vector<jint> st(n, -1), en(n, -1);
+  if (n > 0 && starts && env->GetArrayLength(starts) >= n) env->GetIntArrayRegion(starts, 0, n, st.data());
+  if (n > 0 && ends && env->GetArrayLength(ends) >= n) env->GetIntArrayRegion(ends, 0, n, en.data());
+  std::vector<rdr::MarkerInput> inputs(n);
+  for (jsize i = 0; i < n; ++i) {
+    auto* jid = static_cast<jstring>(env->GetObjectArrayElement(ids, i));
+    auto* jb = static_cast<jstring>(env->GetObjectArrayElement(blockIds, i));
+    inputs[i] = {Std(env, jid), Std(env, jb), st[i], en[i]};
+    if (jid) env->DeleteLocalRef(jid);
+    if (jb) env->DeleteLocalRef(jb);
+  }
+  const rdr::ResolvedMarkers r = rdr::ResolveMarkers(*s, inputs);
+  std::vector<jint> invalid;
+  for (jsize i = 0; i < n; ++i) {
+    if (std::find(r.invalidIds.begin(), r.invalidIds.end(), inputs[i].id) != r.invalidIds.end()) {
+      invalid.push_back(i);
+    }
+  }
+  out.push_back(static_cast<jint>(invalid.size()));
+  out.insert(out.end(), invalid.begin(), invalid.end());
+  for (const auto& [block, anchors] : r.byBlock) {
+    for (const auto& a : anchors) out.insert(out.end(), {block, a.input, a.offset});
+  }
+  return Ints(env, out);
+}
+
+/** Marker line on a page image: x, y, w, h normalized to the page. */
+JNIEXPORT jfloatArray JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativeMarkerPageRect(JNIEnv* env, jclass, jlong h,
+                                                                 jint block, jint offset) {
+  const auto* s = Snap(h);
+  const rdr::PageRect r = s ? rdr::MarkerPageRect(*s, block, offset) : rdr::PageRect{0, 0, 1, 0};
+  const jfloat v[4] = {r.x, r.y, r.w, r.h};
+  jfloatArray out = env->NewFloatArray(4);
+  env->SetFloatArrayRegion(out, 0, 4, v);
+  return out;
+}
+
+/** [start, end) widened by `mode` (0 none, 1 sentence, 2 block); see SnapRange. */
+JNIEXPORT jintArray JNICALL
+Java_com_sherpaonnx_reader_ReaderViewNative_nativeSnapRange(JNIEnv* env, jclass, jlong h, jint block,
+                                                            jint start, jint end, jint mode) {
+  const auto* s = Snap(h);
+  std::vector<jint> out{start, end};
+  if (s) {
+    const auto r = rdr::SnapRange(*s, block, start, end,
+                                  static_cast<rdr::SelectionSnap>(mode >= 0 && mode <= 2 ? mode : 0));
+    out = {r.start, r.end};
   }
   return Ints(env, out);
 }

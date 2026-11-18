@@ -1490,6 +1490,11 @@ export interface Spec extends TurboModule {
   ): Promise<string>;
   /** JSON array of `{ title, level, sectionId, blockId }` (reader contents). */
   getReaderToc(documentId: string): Promise<string>;
+  /** JSON array of `{ blockId, index, start, end }`: the sentences of the given blocks. */
+  getReaderSentences(
+    documentId: string,
+    blockIds: Array<string>
+  ): Promise<string>;
 
   releaseReaderDocument(documentId: string): Promise<boolean>;
 

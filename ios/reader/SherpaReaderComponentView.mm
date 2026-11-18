@@ -16,7 +16,9 @@
 #include "ImageRegistry.h"
 #include "ReaderLayout.h"
 #include "ReaderHighlights.h"
+#include "ReaderMarkers.h"
 #include "ReaderRegistry.h"
+#include "ReaderSentences.h"
 #include "ReaderTracker.h"
 
 #include <algorithm>
@@ -69,6 +71,47 @@ bool SameHighlights(const std::vector<SherpaReaderViewHighlightsStruct> &a,
         x.color != y.color || x.hasColor != y.hasColor || x.follow != y.follow) {
       return false;
     }
+  }
+  return true;
+}
+
+bool SameMarkers(const std::vector<SherpaReaderViewMarkersStruct> &a,
+                 const std::vector<SherpaReaderViewMarkersStruct> &b)
+{
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    const auto &x = a[i];
+    const auto &y = b[i];
+    if (x.id != y.id || x.blockId != y.blockId || x.start != y.start || x.end != y.end) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool SameMenuItems(const std::vector<SherpaReaderViewSelectionMenuItemsStruct> &a,
+                   const std::vector<SherpaReaderViewSelectionMenuItemsStruct> &b)
+{
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (a[i].id != b[i].id || a[i].title != b[i].title || a[i].systemImage != b[i].systemImage) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** Where a block's markers are: changes when a marker or its anchor changes. */
+bool SameBlockMarkers(const std::vector<rdr::MarkerAnchor> &a, const std::vector<SherpaReaderViewMarkersStruct> &pa,
+                      const std::vector<rdr::MarkerAnchor> &b, const std::vector<SherpaReaderViewMarkersStruct> &pb)
+{
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (a[i].offset != b[i].offset || pa[a[i].input].id != pb[b[i].input].id) return false;
   }
   return true;
 }
@@ -160,6 +203,7 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
 @end
 
 @interface SherpaReaderComponentView () <RCTSherpaReaderViewViewProtocol,
+                                         SherpaReaderCellDelegate,
                                          UITableViewDataSource,
                                          UITableViewDelegate,
                                          UIGestureRecognizerDelegate>
@@ -179,6 +223,13 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
   UITableView *_tableView;
   UITapGestureRecognizer *_tap;
   NSMutableDictionary<NSString *, SherpaReaderInsertComponentView *> *_hostsByKey;
+  // Mounted marker hosts (JS mounts only the markers near the visible range).
+  NSMutableDictionary<NSString *, SherpaReaderInsertComponentView *> *_markerHostsById;
+  BOOL _markerRefreshScheduled;
+  // Last `onMarkerWindowChange`: the rows it was computed for and its IDs.
+  NSInteger _markerWindowFirst;
+  NSInteger _markerWindowLast;
+  std::vector<std::string> _markerWindow;
   // Measured heights of block rows (keyed by block ID). Returned as the
   // estimate so UIKit does not re-estimate rows above the viewport on updates.
   NSMutableDictionary<NSString *, NSNumber *> *_blockHeights;
@@ -199,6 +250,15 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
   BOOL _followAnimation;
   int _followedBlock;
   int _followedOffset;
+
+  BOOL _selectable;
+  rdr::SelectionSnap _selectionSnap;
+  std::vector<SherpaReaderViewSelectionMenuItemsStruct> _menuItems;
+  __weak SherpaReaderTextCell *_selectionCell;
+  std::vector<SherpaReaderViewMarkersStruct> _markerProps;
+  std::vector<SherpaReaderViewMarkersStruct> _resolvedMarkerProps;  // the props `_resolvedMarkers` indexes
+  rdr::ResolvedMarkers _resolvedMarkers;
+  std::vector<std::string> _reportedInvalidMarkers;
 
   std::string _documentId;
   int _documentRevision;
@@ -233,6 +293,9 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
     static const auto defaultProps = std::make_shared<const SherpaReaderViewProps>();
     _props = defaultProps;
     _hostsByKey = [NSMutableDictionary new];
+    _markerHostsById = [NSMutableDictionary new];
+    _markerWindowFirst = -1;
+    _markerWindowLast = -1;
     _blockHeights = [NSMutableDictionary new];
     _initialOffset = -1;
     _jumpThreshold = 20;
@@ -389,13 +452,242 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   if (highlightsChanged) {
     _highlightProps = newP.highlights;
   }
+  const bool markersChanged = !SameMarkers(_markerProps, newP.markers);
+  if (markersChanged) {
+    _markerProps = newP.markers;
+  }
+  _selectionSnap = rdr::SelectionSnapFromName(newP.selectionSnap.c_str());
+  if (!SameMenuItems(_menuItems, newP.selectionMenuItems)) {
+    _menuItems = newP.selectionMenuItems;
+  }
+  if (_selectable != (BOOL)newP.selectable) {
+    _selectable = newP.selectable;
+    for (UITableViewCell *cell in _tableView.visibleCells) {
+      if ([cell isKindOfClass:SherpaReaderTextCell.class]) ((SherpaReaderTextCell *)cell).selectable = _selectable;
+    }
+  }
   if (rowsChanged) {
-    // The rebuild resolves highlights against the new snapshot / theme.
+    // The rebuild resolves highlights and markers against the new snapshot / theme.
     [self scheduleRebuild];
-  } else if (highlightsChanged) {
-    [self applyHighlights];
-  } else if (followModeChanged) {
-    [self followAnimated:YES force:YES];
+  } else {
+    if (markersChanged) {
+      [self applyMarkers];
+    }
+    if (highlightsChanged) {
+      [self applyHighlights];
+    } else if (followModeChanged) {
+      [self followAnimated:YES force:YES];
+    }
+  }
+}
+
+#pragma mark - Markers
+
+/** Resolves `_markerProps` against the snapshot; returns blocks whose markers changed. */
+- (std::vector<int>)resolveMarkers
+{
+  std::vector<rdr::MarkerInput> inputs;
+  inputs.reserve(_markerProps.size());
+  for (const auto &m : _markerProps) {
+    inputs.push_back({m.id, m.blockId, m.start, m.end});
+  }
+  rdr::ResolvedMarkers next;
+  if (_snap) next = rdr::ResolveMarkers(*_snap, inputs);
+  std::vector<int> changed;
+  for (const auto &[block, anchors] : next.byBlock) {
+    auto it = _resolvedMarkers.byBlock.find(block);
+    if (it == _resolvedMarkers.byBlock.end() ||
+        !SameBlockMarkers(it->second, _resolvedMarkerProps, anchors, _markerProps)) {
+      changed.push_back(block);
+    }
+  }
+  for (const auto &[block, anchors] : _resolvedMarkers.byBlock) {
+    if (next.byBlock.find(block) == next.byBlock.end()) changed.push_back(block);
+  }
+  _resolvedMarkers = std::move(next);
+  _resolvedMarkerProps = _markerProps;
+  if (!_resolvedMarkers.invalidIds.empty() && _resolvedMarkers.invalidIds != _reportedInvalidMarkers) {
+    std::string ids;
+    for (const auto &id : _resolvedMarkers.invalidIds) ids += (ids.empty() ? "" : ", ") + id;
+    [self emitError:"ERR_READER_INVALID_ARGUMENT" message:"Unknown marker block or range: " + ids];
+  }
+  _reportedInvalidMarkers = _resolvedMarkers.invalidIds;
+  return changed;
+}
+
+/** Markers of the blocks a row stands for (page rows: placed on the page by the block's line). */
+- (nullable NSArray<SherpaReaderMarker *> *)markersForRow:(const ReaderRow &)row
+{
+  if (_resolvedMarkers.byBlock.empty() || row.kind != RowKind::Block || !_snap) return nil;
+  NSMutableArray<SherpaReaderMarker *> *out = nil;
+  for (int block = row.coverFirst; block <= row.coverLast; ++block) {
+    auto it = _resolvedMarkers.byBlock.find(block);
+    if (it == _resolvedMarkers.byBlock.end()) continue;
+    for (const auto &a : it->second) {
+      const auto &p = _resolvedMarkerProps[a.input];
+      SherpaReaderMarker *m = [SherpaReaderMarker new];
+      m.markerId = ToNS(p.id);
+      SherpaReaderInsertComponentView *host = _markerHostsById[m.markerId];
+      m.host = host;
+      m.hostSize = host ? host.yogaSize : CGSizeZero;
+      m.offset = a.offset;
+      if (block != row.blockIndex || row.page) {
+        // On a page image: the block's line on the page.
+        const rdr::PageRect r = rdr::MarkerPageRect(*_snap, block, a.offset);
+        m.pageY = r.y;
+        m.pageHeight = r.h > 0 ? r.h : 0.0001;
+      }
+      if (!out) out = [NSMutableArray array];
+      [out addObject:m];
+    }
+  }
+  return out;
+}
+
+/** Applies changed markers to the visible rows in place (no relayout). */
+- (void)applyMarkers
+{
+  const std::vector<int> changed = [self resolveMarkers];
+  [self updateMarkerWindow:YES];
+  if (changed.empty()) return;
+  [self updateMarkerCells:&changed];
+}
+
+/** Re-places the markers of visible rows (`blocks`: only rows covering one of them; NULL: all). */
+- (void)updateMarkerCells:(const std::vector<int> *)blocks
+{
+  for (NSIndexPath *path in _tableView.indexPathsForVisibleRows) {
+    if (path.row >= (NSInteger)_rows.size()) continue;
+    const auto &row = _rows[path.row];
+    if (row.kind != RowKind::Block) continue;
+    if (blocks) {
+      const bool touched = std::any_of(blocks->begin(), blocks->end(), [&](int b) {
+        return b >= row.coverFirst && b <= row.coverLast;
+      });
+      if (!touched) continue;
+    }
+    UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
+    if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
+      [(SherpaReaderTextCell *)cell updateMarkers:[self markersForRow:row] theme:_theme];
+    } else if ([cell isKindOfClass:SherpaReaderImageCell.class]) {
+      [(SherpaReaderImageCell *)cell updateMarkers:[self markersForRow:row] theme:_theme];
+    }
+  }
+}
+
+/** A marker host was mounted, unmounted or resized: re-place visible markers once. */
+- (void)scheduleMarkerRefresh
+{
+  if (_markerRefreshScheduled) return;
+  _markerRefreshScheduled = YES;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    self->_markerRefreshScheduled = NO;
+    if (self->_resolvedMarkers.byBlock.empty()) return;
+    [self updateMarkerCells:NULL];
+    [self syncInsertOriginsWithMarkers:!(self->_tableView.isDragging || self->_tableView.isDecelerating)];
+  });
+}
+
+/**
+ * Tells JS which marker views to mount: the markers of the rows from one
+ * viewport above to one viewport below the visible rows. Emitted only when
+ * that set changes; while the rows stay the same nothing is computed.
+ */
+- (void)updateMarkerWindow:(BOOL)force
+{
+  if (_markerWindow.empty() && _resolvedMarkers.byBlock.empty()) return;
+  NSInteger first = -1;
+  NSInteger last = -1;
+  const CGFloat h = _tableView.bounds.size.height;
+  if (!_resolvedMarkers.byBlock.empty() && !_rows.empty() && h > 0) {
+    const CGRect rect = CGRectMake(0, _tableView.contentOffset.y - h, MAX(1, _tableView.bounds.size.width), 3 * h);
+    NSArray<NSIndexPath *> *paths = [_tableView indexPathsForRowsInRect:rect];
+    if (paths.count > 0) {
+      first = paths.firstObject.row;
+      last = paths.lastObject.row;
+    }
+  }
+  if (!force && first == _markerWindowFirst && last == _markerWindowLast) return;
+  _markerWindowFirst = first;
+  _markerWindowLast = last;
+  std::vector<std::string> ids;
+  for (NSInteger i = MAX(0, first); first >= 0 && i <= last && i < (NSInteger)_rows.size(); ++i) {
+    const auto &row = _rows[i];
+    if (row.kind != RowKind::Block) continue;
+    for (int block = row.coverFirst; block <= row.coverLast; ++block) {
+      auto it = _resolvedMarkers.byBlock.find(block);
+      if (it == _resolvedMarkers.byBlock.end()) continue;
+      for (const auto &a : it->second) ids.push_back(_resolvedMarkerProps[a.input].id);
+    }
+  }
+  if (ids == _markerWindow) return;
+  _markerWindow = ids;
+  if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
+    emitter->onMarkerWindowChange({ids});
+  }
+}
+
+#pragma mark - Selection
+
+- (NSRange)textCell:(SherpaReaderTextCell *)cell snapSelection:(NSRange)range
+{
+  if (!_snap || _selectionSnap == rdr::SelectionSnap::None || cell.blockIndex < 0 ||
+      cell.blockIndex >= (NSInteger)_snap->blocks.size()) {
+    return range;
+  }
+  const rdr::SentenceRange r = rdr::SnapRange(*_snap, (int)cell.blockIndex, (int)range.location,
+                                              (int)NSMaxRange(range), _selectionSnap);
+  return NSMakeRange((NSUInteger)r.start, (NSUInteger)(r.end - r.start));
+}
+
+- (void)textCellDidChangeSelection:(SherpaReaderTextCell *)cell
+{
+  // One selection at a time (v1: within one block).
+  if (cell.selectedRange.length == 0) {
+    if (_selectionCell == cell) _selectionCell = nil;
+    return;
+  }
+  SherpaReaderTextCell *previous = _selectionCell;
+  _selectionCell = cell;
+  if (previous && previous != cell) [previous clearSelection];
+}
+
+- (UIMenu *)textCell:(SherpaReaderTextCell *)cell
+        menuForRange:(NSRange)range
+    suggestedActions:(NSArray<UIMenuElement *> *)suggested API_AVAILABLE(ios(16.0))
+{
+  if (_menuItems.empty() || !_snap) return [UIMenu menuWithChildren:suggested];
+  const int block = (int)cell.blockIndex;
+  NSMutableArray<UIMenuElement *> *items = [NSMutableArray arrayWithCapacity:_menuItems.size()];
+  __weak SherpaReaderComponentView *weakSelf = self;
+  __weak SherpaReaderTextCell *weakCell = cell;
+  for (const auto &item : _menuItems) {
+    UIImage *image = item.systemImage.empty() ? nil : [UIImage systemImageNamed:ToNS(item.systemImage)];
+    const std::string itemId = item.id;
+    [items addObject:[UIAction actionWithTitle:ToNS(item.title)
+                                         image:image
+                                    identifier:nil
+                                       handler:^(__kindof UIAction *_) {
+                                         [weakSelf emitSelectionAction:itemId block:block range:range];
+                                         [weakCell clearSelection];
+                                       }]];
+  }
+  UIMenu *app = [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:items];
+  return [UIMenu menuWithChildren:[@[ app ] arrayByAddingObjectsFromArray:suggested]];
+}
+
+- (void)emitSelectionAction:(const std::string &)itemId block:(int)block range:(NSRange)range
+{
+  if (!_snap || block < 0 || block >= (int)_snap->blocks.size()) return;
+  NSString *text = ToNS(_snap->BlockText(block));
+  if (NSMaxRange(range) > text.length) return;
+  const int start = (int)range.location;
+  const int end = (int)NSMaxRange(range);
+  const rdr::SentenceRange sentence = rdr::EnclosingSentences(*_snap, block, start, end);
+  if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
+    emitter->onSelectionAction({itemId, _snap->blocks[block].id, start, end,
+                                std::string([text substringWithRange:range].UTF8String ?: ""), sentence.start,
+                                sentence.end});
   }
 }
 
@@ -650,6 +942,11 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   }
   auto *host = (SherpaReaderInsertComponentView *)childComponentView;
   host.reader = self;
+  if (host.markerId.length > 0) {
+    _markerHostsById[host.markerId] = host;
+    [self scheduleMarkerRefresh];
+    return;
+  }
   if (host.insertKey.length > 0) {
     _hostsByKey[host.insertKey] = host;
   }
@@ -662,20 +959,37 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     return;
   }
   auto *host = (SherpaReaderInsertComponentView *)childComponentView;
+  const BOOL wasMarker = [_markerHostsById allKeysForObject:host].count > 0;
+  for (NSString *key in [_markerHostsById allKeysForObject:host]) {
+    [_markerHostsById removeObjectForKey:key];
+  }
   for (NSString *key in [_hostsByKey allKeysForObject:host]) {
     [_hostsByKey removeObjectForKey:key];
   }
   host.reader = nil;
   [host removeFromSuperview];
-  [self scheduleRebuild];
+  if (wasMarker) {
+    [self scheduleMarkerRefresh];
+  } else {
+    [self scheduleRebuild];
+  }
 }
 
 - (void)insertHostDidChangeKey:(SherpaReaderInsertComponentView *)host
 {
+  const BOOL wasInsert = [_hostsByKey allKeysForObject:host].count > 0;
+  for (NSString *key in [_markerHostsById allKeysForObject:host]) {
+    [_markerHostsById removeObjectForKey:key];
+  }
   for (NSString *key in [_hostsByKey allKeysForObject:host]) {
     [_hostsByKey removeObjectForKey:key];
   }
-  if (host.insertKey.length > 0) {
+  if (host.markerId.length > 0) {
+    _markerHostsById[host.markerId] = host;
+    [host removeFromSuperview];
+    [self scheduleMarkerRefresh];
+    if (!wasInsert) return;
+  } else if (host.insertKey.length > 0) {
     _hostsByKey[host.insertKey] = host;
   }
   [self scheduleRebuild];
@@ -683,6 +997,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 
 - (void)insertHostDidResize:(SherpaReaderInsertComponentView *)host
 {
+  if (host.markerId.length > 0) {
+    [self scheduleMarkerRefresh];
+    return;
+  }
   if (_rows.empty()) {
     return;
   }
@@ -756,6 +1074,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   SherpaReaderAnchor *anchor = [self captureAnchor];
   [self loadSnapshot];
   [self resolveHighlights];
+  [self resolveMarkers];
   std::vector<ReaderRow> rows;
   if (_snap) {
     rows.reserve(_snap->blocks.size() + _inserts.size());
@@ -794,6 +1113,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     }
   }
   [self sampleWithPhase:rdr::ScrollPhase::Layout];
+  [self updateMarkerWindow:YES];
   // Reflow (theme, revision) may have moved the followed highlight.
   [self followAnimated:NO force:YES];
   if (!_readySent) {
@@ -911,6 +1231,8 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
                           theme:_theme
                            page:row.page];
     [cell updatePageMarks:[self pageMarksForRow:row]];
+    cell.delegate = self;
+    [cell updateMarkers:[self markersForRow:row] theme:_theme];
     return cell;
   }
   if (b.type == rdr::ReaderBlockType::Separator) {
@@ -926,6 +1248,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
                    styles:StyleSpans(b)
                highlights:[self spansForBlock:row.blockIndex]
                     theme:_theme];
+  cell.delegate = self;
+  cell.blockIndex = row.blockIndex;
+  cell.selectable = _selectable;
+  [cell updateMarkers:[self markersForRow:row] theme:_theme];
   return cell;
 }
 
@@ -995,15 +1321,25 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     _blockHeights[ToNS(_snap->blocks[row.blockIndex].id)] = @(cell.bounds.size.height);
   } else if (row.kind == RowKind::Insert) {
     dispatch_async(dispatch_get_main_queue(), ^{
-      [self syncInsertOrigins];
+      [self syncInsertOriginsWithMarkers:!(self->_tableView.isDragging || self->_tableView.isDecelerating)];
     });
   }
 }
 
 #pragma mark - Insert positions for `measure`
 
-/** Pushes every visible insert host's position (reader coordinates) into its shadow state. */
+/** Pushes every visible insert and marker host's position (reader coordinates) into its shadow state. */
 - (void)syncInsertOrigins
+{
+  [self syncInsertOriginsWithMarkers:YES];
+}
+
+/**
+ * Every changed origin is a Fabric state update (a commit), so marker hosts
+ * (often dozens) are synced only at rest, not while scrolling; Pressability
+ * inside them measures after the list has settled.
+ */
+- (void)syncInsertOriginsWithMarkers:(BOOL)markers
 {
   _lastOriginSync = CACurrentMediaTime();
   for (UITableViewCell *cell in _tableView.visibleCells) {
@@ -1014,6 +1350,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     if (host != nil && host.superview == cell.contentView) {
       [host setOnScreenOrigin:[host convertPoint:CGPointZero toView:self]];
     }
+  }
+  if (!markers) return;
+  for (SherpaReaderInsertComponentView *host in _markerHostsById.objectEnumerator) {
+    if (host.window != nil) [host setOnScreenOrigin:[host convertPoint:CGPointZero toView:self]];
   }
 }
 
@@ -1031,6 +1371,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
     [self sampleWithPhase:rdr::ScrollPhase::Layout];
     [self followAnimated:NO force:YES];
   }
+  [self updateMarkerWindow:NO];
   [self syncInsertOrigins];
 }
 
@@ -1186,9 +1527,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   } else if (_followAnimation) {
     [self sampleWithPhase:rdr::ScrollPhase::Follow];
   }
+  [self updateMarkerWindow:NO];
   // Throttled: Pressability measures on touch-down; at rest the sync is exact.
   if (CACurrentMediaTime() - _lastOriginSync > 0.05) {
-    [self syncInsertOrigins];
+    [self syncInsertOriginsWithMarkers:NO];
   }
 }
 
@@ -1236,6 +1578,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch
 {
   for (UIView *v = touch.view; v != nil && v != _tableView; v = v.superview) {
+    // Inserts and marker views handle their own touches (a marker tap → onMarkerPress in JS).
     if ([v isKindOfClass:SherpaReaderInsertComponentView.class]) {
       return NO;
     }
@@ -1249,14 +1592,35 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   return YES;
 }
 
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
+{
+  if (gestureRecognizer != _tap) return YES;
+  // A tap while text is selected only ends the selection.
+  SherpaReaderTextCell *selected = _selectionCell;
+  if (selected && selected.selectedRange.length > 0) {
+    [selected clearSelection];
+    _selectionCell = nil;
+    return NO;
+  }
+  return YES;
+}
+
 - (void)handleTap:(UITapGestureRecognizer *)tap
 {
-  NSIndexPath *path = [_tableView indexPathForRowAtPoint:[tap locationInView:_tableView]];
+  const CGPoint point = [tap locationInView:_tableView];
+  NSIndexPath *path = [_tableView indexPathForRowAtPoint:point];
   if (!_snap || path == nil || path.row >= (NSInteger)_rows.size() || _rows[path.row].kind != RowKind::Block) {
     return;
   }
+  const auto &row = _rows[path.row];
+  int offset = -1;
+  UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
+  if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
+    offset = (int)[(SherpaReaderTextCell *)cell characterOffsetAtPoint:[_tableView convertPoint:point
+                                                                                         toView:cell.contentView]];
+  }
   if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
-    emitter->onReaderTap({_snap->blocks[_rows[path.row].blockIndex].id});
+    emitter->onReaderTap({_snap->blocks[row.blockIndex].id, offset});
   }
 }
 

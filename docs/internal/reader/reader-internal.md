@@ -14,7 +14,7 @@ Bridges                    ios/reader/bridge/SherpaOnnx+Reader.mm     ios/reader
         │                                            │
         ▼                                            ▼
 Shared C++ core            android/src/main/cpp/reader/   (compiled into the iOS pod as well)
-  ReaderRegistry · ReaderSnapshot · ReaderTracker · ReaderHighlights · ReaderJson · ReaderTextHash · ReaderFileHash · ReaderBridge
+  ReaderRegistry · ReaderSnapshot · ReaderTracker · ReaderHighlights · ReaderSentences · ReaderMarkers · ReaderJson · ReaderTextHash · ReaderFileHash · ReaderBridge
   ReaderLayout (rows per page display) · ReaderOcrText (OCR → blocks) · ReaderTextSlice · ReaderSidecar
         │
         ▼
@@ -23,7 +23,7 @@ Structure sources          document/DocEpub.cpp · DocFb2.cpp · DocMobi.cpp · 
                            OCR text: textbuffer/TxtOcrLayout.h on the OCR buffer → ReaderOcrText → child blocks
 ```
 
-All rules that must behave the same on both platforms live in the shared C++ core: IDs and hashes, the snapshot model, text-range mapping, highlight resolution and the reading tracker. The platform views only lay out rows, draw text and feed scroll samples into the tracker.
+All rules that must behave the same on both platforms live in the shared C++ core: IDs and hashes, the snapshot model, text-range mapping, highlight and marker resolution, sentence splitting / selection snapping and the reading tracker. The platform views only lay out rows, draw text and feed scroll samples into the tracker.
 
 ## 1. Structure extraction
 
@@ -56,11 +56,12 @@ All rules that must behave the same on both platforms live in the shared C++ cor
 
 ### JS wrapper (`ReaderView.tsx`)
 
-- Flattens everything into codegen-friendly props: `documentId` + `documentRevision`, `initialSectionId/BlockId/Offset`, `furthestBlockId` + `furthestRevision`, theme fields (font, size, scale, line height, spacing, `readerMarginHorizontal/Vertical`, alignment, hyphenation, colors), `inserts` as `{ key, kind, target }`, `highlights` as `HighlightSpec`, follow options.
+- Flattens everything into codegen-friendly props: `documentId` + `documentRevision`, `initialSectionId/BlockId/Offset`, `furthestBlockId` + `furthestRevision`, theme fields (font, size, scale, line height, spacing, `readerMarginHorizontal/Vertical`, alignment, hyphenation, colors), `inserts` as `{ key, kind, target }`, `highlights` as `HighlightSpec`, follow options, `selectable` / `selectionSnap`, `selectionMenuItems` as `{ id, title, systemImage }`, `markers` as `MarkerSpec` `{ id, blockId, start, end }` (-1 = none; `accessibilityLabel` stays in JS).
 - **Do not name props like Yoga style props.** `marginHorizontal` / `marginVertical` were also read by Fabric as layout margins of the view itself; they are `readerMargin*` for that reason.
 - `furthestRevision` increases only when the `furthestLocator` block changes, so native applies the app's frontier exactly when the app changed it.
 - Colors go through `processColor` and are passed as signed Int32 (`toInt32`), because `ColorValue` inside object arrays is not reliable in codegen. Platform colors fall back to the accent.
 - Inserts: for each spec, a `SherpaReaderInsertView` child with `insertKey` wraps `renderInsert(key)`.
+- Markers: a `SherpaReaderInsertView` child with `markerId` (`MarkerHost`) wraps `renderMarker(id)`, only for the IDs in the marker window (see [Margin markers](#margin-markers-readermarkerscpp)). Hosts are rendered in `markers` order, so the window only adds and removes children (a reorder would remount native views).
 - Commands: `scrollToLocator(sectionId, blockId, offset, animated)`, `resumeFollow()`.
 
 ### Rows
@@ -80,7 +81,7 @@ The reading position is kept by anchor: before a reflow the view records the fir
 This is the part most likely to break with React Native updates. Background: [insert-spike.md](insert-spike.md).
 
 - `SherpaReaderView` receives insert hosts as Fabric children but does **not** add them as subviews where Fabric expects. iOS overrides `mountChildComponentView` / `unmountChildComponentView` without calling `super`; Android keeps a logical child list in the view manager (`addView` / `removeViewAt` / `getChildAt`) with `needsCustomLayoutForChildren() = true`.
-- Yoga lays each host out at full reader width at the reader's origin. The list uses the Yoga height as the row height and moves the host into the row's cell (`attachHost:` on iOS, the insert row container on Android). A Yoga height change (`onInsertResized` / `insertHostDidResize:`) updates that row while keeping the anchor.
+- Yoga lays each host out at full reader width at the reader's origin. The list uses the Yoga height as the row height and moves the host into the row's cell (`attachHost:` on iOS, the insert row container on Android). A Yoga height change (`onInsertResized` / `insertHostDidResize:`) updates that row while keeping the anchor. iOS ignores changes under 0.5 pt: any Yoga pass over the reader's children moves heights by ~1e-5, and a table update per insert stalled for >100 ms with 40 chapter-end inserts.
 - **Measure fix:** Pressability measures the press rect from the shadow tree, where every host sits at the reader's origin. The hand-written shadow node `cpp/fabric/react/renderer/components/SherpaOnnxSpec/SherpaReaderInsertShadowNode` reports the on-screen row position as `getContentOriginOffset`; the list pushes that position into Fabric state on scroll and layout (`setOnScreenOrigin` → `StateWrapper.updateState` / `ConcreteState::updateState`). The insert component is `interfaceOnly`; Android builds the codegen library from `android/src/main/jni-codegen`, and `react-native.config.js` registers both component descriptors.
 - A drag in the list cancels the JS responder (iOS: toggles the surface touch handler; Android: `NativeGestureUtil`), so a scroll that starts on a button does not press it.
 - Android only: react-native-screens calls `startViewTransition` on descendants while a screen is popped; `ReaderRecyclerView` and the insert row container ignore it, otherwise recycling throws "Scrapped or attached views may not be recycled".
@@ -119,6 +120,29 @@ Rules (tested in `reader_host_test`):
   - iOS: `NSBackgroundColorAttributeName`, thick `NSUnderlineStyleAttributeName` + `NSUnderlineColorAttributeName`, `NSForegroundColorAttributeName`; visible cells are updated in place with `updateHighlights:theme:` (no `reloadData`).
 - Highlights never change fonts, so row heights stay valid.
 - **Inline styles** are applied in the same attributed string / `SpannableString` on every bind (and kept on highlight-only updates), so the first measured height already has them. iOS: `SherpaReaderTheme` caches one font per heading level and flags (`styledFontForLevel:`; descriptor traits, the row's family only), with `NSObliquenessAttributeName` / negative `NSStrokeWidthAttributeName` when the face is missing. Android: `Theme.styledFaces` (ReactFontManager for custom families, `Typeface.create` for the default) drawn by `ReaderFaceSpan`, which fakes bold / skew for what the face lacks. Headings add bold to their runs.
+
+### Sentences and selection (`ReaderSentences.cpp`)
+
+- `SplitSentences(utf8)` returns UTF-16 ranges: boundaries are the default text segmentation's (`seg_is_default_sentence_boundary` in `segmentbuffer/SegEngine.cpp`: `. ! ? ; :`, line break, CJK / Arabic / Devanagari stops). ASCII marks end a sentence only before whitespace or the end; a run of marks plus closing quotes / brackets stays with the sentence; ranges are trimmed. Keep the boundary set in sync with SegEngine. A single `.` before a word on the same line continues the sentence after an entry of `kAbbreviations` (kinds: before any word, before a digit, before a lower-case word or digit; lower-case entries also match capitalized), an initial before a capital (not `I`) or a 1–3 digit ordinal before a lower-case word or a word of `kAfterOrdinal`. No app-supplied list (would need a parameter through `BlockSentences`, `SnapRange`, both views and the bridge).
+- `SnapRange(snap, block, start, end, mode)` widens a selection (`None`, `Sentence`: first sentence ending after `start` to the last starting before `end`, gaps move inward; `Block`: `[0, len]`). `EnclosingSentences` is the `Sentence` case and gives `sentenceStart` / `sentenceEnd` of `onSelectionAction`. `SentencesJson` serves `getReaderSentences` (unknown block IDs reject).
+- **iOS:** the text cell's `UITextView` becomes `selectable` + `userInteractionEnabled` with the prop. `textViewDidChangeSelection:` asks the reader view to snap and re-sets the range (guarded against recursion). `textView:editMenuForTextInRange:suggestedActions:` (iOS 16+) returns the app's `UIAction`s inline, then the suggested items; the handler captures block and range, emits the event and clears the selection. The reader view tracks the one cell with a selection (`_selectionCell`) and clears others; its tap recognizer does not begin while a selection exists (`gestureRecognizerShouldBegin:` clears it instead). `updateHighlights:` keeps the selected range.
+- **Android:** text rows are `ReaderTextView` (a `TextView`): `setTextIsSelectable` with the prop, `onSelectionChanged` snaps through `nativeSnapRange`, a `customSelectionActionModeCallback` adds the app items (ids `MENU_ITEM_BASE + i`). Highlight-only rebinds keep the selection (`setTextKeepingSelection`). The layout manager refuses `requestChildRectangleOnScreen`, so a focused selectable row does not scroll the list; `onViewAttachedToWindow` toggles `isEnabled` to revive selection on reattached rows. Not tried on a device yet.
+
+### Margin markers (`ReaderMarkers.cpp`)
+
+- Input per marker: `{ id, blockId, start, end }` (the views stay with JS). `ResolveMarkers` returns anchors per block: input index and the UTF-16 offset of the range's last character (moved off a low surrogate), or -1 for block markers and non-text blocks. Unknown blocks / reversed ranges → `invalidIds` → `onError`.
+- `MarkerPageRect(snap, block, offset)` places a marker on a page image (line box of the offset, else first line box, else block rect, else the page top).
+- Android JNI packs `[invalidCount, invalid indices…, then block, input, offset per marker]`.
+- **No SDK look:** the app draws each marker with `renderMarker`; the SDK only places the view. The host is the insert host component with `markerId` set (same `SherpaReaderInsertShadowNode` + origin state, so `measure` inside a marker view returns on-screen positions; the views' origins are synced in `syncInsertOrigins`, but only at rest: every changed origin is a Fabric state update and therefore a commit, and syncing dozens of marker hosts every 50 ms while scrolling cost most of the main thread). Yoga lays the host out at its content size (`position: absolute`, top-left of the reader).
+- **Virtualization:** the native list emits `onMarkerWindowChange({ markerIds })`: the markers of the rows from one viewport above to one below the visible rows (iOS: `indexPathsForRowsInRect:` over 3 × the height; Android: visible rows ± their count). It is recomputed only when that row range changes (scroll), and forced after a rebuild or a `markers` change; it is emitted only when the ID list changes. JS (`nextMarkerWindow`) mounts the requested IDs plus up to `MARKER_WINDOW_BUFFER` (16) previously mounted ones, most recently requested first, so a short scroll back does not remount.
+- **Placement:** centered in the trailing margin (`width - inset / 2`), clamped inside the row (a wider view overlaps the text; page images: at the trailing edge), vertically centered on the glyph center of its line; markers on one line stack downward (2 pt / dp gap). iOS: each text / image cell has a `SherpaReaderMarkerOverlay` that holds the hosts of its row (`attachMarkers:` moves them in from other / recycled cells, `prepareForReuse` hands them back), placed in `layoutSubviews`; hits on the overlay itself fall through. A host's Yoga layout keeps the origin the row gave it; a size change or a (un)mount re-places the visible rows once (`scheduleMarkerRefresh`). Android: one `MarkerLayer` over the `RecyclerView` holds all mounted hosts, laid out at their Yoga size at (0, 0) and moved with `translationX/Y` in `positionMarkers()` after every scroll step (`onScrolled`, same frame as the row offsets) and layout pass; hosts of detached rows are `INVISIBLE`. The layer never consumes touches (they reach the list; RN dispatches JS touches from the root view).
+- **Touch:** `MarkerHost` is a JS responder: bubbling, so a `Pressable` inside the app's view claims the touch first; otherwise a release within 10 pt fires `onMarkerPress`. Native scrolling cancels it (`cancelReactTouches` / `NativeGestureUtil`). The native tap recognizer ignores touches in hosts (iOS: `shouldReceiveTouch`; Android: `markerViewAt`, with hit slop). `hitSlop` grows small views to 44 pt / 48 dp (from `onLayout`).
+- **Measured** (iOS Simulator, debug build, Time Profiler, 200 test markers, repeated flings): no main-thread busy period over 9 ms (without markers: 13 ms). In 24 s the main thread was busy 1.8 s: marker code (window, placement, origin sync) about 0.16 s, RN mounting (mostly hosts entering the window) about 0.45 s. Animation Hitches is not available on the simulator.
+- **Accessibility:** the host is `accessible` with role button, `accessibilityLabel` and the `activate` action (→ `onMarkerPress`). iOS cells with placed hosts become containers: a text (or image) element, then the hosts top to bottom. Android: hosts in the layer come after the rows in TalkBack order.
+
+### Tap offset
+
+`onTap` carries `offset`: iOS `characterOffsetAtPoint:` of the text cell, Android `TextView.getOffsetForPosition`; -1 on rows without text (the JS wrapper drops it).
 
 ### Follow scrolling
 
@@ -163,17 +187,18 @@ Rules (tested in `reader_host_test`):
 
 | What | Where | Run |
 |---|---|---|
-| Structure golden files (EPUB, FB2, MOBI, AZW3, PDF), text identity golden (text, IDs, hashes, ranges per book incl. Frankenstein), inline style runs (`styles.epub`, `styles.fb2`), IDs, textHash, registry, MapTextRange, highlights, tracker (incl. Follow), row plan and visibility, OCR blocks, slices, highlight rects, sidecar | `test/cpp/reader/reader_host_test.cpp` (PDF parts need PDFium; CMake downloads it) | `cmake -S test/cpp -B test/cpp/build && cmake --build test/cpp/build --target reader_host_test && ./test/cpp/build/reader_host_test` |
-| JS API, highlight specs, read-aloud timeline | `src/reader/__tests__/` | `yarn jest src/reader` |
+| Structure golden files (EPUB, FB2, MOBI, AZW3, PDF), text identity golden (text, IDs, hashes, ranges per book incl. Frankenstein), inline style runs (`styles.epub`, `styles.fb2`), IDs, textHash, registry, MapTextRange, highlights, sentences (split, snap, JSON), markers (anchors, page rect), tracker (incl. Follow), row plan and visibility, OCR blocks, slices, highlight rects, sidecar | `test/cpp/reader/reader_host_test.cpp` (PDF parts need PDFium; CMake downloads it) | `cmake -S test/cpp -B test/cpp/build && cmake --build test/cpp/build --target reader_host_test && ./test/cpp/build/reader_host_test` |
+| JS API (incl. `getReaderSentences`), highlight, marker and menu item specs, marker window (`nextMarkerWindow`) and hit slop, tap payload, read-aloud timeline | `src/reader/__tests__/` | `yarn jest src/reader` |
 | TTS timeline | `src/tts/__tests__/synthesize-timeline.test.ts`, orchestrator tests | `yarn jest src/tts src/pipeline` |
 | Scanned PDF page → PDFium → ppocrv6-tiny → reader blocks | `test/cpp/ocr/ocr_reader_pages_host_test.cpp` (in `ppocr_host_test`; skips without the pack in `build/ocr-models`) | `cmake --build test/cpp/build --target ppocr_host_test && ./test/cpp/build/ppocr_host_test` |
 | Turbo signatures | | `yarn check:ios-turbo-signatures` |
 
 Device smoke checks (both platforms; build iOS and Android one after the other, never in parallel):
 
-1. Example → **Reader**, Frankenstein: contents jump, chapter-end card, mark + note, search, appearance changes keep the first visible line, rotate.
-2. Change the book and open it again: it resumes at the last position.
-3. Example → **Read aloud**, Frankenstein: tap a paragraph, read aloud; sentence and word highlights move, follow keeps them in view, a drag pauses following, the button resumes it; playback continues across chunks and sections.
+1. Example → **Reader**, Frankenstein: contents jump, chapter-end card, search, appearance changes keep the first visible line, rotate.
+2. Selection and markers: long-press snaps to the sentence (Aa → none / block), menu **Note** adds a card and a margin count, a second note on the same sentence makes it 2, tapping the count shows the notes; **Mark** highlights the selected range; Aa → **Test markers (200)** and fling through the book; repeat in the night theme.
+3. Change the book and open it again: it resumes at the last position.
+4. Example → **Read aloud**, Frankenstein: tap a paragraph, read aloud; sentence and word highlights move, follow keeps them in view, a drag pauses following, the button resumes it; playback continues across chunks and sections.
 
 Android tips: drive the device with `adb shell input` and `uiautomator dump`; read JS logs with `adb logcat` (`ReactNativeJS`). A CDP log client that reconnects in a loop keeps the "Refreshing…" banner up and makes `uiautomator` fail with "could not get idle state". Fast Refresh re-runs effect cleanups, so a screen that releases its document in a cleanup must be reopened after an edit.
 
@@ -183,4 +208,6 @@ Android tips: drive the device with `adb shell input` and `uiautomator dump`; re
 - New rule in the structure, IDs or hash: bump the matching version constant, update the golden file and reader.md.
 - New tracker behavior: implement it in `ReaderTracker` only and add a host test; the views must stay thin.
 - New highlight style: `ReaderHighlightStyle` (TS), `HighlightStyle` (C++), both renderers, docs.
+- New sentence rule: `ReaderSentences.cpp` only (keep it in line with SegEngine's boundary set), host test, reader.md rules list.
+- New anchor or placement rule: `ReaderMarkers` (anchor, C++ test) and both placers (iOS `SherpaReaderMarkerOverlay`, Android `positionMarkers`) with the same placement. The look belongs to the app (`renderMarker`).
 - Keep the SDK use-case neutral: examples in code, tests and docs are generic (search, notes, read-aloud, guides).

@@ -81,6 +81,10 @@ bool BridgeLoadRecognition(const std::string& documentId, const uint8_t* data, s
 /** Contents JSON (see TocJson). */
 bool BridgeGetToc(const std::string& documentId, std::string* json, ReaderError* err);
 
+/** Sentences of the given blocks (see SentencesJson); rejects unknown block IDs. */
+bool BridgeGetSentences(const std::string& documentId, const std::vector<std::string>& blockIds,
+                        std::string* json, ReaderError* err);
+
 bool BridgeReleaseDocument(const std::string& documentId);
 
 }  // namespace reader

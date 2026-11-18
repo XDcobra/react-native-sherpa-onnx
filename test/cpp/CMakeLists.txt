@@ -1114,6 +1114,8 @@ add_executable(reader_host_test
   "${READER_CPP_ROOT}/reader/ReaderRegistry.cpp"
   "${READER_CPP_ROOT}/reader/ReaderTracker.cpp"
   "${READER_CPP_ROOT}/reader/ReaderHighlights.cpp"
+  "${READER_CPP_ROOT}/reader/ReaderSentences.cpp"
+  "${READER_CPP_ROOT}/reader/ReaderMarkers.cpp"
   "${READER_CPP_ROOT}/reader/ReaderLayout.cpp"
   "${READER_CPP_ROOT}/reader/ReaderOcrText.cpp"
   "${READER_CPP_ROOT}/reader/ReaderTextSlice.cpp"
