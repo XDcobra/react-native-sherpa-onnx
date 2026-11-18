@@ -248,6 +248,21 @@ bool BridgeGetToc(const std::string& documentId, std::string* json, ReaderError*
   return true;
 }
 
+bool BridgeGetSentences(const std::string& documentId, const std::vector<std::string>& blockIds,
+                        std::string* json, ReaderError* err) {
+  std::shared_ptr<const ReaderSnapshot> snap;
+  if (!SnapshotOrError(documentId, &snap, err)) return false;
+  std::string unknown;
+  if (!SentencesJson(*snap, blockIds, json, &unknown)) {
+    if (err) {
+      err->code = kErrReaderInvalidArgument;
+      err->message = "Unknown block ID: " + unknown;
+    }
+    return false;
+  }
+  return true;
+}
+
 bool BridgeReleaseDocument(const std::string& documentId) {
   return ReaderRegistry::Instance().Release(documentId);
 }

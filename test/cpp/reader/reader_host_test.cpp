@@ -6,8 +6,10 @@
 #include "ReaderHighlights.h"
 #include "ReaderJson.h"
 #include "ReaderLayout.h"
+#include "ReaderMarkers.h"
 #include "ReaderOcrText.h"
 #include "ReaderRegistry.h"
+#include "ReaderSentences.h"
 #include "ReaderSidecar.h"
 #include "ReaderTextHash.h"
 #include "ReaderTextSlice.h"
@@ -1436,5 +1438,162 @@ TEST(ReaderToc, FallsBackToSectionTitles) {
   EXPECT_EQ(TocJson(*snap),
             "[{\"title\":\"The Lighthouse\",\"level\":1,\"sectionId\":\"s0\",\"blockId\":\"s0.b0\"},"
             "{\"title\":\"The Storm\",\"level\":1,\"sectionId\":\"s1\",\"blockId\":\"s1.b0\"}]");
+  ReaderRegistry::Instance().Release(id);
+}
+
+// ---- Sentences ------------------------------------------------------------
+
+namespace {
+
+/** The sentences of `text` as strings (ASCII test input: UTF-16 = bytes). */
+std::vector<std::string> Sentences(const std::string& text) {
+  std::vector<std::string> out;
+  for (const auto& r : SplitSentences(text)) out.push_back(text.substr(r.start, r.end - r.start));
+  return out;
+}
+
+/** A document with one app section holding `texts` as paragraphs `app:t.p0`, `app:t.p1`, … */
+std::string DocWithParagraphs(const std::vector<std::string>& texts) {
+  const std::string id = CreateDoc("structure.epub");
+  ReaderAppSectionInput in;
+  in.after = "s0";
+  in.id = "app:t";
+  for (size_t i = 0; i < texts.size(); ++i) {
+    in.blocks.push_back({"p" + std::to_string(i), ReaderBlockType::Paragraph, texts[i], 0});
+  }
+  ReaderError err;
+  EXPECT_TRUE(ReaderRegistry::Instance().InsertSection(id, in, &err)) << err.message;
+  return id;
+}
+
+}  // namespace
+
+TEST(ReaderSentences, SplitsOnTheSegmentationBoundaries) {
+  using V = std::vector<std::string>;
+  EXPECT_EQ(Sentences("One. Two! Three? Four"), (V{"One.", "Two!", "Three?", "Four"}));
+  EXPECT_EQ(Sentences("Note: this; that."), (V{"Note:", "this;", "that."}));
+  EXPECT_EQ(Sentences("  Leading and trailing.   "), (V{"Leading and trailing."}));
+  EXPECT_EQ(Sentences("Line one\nLine two"), (V{"Line one", "Line two"}));
+  EXPECT_EQ(Sentences(""), V{});
+  EXPECT_EQ(Sentences(" \n\t "), V{});
+}
+
+TEST(ReaderSentences, KeepsRunsQuotesAndInnerMarks) {
+  using V = std::vector<std::string>;
+  EXPECT_EQ(Sentences("Really?! Yes... Fine."), (V{"Really?!", "Yes...", "Fine."}));
+  EXPECT_EQ(Sentences("\"Go.\" He went. (Aside.) Done"), (V{"\"Go.\"", "He went.", "(Aside.)", "Done"}));
+  // ASCII marks need whitespace (or the end) after them.
+  EXPECT_EQ(Sentences("Pi is 3.14 and it is 10:30 now. Next"), (V{"Pi is 3.14 and it is 10:30 now.", "Next"}));
+  // Curly closing quote (3 UTF-8 bytes, 1 UTF-16 unit).
+  const std::string t = "\xE2\x80\x9CHi.\xE2\x80\x9D Then.";  // “Hi.” Then.
+  const auto r = SplitSentences(t);
+  ASSERT_EQ(r.size(), 2u);
+  EXPECT_EQ(r[0].start, 0);
+  EXPECT_EQ(r[0].end, 5);  // “Hi.”
+  EXPECT_EQ(r[1].start, 6);
+  EXPECT_EQ(r[1].end, 11);
+}
+
+TEST(ReaderSentences, CjkMarksEndWithoutSpaceAndOffsetsAreUtf16) {
+  // 你好。再见！ = 6 code points; the stops end sentences without a space.
+  const auto r = SplitSentences("\xE4\xBD\xA0\xE5\xA5\xBD\xE3\x80\x82\xE5\x86\x8D\xE8\xA7\x81\xEF\xBC\x81");
+  ASSERT_EQ(r.size(), 2u);
+  EXPECT_EQ(r[0].start, 0);
+  EXPECT_EQ(r[0].end, 3);
+  EXPECT_EQ(r[1].start, 3);
+  EXPECT_EQ(r[1].end, 6);
+  // An emoji is two UTF-16 units.
+  const auto e = SplitSentences("a\xF0\x9F\x98\x80. b");
+  ASSERT_EQ(e.size(), 2u);
+  EXPECT_EQ(e[0].end, 4);
+  EXPECT_EQ(e[1].start, 5);
+}
+
+TEST(ReaderSentences, SnapRangeWidensToSentencesOrTheBlock) {
+  //                                   0         1         2
+  //                                   0123456789012345678901234567
+  const std::string id = DocWithParagraphs({"First one. Second one. Third."});
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  const int p = snap->BlockIndex("app:t.p0");
+  auto snapTo = [&](int s, int e, SelectionSnap m) {
+    const auto r = SnapRange(*snap, p, s, e, m);
+    return std::make_pair(r.start, r.end);
+  };
+  using P = std::pair<int, int>;
+  EXPECT_EQ(snapTo(2, 4, SelectionSnap::Sentence), (P{0, 10}));     // inside "First one."
+  EXPECT_EQ(snapTo(8, 13, SelectionSnap::Sentence), (P{0, 22}));    // across two sentences
+  EXPECT_EQ(snapTo(10, 11, SelectionSnap::Sentence), (P{11, 22}));  // the gap: next sentence
+  EXPECT_EQ(snapTo(5, 11, SelectionSnap::Sentence), (P{0, 10}));    // ends in the gap
+  EXPECT_EQ(snapTo(14, 14, SelectionSnap::Sentence), (P{11, 22}));  // a caret
+  EXPECT_EQ(snapTo(3, 999, SelectionSnap::Sentence), (P{0, 29}));   // clamped
+  EXPECT_EQ(snapTo(2, 4, SelectionSnap::Block), (P{0, 29}));
+  EXPECT_EQ(snapTo(2, 4, SelectionSnap::None), (P{2, 4}));
+  EXPECT_EQ(SelectionSnapFromName("sentence"), SelectionSnap::Sentence);
+  EXPECT_EQ(SelectionSnapFromName("block"), SelectionSnap::Block);
+  EXPECT_EQ(SelectionSnapFromName("other"), SelectionSnap::None);
+  const auto enc = EnclosingSentences(*snap, p, 12, 13);
+  EXPECT_EQ(enc.start, 11);
+  EXPECT_EQ(enc.end, 22);
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderSentences, JsonPerBlockAndUnknownIds) {
+  const std::string id = DocWithParagraphs({"A b. C d.", "Single"});
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  std::string json;
+  std::string unknown;
+  ASSERT_TRUE(SentencesJson(*snap, {"app:t.p0", "app:t.p1", "s0.b4"}, &json, &unknown));
+  // s0.b4 is an image: no sentences.
+  EXPECT_EQ(json,
+            "[{\"blockId\":\"app:t.p0\",\"index\":0,\"start\":0,\"end\":4},"
+            "{\"blockId\":\"app:t.p0\",\"index\":1,\"start\":5,\"end\":9},"
+            "{\"blockId\":\"app:t.p1\",\"index\":0,\"start\":0,\"end\":6}]");
+  EXPECT_FALSE(SentencesJson(*snap, {"app:t.p0", "s9.b9"}, &json, &unknown));
+  EXPECT_EQ(unknown, "s9.b9");
+  EXPECT_TRUE(BlockSentences(*snap, snap->BlockIndex("s0.b5")).empty());  // separator
+  ReaderRegistry::Instance().Release(id);
+}
+
+// ---- Margin markers ---------------------------------------------------------
+
+TEST(ReaderMarkers, AnchorsAtTheBlockOrTheRangeEnd) {
+  const std::string id = DocWithParagraphs({"First one. Second one.", "a\xF0\x9F\x98\x80" "b"});
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  const int p0 = snap->BlockIndex("app:t.p0");
+  const int p1 = snap->BlockIndex("app:t.p1");
+  std::vector<MarkerInput> in(7);
+  in[0] = {"block", "app:t.p0", -1, -1};
+  in[1] = {"range", "app:t.p0", 11, 22};
+  in[2] = {"clamped", "app:t.p0", 5, 999};
+  in[3] = {"startOnly", "app:t.p0", 3, -1};
+  in[4] = {"surrogate", "app:t.p1", 0, 3};  // last char = low surrogate (2) → its pair start (1)
+  in[5] = {"image", "s0.b4", 0, 4};          // image: block anchor
+  in[6] = {"bad", "s9.b9", -1, -1};
+  const auto r = ResolveMarkers(*snap, in);
+  ASSERT_EQ(r.invalidIds.size(), 1u);
+  EXPECT_EQ(r.invalidIds[0], "bad");
+  const auto& a = r.byBlock.at(p0);
+  ASSERT_EQ(a.size(), 4u);
+  EXPECT_EQ(a[0].input, 0);
+  EXPECT_EQ(a[0].offset, -1);
+  EXPECT_EQ(a[1].offset, 21);
+  EXPECT_EQ(a[2].offset, 21);  // clamped to the last character
+  EXPECT_EQ(a[3].offset, 3);
+  EXPECT_EQ(r.byBlock.at(p1).at(0).offset, 1);
+  EXPECT_EQ(r.byBlock.at(snap->BlockIndex("s0.b4")).at(0).offset, -1);
+  // Reversed ranges are invalid.
+  const auto bad = ResolveMarkers(*snap, {{"rev", "app:t.p0", 9, 3}});
+  ASSERT_EQ(bad.invalidIds.size(), 1u);
+  EXPECT_TRUE(bad.byBlock.empty());
+  ReaderRegistry::Instance().Release(id);
+}
+
+TEST(ReaderMarkers, PageRectFallsBackToTheBlockRect) {
+  const std::string id = DocWithParagraphs({"Text"});
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  // No line boxes and no rect: the page's top edge.
+  const auto r = MarkerPageRect(*snap, snap->BlockIndex("app:t.p0"), 2);
+  EXPECT_EQ(r.y, 0);
+  EXPECT_EQ(r.w, 1);
   ReaderRegistry::Instance().Release(id);
 }

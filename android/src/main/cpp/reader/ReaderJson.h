@@ -46,5 +46,14 @@ std::string SliceRangesJson(const ReaderSnapshot& snap, const ReaderTextSlice& s
 std::string SliceJson(const ReaderSnapshot& snap, const ReaderTextSlice& slice,
                       const std::string& bufferId);
 
+/**
+ * `[{blockId, index, start, end}]`: the sentences of each block in `blockIds`
+ * (see SplitSentences; UTF-16 offsets in the block, `index` from 0 per
+ * block). Blocks without text add nothing. False with `*unknownId` set when a
+ * block ID is unknown.
+ */
+bool SentencesJson(const ReaderSnapshot& snap, const std::vector<std::string>& blockIds,
+                   std::string* json, std::string* unknownId);
+
 }  // namespace reader
 }  // namespace sherpa_onnx

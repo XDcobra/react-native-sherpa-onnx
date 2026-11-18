@@ -333,6 +333,8 @@ set(SOURCES
     reader/ReaderTextSlice.cpp
     reader/ReaderSidecar.cpp
     reader/ReaderHighlights.cpp
+    reader/ReaderSentences.cpp
+    reader/ReaderMarkers.cpp
     reader/ReaderJson.cpp
     reader/ReaderFileHash.cpp
     reader/ReaderBridge.cpp
