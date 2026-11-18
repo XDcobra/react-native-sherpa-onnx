@@ -16,7 +16,9 @@
 #include "ImageRegistry.h"
 #include "ReaderLayout.h"
 #include "ReaderHighlights.h"
+#include "ReaderMarkers.h"
 #include "ReaderRegistry.h"
+#include "ReaderSentences.h"
 #include "ReaderTracker.h"
 
 #include <algorithm>
@@ -67,6 +69,55 @@ bool SameHighlights(const std::vector<SherpaReaderViewHighlightsStruct> &a,
     if (x.id != y.id || x.fromBlockId != y.fromBlockId || x.fromOffset != y.fromOffset ||
         x.toBlockId != y.toBlockId || x.toOffset != y.toOffset || x.style != y.style ||
         x.color != y.color || x.hasColor != y.hasColor || x.follow != y.follow) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool SameMarkers(const std::vector<SherpaReaderViewMarkersStruct> &a,
+                 const std::vector<SherpaReaderViewMarkersStruct> &b)
+{
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    const auto &x = a[i];
+    const auto &y = b[i];
+    if (x.id != y.id || x.blockId != y.blockId || x.start != y.start || x.end != y.end || x.label != y.label ||
+        x.accessibilityLabel != y.accessibilityLabel || x.color != y.color || x.hasColor != y.hasColor ||
+        x.textColor != y.textColor || x.hasTextColor != y.hasTextColor) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool SameMenuItems(const std::vector<SherpaReaderViewSelectionMenuItemsStruct> &a,
+                   const std::vector<SherpaReaderViewSelectionMenuItemsStruct> &b)
+{
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (a[i].id != b[i].id || a[i].title != b[i].title || a[i].systemImage != b[i].systemImage) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/** What a block's markers look like: changes when an anchor or a marker's content changes. */
+bool SameBlockMarkers(const std::vector<rdr::MarkerAnchor> &a, const std::vector<SherpaReaderViewMarkersStruct> &pa,
+                      const std::vector<rdr::MarkerAnchor> &b, const std::vector<SherpaReaderViewMarkersStruct> &pb)
+{
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    if (a[i].offset != b[i].offset) return false;
+    const auto &x = pa[a[i].input];
+    const auto &y = pb[b[i].input];
+    if (x.id != y.id || x.label != y.label || x.accessibilityLabel != y.accessibilityLabel || x.color != y.color ||
+        x.hasColor != y.hasColor || x.textColor != y.textColor || x.hasTextColor != y.hasTextColor) {
       return false;
     }
   }
@@ -160,6 +211,7 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
 @end
 
 @interface SherpaReaderComponentView () <RCTSherpaReaderViewViewProtocol,
+                                         SherpaReaderCellDelegate,
                                          UITableViewDataSource,
                                          UITableViewDelegate,
                                          UIGestureRecognizerDelegate>
@@ -199,6 +251,15 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
   BOOL _followAnimation;
   int _followedBlock;
   int _followedOffset;
+
+  BOOL _selectable;
+  rdr::SelectionSnap _selectionSnap;
+  std::vector<SherpaReaderViewSelectionMenuItemsStruct> _menuItems;
+  __weak SherpaReaderTextCell *_selectionCell;
+  std::vector<SherpaReaderViewMarkersStruct> _markerProps;
+  std::vector<SherpaReaderViewMarkersStruct> _resolvedMarkerProps;  // the props `_resolvedMarkers` indexes
+  rdr::ResolvedMarkers _resolvedMarkers;
+  std::vector<std::string> _reportedInvalidMarkers;
 
   std::string _documentId;
   int _documentRevision;
@@ -389,13 +450,211 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   if (highlightsChanged) {
     _highlightProps = newP.highlights;
   }
+  const bool markersChanged = !SameMarkers(_markerProps, newP.markers);
+  if (markersChanged) {
+    _markerProps = newP.markers;
+  }
+  _selectionSnap = rdr::SelectionSnapFromName(newP.selectionSnap.c_str());
+  if (!SameMenuItems(_menuItems, newP.selectionMenuItems)) {
+    _menuItems = newP.selectionMenuItems;
+  }
+  if (_selectable != (BOOL)newP.selectable) {
+    _selectable = newP.selectable;
+    for (UITableViewCell *cell in _tableView.visibleCells) {
+      if ([cell isKindOfClass:SherpaReaderTextCell.class]) ((SherpaReaderTextCell *)cell).selectable = _selectable;
+    }
+  }
   if (rowsChanged) {
-    // The rebuild resolves highlights against the new snapshot / theme.
+    // The rebuild resolves highlights and markers against the new snapshot / theme.
     [self scheduleRebuild];
-  } else if (highlightsChanged) {
-    [self applyHighlights];
-  } else if (followModeChanged) {
-    [self followAnimated:YES force:YES];
+  } else {
+    if (markersChanged) {
+      [self applyMarkers];
+    }
+    if (highlightsChanged) {
+      [self applyHighlights];
+    } else if (followModeChanged) {
+      [self followAnimated:YES force:YES];
+    }
+  }
+}
+
+#pragma mark - Markers
+
+/** Resolves `_markerProps` against the snapshot; returns blocks whose markers changed. */
+- (std::vector<int>)resolveMarkers
+{
+  std::vector<rdr::MarkerInput> inputs;
+  inputs.reserve(_markerProps.size());
+  for (const auto &m : _markerProps) {
+    inputs.push_back({m.id, m.blockId, m.start, m.end});
+  }
+  rdr::ResolvedMarkers next;
+  if (_snap) next = rdr::ResolveMarkers(*_snap, inputs);
+  std::vector<int> changed;
+  for (const auto &[block, anchors] : next.byBlock) {
+    auto it = _resolvedMarkers.byBlock.find(block);
+    if (it == _resolvedMarkers.byBlock.end() ||
+        !SameBlockMarkers(it->second, _resolvedMarkerProps, anchors, _markerProps)) {
+      changed.push_back(block);
+    }
+  }
+  for (const auto &[block, anchors] : _resolvedMarkers.byBlock) {
+    if (next.byBlock.find(block) == next.byBlock.end()) changed.push_back(block);
+  }
+  _resolvedMarkers = std::move(next);
+  _resolvedMarkerProps = _markerProps;
+  if (!_resolvedMarkers.invalidIds.empty() && _resolvedMarkers.invalidIds != _reportedInvalidMarkers) {
+    std::string ids;
+    for (const auto &id : _resolvedMarkers.invalidIds) ids += (ids.empty() ? "" : ", ") + id;
+    [self emitError:"ERR_READER_INVALID_ARGUMENT" message:"Unknown marker block or range: " + ids];
+  }
+  _reportedInvalidMarkers = _resolvedMarkers.invalidIds;
+  return changed;
+}
+
+/** Markers of the blocks a row stands for (page rows: placed on the page by the block's line). */
+- (nullable NSArray<SherpaReaderMarker *> *)markersForRow:(const ReaderRow &)row
+{
+  if (_resolvedMarkers.byBlock.empty() || row.kind != RowKind::Block || !_snap) return nil;
+  NSMutableArray<SherpaReaderMarker *> *out = nil;
+  for (int block = row.coverFirst; block <= row.coverLast; ++block) {
+    auto it = _resolvedMarkers.byBlock.find(block);
+    if (it == _resolvedMarkers.byBlock.end()) continue;
+    for (const auto &a : it->second) {
+      const auto &p = _resolvedMarkerProps[a.input];
+      SherpaReaderMarker *m = [SherpaReaderMarker new];
+      m.markerId = ToNS(p.id);
+      m.label = ToNS(p.label);
+      m.spokenLabel = p.accessibilityLabel.empty() ? nil : ToNS(p.accessibilityLabel);
+      m.fillColor = p.hasColor ? ColorFromARGB(static_cast<uint32_t>(p.color)) : _theme.accentColor;
+      m.labelColor = p.hasTextColor ? ColorFromARGB(static_cast<uint32_t>(p.textColor)) : UIColor.whiteColor;
+      m.offset = a.offset;
+      if (block != row.blockIndex || row.page) {
+        // On a page image: the block's line on the page.
+        const rdr::PageRect r = rdr::MarkerPageRect(*_snap, block, a.offset);
+        m.pageY = r.y;
+        m.pageHeight = r.h > 0 ? r.h : 0.0001;
+      }
+      if (!out) out = [NSMutableArray array];
+      [out addObject:m];
+    }
+  }
+  return out;
+}
+
+/** Applies changed markers to the visible rows in place (no relayout). */
+- (void)applyMarkers
+{
+  const std::vector<int> changed = [self resolveMarkers];
+  if (changed.empty()) return;
+  for (NSIndexPath *path in _tableView.indexPathsForVisibleRows) {
+    if (path.row >= (NSInteger)_rows.size()) continue;
+    const auto &row = _rows[path.row];
+    if (row.kind != RowKind::Block) continue;
+    const bool touched = std::any_of(changed.begin(), changed.end(), [&](int b) {
+      return b >= row.coverFirst && b <= row.coverLast;
+    });
+    if (!touched) continue;
+    UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
+    if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
+      [(SherpaReaderTextCell *)cell updateMarkers:[self markersForRow:row] theme:_theme];
+    } else if ([cell isKindOfClass:SherpaReaderImageCell.class]) {
+      [(SherpaReaderImageCell *)cell updateMarkers:[self markersForRow:row] theme:_theme];
+    }
+  }
+}
+
+- (nullable NSString *)markerIdAtTablePoint:(CGPoint)point row:(NSIndexPath *)path
+{
+  UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
+  const CGPoint p = [_tableView convertPoint:point toView:cell];
+  if ([cell isKindOfClass:SherpaReaderTextCell.class]) return [(SherpaReaderTextCell *)cell markerIdAtPoint:p];
+  if ([cell isKindOfClass:SherpaReaderImageCell.class]) return [(SherpaReaderImageCell *)cell markerIdAtPoint:p];
+  return nil;
+}
+
+- (void)emitMarkerPress:(NSString *)markerId
+{
+  std::string id = std::string(markerId.UTF8String ?: "");
+  std::string blockId;
+  for (const auto &m : _resolvedMarkerProps) {
+    if (m.id == id) {
+      blockId = m.blockId;
+      break;
+    }
+  }
+  if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
+    emitter->onMarkerPress({id, blockId});
+  }
+}
+
+- (void)cellDidActivateMarker:(NSString *)markerId
+{
+  [self emitMarkerPress:markerId];
+}
+
+#pragma mark - Selection
+
+- (NSRange)textCell:(SherpaReaderTextCell *)cell snapSelection:(NSRange)range
+{
+  if (!_snap || _selectionSnap == rdr::SelectionSnap::None || cell.blockIndex < 0 ||
+      cell.blockIndex >= (NSInteger)_snap->blocks.size()) {
+    return range;
+  }
+  const rdr::SentenceRange r = rdr::SnapRange(*_snap, (int)cell.blockIndex, (int)range.location,
+                                              (int)NSMaxRange(range), _selectionSnap);
+  return NSMakeRange((NSUInteger)r.start, (NSUInteger)(r.end - r.start));
+}
+
+- (void)textCellDidChangeSelection:(SherpaReaderTextCell *)cell
+{
+  // One selection at a time (v1: within one block).
+  if (cell.selectedRange.length == 0) {
+    if (_selectionCell == cell) _selectionCell = nil;
+    return;
+  }
+  SherpaReaderTextCell *previous = _selectionCell;
+  _selectionCell = cell;
+  if (previous && previous != cell) [previous clearSelection];
+}
+
+- (UIMenu *)textCell:(SherpaReaderTextCell *)cell
+        menuForRange:(NSRange)range
+    suggestedActions:(NSArray<UIMenuElement *> *)suggested API_AVAILABLE(ios(16.0))
+{
+  if (_menuItems.empty() || !_snap) return [UIMenu menuWithChildren:suggested];
+  const int block = (int)cell.blockIndex;
+  NSMutableArray<UIMenuElement *> *items = [NSMutableArray arrayWithCapacity:_menuItems.size()];
+  __weak SherpaReaderComponentView *weakSelf = self;
+  __weak SherpaReaderTextCell *weakCell = cell;
+  for (const auto &item : _menuItems) {
+    UIImage *image = item.systemImage.empty() ? nil : [UIImage systemImageNamed:ToNS(item.systemImage)];
+    const std::string itemId = item.id;
+    [items addObject:[UIAction actionWithTitle:ToNS(item.title)
+                                         image:image
+                                    identifier:nil
+                                       handler:^(__kindof UIAction *_) {
+                                         [weakSelf emitSelectionAction:itemId block:block range:range];
+                                         [weakCell clearSelection];
+                                       }]];
+  }
+  UIMenu *app = [UIMenu menuWithTitle:@"" image:nil identifier:nil options:UIMenuOptionsDisplayInline children:items];
+  return [UIMenu menuWithChildren:[@[ app ] arrayByAddingObjectsFromArray:suggested]];
+}
+
+- (void)emitSelectionAction:(const std::string &)itemId block:(int)block range:(NSRange)range
+{
+  if (!_snap || block < 0 || block >= (int)_snap->blocks.size()) return;
+  NSString *text = ToNS(_snap->BlockText(block));
+  if (NSMaxRange(range) > text.length) return;
+  const int start = (int)range.location;
+  const int end = (int)NSMaxRange(range);
+  const rdr::SentenceRange sentence = rdr::EnclosingSentences(*_snap, block, start, end);
+  if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
+    emitter->onSelectionAction({itemId, _snap->blocks[block].id, start, end,
+                                std::string([text substringWithRange:range].UTF8String ?: ""), sentence.start,
+                                sentence.end});
   }
 }
 
@@ -756,6 +1015,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   SherpaReaderAnchor *anchor = [self captureAnchor];
   [self loadSnapshot];
   [self resolveHighlights];
+  [self resolveMarkers];
   std::vector<ReaderRow> rows;
   if (_snap) {
     rows.reserve(_snap->blocks.size() + _inserts.size());
@@ -911,6 +1171,8 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
                           theme:_theme
                            page:row.page];
     [cell updatePageMarks:[self pageMarksForRow:row]];
+    cell.delegate = self;
+    [cell updateMarkers:[self markersForRow:row] theme:_theme];
     return cell;
   }
   if (b.type == rdr::ReaderBlockType::Separator) {
@@ -926,6 +1188,10 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
                    styles:StyleSpans(b)
                highlights:[self spansForBlock:row.blockIndex]
                     theme:_theme];
+  cell.delegate = self;
+  cell.blockIndex = row.blockIndex;
+  cell.selectable = _selectable;
+  [cell updateMarkers:[self markersForRow:row] theme:_theme];
   return cell;
 }
 
@@ -1249,14 +1515,40 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   return YES;
 }
 
+- (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
+{
+  if (gestureRecognizer != _tap) return YES;
+  // A tap while text is selected only ends the selection.
+  SherpaReaderTextCell *selected = _selectionCell;
+  if (selected && selected.selectedRange.length > 0) {
+    [selected clearSelection];
+    _selectionCell = nil;
+    return NO;
+  }
+  return YES;
+}
+
 - (void)handleTap:(UITapGestureRecognizer *)tap
 {
-  NSIndexPath *path = [_tableView indexPathForRowAtPoint:[tap locationInView:_tableView]];
+  const CGPoint point = [tap locationInView:_tableView];
+  NSIndexPath *path = [_tableView indexPathForRowAtPoint:point];
   if (!_snap || path == nil || path.row >= (NSInteger)_rows.size() || _rows[path.row].kind != RowKind::Block) {
     return;
   }
+  // Markers first: a tap on a marker is not a tap on the text.
+  if (NSString *markerId = [self markerIdAtTablePoint:point row:path]) {
+    [self emitMarkerPress:markerId];
+    return;
+  }
+  const auto &row = _rows[path.row];
+  int offset = -1;
+  UITableViewCell *cell = [_tableView cellForRowAtIndexPath:path];
+  if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
+    offset = (int)[(SherpaReaderTextCell *)cell characterOffsetAtPoint:[_tableView convertPoint:point
+                                                                                         toView:cell.contentView]];
+  }
   if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
-    emitter->onReaderTap({_snap->blocks[_rows[path.row].blockIndex].id});
+    emitter->onReaderTap({_snap->blocks[row.blockIndex].id, offset});
   }
 }
 

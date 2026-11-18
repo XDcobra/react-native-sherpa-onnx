@@ -25,6 +25,36 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
 @property (nonatomic, assign) BOOL bold;
 @end
 
+/** A label in the trailing margin of a row (`markers` prop). */
+@interface SherpaReaderMarker : NSObject
+@property (nonatomic, copy) NSString *markerId;
+@property (nonatomic, copy) NSString *label;
+/** Read by VoiceOver; nil = `label`. */
+@property (nonatomic, copy, nullable) NSString *spokenLabel;
+@property (nonatomic, strong) UIColor *fillColor;
+@property (nonatomic, strong) UIColor *labelColor;
+/** Text rows: UTF-16 offset whose line the marker sits at; -1 = the first line. */
+@property (nonatomic, assign) NSInteger offset;
+/** Image rows: the marker's line normalized to the image (y, height); height <= 0 = the image top. */
+@property (nonatomic, assign) CGFloat pageY;
+@property (nonatomic, assign) CGFloat pageHeight;
+@end
+
+@class SherpaReaderTextCell;
+
+/** Selection and marker callbacks of text and image rows (the reader view). */
+@protocol SherpaReaderCellDelegate <NSObject>
+/** The range a selection is widened to (`selectionSnap`). */
+- (NSRange)textCell:(SherpaReaderTextCell *)cell snapSelection:(NSRange)range;
+- (void)textCellDidChangeSelection:(SherpaReaderTextCell *)cell;
+/** Menu for a selection: app items, then the suggested system items. */
+- (nullable UIMenu *)textCell:(SherpaReaderTextCell *)cell
+                 menuForRange:(NSRange)range
+             suggestedActions:(NSArray<UIMenuElement *> *)suggested API_AVAILABLE(ios(16.0));
+/** A marker was activated with VoiceOver. */
+- (void)cellDidActivateMarker:(NSString *)markerId;
+@end
+
 /** Resolved typography and colors of a ReaderView (from the `theme` props). */
 @interface SherpaReaderTheme : NSObject
 @property (nonatomic, strong) UIFont *bodyFont;
@@ -56,6 +86,14 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
 /** Paragraph / heading row: non-editable TextKit 1 text view (offset ↔ point). */
 @interface SherpaReaderTextCell : UITableViewCell
 @property (nonatomic, strong, readonly) UITextView *textView;
+@property (nonatomic, weak, nullable) id<SherpaReaderCellDelegate> delegate;
+/** Flat block index of the row (set by the reader view). */
+@property (nonatomic, assign) NSInteger blockIndex;
+/** Long-press text selection (`selectable` prop). */
+@property (nonatomic, assign) BOOL selectable;
+/** Selected UTF-16 range of the block text (length 0: none). */
+@property (nonatomic, readonly) NSRange selectedRange;
+- (void)clearSelection;
 - (void)configureWithText:(NSString *)text
              headingLevel:(NSInteger)level
                highlights:(nullable NSArray<SherpaReaderHighlightSpan *> *)highlights
@@ -73,6 +111,10 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
 - (NSInteger)characterOffsetAtPoint:(CGPoint)point;
 /** Top of the line holding `offset`, in cell coordinates. */
 - (CGFloat)lineTopForCharacterOffset:(NSInteger)offset;
+/** Margin markers of the row; drawn over the row, the text layout does not change. */
+- (void)updateMarkers:(nullable NSArray<SherpaReaderMarker *> *)markers theme:(SherpaReaderTheme *)theme;
+/** ID of the marker at `point` (cell coordinates, with a 44 pt touch target), or nil. */
+- (nullable NSString *)markerIdAtPoint:(CGPoint)point;
 @end
 
 /** A highlight over a page image: `rect` normalized to the page. */
@@ -95,6 +137,10 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
                          page:(BOOL)page;
 /** Highlights drawn over the page (background fill, underline, text-color frame). */
 - (void)updatePageMarks:(NSArray<SherpaReaderPageMark *> *)marks;
+@property (nonatomic, weak, nullable) id<SherpaReaderCellDelegate> delegate;
+/** Margin markers (at the image's trailing edge; page images have no margin). */
+- (void)updateMarkers:(nullable NSArray<SherpaReaderMarker *> *)markers theme:(SherpaReaderTheme *)theme;
+- (nullable NSString *)markerIdAtPoint:(CGPoint)point;
 @end
 
 @interface SherpaReaderSeparatorCell : UITableViewCell
