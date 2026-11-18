@@ -23,6 +23,12 @@ struct SentenceRange {
  *   (`3.14`, `e.g.x`, `10:30` stay whole); the other marks always end one.
  * - A run of marks (`?!`, `...`) and the closing quotes / brackets after it
  *   stay with the sentence.
+ * - A single `.` before a word on the same line does not end a sentence after
+ *   a built-in English / German abbreviation (`Mr.`, `e.g.`, `z.B.`; some only
+ *   before a digit, `No. 5`, or a lower-case word, `etc. and`), an initial
+ *   before a capital (`J. R. R. Tolkien`, not `I.`) or a German ordinal
+ *   before a lower-case word or a month (`1. Januar`). The end of the text
+ *   always ends one.
  * - Sentences are trimmed of surrounding whitespace; whitespace-only pieces
  *   are dropped. A line break always ends a sentence.
  *

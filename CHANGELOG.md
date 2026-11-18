@@ -44,6 +44,7 @@
   - `<ReaderView selectable>`: native long-press selection inside a block (iOS `UITextView`, Android `TextView` in the list); `selectionSnap: 'none' | 'sentence' | 'block'` widens it while the user selects.
   - `selectionMenuItems: { id, title, systemImage? }[]` adds app actions before the system items (iOS 16+ edit menu, Android selection `ActionMode`); `onSelectionAction({ itemId, blockId, start, end, text, sentenceStart, sentenceEnd })`.
   - `getReaderSentences(doc, blockIds)`: sentence ranges per block from one shared C++ splitter (boundaries of the default text segmentation), the same rules the view uses for snapping and `sentenceStart` / `sentenceEnd`.
+  - The sentence rules keep built-in English / German abbreviations (`Mr.`, `e.g.`, `z.B.`, `Nr. 5`), initials (`J. R. R. Tolkien`) and German ordinals (`1. Januar`) inside a sentence.
   - `markers: { id, blockId, start?, end?, label, accessibilityLabel?, color?, textColor? }[]`: labels in the trailing margin at a block's first line or at the line of a range's end, compared by ID and redrawn without relayout; `onMarkerPress({ id, blockId })`; VoiceOver buttons / TalkBack actions.
   - `onTap` reports `offset`, the UTF-16 offset of the tapped character in the block (absent on rows without text); a tap on a marker fires `onMarkerPress` instead.
   - See `docs/reader.md`.

@@ -1452,6 +1452,24 @@ std::vector<std::string> Sentences(const std::string& text) {
   return out;
 }
 
+/** Like Sentences, for UTF-8 input (maps the UTF-16 ranges back to bytes). */
+std::vector<std::string> SentencesUtf8(const std::string& text) {
+  std::vector<size_t> byteAt;  // UTF-16 offset -> byte offset
+  for (size_t i = 0; i < text.size();) {
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+    const size_t adv = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+    byteAt.push_back(i);
+    if (adv == 4) byteAt.push_back(i);
+    i += adv;
+  }
+  byteAt.push_back(text.size());
+  std::vector<std::string> out;
+  for (const auto& r : SplitSentences(text)) {
+    out.push_back(text.substr(byteAt[r.start], byteAt[r.end] - byteAt[r.start]));
+  }
+  return out;
+}
+
 /** A document with one app section holding `texts` as paragraphs `app:t.p0`, `app:t.p1`, … */
 std::string DocWithParagraphs(const std::vector<std::string>& texts) {
   const std::string id = CreateDoc("structure.epub");
@@ -1507,6 +1525,67 @@ TEST(ReaderSentences, CjkMarksEndWithoutSpaceAndOffsetsAreUtf16) {
   ASSERT_EQ(e.size(), 2u);
   EXPECT_EQ(e[0].end, 4);
   EXPECT_EQ(e[1].start, 5);
+}
+
+TEST(ReaderSentences, EnglishAbbreviationsAndInitials) {
+  using V = std::vector<std::string>;
+  EXPECT_EQ(Sentences("Mr. and Mrs. Smith met Dr. Jones. They talked."),
+            (V{"Mr. and Mrs. Smith met Dr. Jones.", "They talked."}));
+  EXPECT_EQ(Sentences("Prof. Ms. Capt. Col. Gen. Lt. Rev. Hon. Messrs. St. Mt. Everest. Next"),
+            (V{"Prof. Ms. Capt. Col. Gen. Lt. Rev. Hon. Messrs. St. Mt. Everest.", "Next"}));
+  EXPECT_EQ(Sentences("Fruit, e.g. apples, i.e. red ones, cf. Smith vs. Jones. Done"),
+            (V{"Fruit, e.g. apples, i.e. red ones, cf. Smith vs. Jones.", "Done"}));
+  EXPECT_EQ(Sentences("See Fig. 3 and No. 5 in Vol. 2. Done"), (V{"See Fig. 3 and No. 5 in Vol. 2.", "Done"}));
+  EXPECT_EQ(Sentences("By J. R. R. Tolkien and A. Smith. Then"),
+            (V{"By J. R. R. Tolkien and A. Smith.", "Then"}));
+  // Real sentence ends after abbreviation-like words.
+  EXPECT_EQ(Sentences("He said No. Then he left."), (V{"He said No.", "Then he left."}));
+  EXPECT_EQ(Sentences("Pears, plums etc. The end."), (V{"Pears, plums etc.", "The end."}));
+  EXPECT_EQ(Sentences("Pears etc. and more."), (V{"Pears etc. and more."}));
+  EXPECT_EQ(Sentences("So did I. Then we left."), (V{"So did I.", "Then we left."}));
+  EXPECT_EQ(Sentences("King Jr. was there. Smith Jr. He left."),
+            (V{"King Jr. was there.", "Smith Jr.", "He left."}));
+  EXPECT_EQ(Sentences("Call the Dr."), (V{"Call the Dr."}));            // end of text
+  EXPECT_EQ(Sentences("Ask Mr.\nNext line"), (V{"Ask Mr.", "Next line"}));  // line break
+  EXPECT_EQ(Sentences("Ask Mr.\" Then"), (V{"Ask Mr.\"", "Then"}));     // closing quote
+  EXPECT_EQ(Sentences("Wait... Mr. X"), (V{"Wait...", "Mr. X"}));       // run of marks
+  EXPECT_EQ(Sentences("A tumor. Then"), (V{"A tumor.", "Then"}));       // `Mr` only as a word
+  EXPECT_EQ(Sentences("mr. smith"), (V{"mr.", "smith"}));               // titles match exactly
+}
+
+TEST(ReaderSentences, GermanAbbreviationsAndOrdinals) {
+  using V = std::vector<std::string>;
+  EXPECT_EQ(SentencesUtf8("Obst, z.B. \xC3\x84pfel, d.h. rote, u.a. Birnen usw. sind gut. Ja"),
+            (V{"Obst, z.B. \xC3\x84pfel, d.h. rote, u.a.", "Birnen usw. sind gut.", "Ja"}));
+  EXPECT_EQ(SentencesUtf8("Hr. M\xC3\xBCller und Fr. Meier, Hrn. Kurz, Dr. Prof. Lang. Ende"),
+            (V{"Hr. M\xC3\xBCller und Fr. Meier, Hrn. Kurz, Dr. Prof. Lang.", "Ende"}));
+  EXPECT_EQ(SentencesUtf8("Vgl. Kapitel 3, bzw. Teil 2, ca. 5 Seiten, ggf. mehr, evtl. Text, inkl. Bild, "
+                      "bzgl. Stil. Fertig"),
+            (V{"Vgl. Kapitel 3, bzw. Teil 2, ca. 5 Seiten, ggf. mehr, evtl. Text, inkl. Bild, bzgl. Stil.",
+               "Fertig"}));
+  EXPECT_EQ(SentencesUtf8("Siehe S. 12, Bd. 2, Nr. 7 in der Hauptstr. 5. Gut"),
+            (V{"Siehe S. 12, Bd. 2, Nr. 7 in der Hauptstr.", "5.", "Gut"}));
+  EXPECT_EQ(SentencesUtf8("Im 19. Jh. war es so. Im 19. Jahrhundert auch."),
+            (V{"Im 19. Jh. war es so.", "Im 19. Jahrhundert auch."}));
+  EXPECT_EQ(SentencesUtf8("Am 1. Januar und am 3. M\xC3\xA4rz kam er zum 2. und 3. Mal. Dann"),
+            (V{"Am 1. Januar und am 3. M\xC3\xA4rz kam er zum 2. und 3.", "Mal.", "Dann"}));
+  // Real sentence ends after numbers and abbreviation-like words.
+  EXPECT_EQ(SentencesUtf8("Es kostet 5. Danach ging er."), (V{"Es kostet 5.", "Danach ging er."}));
+  EXPECT_EQ(SentencesUtf8("Im Jahr 1999. Dann"), (V{"Im Jahr 1999.", "Dann"}));
+  EXPECT_EQ(SentencesUtf8("Und so weiter usw. Dann kam er."), (V{"Und so weiter usw.", "Dann kam er."}));
+  EXPECT_EQ(SentencesUtf8("Er wohnt in der Str. Am Abend"), (V{"Er wohnt in der Str.", "Am Abend"}));
+  EXPECT_EQ(SentencesUtf8("Das war z.B."), (V{"Das war z.B."}));
+}
+
+TEST(ReaderSentences, SnapKeepsAbbreviationsInTheSentence) {
+  //                                   0         1         2
+  //                                   012345678901234567890123456
+  const std::string id = DocWithParagraphs({"Mr. Smith came. He left."});
+  auto snap = ReaderRegistry::Instance().Snapshot(id);
+  const auto r = EnclosingSentences(*snap, snap->BlockIndex("app:t.p0"), 5, 6);
+  EXPECT_EQ(r.start, 0);
+  EXPECT_EQ(r.end, 15);
+  ReaderRegistry::Instance().Release(id);
 }
 
 TEST(ReaderSentences, SnapRangeWidensToSentencesOrTheBlock) {

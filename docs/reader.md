@@ -322,7 +322,9 @@ Sentence ranges of the given blocks, by the same shared rules as `selectionSnap:
 | Boundaries | `. ! ? ; :`, line break, `。！？｡ ؟ । ॥` (as in `src/segment`) |
 | ASCII marks | end a sentence only before whitespace or end of text (`3.14`, `10:30` stay whole) |
 | Runs and closers | `?!`, `...` and following quotes/brackets belong to the sentence; whitespace trimmed |
-| Abbreviations | not recognized (`Mr.` ends a sentence) |
+| Abbreviations | built-in English / German list (`Mr.`, `Dr.`, `e.g.`, `z.B.`, `vgl.`) does not end a sentence before the next word; `No.`, `Nr.`, `S.`, `Fig.` only before a digit; `etc.`, `usw.`, `u.a.`, `Jr.` only before a lower-case word or digit; no app list |
+| Initials and ordinals | `J. R. R. Tolkien`, `A. Smith` stay whole (not `I.`); `1. Januar`, `3. und`, `19. Jh.` stay whole, `5. Danach` ends |
+| Line break, end of text | always end a sentence, also after an abbreviation (`Call the Dr.`) |
 | Blocks without text | no sentences (images, pages, separators) |
 | Unknown block ID | rejects with `ERR_READER_INVALID_ARGUMENT` |
 
@@ -824,7 +826,7 @@ SEPARATOR_HASH = hashlib.sha256(b"\x1fseparator").hexdigest()[:16]
 
 - Scroll mode only; no zoom.
 - Text selection stays inside one block (no selection across paragraphs) and does not autoscroll the list; app menu items need iOS 16+. Page images (`pageDisplay: 'image'`) have no selection.
-- Sentence rules do not recognize abbreviations (`Mr. Smith` splits after `Mr.`).
+- Sentence rules know only a built-in English / German abbreviation list; a real end after a title (`on Main St. Then`) or an initial (`plan B. Then`) is merged.
 - Margin markers on the same line stack downward; long labels overlap the text.
 - On page images, a highlight inside a line (a word) is placed by estimate; OCR models without positions mark the whole page.
 - Of the inline formatting only italic and bold are kept ([Inline styles](#inline-styles)); links, footnote markers, underline, small caps, colors and CSS classes are not. PDF, OCR and plain text blocks have no inline styles.
