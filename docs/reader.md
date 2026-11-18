@@ -201,7 +201,18 @@ function recognizeReaderPages(
 doc = await recognizeReaderPages(doc, ocr, { scope: 'around', at: position, onDocument: setDoc });
 ```
 
-Recognizes page images one page per `recognize` call and attaches each page's text as it is done. `scope: 'around'` (default) does the page at `at`, `ahead` pages after it (default 2) and `behind` pages before it (default 1). `'all'` does the whole book from the first page, and `{ sections }` does the pages you name. Pages that already have text are skipped unless `force` is set. `onDocument` receives new document values at most every `updateIntervalMs` (default 300) and once at the end. `recognize` passes options such as `readingDirection: 'rtl'` (manga) or a VLM `instruction` to every call. `onProgress` reports `{ done, total, sectionId, hasText }` after each page; `hasText: false` means the model returned no text for the page, which keeps showing only its image. With `signal`, the run stops after the page in progress, and recognized pages keep their text. Run one at a time per document.
+Runs OCR on page images, one page per call, and attaches each page's text as it is done.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `scope` | `'around'` | `'around'`: page at `at` plus `ahead` (2) after and `behind` (1) before · `'all'`: whole book · `{ sections }`: the named pages |
+| `force` | `false` | also redo pages that already have text |
+| `onDocument` | — | new document values, at most every `updateIntervalMs` (300) and once at the end |
+| `recognize` | — | passed to every call, e.g. `readingDirection: 'rtl'`, a VLM `instruction` |
+| `onProgress` | — | `{ done, total, sectionId, hasText }` per page; `hasText: false` = page keeps only its image |
+| `signal` | — | stops after the page in progress; done pages keep their text |
+
+Note: one run at a time per document.
 
 #### `saveReaderRecognition(doc, destination, options?)` / `loadReaderRecognition(doc, source, options?)`
 
@@ -304,12 +315,18 @@ function getReaderSentences(doc: ReaderDocument, blockIds: readonly string[]): P
 const sentences = await getReaderSentences(doc, ['s3.b12']);
 ```
 
-The sentences of the given blocks, split natively by the same shared C++ rules the view uses for `selectionSnap: 'sentence'` and for `sentenceStart` / `sentenceEnd` of `onSelectionAction`, so stored sentence ranges match on both platforms. Blocks without text (images, pages, separators) have none; an unknown block ID rejects with `ERR_READER_INVALID_ARGUMENT`. Rules:
+Sentence ranges of the given blocks, by the same shared rules as `selectionSnap: 'sentence'` and `onSelectionAction`, so they match on both platforms.
 
-- Boundaries are those of the default text segmentation (`src/segment`): `. ! ? ; :`, a line break, and `。！？｡ ؟ । ॥`.
-- ASCII marks end a sentence only before whitespace or the end of the text, so `3.14` or `10:30` stay whole; the other marks always end one.
-- A run of marks (`?!`, `...`) and the closing quotes and brackets after it belong to the sentence; sentences are trimmed of surrounding whitespace.
-- Abbreviations (`Mr.`) are not recognized; read-aloud sentences come from the TTS segments, not from these rules.
+| Rule / case | Behaviour |
+|---|---|
+| Boundaries | `. ! ? ; :`, line break, `。！？｡ ؟ । ॥` (as in `src/segment`) |
+| ASCII marks | end a sentence only before whitespace or end of text (`3.14`, `10:30` stay whole) |
+| Runs and closers | `?!`, `...` and following quotes/brackets belong to the sentence; whitespace trimmed |
+| Abbreviations | not recognized (`Mr.` ends a sentence) |
+| Blocks without text | no sentences (images, pages, separators) |
+| Unknown block ID | rejects with `ERR_READER_INVALID_ARGUMENT` |
+
+Note: read-aloud sentences come from the TTS segments, not from these rules.
 
 #### `mapTextRanges(doc, ranges, options?)`
 
