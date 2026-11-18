@@ -121,6 +121,17 @@ export type ReaderTocEntry = {
   locator: ReaderLocator;
 };
 
+/** One sentence of a block (`getReaderSentences`). */
+export type ReaderSentence = {
+  blockId: string;
+  /** Position of the sentence in its block, from 0. */
+  index: number;
+  /** UTF-16 offset in the block text (inclusive). */
+  start: number;
+  /** UTF-16 offset in the block text (exclusive). */
+  end: number;
+};
+
 /** A range in the reading flow: `from` inclusive, `to` exclusive. */
 export type ReaderRange = { from: ReaderLocator; to: ReaderLocator };
 

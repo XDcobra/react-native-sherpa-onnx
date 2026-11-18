@@ -9,6 +9,7 @@ const mockNative = {
   mapReaderTextRanges: jest.fn(),
   createReaderTextSlice: jest.fn(),
   getReaderToc: jest.fn(),
+  getReaderSentences: jest.fn(),
   releaseReaderDocument: jest.fn(),
 };
 
@@ -69,6 +70,7 @@ import {
   createReaderTextSlice,
   formatBlockId,
   getReaderBlocks,
+  getReaderSentences,
   getReaderToc,
   insertSection,
   loadReaderDocument,
@@ -416,6 +418,34 @@ describe('reader api', () => {
       },
     ]);
     expect(mockNative.getReaderToc).toHaveBeenCalledWith('rdr_1');
+  });
+
+  it('reads the sentences of blocks in one call', async () => {
+    const sentences = [
+      { blockId: 's0.b1', index: 0, start: 0, end: 12 },
+      { blockId: 's0.b1', index: 1, start: 13, end: 30 },
+    ];
+    mockNative.getReaderSentences.mockResolvedValue(JSON.stringify(sentences));
+    await expect(
+      getReaderSentences(SUMMARY as never, ['s0.b1', 's0.b2'])
+    ).resolves.toEqual(sentences);
+    expect(mockNative.getReaderSentences).toHaveBeenCalledWith('rdr_1', [
+      's0.b1',
+      's0.b2',
+    ]);
+  });
+
+  it('skips the native call for no blocks and rejects unknown blocks', async () => {
+    await expect(getReaderSentences(SUMMARY as never, [])).resolves.toEqual([]);
+    expect(mockNative.getReaderSentences).not.toHaveBeenCalled();
+    mockNative.getReaderSentences.mockRejectedValue(
+      Object.assign(new Error('Unknown block ID: s9.b9'), {
+        code: 'ERR_READER_INVALID_ARGUMENT',
+      })
+    );
+    await expect(
+      getReaderSentences(SUMMARY as never, ['s9.b9'])
+    ).rejects.toMatchObject({ code: 'ERR_READER_INVALID_ARGUMENT' });
   });
 
   it('maps text-buffer ranges to reader ranges in one call', async () => {

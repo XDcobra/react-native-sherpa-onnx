@@ -4126,6 +4126,9 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   override fun getReaderToc(documentId: String, promise: Promise) =
     readerHelper.getReaderToc(documentId, promise)
 
+  override fun getReaderSentences(documentId: String, blockIds: ReadableArray, promise: Promise) =
+    readerHelper.getReaderSentences(documentId, blockIds, promise)
+
   override fun saveReaderRecognition(
     documentId: String,
     destination: ReadableMap,

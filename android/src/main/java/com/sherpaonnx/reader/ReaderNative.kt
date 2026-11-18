@@ -63,6 +63,8 @@ internal object ReaderNative {
 
   @JvmStatic external fun nativeGetToc(documentId: String): Array<String>
 
+  @JvmStatic external fun nativeGetSentences(documentId: String, blockIds: Array<String>): Array<String>
+
   /** [bytes or null, pages, errorCode, errorMessage]. */
   @JvmStatic external fun nativeEncodeRecognition(documentId: String, modelId: String): Array<Any?>
 

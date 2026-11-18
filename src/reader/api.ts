@@ -32,6 +32,7 @@ import type {
   ReaderLocator,
   ReaderRange,
   ReaderTextSlice,
+  ReaderSentence,
   ReaderTocEntry,
   ReaderSectionInfo,
 } from './types';
@@ -402,6 +403,24 @@ export async function getReaderToc(
     level: Math.max(1, Number(e.level) || 1),
     locator: { sectionId: e.sectionId, blockId: e.blockId },
   }));
+}
+
+/**
+ * Sentences of the given blocks (UTF-16 ranges inside each block), with the
+ * same rules the view uses for `selectionSnap: 'sentence'` and the sentence
+ * range of `onSelectionAction`. Blocks without text (images, pages,
+ * separators) have none. Rejects with `ERR_READER_INVALID_ARGUMENT` when a
+ * block ID is unknown.
+ */
+export async function getReaderSentences(
+  doc: ReaderDocument,
+  blockIds: readonly string[]
+): Promise<ReaderSentence[]> {
+  if (blockIds.length === 0) return [];
+  const json = await callNative(() =>
+    getNative().getReaderSentences(doc.id, [...blockIds])
+  );
+  return JSON.parse(json) as ReaderSentence[];
 }
 
 /**

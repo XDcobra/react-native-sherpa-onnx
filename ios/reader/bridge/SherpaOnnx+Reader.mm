@@ -309,6 +309,18 @@ RCT_EXPORT_METHOD(getReaderToc : (NSString *)documentId resolve : (RCTPromiseRes
   });
 }
 
+RCT_EXPORT_METHOD(getReaderSentences : (NSString *)documentId blockIds : (NSArray *)
+                      blockIds resolve : (RCTPromiseResolveBlock)
+                          resolve reject : (RCTPromiseRejectBlock)reject) {
+  const auto ids = StdStrings(blockIds);
+  dispatch_async(ReaderQueue(), ^{
+    std::string json;
+    sherpa_onnx::reader::ReaderError err;
+    const bool ok = sherpa_onnx::reader::BridgeGetSentences(Std(documentId), ids, &json, &err);
+    Finish(ok, json, err, resolve, reject);
+  });
+}
+
 RCT_EXPORT_METHOD(releaseReaderDocument : (NSString *)documentId resolve : (
                       RCTPromiseResolveBlock)resolve reject : (RCTPromiseRejectBlock)reject) {
   resolve(@(sherpa_onnx::reader::BridgeReleaseDocument(Std(documentId))));
