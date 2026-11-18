@@ -587,6 +587,8 @@ Rules (shared C++ tracker, identical on iOS and Android):
 
 ## Text selection
 
+<p align="center"><img src="./images/example/reader_selection_cut.png" alt="A sentence selected, with Note, Mark and Listen before the system items" width="300" /></p>
+
 With `selectable`, a long press selects text with the platform's handles and menu (copy, look up, share, … stay available). The app adds its own actions with `selectionMenuItems` and gets the choice in `onSelectionAction`.
 
 ```tsx
@@ -599,8 +601,6 @@ With `selectable`, a long press selects text with the platform's handles and men
 />
 ```
 
-<p align="center"><img src="./images/example/reader_selection_cut.png" alt="A sentence selected, with Note, Mark and Listen before the system items" width="300" /></p>
-
 - **One block:** a selection stays inside one paragraph or heading. A new selection elsewhere ends the previous one; a tap ends it without firing `onTap`.
 - **Snapping** (`selectionSnap`) is applied while the selection changes: `'sentence'` widens it to the sentences it touches ([sentence rules](#getreadersentencesdoc-blockids)), `'block'` to the whole block, `'none'` keeps the platform's word selection.
 - **Menu:** app items come first, then the system items. `systemImage` is an SF Symbol name (iOS only). iOS 16+ (`UITextView` edit menu); on iOS 15 only the system items are shown. Android uses the selection `ActionMode`.
@@ -608,6 +608,8 @@ With `selectable`, a long press selects text with the platform's handles and men
 - Scrolling, taps and markers keep working; the selection is not autoscrolled past the visible rows.
 
 ## Margin markers
+
+<p align="center"><img src="./images/example/reader_markers_cut.png" alt="A paragraph marker and a sentence marker in the margin" width="300" /></p>
 
 `markers` places short labels (a count, a symbol) in the trailing margin, next to a block or a sentence. They never change the text or the row height.
 
@@ -621,8 +623,6 @@ With `selectable`, a long press selects text with the platform's handles and men
   onMarkerPress={({ id }) => openNotes(id)}
 />
 ```
-
-<p align="center"><img src="./images/example/reader_markers_cut.png" alt="A paragraph marker and a sentence marker in the margin" width="300" /></p>
 
 - **Position:** without `start` / `end` a marker sits at the block's first line; with a range, at the line of the range's last character. Markers on the same line are placed below one another, so combine them in the app (one marker with a count) to keep the margin tidy. On page images markers sit at the trailing edge of the page at the block's line.
 - **Look:** a pill with `color` (default: the theme's `accent`) and `textColor` (default white). It is centered in the trailing margin when it fits; a long label reaches into the text, so keep labels short (1–2 characters).
@@ -645,6 +645,8 @@ Follow scrolling counts as continuous reading: no `onJump` for short moves, and 
 
 ## Inserts
 
+<p align="center"><img src="./images/example/reader_insert_cut.png" alt="A note card as a React Native view after a paragraph" width="300" /></p>
+
 An insert is a React Native view placed between blocks. It is full width, takes the height Yoga gives it, scrolls with the text and keeps presses, accessibility and state.
 
 | `at` | Position |
@@ -657,8 +659,6 @@ An insert is a React Native view placed between blocks. It is full width, takes 
 const inserts = notes.map((n) => ({ key: n.id, at: { afterBlock: n.blockId } }));
 <ReaderView inserts={inserts} renderInsert={(key) => <NoteCard note={byId[key]} />} />;
 ```
-
-<p align="center"><img src="./images/example/reader_insert_cut.png" alt="A note card as a React Native view after a paragraph" width="300" /></p>
 
 - Change `inserts` at any time; the reading position stays. Height changes of an insert (for example an expanding card) keep the visible text in place.
 - Keep `renderInsert` cheap; it runs for every insert in the list. Pass changing data through props or context.
