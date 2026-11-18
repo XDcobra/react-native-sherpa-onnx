@@ -599,6 +599,8 @@ With `selectable`, a long press selects text with the platform's handles and men
 />
 ```
 
+<p align="center"><img src="./images/example/reader_selection_cut.png" alt="A sentence selected, with Note, Mark and Listen before the system items" width="300" /></p>
+
 - **One block:** a selection stays inside one paragraph or heading. A new selection elsewhere ends the previous one; a tap ends it without firing `onTap`.
 - **Snapping** (`selectionSnap`) is applied while the selection changes: `'sentence'` widens it to the sentences it touches ([sentence rules](#getreadersentencesdoc-blockids)), `'block'` to the whole block, `'none'` keeps the platform's word selection.
 - **Menu:** app items come first, then the system items. `systemImage` is an SF Symbol name (iOS only). iOS 16+ (`UITextView` edit menu); on iOS 15 only the system items are shown. Android uses the selection `ActionMode`.
@@ -619,6 +621,8 @@ With `selectable`, a long press selects text with the platform's handles and men
   onMarkerPress={({ id }) => openNotes(id)}
 />
 ```
+
+<p align="center"><img src="./images/example/reader_markers_cut.png" alt="A paragraph marker and a sentence marker in the margin" width="300" /></p>
 
 - **Position:** without `start` / `end` a marker sits at the block's first line; with a range, at the line of the range's last character. Markers on the same line are placed below one another, so combine them in the app (one marker with a count) to keep the margin tidy. On page images markers sit at the trailing edge of the page at the block's line.
 - **Look:** a pill with `color` (default: the theme's `accent`) and `textColor` (default white). It is centered in the trailing margin when it fits; a long label reaches into the text, so keep labels short (1–2 characters).
@@ -654,6 +658,8 @@ const inserts = notes.map((n) => ({ key: n.id, at: { afterBlock: n.blockId } }))
 <ReaderView inserts={inserts} renderInsert={(key) => <NoteCard note={byId[key]} />} />;
 ```
 
+<p align="center"><img src="./images/example/reader_insert_cut.png" alt="A note card as a React Native view after a paragraph" width="300" /></p>
+
 - Change `inserts` at any time; the reading position stays. Height changes of an insert (for example an expanding card) keep the visible text in place.
 - Keep `renderInsert` cheap; it runs for every insert in the list. Pass changing data through props or context.
 - Inserts are not blocks: they have no locator and do not count for jumps or the furthest position.
@@ -688,6 +694,13 @@ Page sections (PDF pages, comic pages) start with their page image; `pageDisplay
 | `'image'` | One full-width page image per page | The page's text blocks: they count as visible where they are on the page |
 | `'imageAndText'` | The page image, then its text | Running headers, footers and page numbers |
 | `'auto'` (default) | `'image'` for page documents (`format: 'pages'`), else `'text'` | |
+
+The same PDF page in each mode (`'auto'` shows this PDF as `'text'`):
+
+| `'text'` | `'image'` | `'imageAndText'` |
+| --- | --- | --- |
+| <img src="./images/example/reader_pages_text.png" alt="The page's text, without running header and page number" width="160" /> | <img src="./images/example/reader_pages_image.png" alt="Page images, one after another" width="160" /> | <img src="./images/example/reader_pages_image_and_text.png" alt="The page image, then its text" width="160" /> |
+| Text, no running header or page number | Page images, one after another | The page image, then its text |
 
 Hidden blocks still count for reading progress, so `onFurthestPositionChange` and `onSectionEnd` see every block. In `'image'` mode a block counts as visible where it is on the page, and `scrollTo` a block puts its place on the page at the top.
 
