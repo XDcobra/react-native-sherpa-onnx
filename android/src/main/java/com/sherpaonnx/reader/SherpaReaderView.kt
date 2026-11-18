@@ -6,10 +6,14 @@ import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.os.Build
 import android.os.SystemClock
 import android.text.Layout
+import android.text.Selection
+import android.text.Spannable
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.TextPaint
@@ -20,7 +24,10 @@ import android.text.style.MetricAffectingSpan
 import android.text.style.UpdateAppearance
 import android.util.LruCache
 import android.util.TypedValue
+import android.view.ActionMode
 import android.view.GestureDetector
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
@@ -98,6 +105,29 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     val follow: Boolean,
   )
 
+  /** One `markers` prop entry (start / end -1: the whole block). */
+  private data class MarkerSpec(
+    val id: String,
+    val blockId: String,
+    val start: Int,
+    val end: Int,
+    val label: String,
+    val accessibilityLabel: String,
+    val color: Int,
+    val hasColor: Boolean,
+    val textColor: Int,
+    val hasTextColor: Boolean,
+  )
+
+  /** A resolved marker: its spec and the UTF-16 offset whose line it sits at (-1: the first line). */
+  private data class Marker(val spec: MarkerSpec, val offset: Int)
+
+  /** One `selectionMenuItems` entry (`systemImage` is iOS only). */
+  private data class MenuItemSpec(val id: String, val title: String)
+
+  /** A marker drawn in the last frame: its touch target in recycler coordinates. */
+  private class MarkerHit(val rect: RectF, val id: String, val blockId: String)
+
   /** Resolved part of a highlight inside one block (UTF-16 range of the block text). */
   private data class Span(val start: Int, val end: Int, val style: Int, val color: Int, val hasColor: Boolean)
 
@@ -139,12 +169,35 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   private var followAnchor = 0.3f
   private var followPauseOnUser = true
   private var pageDisplay = "text"
+  private var selectable = false
+  private var selectionSnap = ReaderViewNative.SNAP_NONE
+  private var menuItems: List<MenuItemSpec> = emptyList()
+  private var markerSpecs: List<MarkerSpec> = emptyList()
+  private var markersDirty = false
 
   /** Logical React children, in Fabric's order. Not attached to this view. */
   internal val hosts = mutableListOf<SherpaReaderInsertView>()
 
   private val recycler = ReaderRecyclerView(reactContext)
-  private val layoutManager = LinearLayoutManager(reactContext)
+  private val layoutManager =
+    object : LinearLayoutManager(reactContext) {
+      // Selectable text rows take focus on a long press; the list must not
+      // scroll to bring the focused row (or a selection rectangle) into view.
+      override fun requestChildRectangleOnScreen(
+        parent: RecyclerView,
+        child: View,
+        rect: Rect,
+        immediate: Boolean,
+        focusedChildVisible: Boolean,
+      ): Boolean = false
+
+      override fun requestChildRectangleOnScreen(
+        parent: RecyclerView,
+        child: View,
+        rect: Rect,
+        immediate: Boolean,
+      ): Boolean = false
+    }
   private val adapter = Adapter()
   private var rows: List<Row> = emptyList()
   private val defaultTextColor = TextView(reactContext).currentTextColor
@@ -182,10 +235,20 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   private var followPlaceAfter = false
   private var reportedInvalid: List<String> = emptyList()
 
+  // ---- Selection and markers ----
+  private var markersByBlock: Map<Int, List<Marker>> = emptyMap()
+  private var reportedInvalidMarkers: List<String> = emptyList()
+  private var markerHits: List<MarkerHit> = emptyList()
+  /** Accessibility action IDs added per row view (removed on the next bind). */
+  private val markerActions = java.util.WeakHashMap<View, List<Int>>()
+  /** The text view holding the current selection (one at a time; v1: within one block). */
+  private var selectionView: ReaderTextView? = null
+
   init {
     recycler.layoutManager = layoutManager
     recycler.adapter = adapter
     recycler.itemAnimator = null
+    recycler.addItemDecoration(MarkerDecoration())
     recycler.clipToPadding = false
     recycler.onLayoutDone = {
       if (pendingScroll != null || pendingLayoutSample || pendingFollowCheck) post(afterLayout)
@@ -253,6 +316,13 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         reactContext,
         object : GestureDetector.SimpleOnGestureListener() {
           override fun onSingleTapUp(e: MotionEvent): Boolean {
+            // A tap while text is selected only ends the selection (the text view clears it).
+            val selected = selectionView
+            if (selected != null && selected.hasSelection()) {
+              selected.clearSelection()
+              selectionView = null
+              return false
+            }
             handleTap(e)
             return false
           }
@@ -442,6 +512,61 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     scheduleRebuild()
   }
 
+  internal fun setSelectable(v: Boolean) {
+    if (v == selectable) return
+    selectable = v
+    if (!v) selectionView?.clearSelection()
+    for (c in 0 until recycler.childCount) {
+      (recycler.getChildViewHolder(recycler.getChildAt(c)) as? TextHolder)?.text?.setSelectableText(v)
+    }
+  }
+
+  internal fun setSelectionSnap(v: String?) {
+    selectionSnap =
+      when (v) {
+        "sentence" -> ReaderViewNative.SNAP_SENTENCE
+        "block" -> ReaderViewNative.SNAP_BLOCK
+        else -> ReaderViewNative.SNAP_NONE
+      }
+  }
+
+  internal fun setSelectionMenuItems(value: ReadableArray?) {
+    val next = ArrayList<MenuItemSpec>()
+    if (value != null) {
+      for (i in 0 until value.size()) {
+        val m = value.getMap(i) ?: continue
+        next += MenuItemSpec(m.getString("id") ?: "", m.getString("title") ?: "")
+      }
+    }
+    menuItems = next
+  }
+
+  internal fun setMarkers(value: ReadableArray?) {
+    val next = ArrayList<MarkerSpec>()
+    if (value != null) {
+      for (i in 0 until value.size()) {
+        val m = value.getMap(i) ?: continue
+        next +=
+          MarkerSpec(
+            id = m.getString("id") ?: "",
+            blockId = m.getString("blockId") ?: "",
+            start = if (m.hasKey("start")) m.getInt("start") else -1,
+            end = if (m.hasKey("end")) m.getInt("end") else -1,
+            label = m.getString("label") ?: "",
+            accessibilityLabel = m.getString("accessibilityLabel") ?: "",
+            color = if (m.hasKey("color")) m.getInt("color") else 0,
+            hasColor = m.hasKey("hasColor") && m.getBoolean("hasColor"),
+            textColor = if (m.hasKey("textColor")) m.getInt("textColor") else 0,
+            hasTextColor = m.hasKey("hasTextColor") && m.getBoolean("hasTextColor"),
+          )
+      }
+    }
+    if (next != markerSpecs) {
+      markerSpecs = next
+      markersDirty = true
+    }
+  }
+
   /** Called once per Fabric props transaction. */
   internal fun onPropsApplied() {
     if (frontierDirty) {
@@ -456,6 +581,11 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       if (pendingAnchor == null) pendingAnchor = readingAnchor()
       theme = next
       scheduleRebuild()
+    }
+    if (markersDirty && !rebuildPosted) {
+      // A pending rebuild resolves markers itself.
+      markersDirty = false
+      applyMarkers()
     }
     if (highlightsDirty && !rebuildPosted) {
       // A pending rebuild resolves highlights itself.
@@ -632,6 +762,256 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
       dispatchFollowChange(true, "command")
     }
     follow(animated = true, force = true, place = true)
+  }
+
+  // ---- Markers ----
+
+  /** Resolves `markerSpecs` against the snapshot; returns blocks whose markers changed. */
+  private fun resolveMarkers(): Set<Int> {
+    val specs = markerSpecs
+    val next = HashMap<Int, ArrayList<Marker>>()
+    val invalid = ArrayList<String>()
+    if (snapshot != 0L && specs.isNotEmpty()) {
+      val packed =
+        ReaderViewNative.nativeResolveMarkers(
+          snapshot,
+          Array(specs.size) { specs[it].id },
+          Array(specs.size) { specs[it].blockId },
+          IntArray(specs.size) { specs[it].start },
+          IntArray(specs.size) { specs[it].end },
+        )
+      if (packed.isNotEmpty()) {
+        var k = 1
+        repeat(packed[0]) { invalid += specs.getOrNull(packed[k++])?.id ?: "" }
+        while (k + 2 < packed.size) {
+          val spec = specs.getOrNull(packed[k + 1])
+          if (spec != null) next.getOrPut(packed[k]) { ArrayList() } += Marker(spec, packed[k + 2])
+          k += 3
+        }
+      }
+    }
+    val changed = HashSet<Int>()
+    for ((block, list) in next) if (markersByBlock[block] != list) changed += block
+    for (block in markersByBlock.keys) if (block !in next) changed += block
+    markersByBlock = next
+    if (invalid.isNotEmpty() && invalid != reportedInvalidMarkers) {
+      dispatchError("ERR_READER_INVALID_ARGUMENT", "Unknown marker block or range: ${invalid.joinToString()}")
+    }
+    reportedInvalidMarkers = invalid
+    return changed
+  }
+
+  /** Redraws the markers (an item decoration) and updates the accessibility actions of changed rows. */
+  private fun applyMarkers() {
+    for (block in resolveMarkers()) {
+      val row = rowByBlock.getOrElse(block) { -1 }
+      if (row >= 0) adapter.notifyItemChanged(row, PAYLOAD_MARKERS)
+    }
+    recycler.invalidate()
+  }
+
+  /** Markers of the blocks a row stands for, with the block each belongs to. */
+  private fun markersOfRow(r: Row.Block): List<Pair<Int, Marker>> {
+    if (markersByBlock.isEmpty()) return emptyList()
+    val out = ArrayList<Pair<Int, Marker>>()
+    for (block in r.coverFirst..r.coverLast) markersByBlock[block]?.forEach { out += block to it }
+    return out
+  }
+
+  private fun dispatchMarkerPress(id: String, blockId: String) {
+    ReaderEvents.dispatch(this, ReaderEvents.MARKER_PRESS) {
+      putString("id", id)
+      putString("blockId", blockId)
+    }
+  }
+
+  /** One custom accessibility action per marker (TalkBack's actions menu). */
+  private fun bindMarkerActions(view: View, r: Row.Block) {
+    markerActions.remove(view)?.forEach { ViewCompat.removeAccessibilityAction(view, it) }
+    val ids = ArrayList<Int>()
+    for ((_, m) in markersOfRow(r)) {
+      val label = m.spec.accessibilityLabel.ifEmpty { m.spec.label }
+      val id = m.spec.id
+      val blockId = m.spec.blockId
+      ids +=
+        ViewCompat.addAccessibilityAction(view, label) { _, _ ->
+          dispatchMarkerPress(id, blockId)
+          true
+        }
+    }
+    if (ids.isNotEmpty()) markerActions[view] = ids
+  }
+
+  // ---- Selection ----
+
+  private fun snapSelection(tv: ReaderTextView, start: Int, end: Int): IntArray? {
+    if (snapshot == 0L || selectionSnap == ReaderViewNative.SNAP_NONE || tv.blockIndex < 0) return null
+    return ReaderViewNative.nativeSnapRange(snapshot, tv.blockIndex, start, end, selectionSnap)
+  }
+
+  private fun dispatchSelectionAction(itemId: String, tv: ReaderTextView) {
+    val block = tv.blockIndex
+    val start = min(tv.selectionStart, tv.selectionEnd)
+    val end = max(tv.selectionStart, tv.selectionEnd)
+    if (snapshot == 0L || block < 0 || end <= start) return
+    val text = blockText(block)
+    if (end > text.length) return
+    val sentence = ReaderViewNative.nativeSnapRange(snapshot, block, start, end, ReaderViewNative.SNAP_SENTENCE)
+    ReaderEvents.dispatch(this, ReaderEvents.SELECTION_ACTION) {
+      putString("itemId", itemId)
+      putString("blockId", blockIdOf(block))
+      putInt("start", start)
+      putInt("end", end)
+      putString("text", text.substring(start, end))
+      putInt("sentenceStart", sentence.getOrElse(0) { start })
+      putInt("sentenceEnd", sentence.getOrElse(1) { end })
+    }
+  }
+
+  /** App items before the system ones (copy, share, …); a choice ends the selection. */
+  private inner class SelectionCallback(private val tv: ReaderTextView) : ActionMode.Callback {
+    override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+      menuItems.forEachIndexed { i, item -> menu.add(Menu.NONE, MENU_ITEM_BASE + i, i, item.title) }
+      return true
+    }
+
+    override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
+
+    override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
+      val i = item.itemId - MENU_ITEM_BASE
+      val spec = menuItems.getOrNull(i) ?: return false
+      dispatchSelectionAction(spec.id, tv)
+      mode.finish()
+      tv.clearSelection()
+      return true
+    }
+
+    override fun onDestroyActionMode(mode: ActionMode) = Unit
+  }
+
+  /**
+   * Text row. Selection (when `selectable`) is snapped while it changes;
+   * `blockIndex` is the flat block index the row shows.
+   */
+  private inner class ReaderTextView(context: Context) : TextView(context) {
+    var blockIndex = -1
+    private var snapping = false
+
+    fun setSelectableText(on: Boolean) {
+      if (isTextSelectable == on) return
+      setTextIsSelectable(on)
+      if (!on) clearSelection()
+    }
+
+    fun clearSelection() {
+      val t = text
+      if (t is Spannable && hasSelection()) Selection.removeSelection(t)
+      if (selectionView === this) selectionView = null
+    }
+
+    override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+      super.onSelectionChanged(selStart, selEnd)
+      if (snapping) return
+      val t = text as? Spannable ?: return
+      val start = min(selStart, selEnd)
+      val end = max(selStart, selEnd)
+      if (end <= start) return
+      val prev = selectionView
+      selectionView = this
+      if (prev != null && prev !== this) prev.clearSelection()
+      val snapped = snapSelection(this, start, end) ?: return
+      if (snapped.size == 2 && (snapped[0] != start || snapped[1] != end) && snapped[1] <= t.length) {
+        snapping = true
+        Selection.setSelection(t, snapped[0], snapped[1])
+        snapping = false
+      }
+    }
+
+    /** Re-sets the text and keeps a selection (highlight-only updates). */
+    fun setTextKeepingSelection(value: CharSequence) {
+      val start = selectionStart
+      val end = selectionEnd
+      val had = isTextSelectable && hasSelection()
+      snapping = true
+      text = value
+      val t = text
+      if (had && t is Spannable && end <= t.length) Selection.setSelection(t, start, end)
+      snapping = false
+    }
+  }
+
+  /**
+   * Draws the margin markers over the rows (no layout change) and keeps their
+   * touch targets for [handleTap]. Markers on the same line go below one another.
+   */
+  private inner class MarkerDecoration : RecyclerView.ItemDecoration() {
+    private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val label = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.CENTER }
+    private val rect = RectF()
+    private val bounds = Rect()
+
+    override fun onDrawOver(c: Canvas, parent: RecyclerView, state: RecyclerView.State) {
+      if (markersByBlock.isEmpty()) {
+        markerHits = emptyList()
+        return
+      }
+      val t = theme
+      label.textSize = max(PixelUtil.toPixelFromDIP(11f), t.fontSizePx * 0.6f)
+      label.typeface = Typeface.DEFAULT_BOLD
+      val fm = label.fontMetrics
+      val pad = PixelUtil.toPixelFromDIP(3f)
+      val height = ceil(fm.descent - fm.ascent + 2 * pad)
+      val minTarget = PixelUtil.toPixelFromDIP(48f)
+      val hits = ArrayList<MarkerHit>()
+      for (i in 0 until parent.childCount) {
+        val child = parent.getChildAt(i)
+        val r = rows.getOrNull(parent.getChildAdapterPosition(child)) as? Row.Block ?: continue
+        val markers = markersOfRow(r)
+        if (markers.isEmpty()) continue
+        val holder = parent.getChildViewHolder(child)
+        val top = child.top + child.translationY
+        val inset = if (r.page) 0 else t.marginHorizontalPx
+        val placed = markers.map { (block, m) -> m to centerOf(holder, r, block, m, top, height) }.sortedBy { it.second }
+        var lastBottom = Float.NEGATIVE_INFINITY
+        for ((m, center) in placed) {
+          val text = m.spec.label
+          val w = max(height, label.measureText(text) + 2 * PixelUtil.toPixelFromDIP(5f))
+          val cy = max(center, lastBottom + PixelUtil.toPixelFromDIP(2f) + height / 2)
+          val right = child.right.toFloat()
+          val left = if (inset >= w + PixelUtil.toPixelFromDIP(4f)) right - inset / 2f - w / 2 else right - PixelUtil.toPixelFromDIP(2f) - w
+          rect.set(left, cy - height / 2, left + w, cy + height / 2)
+          lastBottom = rect.bottom
+          fill.color = if (m.spec.hasColor) m.spec.color else t.accentColor
+          c.drawRoundRect(rect, height / 2, height / 2, fill)
+          label.color = if (m.spec.hasTextColor) m.spec.textColor else Color.WHITE
+          label.getTextBounds(text, 0, text.length, bounds)
+          c.drawText(text, rect.centerX(), rect.centerY() - (fm.ascent + fm.descent) / 2, label)
+          val dx = max(0f, (minTarget - rect.width()) / 2)
+          val dy = max(0f, (minTarget - rect.height()) / 2)
+          hits += MarkerHit(RectF(rect.left - dx, rect.top - dy, rect.right + dx, rect.bottom + dy), m.spec.id, m.spec.blockId)
+        }
+      }
+      markerHits = hits
+    }
+
+    /** Vertical center (recycler coordinates) of the line a marker sits at. */
+    private fun centerOf(holder: RecyclerView.ViewHolder, r: Row.Block, block: Int, m: Marker, top: Float, height: Float): Float {
+      if (holder is TextHolder && block == r.index && !r.page) {
+        val tv = holder.text
+        val layout = tv.layout ?: return top + height / 2
+        val line = if (m.offset < 0) 0 else layout.getLineForOffset(min(m.offset, tv.text.length))
+        val fm = tv.paint.fontMetrics
+        return top + tv.paddingTop + layout.getLineBaseline(line) + (fm.ascent + fm.descent) / 2
+      }
+      val item = holder.itemView
+      if (r.page || block != r.index) {
+        val pr = ReaderViewNative.nativeMarkerPageRect(snapshot, block, m.offset)
+        if (pr.size >= 4 && pr[3] > 0) return top + (pr[1] + pr[3] / 2) * item.height
+        if (pr.size >= 4) return top + pr[1] * item.height + height / 2 + PixelUtil.toPixelFromDIP(4f)
+      }
+      val padTop = (holder as? ImageHolder)?.frame?.paddingTop ?: 0
+      return top + padTop + height / 2 + PixelUtil.toPixelFromDIP(4f)
+    }
   }
 
   /** Highlights of the blocks a page row stands for, as rects on the page image. */
@@ -959,6 +1339,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     loadSnapshot()
     highlightsDirty = false
     val highlightChanges = resolveHighlights()
+    markersDirty = false
+    val markerChanges = resolveMarkers()
     recycler.setPadding(0, theme.marginVerticalPx, 0, theme.marginVerticalPx)
     val next = ArrayList<Row>(blockCount + inserts.size)
     if (snapshot != 0L) {
@@ -1019,7 +1401,12 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         val row = rowByBlock.getOrElse(block) { -1 }
         if (row >= 0) adapter.notifyItemChanged(row, PAYLOAD_HIGHLIGHT)
       }
+      for (block in markerChanges) {
+        val row = rowByBlock.getOrElse(block) { -1 }
+        if (row >= 0) adapter.notifyItemChanged(row, PAYLOAD_MARKERS)
+      }
     }
+    recycler.invalidate()
 
     if (snapshot == 0L || blockCount == 0) return
     val anchor = pendingAnchor
@@ -1255,9 +1642,24 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
   }
 
   private fun handleTap(e: MotionEvent) {
+    // Markers first: a tap on a marker is not a tap on the text.
+    markerHits.firstOrNull { it.rect.contains(e.x, e.y) }?.let {
+      dispatchMarkerPress(it.id, it.blockId)
+      return
+    }
     val child = recycler.findChildViewUnder(e.x, e.y) ?: return
     val row = rows.getOrNull(recycler.getChildAdapterPosition(child)) as? Row.Block ?: return
-    ReaderEvents.dispatch(this, ReaderEvents.TAP) { putString("blockId", row.id) }
+    val tv = (recycler.getChildViewHolder(child) as? TextHolder)?.text
+    val offset =
+      if (tv != null && tv.layout != null && !row.page) {
+        tv.getOffsetForPosition(e.x - child.left, e.y - child.top - child.translationY)
+      } else {
+        -1
+      }
+    ReaderEvents.dispatch(this, ReaderEvents.TAP) {
+      putString("blockId", row.id)
+      putInt("offset", offset)
+    }
   }
 
   // ---- Commands ----
@@ -1440,7 +1842,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     }
   }
 
-  private class TextHolder(val text: TextView) : RecyclerView.ViewHolder(text)
+  private class TextHolder(val text: ReaderTextView) : RecyclerView.ViewHolder(text)
 
   private class ImageHolder(
     root: FrameLayout,
@@ -1541,9 +1943,10 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         VIEW_INSERT -> InsertHolder(InsertContainer(parent.context).apply { layoutParams = lp })
         else ->
           TextHolder(
-            TextView(parent.context).apply {
+            ReaderTextView(parent.context).apply {
               layoutParams = lp
               includeFontPadding = false
+              customSelectionActionModeCallback = SelectionCallback(this)
             }
           )
       }
@@ -1551,16 +1954,27 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int, payloads: MutableList<Any>) {
       val r = rows.getOrNull(position)
-      if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_HIGHLIGHT } && holder is TextHolder && r is Row.Block) {
-        // Highlight-only change: same text, styles and fonts, so the row height stays.
-        holder.text.text = styledBlock(r.index, theme)
-        return
-      }
-      if (payloads.isNotEmpty() && payloads.all { it == PAYLOAD_HIGHLIGHT } && holder is ImageHolder && r is Row.Block) {
-        holder.overlay.marks = pageMarks(r, theme)
+      val partial = payloads.isNotEmpty() && payloads.all { it == PAYLOAD_HIGHLIGHT || it == PAYLOAD_MARKERS }
+      if (partial && r is Row.Block && (holder is TextHolder || holder is ImageHolder)) {
+        // Highlight / marker change: same text, styles and fonts, so the row height stays.
+        if (PAYLOAD_HIGHLIGHT in payloads) {
+          if (holder is TextHolder) holder.text.setTextKeepingSelection(styledBlock(r.index, theme))
+          if (holder is ImageHolder) holder.overlay.marks = pageMarks(r, theme)
+        }
+        // Markers are drawn by the decoration; the row keeps their accessibility actions.
+        if (PAYLOAD_MARKERS in payloads) bindMarkerActions(holder.itemView, r)
         return
       }
       onBindViewHolder(holder, position)
+    }
+
+    override fun onViewAttachedToWindow(holder: RecyclerView.ViewHolder) {
+      // A selectable TextView that was detached loses its selection handles
+      // ("TextView does not support text selection"); re-enabling fixes it.
+      if (holder is TextHolder && holder.text.isTextSelectable) {
+        holder.text.isEnabled = false
+        holder.text.isEnabled = true
+      }
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
@@ -1569,10 +1983,14 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
         is Row.Insert -> bindInsert(holder as InsertHolder, r)
         is Row.Block ->
           when (holder) {
-            is TextHolder -> bindText(holder, r.index, t)
+            is TextHolder -> {
+              bindText(holder, r.index, t)
+              bindMarkerActions(holder.itemView, r)
+            }
             is ImageHolder -> {
               bindImage(holder, r.index, t, r.page)
               holder.overlay.marks = pageMarks(r, t)
+              bindMarkerActions(holder.itemView, r)
             }
             is SeparatorHolder -> {
               holder.line.setLineColor(t.textColor)
@@ -1604,6 +2022,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
           if (t.justify && level == 0) Layout.JUSTIFICATION_MODE_INTER_WORD else Layout.JUSTIFICATION_MODE_NONE
       }
       tv.textLocale = locale ?: Locale.getDefault()
+      tv.blockIndex = index
+      tv.setSelectableText(selectable)
       tv.text = styledBlock(index, t)
       ViewCompat.setAccessibilityHeading(tv, level > 0)
     }
@@ -1651,6 +2071,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
     }
 
     override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+      if (holder is TextHolder) holder.text.clearSelection()
       if (holder is InsertHolder) {
         holder.container.removeAllViews()
         holder.container.host = null
@@ -1691,6 +2112,8 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
 
   companion object {
     private const val PAYLOAD_HIGHLIGHT = "highlight"
+    private const val PAYLOAD_MARKERS = "markers"
+    private const val MENU_ITEM_BASE = 0x5e00
     private val DEFAULT_ACCENT = Color.rgb(0, 122, 255)
     /** Ints per block in nativeBlockTable: type, level, section, frame, w, h, flags. */
     private const val BLOCK_STRIDE = 7

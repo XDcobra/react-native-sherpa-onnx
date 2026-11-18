@@ -110,6 +110,15 @@ class SherpaReaderViewManager :
 
   override fun setJumpThreshold(view: SherpaReaderView, value: Int) = view.setJumpThreshold(value)
 
+  override fun setSelectable(view: SherpaReaderView, value: Boolean) = view.setSelectable(value)
+
+  override fun setSelectionSnap(view: SherpaReaderView, value: String?) = view.setSelectionSnap(value)
+
+  override fun setSelectionMenuItems(view: SherpaReaderView, value: ReadableArray?) =
+    view.setSelectionMenuItems(value)
+
+  override fun setMarkers(view: SherpaReaderView, value: ReadableArray?) = view.setMarkers(value)
+
   override fun onAfterUpdateTransaction(view: SherpaReaderView) {
     super.onAfterUpdateTransaction(view)
     view.onPropsApplied()

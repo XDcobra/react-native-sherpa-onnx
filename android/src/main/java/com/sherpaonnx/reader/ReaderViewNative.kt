@@ -90,6 +90,24 @@ internal object ReaderViewNative {
     flags: IntArray,
   ): IntArray
 
+  /**
+   * Margin markers: [invalidCount, invalid input indices…, then per resolved marker:
+   * block, input index, offset (-1 = the block's first line)].
+   */
+  @JvmStatic external fun nativeResolveMarkers(
+    handle: Long,
+    ids: Array<String>,
+    blockIds: Array<String>,
+    starts: IntArray,
+    ends: IntArray,
+  ): IntArray
+
+  /** Marker line on a page image: x, y, w, h normalized to the page. */
+  @JvmStatic external fun nativeMarkerPageRect(handle: Long, block: Int, offset: Int): FloatArray
+
+  /** [start, end) widened by [mode] (SNAP_*): to sentences or the whole block. */
+  @JvmStatic external fun nativeSnapRange(handle: Long, block: Int, start: Int, end: Int, mode: Int): IntArray
+
   /** [first, last]: read range (progress, jumps); [shownFirst, shownLast]: the visible range. */
   @JvmStatic external fun nativeTrackerSample(
     handle: Long,
@@ -106,4 +124,8 @@ internal object ReaderViewNative {
   const val PHASE_PROGRAMMATIC = 3
   const val PHASE_LAYOUT = 4
   const val PHASE_FOLLOW = 5
+
+  const val SNAP_NONE = 0
+  const val SNAP_SENTENCE = 1
+  const val SNAP_BLOCK = 2
 }
