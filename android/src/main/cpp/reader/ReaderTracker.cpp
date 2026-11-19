@@ -116,7 +116,33 @@ std::vector<TrackerEvent> ReaderTracker::Sample(int first, int last, ScrollPhase
     return out;
   }
 
+  // An indicator drag ends with the first sample that is not part of it: one
+  // jump from where it started to where it landed (at rest: this sample).
+  if (inScrub_ && phase != ScrollPhase::Scrub && phase != ScrollPhase::Momentum &&
+      phase != ScrollPhase::Layout) {
+    inScrub_ = false;
+    const bool atRest = phase == ScrollPhase::Idle;
+    const int toFirst = atRest ? first : prevFirst_;
+    const int toLast = atRest ? last : prevLast_;
+    if (toFirst != scrubFrom_) jump(scrubFrom_, toFirst, "drag");
+    StartSegment(toFirst, toLast);
+    if (toFirst <= frontier_ + 1) Extend(toFirst, toLast, &out);
+    if (atRest) {
+      prevFirst_ = first;
+      prevLast_ = last;
+      return out;
+    }
+  }
+
   switch (phase) {
+    case ScrollPhase::Scrub:
+      if (!inScrub_) {
+        inScrub_ = true;
+        inFling_ = false;
+        scrubFrom_ = prevFirst_;
+      }
+      break;
+
     case ScrollPhase::Programmatic:
       inFling_ = false;
       if (first != prevFirst_) jump(prevFirst_, first, "scrollTo");
@@ -125,6 +151,7 @@ std::vector<TrackerEvent> ReaderTracker::Sample(int first, int last, ScrollPhase
       break;
 
     case ScrollPhase::Momentum:
+      if (inScrub_) break;  // the indicator glides out: still the same drag
       if (!inFling_) {
         inFling_ = true;
         flingFromFirst_ = prevFirst_;
