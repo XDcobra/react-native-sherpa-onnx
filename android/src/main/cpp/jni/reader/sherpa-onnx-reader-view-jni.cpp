@@ -271,7 +271,7 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeTrackerFrontier(JNIEnv*, jclas
 /**
  * 6 ints per event: kind (0 visible, 1 furthest, 2 section end, 3 jump),
  * then visible: first, last, settled; furthest: block; section end: block,
- * section; jump: from, to, distance, cause (0 scroll, 1 fling, 2 scrollTo, 3 follow).
+ * section; jump: from, to, distance, cause (0 scroll, 1 fling, 2 scrollTo, 3 follow, 4 drag).
  */
 JNIEXPORT jintArray JNICALL
 Java_com_sherpaonnx_reader_ReaderViewNative_nativeTrackerSample(JNIEnv* env, jclass, jlong h,
@@ -295,6 +295,7 @@ Java_com_sherpaonnx_reader_ReaderViewNative_nativeTrackerSample(JNIEnv* env, jcl
         const int cause = e.cause == "fling"      ? 1
                           : e.cause == "scrollTo" ? 2
                           : e.cause == "follow"   ? 3
+                          : e.cause == "drag"     ? 4
                                                   : 0;
         out.insert(out.end(), {3, e.from, e.to, e.distance, cause, 0});
         break;

@@ -435,7 +435,7 @@ The native reading view. All props:
 | `renderInsert` | `(key: string) => ReactNode` | — | Renders the insert with that key. |
 | `highlights` | `ReaderHighlight[]` | `[]` | Marked ranges; see [Highlights](#highlights). |
 | `follow` | `ReaderFollowOptions` | `{ mode: 'keepVisible' }` | Keeps the highlight with `follow: true` in view; see [Follow scrolling](#follow-scrolling). |
-| `jumpThreshold` | `number` | `20` | Blocks; a larger move is reported as `onJump`. |
+| `jumpThreshold` | `number` | `20` | Blocks; a larger move is reported as `onJump`. A scroll indicator drag is always a jump. |
 | `pageDisplay` | `'auto' \| 'text' \| 'image' \| 'imageAndText'` | `'auto'` | How pages of PDFs, comics and scans are shown; see [Pages](#pages). |
 | `selectable` | `boolean` | `false` | Long-press text selection inside a block; see [Text selection](#text-selection). |
 | `selectionSnap` | `'none' \| 'sentence' \| 'block'` | `'none'` | Widens a selection to whole sentences or the whole block while the user selects. |
@@ -554,7 +554,7 @@ When the theme changes, the first visible line stays in place. The same holds fo
 | `onVisibleRangeChange` | `ReaderVisibleRange` | The first or last visible block changes, and once more with `settled: true` when scrolling stops. `first` is the block with the line at the top of the reading area, `last` the last block with any part in it. `firstOffset` (settled only) is the UTF-16 offset of that first line. |
 | `onFurthestPositionChange` | `ReaderLocator` | The frontier advanced while reading continuously. |
 | `onSectionEnd` | `{ sectionId, blockId }` | The last block of a section came into view while reading continuously. Fires once per transition into view. |
-| `onJump` | `ReaderJump` | The position moved more than `jumpThreshold` blocks. The app decides whether the jump counts as read. |
+| `onJump` | `ReaderJump` | The position moved more than `jumpThreshold` blocks, or the user dragged the scroll indicator. The app decides whether the jump counts as read. |
 | `onTap` | `ReaderTap` `{ blockId, offset? }` | A tap on a row (not on inserts, not on a marker view), for example to toggle toolbars. `offset` is the UTF-16 offset of the tapped character in the block; absent on image and separator rows. A tap that only ends a text selection does not fire. |
 | `onSelectionAction` | `ReaderSelectionAction` `{ itemId, blockId, start, end, text, sentenceStart, sentenceEnd }` | A `selectionMenuItems` entry was chosen. `start` / `end` is the (snapped) selection in the block, `sentenceStart` / `sentenceEnd` the sentences it touches as one range. The selection is cleared afterwards. |
 | `onMarkerPress` | `{ id, blockId }` | A marker view was tapped (outside its own pressable children) or activated with VoiceOver / TalkBack. |
@@ -567,8 +567,9 @@ Rules (shared C++ tracker, identical on iOS and Android):
 - **Read:** for the furthest position, section ends and jumps a block counts when at least 50 % of `min(blockHeight, viewportHeight)` is on screen, so a block that only peeks in is not read yet.
 - **Furthest position:** advances only while the visible range touches the current frontier. A jump does not move it; set `furthestLocator` to accept one.
 - **Jump causes** (`ReaderJump.cause`):
-  - `'scroll'`: the visible range moved more than `jumpThreshold` blocks without continuous visibility, for example by dragging the scroll indicator.
+  - `'scroll'`: the visible range moved more than `jumpThreshold` blocks between two samples of a finger scroll, for example when rows were re-measured.
   - `'fling'`: a fling landed more than `jumpThreshold` blocks away.
+  - `'drag'`: the user dragged the scroll indicator (iOS). One jump when the view comes to rest, from where the drag started, whatever the distance and speed; none if it ends where it started. While dragging, `onVisibleRangeChange` follows, but the furthest position and section ends do not move.
   - `'scrollTo'`: the command moved the view; always reported, whatever the distance.
   - `'follow'`: follow scrolling moved far, for example when read-aloud restarted elsewhere. Shorter follow moves count as continuous reading.
 
@@ -923,7 +924,7 @@ import type {
 | `ReaderHighlightStyle` | `'background' \| 'underline' \| 'textColor'` |
 | `ReaderFollowOptions` / `ReaderFollowChange` | `{ mode?, anchor?, pauseOnUserScroll? }` / `{ following, reason }` |
 | `ReaderVisibleRange` | `{ first, last, firstOffset, settled, visibleInserts }` |
-| `ReaderJump` / `ReaderJumpCause` | `{ from, to, distance, cause }` / `'scroll' \| 'fling' \| 'scrollTo' \| 'follow'` |
+| `ReaderJump` / `ReaderJumpCause` | `{ from, to, distance, cause }` / `'scroll' \| 'fling' \| 'scrollTo' \| 'follow' \| 'drag'` |
 | `ReaderViewProps` / `ReaderViewHandle` | View props / ref: `scrollTo`, `resumeFollow` |
 | `ReaderPageDisplay` | `'auto' \| 'text' \| 'image' \| 'imageAndText'` ([Pages](#pages)) |
 | `CreateReaderDocumentOptions` / `LoadReaderDocumentOptions` | Options of `createReaderDocument` / `loadReaderDocument` |
@@ -1123,6 +1124,14 @@ onVisibleRangeChange={(r) => {
   }}
 />
 ```
+
+A jump never moves the furthest position; `setFurthest` accepts it.
+
+| Cause | Typical handling |
+|---|---|
+| `'scrollTo'` | Contents, search, bookmark: the app knows the target. |
+| `'drag'` | Scroll indicator: ask before counting skipped chapters as read. |
+| `'scroll'` / `'fling'` / `'follow'` | Large move without reading. |
 
 </details>
 

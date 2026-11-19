@@ -124,6 +124,8 @@ internal object ReaderViewNative {
   const val PHASE_PROGRAMMATIC = 3
   const val PHASE_LAYOUT = 4
   const val PHASE_FOLLOW = 5
+  /** Drag of a scroll indicator / fast-scroll thumb: one "drag" jump when it comes to rest. */
+  const val PHASE_SCRUB = 6
 
   const val SNAP_NONE = 0
   const val SNAP_SENTENCE = 1

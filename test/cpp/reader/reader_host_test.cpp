@@ -1041,10 +1041,10 @@ TEST(ReaderTracker, ShortFlingIsReadingLongFlingIsJump) {
   EXPECT_EQ(t.Frontier(), 16);  // jumps do not move the frontier
 }
 
-TEST(ReaderTracker, ScrubbingAndScrollToAreJumps) {
+TEST(ReaderTracker, FarDragSampleAndScrollToAreJumps) {
   ReaderTracker t({}, 20);
   t.Sample(0, 4, ScrollPhase::Layout);
-  auto ev = t.Sample(50, 54, ScrollPhase::Drag);  // indicator scrub
+  auto ev = t.Sample(50, 54, ScrollPhase::Drag);  // e.g. rows re-measured mid-drag
   ASSERT_TRUE(Find(ev, Kind::Jump));
   EXPECT_EQ(Find(ev, Kind::Jump)->cause, "scroll");
   ev = t.Sample(5, 9, ScrollPhase::Programmatic);
@@ -1053,6 +1053,73 @@ TEST(ReaderTracker, ScrubbingAndScrollToAreJumps) {
   EXPECT_EQ(Find(ev, Kind::Jump)->distance, 5 - 50);
   // Back at the frontier: reading continues it.
   EXPECT_EQ(t.Frontier(), 9);
+}
+
+TEST(ReaderTracker, SlowIndicatorDragIsOneJumpFromItsStart) {
+  // A slow drag of the scroll indicator moves a few blocks per sample, so as
+  // finger scrolling it would read chapter after chapter.
+  ReaderTracker t({9, 19, 29, 39, 49}, 20);
+  t.Sample(0, 4, ScrollPhase::Layout);
+  auto ev = t.Sample(1, 5, ScrollPhase::Drag);  // a little reading first
+  EXPECT_EQ(t.Frontier(), 5);
+  int visible = 0;
+  for (int f = 3; f <= 45; f += 3) {
+    ev = t.Sample(f, f + 4, ScrollPhase::Scrub);
+    EXPECT_EQ(Count(ev, Kind::Jump), 0);
+    EXPECT_EQ(Count(ev, Kind::Furthest), 0);
+    EXPECT_EQ(Count(ev, Kind::SectionEnd), 0);
+    visible += Count(ev, Kind::VisibleRange);
+  }
+  EXPECT_GT(visible, 0);  // the visible range still follows the drag
+  ev = t.Sample(46, 50, ScrollPhase::Scrub);  // the indicator glides out
+  ev = t.Sample(47, 51, ScrollPhase::Idle);
+  ASSERT_TRUE(Find(ev, Kind::Jump));
+  EXPECT_EQ(Count(ev, Kind::Jump), 1);
+  EXPECT_EQ(Find(ev, Kind::Jump)->cause, "drag");
+  EXPECT_EQ(Find(ev, Kind::Jump)->from, 1);  // where the drag started
+  EXPECT_EQ(Find(ev, Kind::Jump)->to, 47);
+  EXPECT_EQ(Find(ev, Kind::Jump)->distance, 46);
+  EXPECT_EQ(Count(ev, Kind::SectionEnd), 0);
+  EXPECT_EQ(t.Frontier(), 5);  // not read until the app accepts it
+  // Finger scrolling from the landing point is reading again, but the frontier
+  // stays until the app sets it.
+  ev = t.Sample(48, 52, ScrollPhase::Drag);
+  EXPECT_EQ(Count(ev, Kind::Jump), 0);
+  EXPECT_EQ(t.Frontier(), 5);
+}
+
+TEST(ReaderTracker, IndicatorDragIsAJumpWhateverTheDistance) {
+  ReaderTracker t({}, 20);
+  t.Sample(10, 14, ScrollPhase::Layout);
+  t.Sample(11, 15, ScrollPhase::Scrub);
+  auto ev = t.Sample(12, 16, ScrollPhase::Idle);
+  ASSERT_TRUE(Find(ev, Kind::Jump));
+  EXPECT_EQ(Find(ev, Kind::Jump)->cause, "drag");
+  EXPECT_EQ(Find(ev, Kind::Jump)->distance, 2);
+  // Within the read stretch: the landing continues the frontier like scrollTo.
+  EXPECT_EQ(t.Frontier(), 16);
+  // Back to the start position: nothing moved, no jump.
+  t.Sample(30, 34, ScrollPhase::Scrub);
+  t.Sample(30, 34, ScrollPhase::Layout);  // rows re-measured mid-drag
+  ev = t.Sample(12, 16, ScrollPhase::Idle);
+  EXPECT_EQ(Count(ev, Kind::Jump), 0);
+  // Backwards is a jump too.
+  t.Sample(5, 9, ScrollPhase::Scrub);
+  ev = t.Sample(2, 6, ScrollPhase::Idle);
+  ASSERT_TRUE(Find(ev, Kind::Jump));
+  EXPECT_EQ(Find(ev, Kind::Jump)->distance, 2 - 12);
+}
+
+TEST(ReaderTracker, IndicatorDragEndsBeforeAScrollTo) {
+  ReaderTracker t({}, 20);
+  t.Sample(0, 4, ScrollPhase::Layout);
+  t.Sample(40, 44, ScrollPhase::Scrub);
+  auto ev = t.Sample(70, 74, ScrollPhase::Programmatic);
+  ASSERT_EQ(Count(ev, Kind::Jump), 2);
+  EXPECT_EQ(ev[ev.size() - 2].cause, "drag");
+  EXPECT_EQ(ev[ev.size() - 2].to, 40);
+  EXPECT_EQ(ev.back().cause, "scrollTo");
+  EXPECT_EQ(ev.back().from, 40);
 }
 
 TEST(ReaderTracker, ReadingAfterAJumpDoesNotMoveFrontierUntilAppConfirms) {

@@ -1671,6 +1671,7 @@ class SherpaReaderView(private val reactContext: ThemedReactContext) : FrameLayo
                 1 -> "fling"
                 2 -> "scrollTo"
                 3 -> "follow"
+                4 -> "drag"
                 else -> "scroll"
               },
             )

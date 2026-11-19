@@ -28,6 +28,7 @@ import SherpaReaderView, {
 import type {
   ReaderHighlight,
   ReaderInsert,
+  ReaderJump,
   ReaderJumpCause,
   ReaderLocator,
   ReaderMarker,
@@ -273,6 +274,23 @@ export function tapFromNative(n: {
     : { blockId: n.blockId };
 }
 
+/** Native jump event → `ReaderJump` (`cause` as the native tracker named it). */
+export function jumpFromNative(n: {
+  fromSectionId: string;
+  fromBlockId: string;
+  toSectionId: string;
+  toBlockId: string;
+  distance: number;
+  cause: string;
+}): ReaderJump {
+  return {
+    from: locator(n.fromSectionId, n.fromBlockId),
+    to: locator(n.toSectionId, n.toBlockId),
+    distance: n.distance,
+    cause: n.cause as ReaderJumpCause,
+  };
+}
+
 function locator(
   sectionId: string,
   blockId: string,
@@ -431,15 +449,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       [onSectionEnd]
     );
     const handleJump = useCallback(
-      (e: NativeSyntheticEvent<NativeEvent<'onJump'>>) => {
-        const n = e.nativeEvent;
-        onJump?.({
-          from: locator(n.fromSectionId, n.fromBlockId),
-          to: locator(n.toSectionId, n.toBlockId),
-          distance: n.distance,
-          cause: n.cause as ReaderJumpCause,
-        });
-      },
+      (e: NativeSyntheticEvent<NativeEvent<'onJump'>>) =>
+        onJump?.(jumpFromNative(e.nativeEvent)),
       [onJump]
     );
     const handleTap = useCallback(

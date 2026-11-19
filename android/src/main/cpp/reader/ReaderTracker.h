@@ -14,6 +14,7 @@ enum class ScrollPhase : int {
   Programmatic = 3,  // scrollTo / initial locator
   Layout = 4,  // size / theme / data change without user scrolling
   Follow = 5,  // the view scrolls along with a followed highlight (read-aloud)
+  Scrub = 6,  // the user drags the scroll indicator / fast-scroll thumb (and its glide-out)
 };
 
 struct TrackerEvent {
@@ -27,7 +28,7 @@ struct TrackerEvent {
   int from = -1;  // Jump
   int to = -1;
   int distance = 0;
-  std::string cause;  // "scroll" | "fling" | "scrollTo" | "follow"
+  std::string cause;  // "scroll" | "fling" | "scrollTo" | "follow" | "drag"
 };
 
 /**
@@ -44,6 +45,9 @@ struct TrackerEvent {
  *   while that stretch starts at or before the current frontier + 1.
  * - Follow: scrolling along a highlight reads like continuous reading (no
  *   jump); only a move of more than N blocks is a jump ("follow").
+ * - Scrub: a drag of the scroll indicator is never reading. It ends with one
+ *   jump ("drag") from where the drag started to where it came to rest,
+ *   whatever the distance and speed; Momentum and Layout samples belong to it.
  * - Section end: the last block of a section becomes visible while reading
  *   continuously (once per transition).
  */
@@ -86,6 +90,8 @@ class ReaderTracker {
   bool inFling_ = false;
   int flingFromFirst_ = -1;
   int flingFromLast_ = -1;
+  bool inScrub_ = false;
+  int scrubFrom_ = -1;
   // Range of the previous continuous sample, for section-end transitions.
   int seenFirst_ = -1;
   int seenLast_ = -1;

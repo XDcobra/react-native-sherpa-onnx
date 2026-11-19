@@ -213,8 +213,15 @@ export type ReaderVisibleRange = {
  * - `fling`: a fling landed more than `jumpThreshold` blocks away.
  * - `scrollTo`: the `scrollTo` command.
  * - `follow`: follow scrolling moved far (e.g. read-aloud restarted elsewhere).
+ * - `drag`: the user dragged the scroll indicator; reported once it comes to
+ *   rest, from where the drag started, whatever the distance and speed.
  */
-export type ReaderJumpCause = 'scroll' | 'fling' | 'scrollTo' | 'follow';
+export type ReaderJumpCause =
+  | 'scroll'
+  | 'fling'
+  | 'scrollTo'
+  | 'follow'
+  | 'drag';
 
 /** How a highlight is drawn. */
 export type ReaderHighlightStyle = 'background' | 'underline' | 'textColor';
