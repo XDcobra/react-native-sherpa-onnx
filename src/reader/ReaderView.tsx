@@ -143,8 +143,8 @@ export function nextMarkerWindow(
   return next;
 }
 
-/** Minimum touch target of a marker (HIG 44 pt, Material 48 dp). */
-function markerMinTarget(): number {
+/** Default hit size of a marker (HIG 44 pt, Material 48 dp). */
+function defaultMarkerHitSize(): number {
   return Platform.OS === 'android' ? 48 : 44;
 }
 
@@ -152,7 +152,7 @@ function markerMinTarget(): number {
 export function markerHitSlop(
   width: number,
   height: number,
-  target: number = markerMinTarget()
+  target: number = defaultMarkerHitSize()
 ): Insets | undefined {
   const x = Math.max(0, Math.ceil((target - width) / 2));
   const y = Math.max(0, Math.ceil((target - height) / 2));
@@ -166,6 +166,8 @@ const MARKER_A11Y_ACTIONS = [{ name: 'activate' }];
 
 type MarkerHostProps = {
   marker: ReaderMarker;
+  /** Side of the square hit area (pt / dp); at least the view's size. */
+  hitSize: number;
   onPress?: (marker: { id: string; blockId: string }) => void;
   children: ReactNode;
 };
@@ -176,10 +178,17 @@ type MarkerHostProps = {
  */
 const MarkerHost = memo(function MarkerHost({
   marker,
+  hitSize,
   onPress,
   children,
 }: MarkerHostProps) {
-  const [slop, setSlop] = useState<Insets | undefined>(undefined);
+  const [size, setSize] = useState<{ width: number; height: number } | null>(
+    null
+  );
+  const slop = useMemo(
+    () => (size ? markerHitSlop(size.width, size.height, hitSize) : undefined),
+    [size, hitSize]
+  );
   const touch = useRef<{ x: number; y: number } | null>(null);
   const { id, blockId } = marker;
   const press = useCallback(
@@ -188,9 +197,10 @@ const MarkerHost = memo(function MarkerHost({
   );
   const handleLayout = useCallback((e: LayoutChangeEvent) => {
     const { width, height } = e.nativeEvent.layout;
-    const next = markerHitSlop(width, height);
-    setSlop((prev) =>
-      prev?.top === next?.top && prev?.left === next?.left ? prev : next
+    setSize((prev) =>
+      prev?.width === width && prev?.height === height
+        ? prev
+        : { width, height }
     );
   }, []);
   const handleAction = useCallback(
@@ -296,6 +306,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       selectionMenuItems,
       markers,
       renderMarker,
+      markerHitSize,
       style,
       testID,
       onReady,
@@ -361,6 +372,11 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     );
     const knownMarkers = useRef(markerIds);
     knownMarkers.current = markerIds;
+    const markerBlocks = useRef(new Map<string, string>());
+    markerBlocks.current = useMemo(
+      () => new Map((markers ?? []).map((m) => [m.id, m.blockId])),
+      [markers]
+    );
     const [markerWindow, setMarkerWindow] = useState<string[]>([]);
     const mountedMarkers = useMemo(() => {
       if (!renderMarker || !markers || markerWindow.length === 0) return [];
@@ -455,6 +471,16 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       },
       []
     );
+    // iOS: a tap over selectable text in a marker's hit area (the text kept
+    // the touch so a long press can still select).
+    const handleMarkerTap = useCallback(
+      (e: NativeSyntheticEvent<NativeEvent<'onMarkerTap'>>) => {
+        const id = e.nativeEvent.markerId;
+        const blockId = markerBlocks.current.get(id);
+        if (blockId != null) onMarkerPress?.({ id, blockId });
+      },
+      [onMarkerPress]
+    );
     const handleError = useCallback(
       (e: NativeSyntheticEvent<NativeEvent<'onReaderError'>>) =>
         onError?.({ code: e.nativeEvent.code, message: e.nativeEvent.message }),
@@ -535,6 +561,9 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         onFollowChange={handleFollowChange}
         onSelectionAction={handleSelectionAction}
         onMarkerWindowChange={renderMarker ? handleMarkerWindow : undefined}
+        onMarkerTap={
+          renderMarker && onMarkerPress ? handleMarkerTap : undefined
+        }
       >
         {renderInsert
           ? insertSpecs.map((spec) => (
@@ -550,7 +579,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           : null}
         {renderMarker
           ? mountedMarkers.map((m) => (
-              <MarkerHost key={m.id} marker={m} onPress={onMarkerPress}>
+              <MarkerHost
+                key={m.id}
+                marker={m}
+                hitSize={markerHitSize ?? defaultMarkerHitSize()}
+                onPress={onMarkerPress}
+              >
                 {renderMarker(m.id)}
               </MarkerHost>
             ))

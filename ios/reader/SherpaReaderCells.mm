@@ -14,8 +14,10 @@
 /**
  * Margin markers of one row: holds the marker hosts (the app's React views)
  * and places each in the trailing margin, vertically centered on the line the
- * row gives. Markers on the same line go below one another. Touches outside
- * the hosts fall through to the row.
+ * row gives. Markers on the same line go below one another. Only touches
+ * inside a host's frame hit it here; its larger hit area (hit slop) can reach
+ * into the neighbouring rows, so the reader view hit-tests that. Touches
+ * outside the hosts fall through to the row.
  */
 @interface SherpaReaderMarkerOverlay : UIView
 /** Moves the mounted hosts of `markers` in (and hosts of other markers out). */
@@ -42,8 +44,15 @@
 }
 
 - (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
-  UIView *hit = [super hitTest:point withEvent:event];
-  return hit == self ? nil : hit;
+  if (self.hidden || !self.userInteractionEnabled) return nil;
+  for (UIView *host in self.subviews.reverseObjectEnumerator) {
+    // The frame, not the hit slop: SherpaReaderComponentView decides about the
+    // rest of the hit area (it also sees the neighbouring rows).
+    if (host.hidden || !CGRectContainsPoint(host.frame, point)) continue;
+    UIView *hit = [host hitTest:[host convertPoint:point fromView:self] withEvent:event];
+    if (hit) return hit;
+  }
+  return nil;
 }
 
 - (void)attachMarkers:(NSArray<SherpaReaderMarker *> *)markers {
@@ -394,6 +403,10 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
   [_overlay placeMarkers:_markers centers:centers trailingInset:_markerInset];
 }
 
+- (NSArray<UIView *> *)placedMarkerHosts {
+  return _overlay.placedHosts;
+}
+
 // VoiceOver: built when asked, from the hosts' current places (they move in
 // and get their size after this row was laid out). The text, then the marker
 // views top to bottom (each one element, from JS).
@@ -643,6 +656,10 @@ static void Pin(UIView *view, UIView *host, UIEdgeInsets insets) {
     [centers addObject:@(y)];
   }
   [_markerOverlay placeMarkers:_markers centers:centers trailingInset:_markerInset];
+}
+
+- (NSArray<UIView *> *)placedMarkerHosts {
+  return _markerOverlay ? _markerOverlay.placedHosts : @[];
 }
 
 // VoiceOver (built when asked, like text rows): the image when it has alt

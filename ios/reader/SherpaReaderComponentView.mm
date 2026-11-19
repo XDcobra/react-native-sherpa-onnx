@@ -159,6 +159,18 @@ NSArray<SherpaReaderStyleSpan *> *StyleSpans(const rdr::ReaderBlock &b)
   return out;
 }
 
+/** `view` is (inside) a text view that selects text with a long press. */
+BOOL IsSelectableText(UIView *view)
+{
+  for (UIView *v = view; v != nil; v = v.superview) {
+    if ([v isKindOfClass:UITextView.class]) {
+      UITextView *tv = (UITextView *)v;
+      return tv.selectable && tv.userInteractionEnabled;
+    }
+  }
+  return NO;
+}
+
 }  // namespace
 
 static NSString *const kTextCellId = @"SherpaReaderTextCell";
@@ -1573,6 +1585,66 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   }
 }
 
+#pragma mark - Marker hit areas
+
+/**
+ * The marker whose hit area holds `point` (reader coordinates); the nearest
+ * center wins. The area is the marker view grown by its hit slop (JS sets it
+ * from `markerHitSize`) and can reach into the neighbouring rows.
+ */
+- (nullable SherpaReaderInsertComponentView *)markerHostAtPoint:(CGPoint)point
+{
+  SherpaReaderInsertComponentView *best = nil;
+  CGFloat bestDistance = CGFLOAT_MAX;
+  for (UITableViewCell *cell in _tableView.visibleCells) {
+    NSArray<UIView *> *hosts = nil;
+    if ([cell isKindOfClass:SherpaReaderTextCell.class]) {
+      hosts = ((SherpaReaderTextCell *)cell).placedMarkerHosts;
+    } else if ([cell isKindOfClass:SherpaReaderImageCell.class]) {
+      hosts = ((SherpaReaderImageCell *)cell).placedMarkerHosts;
+    }
+    for (UIView *view in hosts) {
+      if (![view isKindOfClass:SherpaReaderInsertComponentView.class] || view.hidden || !view.userInteractionEnabled) {
+        continue;
+      }
+      SherpaReaderInsertComponentView *host = (SherpaReaderInsertComponentView *)view;
+      const CGRect frame = [host convertRect:host.bounds toView:self];
+      const CGRect area = UIEdgeInsetsInsetRect(frame, host.hitTestEdgeInsets);
+      if (!CGRectContainsPoint(area, point)) continue;
+      const CGFloat distance = hypot(point.x - CGRectGetMidX(frame), point.y - CGRectGetMidY(frame));
+      if (distance < bestDistance) {
+        best = host;
+        bestDistance = distance;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Markers first: UIKit hit-tests row by row, so the part of a marker's hit
+ * area that lies in the neighbouring row would go to that row. Over
+ * selectable text the text keeps the touch (a long press selects); a tap
+ * there still reaches the marker, through `handleTap:`. Scrolling is not
+ * affected: the hosts are inside the table.
+ */
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event
+{
+  UIView *hit = [super hitTest:point withEvent:event];
+  if (hit == nil || _markerHostsById.count == 0) {
+    return hit;
+  }
+  for (UIView *v = hit; v != nil && v != self; v = v.superview) {
+    // On a marker or insert view itself.
+    if ([v isKindOfClass:SherpaReaderInsertComponentView.class]) return hit;
+  }
+  SherpaReaderInsertComponentView *host = [self markerHostAtPoint:point];
+  if (host == nil || IsSelectableText(hit)) {
+    return hit;
+  }
+  return [host hitTest:[host convertPoint:point fromView:self] withEvent:event] ?: host;
+}
+
 #pragma mark - Tap
 
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch
@@ -1607,6 +1679,13 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 
 - (void)handleTap:(UITapGestureRecognizer *)tap
 {
+  // A tap on selectable text inside a marker's hit area (see hitTest:) is the marker's.
+  if (SherpaReaderInsertComponentView *marker = [self markerHostAtPoint:[tap locationInView:self]]) {
+    if (auto emitter = std::static_pointer_cast<const SherpaReaderViewEventEmitter>(_eventEmitter)) {
+      emitter->onMarkerTap({std::string(marker.markerId.UTF8String ?: "")});
+    }
+    return;
+  }
   const CGPoint point = [tap locationInView:_tableView];
   NSIndexPath *path = [_tableView indexPathForRowAtPoint:point];
   if (!_snap || path == nil || path.row >= (NSInteger)_rows.size() || _rows[path.row].kind != RowKind::Block) {

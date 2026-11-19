@@ -63,6 +63,10 @@ type MarkerWindowEvent = Readonly<{
   markerIds: string[];
 }>;
 
+type MarkerTapEvent = Readonly<{
+  markerId: string;
+}>;
+
 type FollowChangeEvent = Readonly<{
   following: boolean;
   reason: string;
@@ -165,6 +169,11 @@ export interface NativeProps extends ViewProps {
   onSelectionAction?: CodegenTypes.DirectEventHandler<SelectionActionEvent>;
   /** The markers whose views JS should mount changed. */
   onMarkerWindowChange?: CodegenTypes.DirectEventHandler<MarkerWindowEvent>;
+  /**
+   * iOS: a tap on selectable text inside a marker's hit area (the text keeps
+   * the touch for a long press, so the marker view does not get it).
+   */
+  onMarkerTap?: CodegenTypes.DirectEventHandler<MarkerTapEvent>;
 }
 
 type ComponentType = HostComponent<NativeProps>;
