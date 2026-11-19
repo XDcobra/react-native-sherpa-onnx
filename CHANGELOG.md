@@ -78,6 +78,10 @@
 * **separation:** Live overload `separate(LiveAudioBuffer, LiveAudioBuffer[], options)` returning `SeparationPipelineHandle` — mandatory `continuous_frames` segmentation policy; no separate `createStreamingSeparation` factory.
 * **separation:** Example app `SeparationScreen` — batch + file/mic live overload, phased progress, stop/restart. Known MVP limits: mono-downmixed stem outputs (stereo stems planned); boundary artifacts possible on segmented live runs (see future-work overlap/crossfade doc).
 
+### Bug Fixes
+
+* **reader:** Dragging the scroll indicator is a jump, not reading: `onJump` fires once with `cause: 'drag'` when the view comes to rest, from where the drag started, whatever the distance and speed. A slow drag through the book no longer advances the furthest position or fires `onSectionEnd` chapter by chapter. `ReaderJumpCause` gains `'drag'`. See `docs/reader.md`.
+
 ### Migration Guide
 
 ```diff
