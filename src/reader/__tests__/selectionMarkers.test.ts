@@ -19,6 +19,7 @@ jest.mock('react-native', () => ({
 jest.mock('../SherpaReaderInsertViewNativeComponent', () => 'Insert');
 
 import {
+  jumpFromNative,
   markerHitSlop,
   markerSpecFor,
   nextMarkerWindow,
@@ -153,6 +154,26 @@ describe('selectionMenuItemSpecFor', () => {
         systemImage: 'text.bubble',
       }).systemImage
     ).toBe('text.bubble');
+  });
+});
+
+describe('jumpFromNative', () => {
+  it('passes a scroll indicator drag through as cause drag', () => {
+    expect(
+      jumpFromNative({
+        fromSectionId: 's1',
+        fromBlockId: 's1.b3',
+        toSectionId: 's9',
+        toBlockId: 's9.b0',
+        distance: 412,
+        cause: 'drag',
+      })
+    ).toEqual({
+      from: { sectionId: 's1', blockId: 's1.b3' },
+      to: { sectionId: 's9', blockId: 's9.b0' },
+      distance: 412,
+      cause: 'drag',
+    });
   });
 });
 
