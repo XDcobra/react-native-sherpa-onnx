@@ -32,9 +32,13 @@ internal object ReaderEvents {
   const val FOLLOW_CHANGE = "topFollowChange"
   const val SELECTION_ACTION = "topSelectionAction"
   const val MARKER_WINDOW = "topMarkerWindowChange"
+  /** iOS only (taps over selectable text in a marker's hit area); registered so the view configs match. */
+  const val MARKER_TAP = "topMarkerTap"
 
   val ALL =
-    listOf(READY, VISIBLE_RANGE, FURTHEST, SECTION_END, JUMP, TAP, ERROR, FOLLOW_CHANGE, SELECTION_ACTION, MARKER_WINDOW)
+    listOf(
+      READY, VISIBLE_RANGE, FURTHEST, SECTION_END, JUMP, TAP, ERROR, FOLLOW_CHANGE, SELECTION_ACTION, MARKER_WINDOW, MARKER_TAP
+    )
 
   fun dispatch(view: View, name: String, build: WritableMap.() -> Unit) {
     val context = view.context as? ReactContext ?: return

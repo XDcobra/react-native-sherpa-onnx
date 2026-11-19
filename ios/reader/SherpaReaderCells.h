@@ -116,6 +116,8 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
  * and places them at their lines; the text layout does not change.
  */
 - (void)updateMarkers:(nullable NSArray<SherpaReaderMarker *> *)markers theme:(SherpaReaderTheme *)theme;
+/** The row's placed marker hosts, top to bottom (the reader hit-tests their hit areas). */
+- (NSArray<UIView *> *)placedMarkerHosts;
 @end
 
 /** A highlight over a page image: `rect` normalized to the page. */
@@ -141,6 +143,8 @@ typedef NS_ENUM(NSInteger, SherpaReaderHighlightStyle) {
 @property (nonatomic, weak, nullable) id<SherpaReaderCellDelegate> delegate;
 /** Margin markers (page images have no margin: at the page's trailing edge). */
 - (void)updateMarkers:(nullable NSArray<SherpaReaderMarker *> *)markers theme:(SherpaReaderTheme *)theme;
+/** The row's placed marker hosts, top to bottom (the reader hit-tests their hit areas). */
+- (NSArray<UIView *> *)placedMarkerHosts;
 @end
 
 @interface SherpaReaderSeparatorCell : UITableViewCell
