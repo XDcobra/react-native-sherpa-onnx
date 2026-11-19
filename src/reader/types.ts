@@ -374,6 +374,12 @@ export type ReaderViewProps = {
    * visible range. Without it markers are not shown.
    */
   renderMarker?: (id: string) => ReactNode;
+  /**
+   * Side of a marker's square hit area, centered on its view (pt / dp). It can
+   * reach into the neighbouring rows; never smaller than the view. Default 44
+   * (iOS) / 48 (Android).
+   */
+  markerHitSize?: number;
   style?: StyleProp<ViewStyle>;
   testID?: string;
   onReady?: (info: { blockCount: number; sectionCount: number }) => void;

@@ -117,6 +117,26 @@ describe('markerHitSlop', () => {
   it('needs no slop for large views', () => {
     expect(markerHitSlop(48, 48, 44)).toBeUndefined();
   });
+
+  it('defaults to the platform target (44 pt on iOS)', () => {
+    expect(markerHitSlop(20, 20)).toEqual({
+      top: 12,
+      bottom: 12,
+      left: 12,
+      right: 12,
+    });
+  });
+
+  it('uses a custom hit size (markerHitSize)', () => {
+    expect(markerHitSlop(20, 20, 60)).toEqual({
+      top: 20,
+      bottom: 20,
+      left: 20,
+      right: 20,
+    });
+    // Smaller than the view: the view's own bounds.
+    expect(markerHitSlop(20, 20, 10)).toBeUndefined();
+  });
 });
 
 describe('selectionMenuItemSpecFor', () => {
