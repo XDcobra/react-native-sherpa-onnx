@@ -632,10 +632,12 @@ With `selectable`, a long press selects text with the platform's handles and men
 | `markers[].blockId`, `start?`, `end?` | Anchor: the block's first line, or the line of the range's last character (UTF-16, `end` exclusive). |
 | `markers[].accessibilityLabel` | Read by VoiceOver / TalkBack; default: the text inside the view. |
 | `renderMarker(id)` | Any view, any size. Without it markers are not shown, not tappable and not read by screen readers. |
+| `markerHitSize` | Side of the square hit area centered on the view (pt / dp). Default 44 (iOS) / 48 (Android); never smaller than the view. |
 
 - **Position:** the view is centered in the trailing margin and vertically on its anchor line. A view wider than the margin is moved in so it stays on screen and then overlaps the text. Markers on the same line are placed below one another, so combine them in the app (one marker with a count) to keep the margin tidy. On page images markers sit at the trailing edge of the page at the block's line.
 - **Virtualized:** only the views of markers in and around the visible range are mounted (one screen above and below, plus up to 16 recently shown ones). `renderMarker` runs when a marker comes near, so keep it cheap and read its data from a map by ID. A view appears one to two frames after the document's first layout.
-- **Touch:** a tap anywhere on the view fires `onMarkerPress` instead of `onTap`. A `Pressable` inside the view takes its own taps first. Small views get a hit slop up to 44 pt (iOS) / 48 dp (Android).
+- **Touch:** a tap anywhere on the view fires `onMarkerPress` instead of `onTap`. A `Pressable` inside the view takes its own taps first.
+- **Hit area:** `markerHitSize` around the view, also where it reaches into the row above or below; the nearest marker wins. Over selectable text a long press still selects, a tap fires `onMarkerPress`; a drag scrolls.
 - **Accessibility:** each marker view is one button for VoiceOver / TalkBack with `accessibilityLabel`; activating it fires `onMarkerPress`. VoiceOver reads it after its row's text; TalkBack reads the visible marker views after the visible rows.
 - **Cost:** markers are compared by `id` and anchor; a change re-places only the affected visible rows (no relayout). Only a few dozen views are mounted at a time, however many markers there are; flinging through 200 markers in the example stays smooth.
 - **Measure:** `measure` / `measureInWindow` inside a marker view return its on-screen position once the list is at rest (not while it scrolls).
