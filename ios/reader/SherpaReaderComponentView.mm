@@ -285,6 +285,13 @@ static NSString *const kInsertCellId = @"SherpaReaderInsertCell";
   BOOL _rebuildScheduled;
   BOOL _readySent;
   BOOL _dragging;
+  // Scroll indicator drag (scrubbing): decided once per drag, kept until the
+  // view comes to rest, reported as one jump (cause "drag").
+  BOOL _scrubbing;
+  BOOL _scrubDecided;
+  CGFloat _dragStartOffset;
+  CGFloat _dragStartTranslation;
+  CGFloat _dragStartX;
   BOOL _programmaticAnimation;
   CFTimeInterval _lastOriginSync;
 }
@@ -874,7 +881,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   const bool moved = _resolved.followBlock != _followedBlock || _resolved.followOffset != _followedOffset;
   _followedBlock = _resolved.followBlock;
   _followedOffset = _resolved.followOffset;
-  if ((!moved && !force) || _followMode == "off" || _dragging) return;
+  if ((!moved && !force) || _followMode == "off" || _dragging || _scrubbing) return;
   if (_followPaused) {
     if (![self followTargetInComfortZone]) return;
     _followPaused = NO;
@@ -1521,6 +1528,11 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 - (void)scrollViewWillBeginDragging:(UIScrollView *)scrollView
 {
   _dragging = YES;
+  _scrubbing = NO;
+  _scrubDecided = NO;
+  _dragStartOffset = scrollView.contentOffset.y;
+  _dragStartTranslation = [scrollView.panGestureRecognizer translationInView:scrollView].y;
+  _dragStartX = [scrollView.panGestureRecognizer locationInView:self].x;
   _programmaticAnimation = NO;
   _followAnimation = NO;
   if (_followPauseOnUser && !_followPaused && _resolved.followBlock >= 0 && _followMode != "off") {
@@ -1530,9 +1542,35 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   [self cancelReactTouches];
 }
 
+/**
+ * Whether this drag moves the scroll indicator instead of the content. UIKit
+ * runs both through the pan gesture; an indicator drag animates the offset
+ * (decelerating while the finger is down) and moves the content with the
+ * finger, many times faster. A content drag moves it against the finger.
+ */
+- (void)decideScrub:(UIScrollView *)scrollView
+{
+  if (_scrubDecided) return;
+  if (scrollView.isTracking && scrollView.isDecelerating) {
+    _scrubbing = YES;
+    _scrubDecided = YES;
+    return;
+  }
+  const CGFloat finger = [scrollView.panGestureRecognizer translationInView:scrollView].y - _dragStartTranslation;
+  if (fabs(finger) < 1) return;
+  const CGFloat content = scrollView.contentOffset.y - _dragStartOffset;
+  const CGFloat edge = 44;  // the indicator's touch area at either side (RTL)
+  const BOOL atEdge = _dragStartX <= edge || _dragStartX >= self.bounds.size.width - edge;
+  _scrubbing = atEdge && finger * content > 0 && fabs(content) >= 2 * fabs(finger);
+  _scrubDecided = YES;
+}
+
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView
 {
-  if (_dragging) {
+  if (_dragging) [self decideScrub:scrollView];
+  if (_scrubbing) {
+    [self sampleWithPhase:rdr::ScrollPhase::Scrub];
+  } else if (_dragging) {
     [self sampleWithPhase:rdr::ScrollPhase::Drag];
   } else if (scrollView.isDecelerating) {
     [self sampleWithPhase:rdr::ScrollPhase::Momentum];
@@ -1552,12 +1590,15 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
   if (!decelerate) {
     [self settle];
   } else {
-    [self sampleWithPhase:rdr::ScrollPhase::Momentum];
+    [self sampleWithPhase:_scrubbing ? rdr::ScrollPhase::Scrub : rdr::ScrollPhase::Momentum];
   }
 }
 
 - (void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView
 {
+  // An indicator drag animates the offset while the finger is still down;
+  // it settles when the finger lifts (scrollViewDidEndDragging).
+  if (_dragging) return;
   [self settle];
 }
 
@@ -1578,6 +1619,7 @@ static bool ThemeChanged(const SherpaReaderViewProps &a, const SherpaReaderViewP
 {
   [self syncInsertOrigins];
   [self sampleWithPhase:rdr::ScrollPhase::Idle];
+  _scrubbing = NO;
   // The user scrolled the followed highlight back into the comfort zone.
   if (_followPaused && !_dragging && [self followTargetInComfortZone]) {
     _followPaused = NO;
