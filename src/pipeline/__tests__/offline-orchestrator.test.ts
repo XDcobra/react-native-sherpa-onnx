@@ -915,6 +915,46 @@ describe('offline orchestrator', () => {
     ]);
   });
 
+  it('text->audio reports a part with nothing to speak to onNonSpeakableSegment', async () => {
+    const seg = (i: number, body: string, start: number) => ({
+      segmentId: `txt_seg_${i}`,
+      domain: 'text',
+      startOffset: start,
+      endOffset: start + body.length,
+      reason: 'manual_commit',
+      source: 'external',
+      createdAtMs: 0,
+      segmentIndex: i,
+      text: body,
+      utf16Length: body.length,
+    });
+    segment.getSegments.mockResolvedValue([seg(0, 'hi', 0), seg(1, '   ', 2)]);
+    audio.getPipelineAudioBufferInfo.mockResolvedValue({
+      bufferId: 'off_tmp_out',
+      kind: 'offlinePcmBuffer',
+      state: 'immutable',
+      sampleRate: 16000,
+      channelCount: 1,
+      numSamples: 4,
+      durationMs: 0.25,
+    });
+    const consumer = jest.fn().mockResolvedValue(undefined);
+    const onNonSpeakableSegment = jest.fn(() => {
+      throw new Error('a failing callback must not fail the run');
+    });
+    const result = await runOfflineTextToAudioPipeline('txt_in', consumer, {
+      segmentation: { mode: 'auto' },
+      sampleRate: 16000,
+      channels: 1,
+      onNonSpeakableSegment,
+    });
+    expect(result.status).toBe('complete');
+    expect(consumer).toHaveBeenCalledTimes(1);
+    expect(onNonSpeakableSegment).toHaveBeenCalledWith(
+      expect.objectContaining({ segmentIndex: 1, segmentCount: 2 })
+    );
+  });
+
   it('text->audio timeline accumulates sample offsets across segments', async () => {
     const seg = (i: number, start: number, end: number) => ({
       segmentId: `txt_seg_${i}`,
