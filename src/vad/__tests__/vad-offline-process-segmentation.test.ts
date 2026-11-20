@@ -757,4 +757,105 @@ describe('VAD offline process: segmentation modes, native passes, and onProgress
 
     expect(mockRunVadOffline).not.toHaveBeenCalled();
   });
+
+  describe('signal', () => {
+    const cancelled = { name: 'AbortError', code: 'ORCHESTRATION_CANCELLED' };
+
+    function abortedSignal(): AbortSignal {
+      const controller = new AbortController();
+      controller.abort();
+      return controller.signal;
+    }
+
+    it('rejects a single pass before the native call when already aborted', async () => {
+      const engine = await createEngine();
+
+      await expect(
+        engine.process({
+          audioIn: 'off_audio',
+          segmentOut: 'seg_off_output',
+          options: { signal: abortedSignal() },
+        })
+      ).rejects.toMatchObject(cancelled);
+      expect(mockRunVadOffline).not.toHaveBeenCalled();
+    });
+
+    it('rejects a segmented run before segmentation when already aborted', async () => {
+      const engine = await createEngine();
+
+      await expect(
+        engine.process({
+          audioIn: 'off_audio',
+          segmentOut: 'seg_off_output',
+          options: { segmentation: { mode: 'auto' }, signal: abortedSignal() },
+        })
+      ).rejects.toMatchObject(cancelled);
+      expect(mockSegmentOfflineBuffer).not.toHaveBeenCalled();
+      expect(mockRunVadOffline).not.toHaveBeenCalled();
+    });
+
+    it('stops between segments, releases temporaries and leaves an offline target empty', async () => {
+      const engine = await createEngine();
+      const controller = new AbortController();
+      const onProgress = jest.fn();
+      const runVad = mockRunVadOffline.getMockImplementation()!;
+      mockRunVadOffline.mockImplementationOnce(async (...args: unknown[]) => {
+        controller.abort();
+        return runVad(...args);
+      });
+
+      await expect(
+        engine.process({
+          audioIn: 'off_audio',
+          segmentOut: 'seg_off_output',
+          options: {
+            segmentation: { mode: 'auto' },
+            onProgress,
+            signal: controller.signal,
+          },
+        })
+      ).rejects.toMatchObject(cancelled);
+
+      expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
+      expect(onProgress).toHaveBeenCalledTimes(1);
+      expect(mockReleasePipelineAudioBuffer).toHaveBeenCalledWith(
+        'off_slice_0'
+      );
+      expect(mockReleasePipelineSegmentBuffer).toHaveBeenCalledWith(
+        'seg_tmp_0'
+      );
+      expect(mockReleasePipelineSegmentBuffer).toHaveBeenCalledWith(
+        'seg_live_staging'
+      );
+      expect(mockFinalizeLiveSegmentBuffer).not.toHaveBeenCalled();
+      expect(mockPopulateOfflineSegmentBufferIfEmpty).not.toHaveBeenCalled();
+    });
+
+    it('keeps the segments already appended to a live target', async () => {
+      const engine = await createEngine();
+      const controller = new AbortController();
+      mockAppendLiveSegment.mockImplementationOnce(async () => {
+        controller.abort();
+        return { segmentId: 'seg_appended_0', segmentIndex: 0 };
+      });
+
+      await expect(
+        engine.process({
+          audioIn: 'off_audio',
+          segmentOut: 'seg_live_output',
+          options: {
+            segmentation: { mode: 'auto' },
+            signal: controller.signal,
+          },
+        })
+      ).rejects.toMatchObject(cancelled);
+
+      expect(mockRunVadOffline).toHaveBeenCalledTimes(1);
+      expect(mockAppendLiveSegment).toHaveBeenCalledTimes(1);
+      expect(mockAppendLiveSegment.mock.calls[0]?.[0]).toBe('seg_live_output');
+      expect(mockReleasePipelineSegmentBuffer).not.toHaveBeenCalledWith(
+        'seg_live_output'
+      );
+    });
+  });
 });
