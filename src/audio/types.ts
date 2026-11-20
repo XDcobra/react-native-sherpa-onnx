@@ -25,18 +25,32 @@ export type AudioOutputFormat =
 export type AudioSaveInput = PipelineAudioBufferIdSource | FileSource;
 
 /**
- * Progress event emitted during audio save operations.
+ * Progress event emitted during audio save operations (native `audioSaveProgress`).
+ *
+ * Sequence for one save: `encode` events while samples are written to the encoder, sent
+ * when the percent moved by at least 1 or 100 ms passed, then exactly one `finalize` event
+ * with `percent: 100` before the promise resolves. Percent never goes back. A failed or
+ * cancelled save sends no `finalize` event.
  */
 export interface AudioSaveProgressEvent {
   /** Unique operation identifier for correlation. */
   operationId: string;
-  /** Current phase: "decode" (file-backed/FileSource input), "encode", or "finalize". */
+  /**
+   * `encode`: frames are being written. `finalize`: the file is complete (always 100 %).
+   * `decode` is reserved for a separate decode stage and is not sent at present;
+   * `FileSource` input reports `encode` progress like buffer input.
+   */
   phase: 'decode' | 'encode' | 'finalize';
-  /** Frames processed so far in current phase. */
+  /** Frames (per channel, at the input sample rate) written to the encoder so far. */
   framesProcessed: number;
-  /** Estimated total frames (0 if unknown). */
+  /**
+   * Frames that will be written: the whole input or the sum of the selected `ranges`
+   * (0 if unknown). When `ranges` are cut from a decoded file (a `FileSource` or a live
+   * buffer with a spool file) it comes from the range bounds and can be larger than the
+   * audio the file holds. In the `finalize` event it equals `framesProcessed`.
+   */
   totalFramesEstimate: number;
-  /** Progress percentage 0–100 (0 when total unknown). */
+  /** `framesProcessed / totalFramesEstimate` as 0–99 while encoding (0 when unknown); 100 in `finalize`. */
   percent: number;
 }
 
@@ -93,7 +107,10 @@ export interface SaveAudioOptions {
   /** AbortSignal to cancel the save operation. */
   signal?: AbortSignal;
 
-  /** Progress callback — wired to native "audioSaveProgress" events. */
+  /**
+   * Progress callback, fed by native `audioSaveProgress` events of this save
+   * (see {@link AudioSaveProgressEvent} for the event sequence and throttling).
+   */
   onProgress?: (event: AudioSaveProgressEvent) => void;
 }
 

@@ -37,6 +37,7 @@
 #include <cstring>
 #include <cerrno>
 #include <thread>
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <sys/mman.h>
@@ -50,6 +51,18 @@ static dispatch_queue_t SherpaAudioDecodeQueue(void) {
   static dispatch_queue_t queue;
   dispatch_once(&onceToken, ^{
     queue = dispatch_queue_create("com.sherpaonnx.audio-decode", DISPATCH_QUEUE_SERIAL);
+  });
+  return queue;
+}
+
+/** Concurrent queue for saveAudioAsFile encodes: off the module thread, several saves can run at once. */
+static dispatch_queue_t SherpaAudioSaveQueue(void) {
+  static dispatch_once_t onceToken;
+  static dispatch_queue_t queue;
+  dispatch_once(&onceToken, ^{
+    dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(
+        DISPATCH_QUEUE_CONCURRENT, QOS_CLASS_USER_INITIATED, 0);
+    queue = dispatch_queue_create("com.sherpaonnx.audio-save", attr);
   });
   return queue;
 }
@@ -2125,11 +2138,86 @@ static std::vector<PaFrameSpan> pa_toFrameSpans(
   return merged;
 }
 
+/**
+ * Throttled `audioSaveProgress` for one save. Same rules as Android `AudioSaveProgressReporter`:
+ * - report(): an "encode" event when the percent moved by >= 1 or 100 ms passed since the last
+ *   event (the first call always emits). Percent is capped at 99 while encoding.
+ * - complete(): one final "finalize" event with percent 100, not throttled, sent once.
+ * Not thread-safe: one instance per save, used from the thread that runs the encode.
+ */
+struct PaSaveProgressThrottle {
+  using EmitFn = std::function<void(const char *phase, int64_t framesProcessed,
+                                    int64_t totalFramesEstimate, int percent)>;
+
+  explicit PaSaveProgressThrottle(EmitFn fn) : emit_(std::move(fn)) {}
+
+  static int percentOf(int64_t frames, int64_t total) {
+    if (total <= 0 || frames <= 0) return 0;
+    int pct = (int)((double)frames * 100.0 / (double)total);
+    return std::clamp(pct, 0, 99);
+  }
+
+  void report(int64_t framesProcessed, int64_t totalFramesEstimate) {
+    if (completed_ || !emit_) return;
+    framesSeen_ = framesProcessed;
+    const int pct = percentOf(framesProcessed, totalFramesEstimate);
+    const auto now = std::chrono::steady_clock::now();
+    if (lastPercent_ >= 0) {
+      if (framesProcessed <= lastEmittedFrames_) return;
+      const auto sinceLast =
+          std::chrono::duration_cast<std::chrono::milliseconds>(now - lastEmit_).count();
+      if (pct < lastPercent_ + 1 && sinceLast < kMinIntervalMs) return;
+    }
+    lastPercent_ = std::max(lastPercent_, pct);
+    lastEmit_ = now;
+    lastEmittedFrames_ = framesProcessed;
+    emit_("encode", framesProcessed, std::max<int64_t>(0, totalFramesEstimate), lastPercent_);
+  }
+
+  void complete() {
+    if (completed_) return;
+    completed_ = true;
+    if (emit_) emit_("finalize", framesSeen_, framesSeen_, 100);
+  }
+
+ private:
+  static constexpr long long kMinIntervalMs = 100;
+  EmitFn emit_;
+  int lastPercent_ = -1;
+  std::chrono::steady_clock::time_point lastEmit_{};
+  int64_t lastEmittedFrames_ = -1;
+  int64_t framesSeen_ = 0;
+  bool completed_ = false;
+};
+
+/** Emitter for PaSaveProgressThrottle: sends `audioSaveProgress` on the main queue. */
+static PaSaveProgressThrottle::EmitFn pa_makeSaveProgressEmitter(SherpaOnnx *module,
+                                                                 NSString *operationId) {
+  __weak SherpaOnnx *weakModule = module;
+  NSString *opId = [operationId copy];
+  return [weakModule, opId](const char *phase, int64_t framesProcessed,
+                            int64_t totalFramesEstimate, int percent) {
+    NSString *phaseStr = [NSString stringWithUTF8String:phase];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      SherpaOnnx *strongModule = weakModule;
+      if (!strongModule) return;
+      [strongModule sendEventWithName:@"audioSaveProgress" body:@{
+        @"operationId": opId,
+        @"phase": phaseStr,
+        @"framesProcessed": @((double)framesProcessed),
+        @"totalFramesEstimate": @((double)totalFramesEstimate),
+        @"percent": @(percent),
+      }];
+    });
+  };
+}
+
 static std::string pa_encodeViaPcm(
     const float *samples, int numSamples, int sampleRate, int channelCount,
     const char *outputPath, const char *format, int outputSampleRateHz,
     int bitrate, int quality, std::atomic<bool> &cancelFlag,
-    const std::vector<PaMsRange> &rangesMs = {}) {
+    const std::vector<PaMsRange> &rangesMs = {},
+    PaSaveProgressThrottle *progress = nullptr) {
   sherpa::AudioEncodeConfig config{};
   config.outputPath = outputPath;
   config.formatHint = format;
@@ -2156,6 +2244,7 @@ static std::string pa_encodeViaPcm(
   if (!session) return errorOut;
 
   const int chunkFrames = 4096;
+  int64_t framesFed = 0;
   for (const auto &span : spans) {
     int64_t at = span.startFrame;
     while (at < span.endFrame) {
@@ -2163,6 +2252,8 @@ static std::string pa_encodeViaPcm(
       std::string err = session->feedChunk(samples + at * channelCount, chunk);
       if (!err.empty()) return err;
       at += chunk;
+      framesFed += chunk;
+      if (progress) progress->report(framesFed, selectedFrames);
     }
   }
   return session->finish();
@@ -2172,7 +2263,8 @@ static std::string pa_encodeViaDecodeFile(
     const char *inputPath, const char *outputPath, const char *format,
     int outputSampleRateHz, int bitrate, int quality,
     std::atomic<bool> &cancelFlag,
-    const std::vector<PaMsRange> &rangesMs = {}) {
+    const std::vector<PaMsRange> &rangesMs = {},
+    PaSaveProgressThrottle *progress = nullptr) {
   sherpa::AudioDecodeConfig decConfig{};
   decConfig.targetSampleRate = 0; // keep source rate
   decConfig.forceMono = true;
@@ -2186,7 +2278,13 @@ static std::string pa_encodeViaDecodeFile(
   int64_t absoluteFrame = 0;
   int64_t fedFrames = 0;
   std::vector<PaFrameSpan> spans;
+  int64_t selectedFramesEstimate = 0;  // progress total for the ranges path
   std::string encodeCreateError;
+  auto sumSpans = [](const std::vector<PaFrameSpan> &v) {
+    int64_t n = 0;
+    for (const auto &s : v) n += s.length();
+    return n;
+  };
 
   auto ensureSession = [&](int rate, int64_t selectedEstimate) -> bool {
     if (session) return true;
@@ -2232,6 +2330,7 @@ static std::string pa_encodeViaDecodeFile(
       std::string err = session->feedChunk(samples + localStart, take);
       if (!err.empty()) throw std::runtime_error(err);
       fedFrames += take;
+      if (progress) progress->report(fedFrames, selectedFramesEstimate);
     }
     absoluteFrame = chunkEnd;
   };
@@ -2244,6 +2343,7 @@ static std::string pa_encodeViaDecodeFile(
     if (spans.empty()) {
       throw std::runtime_error("AUDIO_SAVE_BUFFER_EMPTY: Buffer is empty");
     }
+    selectedFramesEstimate = sumSpans(spans);
     if (!allSamples.empty()) {
       std::vector<float> pending = std::move(allSamples);
       allSamples.clear();
@@ -2270,7 +2370,8 @@ static std::string pa_encodeViaDecodeFile(
     }
     int rate = decResult.sourceSampleRate > 0 ? decResult.sourceSampleRate : 16000;
     return pa_encodeViaPcm(allSamples.data(), (int)allSamples.size(), rate, 1,
-                           outputPath, format, outputSampleRateHz, bitrate, quality, cancelFlag);
+                           outputPath, format, outputSampleRateHz, bitrate, quality, cancelFlag,
+                           {}, progress);
   }
 
   if (srcRate <= 0) {
@@ -2282,6 +2383,7 @@ static std::string pa_encodeViaDecodeFile(
                               : (int64_t)allSamples.size();
     spans = pa_toFrameSpans(normalized, srcRate, totalFrames);
     if (spans.empty()) return "AUDIO_SAVE_BUFFER_EMPTY: Buffer is empty";
+    selectedFramesEstimate = sumSpans(spans);
     if (!allSamples.empty()) {
       std::vector<float> pending = std::move(allSamples);
       allSamples.clear();
@@ -2300,6 +2402,9 @@ static std::string pa_encodeViaDecodeFile(
 }
 
 // ---- Save audio buffer to file ----
+// The registry lock (g_pa_mutex) is held only for the lookup. The encode runs on
+// SherpaAudioSaveQueue so decode, release and playback calls are not blocked behind it,
+// and cancelAudioSave (module thread) can reach a running encode.
 - (void)saveAudioBufferToFile:(NSString *)bufferId
                   destination:(NSDictionary *)destination
                        format:(NSString *)format
@@ -2350,94 +2455,123 @@ static std::string pa_encodeViaDecodeFile(
 
   std::string bid = [bufferId UTF8String];
   std::string outputPathStr = [outputPath UTF8String];
-  std::string err;
 
-  std::lock_guard<std::mutex> lock(g_pa_mutex);
-
-  // Offline buffer?
-  if (bid.rfind("off_", 0) == 0) {
-    auto it = g_pa_offline.find(bid);
-    if (it == g_pa_offline.end()) {
-      [wh cleanup]; pa_cleanupOutputFile(outputPath);
-      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
-      reject(@"AUDIO_SAVE_SOURCE_NOT_FOUND", @"Offline buffer not found", nil); return;
-    }
-    auto &entry = it->second;
-    if (entry->numSamples() == 0) {
-      [wh cleanup]; pa_cleanupOutputFile(outputPath);
-      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
-      reject(@"AUDIO_SAVE_BUFFER_EMPTY", @"Buffer is empty", nil); return;
-    }
-
-    {
-      const float *ptr = entry->floatPtr();
-      int n = entry->numSamples();
-      err = pa_encodeViaPcm(ptr, n,
-                             entry->sampleRate, entry->channelCount,
-                             outputPathStr.c_str(), fmt.c_str(), rate,
-                             (int)bitrate, (int)quality, *cancelFlag, rangesMs);
-    }
-  }
-  // Live buffer?
-  else if (bid.rfind("live_", 0) == 0) {
-    auto it = g_pa_live.find(bid);
-    if (it == g_pa_live.end()) {
-      [wh cleanup]; pa_cleanupOutputFile(outputPath);
-      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
-      if (g_pa_invalidated_live_ids.find(bid) != g_pa_invalidated_live_ids.end()) {
-        reject(kPAErrBufferInvalidated, @"Live buffer is invalidated after transfer", nil);
+  // Look up the buffer and take what the encode needs. An offline entry is kept by
+  // shared_ptr: releasePipelineAudioBuffer only frees its PCM when it holds the last
+  // reference, so a release during the encode leaves the samples valid until we finish.
+  // A live buffer gives either its spool path (decoded from disk) or the entry itself,
+  // held only until its ring has been copied.
+  std::shared_ptr<PaOfflineEntry> offline;
+  std::shared_ptr<PaLiveEntry> liveForSnapshot;
+  std::string spoolPath;
+  int liveSampleRate = 0;
+  NSString *lookupErrCode = nil;
+  NSString *lookupErrMsg = nil;
+  {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    if (bid.rfind("off_", 0) == 0) {
+      auto it = g_pa_offline.find(bid);
+      if (it == g_pa_offline.end()) {
+        lookupErrCode = @"AUDIO_SAVE_SOURCE_NOT_FOUND";
+        lookupErrMsg = @"Offline buffer not found";
+      } else if (it->second->numSamples() == 0) {
+        lookupErrCode = @"AUDIO_SAVE_BUFFER_EMPTY";
+        lookupErrMsg = @"Buffer is empty";
       } else {
-        reject(@"AUDIO_SAVE_SOURCE_NOT_FOUND", @"Live buffer not found", nil);
+        offline = it->second;
       }
-      return;
-    }
-    auto &entry = it->second;
-    if (entry->state != PaLiveEntry::FINISHED) {
-      [wh cleanup]; pa_cleanupOutputFile(outputPath);
-      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
-      reject(@"AUDIO_SAVE_BUFFER_NOT_FINALIZED", @"Live buffer must be finalized before saving", nil); return;
-    }
-    if (entry->totalSamplesWritten == 0) {
-      [wh cleanup]; pa_cleanupOutputFile(outputPath);
-      { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
-      reject(@"AUDIO_SAVE_BUFFER_EMPTY", @"Buffer is empty", nil); return;
-    }
-
-    if (entry->hasActiveSpool) {
-      err = pa_encodeViaDecodeFile(entry->spoolPath.c_str(), outputPathStr.c_str(), fmt.c_str(),
-                                    rate, (int)bitrate, (int)quality, *cancelFlag, rangesMs);
+    } else if (bid.rfind("live_", 0) == 0) {
+      auto it = g_pa_live.find(bid);
+      if (it == g_pa_live.end()) {
+        if (g_pa_invalidated_live_ids.find(bid) != g_pa_invalidated_live_ids.end()) {
+          lookupErrCode = kPAErrBufferInvalidated;
+          lookupErrMsg = @"Live buffer is invalidated after transfer";
+        } else {
+          lookupErrCode = @"AUDIO_SAVE_SOURCE_NOT_FOUND";
+          lookupErrMsg = @"Live buffer not found";
+        }
+      } else if (it->second->state != PaLiveEntry::FINISHED) {
+        lookupErrCode = @"AUDIO_SAVE_BUFFER_NOT_FINALIZED";
+        lookupErrMsg = @"Live buffer must be finalized before saving";
+      } else if (it->second->totalSamplesWritten == 0) {
+        lookupErrCode = @"AUDIO_SAVE_BUFFER_EMPTY";
+        lookupErrMsg = @"Buffer is empty";
+      } else if (it->second->hasActiveSpool) {
+        spoolPath = it->second->spoolPath;
+      } else {
+        liveForSnapshot = it->second;
+        liveSampleRate = it->second->sampleRate;
+      }
     } else {
-      auto snapshot = entry->snapshotRing();
-      err = pa_encodeViaPcm(snapshot.data(), (int)snapshot.size(), entry->sampleRate, 1,
-                             outputPathStr.c_str(), fmt.c_str(), rate,
-                             (int)bitrate, (int)quality, *cancelFlag, rangesMs);
+      lookupErrCode = @"AUDIO_SAVE_SOURCE_NOT_FOUND";
+      lookupErrMsg = @"Invalid buffer ID prefix: expected off_ or live_";
     }
   }
-  else {
+  if (lookupErrCode) {
     [wh cleanup]; pa_cleanupOutputFile(outputPath);
     { std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex); g_pa_saveCancelFlags.erase(opId); }
-    reject(@"AUDIO_SAVE_SOURCE_NOT_FOUND", @"Invalid buffer ID prefix: expected off_ or live_", nil);
+    reject(lookupErrCode, lookupErrMsg, nil);
     return;
   }
 
-  {
-    std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex);
-    g_pa_saveCancelFlags.erase(opId);
-  }
+  __weak SherpaOnnx *weakSelf = self;
+  NSString *opIdNs = [operationId copy];
+  const int bitrateKbps = (int)bitrate;
+  const int qualityLevel = (int)quality;
+  __block std::shared_ptr<PaLiveEntry> liveHold = std::move(liveForSnapshot);
 
-  if (!err.empty()) {
-    [wh cleanup]; pa_cleanupOutputFile(outputPath);
-    NSString *nsErr = [NSString stringWithUTF8String:err.c_str()];
-    NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
-    if ([nsErr containsString:@"CANCELLED"]) code = @"AUDIO_SAVE_CANCELLED";
-    else if ([nsErr hasPrefix:@"AUDIO_SAVE_BUFFER_EMPTY"]) code = @"AUDIO_SAVE_BUFFER_EMPTY";
-    else if ([nsErr hasPrefix:@"AUDIO_SAVE_INVALID_RANGE"]) code = @"AUDIO_SAVE_INVALID_RANGE";
-    reject(code, nsErr, nil);
-    return;
-  }
+  dispatch_async(SherpaAudioSaveQueue(), ^{
+    @autoreleasepool {
+      PaSaveProgressThrottle progress(pa_makeSaveProgressEmitter(weakSelf, opIdNs));
+      std::string err;
+      try {
+        if (offline) {
+          err = pa_encodeViaPcm(offline->floatPtr(), offline->numSamples(),
+                                offline->sampleRate, offline->channelCount,
+                                outputPathStr.c_str(), fmt.c_str(), rate,
+                                bitrateKbps, qualityLevel, *cancelFlag, rangesMs, &progress);
+        } else if (!spoolPath.empty()) {
+          err = pa_encodeViaDecodeFile(spoolPath.c_str(), outputPathStr.c_str(), fmt.c_str(),
+                                       rate, bitrateKbps, qualityLevel, *cancelFlag, rangesMs,
+                                       &progress);
+        } else {
+          std::vector<float> snapshot = liveHold->snapshotRing();
+          liveHold.reset();
+          err = pa_encodeViaPcm(snapshot.data(), (int)snapshot.size(), liveSampleRate, 1,
+                                outputPathStr.c_str(), fmt.c_str(), rate,
+                                bitrateKbps, qualityLevel, *cancelFlag, rangesMs, &progress);
+        }
+      } catch (const std::exception &e) {
+        err = std::string("AUDIO_SAVE_ENCODE_ERROR: ") + e.what();
+      }
+      liveHold.reset();
 
-  [wh cleanup];
-  resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
+      {
+        std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex);
+        g_pa_saveCancelFlags.erase(opId);
+      }
+
+      if (!err.empty()) {
+        [wh cleanup]; pa_cleanupOutputFile(outputPath);
+        NSString *nsErr = [NSString stringWithUTF8String:err.c_str()];
+        NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
+        if ([nsErr containsString:@"CANCELLED"]) code = @"AUDIO_SAVE_CANCELLED";
+        else if ([nsErr hasPrefix:@"AUDIO_SAVE_BUFFER_EMPTY"]) code = @"AUDIO_SAVE_BUFFER_EMPTY";
+        else if ([nsErr hasPrefix:@"AUDIO_SAVE_INVALID_RANGE"]) code = @"AUDIO_SAVE_INVALID_RANGE";
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(code, nsErr, nil);
+        });
+        return;
+      }
+
+      [wh cleanup];
+      // Final 100 % event; it is queued on the main queue before the resolve below.
+      progress.complete();
+      dispatch_async(dispatch_get_main_queue(), ^{
+        resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
+      });
+    }
+  });
 }
 
 // ---- Save file as audio file (file-to-file, no buffer registry) ----
@@ -2506,30 +2640,53 @@ static std::string pa_encodeViaDecodeFile(
   std::string inputPathStr = [inputPath UTF8String];
   std::string outputPathStr = [outputPath UTF8String];
 
-  std::string err = pa_encodeViaDecodeFile(inputPathStr.c_str(), outputPathStr.c_str(), fmt.c_str(),
-                                            rate, (int)bitrate, (int)quality, *cancelFlag, rangesMs);
+  __weak SherpaOnnx *weakSelf = self;
+  NSString *opIdNs = [operationId copy];
+  const int bitrateKbps = (int)bitrate;
+  const int qualityLevel = (int)quality;
 
-  {
-    std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex);
-    g_pa_saveCancelFlags.erase(opId);
-  }
+  // Decode + encode off the module thread (see saveAudioBufferToFile).
+  dispatch_async(SherpaAudioSaveQueue(), ^{
+    @autoreleasepool {
+      PaSaveProgressThrottle progress(pa_makeSaveProgressEmitter(weakSelf, opIdNs));
+      std::string err;
+      try {
+        err = pa_encodeViaDecodeFile(inputPathStr.c_str(), outputPathStr.c_str(), fmt.c_str(),
+                                     rate, bitrateKbps, qualityLevel, *cancelFlag, rangesMs,
+                                     &progress);
+      } catch (const std::exception &e) {
+        err = std::string("AUDIO_SAVE_ENCODE_ERROR: ") + e.what();
+      }
 
-  [rh cleanup];
+      {
+        std::lock_guard<std::mutex> lk(g_pa_saveCancelMutex);
+        g_pa_saveCancelFlags.erase(opId);
+      }
 
-  if (!err.empty()) {
-    [wh cleanup]; pa_cleanupOutputFile(outputPath);
-    NSString *nsErr = [NSString stringWithUTF8String:err.c_str()];
-    NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
-    if ([nsErr containsString:@"CANCELLED"]) code = @"AUDIO_SAVE_CANCELLED";
-    else if ([nsErr hasPrefix:@"AUDIO_SAVE_BUFFER_EMPTY"]) code = @"AUDIO_SAVE_BUFFER_EMPTY";
-    else if ([nsErr hasPrefix:@"AUDIO_SAVE_INVALID_RANGE"]) code = @"AUDIO_SAVE_INVALID_RANGE";
-    else if ([nsErr hasPrefix:@"AUDIO_SAVE_SOURCE_NOT_FOUND"]) code = @"AUDIO_SAVE_SOURCE_NOT_FOUND";
-    reject(code, nsErr, nil);
-    return;
-  }
+      [rh cleanup];
 
-  [wh cleanup];
-  resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
+      if (!err.empty()) {
+        [wh cleanup]; pa_cleanupOutputFile(outputPath);
+        NSString *nsErr = [NSString stringWithUTF8String:err.c_str()];
+        NSString *code = @"AUDIO_SAVE_ENCODE_ERROR";
+        if ([nsErr containsString:@"CANCELLED"]) code = @"AUDIO_SAVE_CANCELLED";
+        else if ([nsErr hasPrefix:@"AUDIO_SAVE_BUFFER_EMPTY"]) code = @"AUDIO_SAVE_BUFFER_EMPTY";
+        else if ([nsErr hasPrefix:@"AUDIO_SAVE_INVALID_RANGE"]) code = @"AUDIO_SAVE_INVALID_RANGE";
+        else if ([nsErr hasPrefix:@"AUDIO_SAVE_SOURCE_NOT_FOUND"]) code = @"AUDIO_SAVE_SOURCE_NOT_FOUND";
+        dispatch_async(dispatch_get_main_queue(), ^{
+          reject(code, nsErr, nil);
+        });
+        return;
+      }
+
+      [wh cleanup];
+      // Final 100 % event; it is queued on the main queue before the resolve below.
+      progress.complete();
+      dispatch_async(dispatch_get_main_queue(), ^{
+        resolve(@{ @"outputKind": outputKind, @"outputPath": resultPath });
+      });
+    }
+  });
 }
 
 // ---- Cancel audio save ----
@@ -2581,8 +2738,12 @@ static std::string pa_encodeViaDecodeFile(
   std::lock_guard<std::mutex> lock(g_pa_mutex);
   auto offIt = g_pa_offline.find(bid);
   if (offIt != g_pa_offline.end()) {
-    offIt->second->release();
+    // Drop the id, but free the PCM only if the registry held the last reference.
+    // A running encode (saveAudioBufferToFile) or a sample view may still read it; the
+    // last holder frees it (~PaOfflineEntry unmaps / frees). Same rule as pa_release_buffer.
+    std::shared_ptr<PaOfflineEntry> entry = std::move(offIt->second);
     g_pa_offline.erase(offIt);
+    if (entry.use_count() == 1) entry->release();
     resolve(nil);
     return;
   }

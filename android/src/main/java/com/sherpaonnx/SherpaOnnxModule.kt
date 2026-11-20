@@ -1196,6 +1196,34 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     }
   }
 
+  private fun emitAudioSaveProgress(
+    operationId: String,
+    phase: String,
+    framesProcessed: Long,
+    totalFramesEstimate: Long,
+    percent: Int,
+  ) {
+    try {
+      val payload = Arguments.createMap()
+      payload.putString("operationId", operationId)
+      payload.putString("phase", phase)
+      payload.putDouble("framesProcessed", framesProcessed.toDouble())
+      payload.putDouble("totalFramesEstimate", totalFramesEstimate.toDouble())
+      payload.putInt("percent", percent)
+      reactApplicationContext
+        .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        .emit("audioSaveProgress", payload)
+    } catch (t: Throwable) {
+      Log.w("SherpaOnnxEncode", "emit audioSaveProgress failed: ${t.message}")
+    }
+  }
+
+  /** One throttled `audioSaveProgress` reporter per save operation (see [AudioSaveProgressReporter]). */
+  private fun newAudioSaveProgressReporter(operationId: String) =
+    com.sherpaonnx.audio.AudioSaveProgressReporter { phase, frames, total, percent ->
+      emitAudioSaveProgress(operationId, phase, frames, total, percent)
+    }
+
   private fun emitImageFromVideoProgress(
     operationId: String,
     percent: Int,
@@ -2993,7 +3021,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     samples: FloatArray, sampleRate: Int, channelCount: Int,
     outputPath: String, format: String, outputSampleRateHz: Int,
     bitrate: Int, quality: Int, operationId: String,
-    cancelFlagAddr: Long
+    cancelFlagAddr: Long,
+    progress: com.sherpaonnx.audio.AudioSaveProgressReporter? = null,
   ) {
     val sessionPtr = nativeEncodeSessionCreate(
       outputPath, format, sampleRate, channelCount,
@@ -3018,6 +3047,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
         }
         offset = end
+        progress?.report(offset.toLong(), totalFrames.toLong())
       }
       val finishErr = nativeEncodeSessionFinish(sessionPtr)
       if (finishErr.isNotEmpty()) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $finishErr")
@@ -3032,6 +3062,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     bitrate: Int, quality: Int, operationId: String,
     cancelFlagAddr: Long,
     rangesMs: List<com.sherpaonnx.audio.AudioSaveRanges.MsRange> = emptyList(),
+    progress: com.sherpaonnx.audio.AudioSaveProgressReporter? = null,
   ) {
     val channelCount = entry.channelCount
     if (channelCount <= 0 || (entry.numSamples % channelCount) != 0) {
@@ -3063,6 +3094,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       val chunkFrames = 4096
       val chunkSamples = chunkFrames * channelCount
       val scratch = FloatArray(chunkSamples)
+      var framesFed = 0L
       entry.createReader().use { reader ->
         for (span in spans) {
           val startSample = (span.startFrame * channelCount).toInt()
@@ -3072,7 +3104,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             val wantFrames = minOf(chunkFrames.toLong(), span.endFrame - at).toInt()
             val wantSamples = wantFrames * channelCount
             val samplesRead = reader.readSamples(scratch, 0, wantSamples)
-            if (samplesRead <= 0) break
+            if (samplesRead <= 0) {
+              // Offline buffers are immutable and spans are clamped to their length, so a
+              // short read means the buffer was released during the save. Fail instead of
+              // resolving with a truncated file.
+              throw IllegalArgumentException(
+                "Offline buffer not found: ${entry.bufferId} was released during the save"
+              )
+            }
             if ((samplesRead % channelCount) != 0) {
               throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Invalid read alignment")
             }
@@ -3084,6 +3123,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
               throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
             }
             at += framesRead.toLong()
+            framesFed += framesRead.toLong()
+            progress?.report(framesFed, selectedFrames)
           }
         }
       }
@@ -3099,18 +3140,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     outputSampleRateHz: Int, bitrate: Int, quality: Int,
     operationId: String, cancelFlagAddr: Long,
     rangesMs: List<com.sherpaonnx.audio.AudioSaveRanges.MsRange> = emptyList(),
+    progress: com.sherpaonnx.audio.AudioSaveProgressReporter? = null,
   ) {
     val normalizedRanges = com.sherpaonnx.audio.AudioSaveRanges.normalizeMs(rangesMs)
     if (normalizedRanges.isEmpty()) {
       encodeViaDecodeFileFull(
         inputPath, inputFd, outputPath, format,
-        outputSampleRateHz, bitrate, quality, cancelFlagAddr,
+        outputSampleRateHz, bitrate, quality, cancelFlagAddr, progress,
       )
       return
     }
     encodeViaDecodeFileRanges(
       inputPath, inputFd, outputPath, format,
-      outputSampleRateHz, bitrate, quality, cancelFlagAddr, normalizedRanges,
+      outputSampleRateHz, bitrate, quality, cancelFlagAddr, normalizedRanges, progress,
     )
   }
 
@@ -3119,6 +3161,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     inputPath: String?, inputFd: Int, outputPath: String, format: String,
     outputSampleRateHz: Int, bitrate: Int, quality: Int,
     cancelFlagAddr: Long,
+    progress: com.sherpaonnx.audio.AudioSaveProgressReporter? = null,
   ) {
     var encodeSessionPtr = 0L
     try {
@@ -3155,6 +3198,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
         }
         offset = end
+        progress?.report(offset.toLong(), samples.size.toLong())
       }
       val finishErr = nativeEncodeSessionFinish(encodeSessionPtr)
       if (finishErr.isNotEmpty()) throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $finishErr")
@@ -3172,6 +3216,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     outputSampleRateHz: Int, bitrate: Int, quality: Int,
     cancelFlagAddr: Long,
     rangesMs: List<com.sherpaonnx.audio.AudioSaveRanges.MsRange>,
+    progress: com.sherpaonnx.audio.AudioSaveProgressReporter? = null,
   ) {
     var encodeSessionPtr = 0L
     var srcRate = 0
@@ -3228,6 +3273,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: $err")
         }
         fedFrames += take.toLong()
+        progress?.report(fedFrames, selectedFramesEstimate)
       }
       absoluteFrame = chunkEnd
     }
@@ -3336,17 +3382,18 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           throw RuntimeException("AUDIO_SAVE_CANCELLED: Operation cancelled")
         }
         val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
+        val progress = newAudioSaveProgressReporter(operationId)
 
         try {
           if (bufferId.startsWith("off_")) {
             saveOfflineBuffer(
               bufferId, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(),
-              operationId, cancelFlagAddr, rangesMs,
+              operationId, cancelFlagAddr, rangesMs, progress,
             )
           } else if (bufferId.startsWith("live_")) {
             saveLiveBuffer(
               bufferId, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(),
-              operationId, cancelFlagAddr, rangesMs,
+              operationId, cancelFlagAddr, rangesMs, progress,
             )
           } else {
             throw IllegalArgumentException("Invalid buffer ID prefix: expected off_ or live_")
@@ -3357,6 +3404,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         }
 
         copyTmpToStreamIfNeeded(dest)
+        // Final 100 % event, sent on this thread before the promise resolves.
+        progress.complete()
 
         val result = com.facebook.react.bridge.Arguments.createMap().apply {
           putString("outputKind", sanitizeOutputKind(dest))
@@ -3406,6 +3455,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     bufferId: String, outputPath: String, format: String, rate: Int,
     bitrate: Int, quality: Int, operationId: String, cancelFlagAddr: Long,
     rangesMs: List<com.sherpaonnx.audio.AudioSaveRanges.MsRange> = emptyList(),
+    progress: com.sherpaonnx.audio.AudioSaveProgressReporter? = null,
   ) {
     val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getOffline(bufferId)
       ?: throw IllegalArgumentException("Offline buffer not found: $bufferId")
@@ -3413,6 +3463,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
     encodeViaOfflineReader(
       entry, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr, rangesMs,
+      progress,
     )
   }
 
@@ -3420,6 +3471,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     bufferId: String, outputPath: String, format: String, rate: Int,
     bitrate: Int, quality: Int, operationId: String, cancelFlagAddr: Long,
     rangesMs: List<com.sherpaonnx.audio.AudioSaveRanges.MsRange> = emptyList(),
+    progress: com.sherpaonnx.audio.AudioSaveProgressReporter? = null,
   ) {
     val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(bufferId)
       ?: if (com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.isInvalidatedLiveBuffer(bufferId)) {
@@ -3435,10 +3487,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     if (spoolPath != null) {
       encodeViaDecodeFile(
         spoolPath, -1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr, rangesMs,
+        progress,
       )
     } else if (rangesMs.isEmpty()) {
       val snapshot = entry.snapshotRing()
-      encodeViaPcm(snapshot, entry.sampleRate, 1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
+      encodeViaPcm(
+        snapshot, entry.sampleRate, 1, outputPath, format, rate, bitrate, quality, operationId,
+        cancelFlagAddr, progress,
+      )
     } else {
       // Ring snapshot + ranges: slice selected frames from PCM (mono).
       val snapshot = entry.snapshotRing()
@@ -3457,7 +3513,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         System.arraycopy(snapshot, span.startFrame.toInt(), merged, out, n)
         out += n
       }
-      encodeViaPcm(merged, entry.sampleRate, 1, outputPath, format, rate, bitrate, quality, operationId, cancelFlagAddr)
+      encodeViaPcm(
+        merged, entry.sampleRate, 1, outputPath, format, rate, bitrate, quality, operationId,
+        cancelFlagAddr, progress,
+      )
     }
   }
 
@@ -3518,11 +3577,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
           throw RuntimeException("AUDIO_SAVE_CANCELLED: Operation cancelled")
         }
         val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
+        val progress = newAudioSaveProgressReporter(operationId)
 
         try {
           encodeViaDecodeFile(
             sourcePath, sourceFd, dest.outputPath, fmt, rate, bitrate.toInt(), quality.toInt(),
-            operationId, cancelFlagAddr, rangesMs,
+            operationId, cancelFlagAddr, rangesMs, progress,
           )
         } finally {
           stopNativeCancelBridge(cancelChecker, operationId)
@@ -3530,6 +3590,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         }
 
         copyTmpToStreamIfNeeded(dest)
+        // Final 100 % event, sent on this thread before the promise resolves.
+        progress.complete()
 
         val result = com.facebook.react.bridge.Arguments.createMap().apply {
           putString("outputKind", sanitizeOutputKind(dest))

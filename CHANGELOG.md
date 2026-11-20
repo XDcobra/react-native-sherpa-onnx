@@ -82,6 +82,9 @@
 ### Bug Fixes
 
 * **reader:** Dragging the scroll indicator is a jump, not reading: `onJump` fires once with `cause: 'drag'` when the view comes to rest, from where the drag started, whatever the distance and speed. A slow drag through the book no longer advances the furthest position or fires `onSectionEnd` chapter by chapter. `ReaderJumpCause` gains `'drag'`. See `docs/reader.md`.
+* **audio:** `saveAudioAsFile` now calls `onProgress`. Android and iOS send `encode` events while frames are written (when the percent moves by 1 or after 100 ms, at most 99 %) and one `finalize` event at 100 % before the promise resolves. Before, no progress events were sent. See `docs/audio-conversion.md`.
+* **audio:** iOS `saveAudioAsFile` no longer runs on the module thread or holds the buffer registry lock while encoding. Decode, release and player calls no longer wait for a running save, several saves can run at once, and aborting `signal` now stops a running save on iOS.
+* **audio:** iOS `releasePipelineAudioBuffer` no longer frees an offline buffer's samples while a save or another holder still reads them; the memory is freed when the last holder is done. On Android, releasing an offline buffer during a save now rejects the save with `AUDIO_SAVE_BUFFER_NOT_FOUND` instead of resolving with a truncated file.
 
 ### Migration Guide
 

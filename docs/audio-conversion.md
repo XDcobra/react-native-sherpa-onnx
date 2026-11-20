@@ -29,7 +29,8 @@ Key behavior:
 - Buffer contents are never modified by save operations.
 - Returns a `ResolvedFileRef` describing the actual written output location.
 - WAV uses a direct native fast path; lossy formats use the shared encode pipeline.
-- Progress events are emitted on the `audioSaveProgress` channel with `decode`, `encode`, and `finalize` phases.
+- `onProgress` receives `encode` events while the encoder runs and one `finalize` event at 100 % before the promise resolves (see [Progress and cancellation](#progress-and-cancellation)).
+- Saves run on a native background thread. Several saves can run at the same time, and other buffer calls are not blocked while a save runs.
 
 ## Quick start
 
@@ -144,7 +145,14 @@ const ref = await saveAudioAsFile(
 );
 ```
 
-`onProgress` receives an `AudioSaveProgressEvent` with a per-operation `operationId`, current `phase`, frame counters, and percent.
+`onProgress` receives an `AudioSaveProgressEvent` with a per-operation `operationId`, current `phase`, frame counters, and percent:
+
+- `encode`: sent while frames are written to the encoder. `framesProcessed` counts frames written so far and `totalFramesEstimate` the frames that will be written (whole input, or the sum of `ranges`). `percent` is `framesProcessed / totalFramesEstimate`, at most 99. Native code sends an event only when the percent moved by at least 1 or 100 ms passed, so a long save sends about 100 events.
+- `finalize`: sent once with `percent: 100` when the file is complete, before the promise resolves. `framesProcessed` and `totalFramesEstimate` are both the number of frames written.
+- `percent` never goes back. A failed or cancelled save sends no `finalize` event.
+- `decode` is part of the type but is not sent at present. A `FileSource` reports `encode` progress like a buffer. Without `ranges` the file is decoded first, so the first `encode` event comes after the decode.
+
+Aborting `signal` stops a running save on both platforms; the promise then rejects with `AUDIO_SAVE_CANCELLED`.
 
 ### Multi-range export
 
@@ -339,6 +347,7 @@ Use `AudioSaveErrorCode` from `react-native-sherpa-onnx/audio` for stable compar
 - Android and iOS both expose the same `saveAudioAsFile` / `saveAudioAsWav16k` API.
 - Android `contentUri` and `contentTree` outputs use a seekable fd when possible, with temp-file fallback if a provider cannot support direct output.
 - iOS output remains path-based through `fs`, `app`, and `securityScoped` destinations.
+- Releasing a buffer while it is being saved does not crash. On iOS an offline buffer stays readable until the save ends, so the save completes. On Android the save rejects with `AUDIO_SAVE_BUFFER_NOT_FOUND`. A live buffer released during the save can make the save fail on both platforms.
 - If FFmpeg is disabled, formats that require the FFmpeg backend reject at runtime. See [disable-ffmpeg.md](disable-ffmpeg.md).
 
 ## Related

@@ -8,7 +8,6 @@ import type {
   AudioOutputFormat,
   AudioSaveInput,
   SaveAudioOptions,
-  AudioSaveProgressEvent,
   PipelineAudioDeviceInfo,
 } from './types';
 import type {
@@ -18,6 +17,10 @@ import type {
 } from '../fileio/types';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import { normalizeAudioTimeRanges } from './ranges';
+import {
+  createAudioSaveProgressForwarder,
+  type AudioSaveProgressForwarder,
+} from './progress';
 
 let eventEmitter: NativeEventEmitter | null = null;
 function getEventEmitter(): NativeEventEmitter {
@@ -83,6 +86,10 @@ function mapQuality(quality?: 'low' | 'medium' | 'high'): number {
  *
  * Output: FileDestination descriptor.
  * Returns a ResolvedFileRef pointing to the written file.
+ *
+ * `options.onProgress` gets `encode` events while samples are written (about every 1 % or
+ * 100 ms, percent at most 99) and one `finalize` event with percent 100 before the promise
+ * resolves. No final event is sent when the save fails or is cancelled.
  * @throws {Error} `AUDIO_SAVE_CANCELLED` — `signal` aborted before or during the save.
  * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — destination or source kind is not valid on this OS.
  * @throws {Error} `AUDIO_INVALID_ARGUMENT` — buffer id is malformed.
@@ -108,21 +115,21 @@ export async function saveAudioAsFile(
   const ranges = normalizeAudioTimeRanges(options?.ranges) ?? null;
 
   let progressSubscription: { remove: () => void } | null = null;
+  let progress: AudioSaveProgressForwarder | null = null;
   let abortHandler: (() => void) | null = null;
 
   try {
-    // Progress listener — listens to native "audioSaveProgress" events
+    // Progress listener — native "audioSaveProgress" events of this operation
     if (options?.onProgress) {
-      const emitter = getEventEmitter();
-      const onProgress = options.onProgress;
-      progressSubscription = emitter.addListener('audioSaveProgress', ((
-        rawEvent: unknown
-      ) => {
-        const event = rawEvent as AudioSaveProgressEvent;
-        if (event.operationId === operationId) {
-          onProgress(event);
-        }
-      }) as any);
+      const forwarder = createAudioSaveProgressForwarder(
+        operationId,
+        options.onProgress
+      );
+      progress = forwarder;
+      progressSubscription = getEventEmitter().addListener(
+        'audioSaveProgress',
+        ((rawEvent: unknown) => forwarder.handle(rawEvent)) as any
+      );
     }
 
     // AbortSignal → native cancel
@@ -167,6 +174,8 @@ export async function saveAudioAsFile(
       );
     }
 
+    // Final 100 % if the native one has not been delivered yet.
+    progress?.complete();
     return parseResolvedFileRef(result);
   } finally {
     progressSubscription?.remove();
