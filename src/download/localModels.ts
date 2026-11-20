@@ -49,6 +49,18 @@ async function listSourceDirs(category: ModelCategory): Promise<string[]> {
     .map((entry) => entry.path);
 }
 
+/**
+ * A model dir counts as downloaded only with both its manifest and the ready
+ * marker: a download that starts again removes the marker but keeps the old
+ * manifest until it finishes.
+ */
+async function isReadyModelDir(
+  modelDir: string,
+  manifestPath: string
+): Promise<boolean> {
+  return (await exists(manifestPath)) && (await exists(`${modelDir}/.ready`));
+}
+
 async function listDownloadedModelsAtBase(
   baseDir: string
 ): Promise<ModelMeta[]> {
@@ -65,7 +77,7 @@ async function listDownloadedModelsAtBase(
     }
 
     const manifestPath = `${entry.path}/manifest.json`;
-    if (!(await exists(manifestPath))) {
+    if (!(await isReadyModelDir(entry.path, manifestPath))) {
       continue;
     }
 
@@ -159,8 +171,25 @@ export async function listDownloadedModelsWithMetadata(
   category: ModelCategory,
   options?: SourceSelectorOptions
 ): Promise<ModelWithMetadata[]> {
-  const sourceId = resolveSourceId(options?.source);
-  const baseDir = getSourceModelsBaseDir(category, sourceId);
+  if (options?.source) {
+    return listWithMetadataAtBase(
+      category,
+      getSourceModelsBaseDir(category, resolveSourceId(options.source))
+    );
+  }
+
+  // Without a source, every source (as listDownloadedModels does).
+  const models: ModelWithMetadata[] = [];
+  for (const sourceDir of await listSourceDirs(category)) {
+    models.push(...(await listWithMetadataAtBase(category, sourceDir)));
+  }
+  return models;
+}
+
+async function listWithMetadataAtBase(
+  category: ModelCategory,
+  baseDir: string
+): Promise<ModelWithMetadata[]> {
   if (!(await exists(baseDir))) {
     return [];
   }
@@ -173,8 +202,8 @@ export async function listDownloadedModelsWithMetadata(
       continue;
     }
 
-    const manifestPath = getManifestPath(category, entry.name, sourceId);
-    if (!(await exists(manifestPath))) {
+    const manifestPath = `${entry.path}/manifest.json`;
+    if (!(await isReadyModelDir(entry.path, manifestPath))) {
       continue;
     }
 
@@ -184,7 +213,10 @@ export async function listDownloadedModelsWithMetadata(
 
       if (manifest.model) {
         modelsWithMetadata.push({
-          model: manifest.model,
+          model: {
+            ...manifest.model,
+            sourceId: resolveSourceId(manifest.model.sourceId),
+          },
           downloadedAt: manifest.downloadedAt,
           lastUsed: manifest.lastUsed ?? null,
           sizeOnDisk: manifest.sizeOnDisk ?? entry.size,
