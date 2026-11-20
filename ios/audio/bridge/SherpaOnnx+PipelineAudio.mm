@@ -182,6 +182,8 @@ struct PaFileIngestStatus {
   int64_t totalFramesEstimate = 0;
   int percent = 0;
   std::string error;
+  /** Set by the prune pass the first time it sees the ingest finished. */
+  int64_t finishedSeenAtMs = 0;
 };
 
 struct PaVisualizationOptions {
@@ -543,6 +545,28 @@ static NSDictionary *pa_visualizationProfileToDict(
 
 static std::unordered_map<std::string, std::shared_ptr<PaFileIngestStatus>> g_pa_fileIngestStatuses;
 static std::mutex g_pa_fileIngestMutex;
+
+/** A finished ingest's status stays readable this long, then it is dropped. */
+static constexpr int64_t kPaFinishedIngestRetentionMs = 10 * 60 * 1000;
+
+/** Caller holds g_pa_fileIngestMutex. */
+static void pa_pruneFinishedIngestsLocked()
+{
+  const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now().time_since_epoch())
+                          .count();
+  for (auto it = g_pa_fileIngestStatuses.begin(); it != g_pa_fileIngestStatuses.end();) {
+    auto &status = it->second;
+    if (!status->isRunning) {
+      if (status->finishedSeenAtMs == 0) status->finishedSeenAtMs = now;
+      if (now - status->finishedSeenAtMs > kPaFinishedIngestRetentionMs) {
+        it = g_pa_fileIngestStatuses.erase(it);
+        continue;
+      }
+    }
+    ++it;
+  }
+}
 
 // pa_generate_id: AudioRegistry.cpp
 
@@ -2801,6 +2825,7 @@ static std::string pa_encodeViaDecodeFile(
   auto status = std::make_shared<PaFileIngestStatus>();
   {
     std::lock_guard<std::mutex> lock(g_pa_fileIngestMutex);
+    pa_pruneFinishedIngestsLocked();
     g_pa_fileIngestStatuses[ingestId] = status;
   }
 
@@ -2984,6 +3009,7 @@ static std::string pa_encodeViaDecodeFile(
   std::shared_ptr<PaFileIngestStatus> status;
   {
     std::lock_guard<std::mutex> lock(g_pa_fileIngestMutex);
+    pa_pruneFinishedIngestsLocked();
     auto it = g_pa_fileIngestStatuses.find(iId);
     if (it != g_pa_fileIngestStatuses.end()) {
       status = it->second;

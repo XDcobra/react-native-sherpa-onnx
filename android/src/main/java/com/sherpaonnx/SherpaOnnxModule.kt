@@ -1170,7 +1170,19 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     @Volatile var totalFramesEstimate: Long = 0,
     @Volatile var percent: Int = 0,
     @Volatile var error: String? = null,
+    /** Set by the prune pass the first time it sees the ingest finished. */
+    @Volatile var finishedSeenAtMs: Long = 0,
   )
+
+  /** A finished ingest's status stays readable for [FINISHED_INGEST_RETENTION_MS], then it is dropped. */
+  private fun pruneFinishedIngests() {
+    val now = android.os.SystemClock.elapsedRealtime()
+    fileIngestStatuses.entries.removeIf { (_, status) ->
+      if (status.isRunning) return@removeIf false
+      if (status.finishedSeenAtMs == 0L) status.finishedSeenAtMs = now
+      now - status.finishedSeenAtMs > FINISHED_INGEST_RETENTION_MS
+    }
+  }
 
   private fun emitDecodeProgress(
     operationId: String,
@@ -2394,10 +2406,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     promise: Promise
   ) {
     val ingestId = "ingest_${java.util.UUID.randomUUID()}"
-    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
-    decodeCancelFlags[operationId] = cancelFlag
-    val status = FileIngestStatus()
-    fileIngestStatuses[ingestId] = status
 
     // Validate buffer exists and is RECORDING before resolving file
     val liveEntry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.getLive(liveBufferId)
@@ -2444,6 +2452,13 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         return
       }
     }
+
+    // Registered after validation, so a rejected start leaves nothing behind.
+    val cancelFlag = java.util.concurrent.atomic.AtomicBoolean(false)
+    decodeCancelFlags[operationId] = cancelFlag
+    val status = FileIngestStatus()
+    pruneFinishedIngests()
+    fileIngestStatuses[ingestId] = status
 
     // Resolve file source synchronously, then run decode on background thread
     val readHandle: com.sherpaonnx.fileio.FileIOResolver.ReadHandle
@@ -2590,6 +2605,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
   }
 
   override fun getFileIngestStatus(ingestId: String, promise: Promise) {
+    pruneFinishedIngests()
     val status = fileIngestStatuses[ingestId]
     if (status == null) {
       val resultMap = Arguments.createMap()
@@ -8400,6 +8416,8 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
 
   companion object {
     const val NAME = "SherpaOnnx"
+
+    private const val FINISHED_INGEST_RETENTION_MS = 10L * 60L * 1000L
 
     @Volatile
     private var instance: SherpaOnnxModule? = null
