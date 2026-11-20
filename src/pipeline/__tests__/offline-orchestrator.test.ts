@@ -1156,4 +1156,420 @@ describe('offline orchestrator', () => {
       expect(audio.appendSamplesToLiveAudioBuffer).toHaveBeenCalledTimes(2);
     });
   });
+
+  describe('cancellation, segment times and segment results', () => {
+    const speechSegment = (index: number, start: number, end: number) => ({
+      segmentId: `seg_${index + 1}`,
+      domain: 'speech',
+      startOffset: start,
+      endOffset: end,
+      reason: 'manual_commit',
+      source: 'external',
+      createdAtMs: Date.now(),
+      segmentIndex: index,
+      sourceAudioBufferId: 'off_input',
+      sampleRate: 16000,
+      durationMs: ((end - start) / 16000) * 1000,
+    });
+
+    const textSegment = (index: number, segText: string) => ({
+      segmentId: `tseg_${index + 1}`,
+      domain: 'text',
+      startOffset: index * 4,
+      endOffset: index * 4 + segText.length,
+      reason: 'manual_commit',
+      source: 'external',
+      createdAtMs: Date.now(),
+      segmentIndex: index,
+      text: segText,
+      utf16Length: segText.length,
+    });
+
+    const setupAudioInput = () => {
+      audio.getPipelineAudioBufferInfo.mockImplementation((id: string) =>
+        Promise.resolve({
+          bufferId: id,
+          kind: 'offlinePcmBuffer',
+          state: 'immutable',
+          sampleRate: 16000,
+          channelCount: 1,
+          numSamples: id === 'off_input' ? 48000 : 4,
+          durationMs: id === 'off_input' ? 3000 : 0.25,
+        })
+      );
+      segment.getSegments.mockResolvedValue([
+        speechSegment(0, 0, 16000),
+        speechSegment(1, 16000, 40000),
+        speechSegment(2, 40000, 48000),
+      ]);
+    };
+
+    const expectCancelled = async (promise: Promise<unknown>) => {
+      await expect(promise).rejects.toMatchObject({
+        name: 'AbortError',
+        code: 'ORCHESTRATION_CANCELLED',
+      });
+    };
+
+    it('rejects without native work when the signal is aborted before start', async () => {
+      setupAudioInput();
+      const controller = new AbortController();
+      controller.abort();
+      const consumer = jest.fn().mockResolvedValue(undefined);
+
+      await expectCancelled(
+        runOfflineAudioPipeline('off_input', consumer, {
+          segmentation: { mode: 'auto' },
+          signal: controller.signal,
+        })
+      );
+
+      expect(consumer).not.toHaveBeenCalled();
+      expect(audio.getPipelineAudioBufferInfo).not.toHaveBeenCalled();
+      expect(audio.createEmptyLiveAudioBuffer).not.toHaveBeenCalled();
+    });
+
+    it('rejects before the single call when segmentation is off', async () => {
+      setupAudioInput();
+      const controller = new AbortController();
+      controller.abort();
+      const consumer = jest.fn().mockResolvedValue(undefined);
+
+      await expectCancelled(
+        runOfflineAudioToTextPipeline('off_input', consumer, {
+          signal: controller.signal,
+        })
+      );
+      expect(consumer).not.toHaveBeenCalled();
+    });
+
+    it('stops between segments, releases temporaries and the accumulator', async () => {
+      setupAudioInput();
+      const controller = new AbortController();
+      const consumer = jest.fn().mockImplementation(async () => {
+        if (consumer.mock.calls.length === 1) controller.abort();
+      });
+
+      await expectCancelled(
+        runOfflineAudioPipeline('off_input', consumer, {
+          segmentation: { mode: 'auto' },
+          signal: controller.signal,
+        })
+      );
+
+      expect(consumer).toHaveBeenCalledTimes(1);
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith(
+        'off_tmp_in_4'
+      );
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith(
+        'off_tmp_out'
+      );
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith('live_acc');
+      expect(audio.transferOfflineAudioBufferFromLive).not.toHaveBeenCalled();
+    });
+
+    it('releases every accumulator of a multi-output run on abort', async () => {
+      setupAudioInput();
+      let n = 0;
+      audio.createEmptyLiveAudioBuffer.mockImplementation(async () => {
+        n += 1;
+        return { bufferId: `live_acc_${n}`, unsubscribeEvents: jest.fn() };
+      });
+      const controller = new AbortController();
+      const consumer = jest.fn().mockImplementation(async () => {
+        controller.abort();
+      });
+
+      await expectCancelled(
+        runOfflineAudioMultiOutputPipeline('off_input', 2, consumer, {
+          segmentation: { mode: 'auto' },
+          signal: controller.signal,
+        })
+      );
+
+      expect(consumer).toHaveBeenCalledTimes(1);
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith(
+        'live_acc_1'
+      );
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith(
+        'live_acc_2'
+      );
+    });
+
+    it('stops before a retry instead of retrying', async () => {
+      setupAudioInput();
+      const controller = new AbortController();
+      const consumer = jest.fn().mockImplementation(async () => {
+        controller.abort();
+        throw new Error('transient');
+      });
+
+      await expectCancelled(
+        runOfflineAudioPipeline('off_input', consumer, {
+          segmentation: { mode: 'auto' },
+          errorRecovery: 'retry',
+          maxRetriesPerSegment: 3,
+          signal: controller.signal,
+        })
+      );
+
+      expect(consumer).toHaveBeenCalledTimes(1);
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith(
+        'off_tmp_in_4'
+      );
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith('live_acc');
+    });
+
+    it('stops after the current segment fails while aborted', async () => {
+      setupAudioInput();
+      const controller = new AbortController();
+      const consumer = jest.fn().mockImplementation(async () => {
+        controller.abort();
+        throw new Error('boom');
+      });
+
+      await expectCancelled(
+        runOfflineAudioToTextPipeline('off_input', consumer, {
+          segmentation: { mode: 'auto' },
+          errorRecovery: 'skip',
+          signal: controller.signal,
+        })
+      );
+      expect(consumer).toHaveBeenCalledTimes(1);
+      expect(text.releasePipelineTextBuffer).toHaveBeenCalledWith('txt_empty');
+    });
+
+    it('finishes the run when the signal aborts during the last segment', async () => {
+      setupAudioInput();
+      const controller = new AbortController();
+      const consumer = jest.fn().mockImplementation(async () => {
+        if (consumer.mock.calls.length === 3) controller.abort();
+      });
+
+      const result = await runOfflineAudioPipeline('off_input', consumer, {
+        segmentation: { mode: 'auto' },
+        signal: controller.signal,
+      });
+
+      expect(result.status).toBe('complete');
+      expect(consumer).toHaveBeenCalledTimes(3);
+    });
+
+    it('stops text pipelines between segments', async () => {
+      segment.getSegments.mockResolvedValue([
+        textSegment(0, 'one.'),
+        textSegment(1, 'two.'),
+      ]);
+      const controller = new AbortController();
+      const consumer = jest.fn().mockImplementation(async () => {
+        controller.abort();
+      });
+
+      await expectCancelled(
+        runOfflineTextPipeline('txt_in', consumer, {
+          segmentation: { mode: 'auto' },
+          signal: controller.signal,
+        })
+      );
+      expect(consumer).toHaveBeenCalledTimes(1);
+      expect(text.releasePipelineTextBuffer).toHaveBeenCalled();
+      expect(text.createOfflineTextBufferFromText).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops text-to-audio between segments and releases the accumulator', async () => {
+      segment.getSegments.mockResolvedValue([
+        textSegment(0, 'one.'),
+        textSegment(1, 'two.'),
+      ]);
+      audio.getPipelineAudioBufferInfo.mockResolvedValue({
+        bufferId: 'off_tmp_out',
+        kind: 'offlinePcmBuffer',
+        state: 'immutable',
+        sampleRate: 16000,
+        channelCount: 1,
+        numSamples: 4,
+        durationMs: 0.25,
+      });
+      const controller = new AbortController();
+      const consumer = jest.fn().mockImplementation(async () => {
+        controller.abort();
+      });
+
+      await expectCancelled(
+        runOfflineTextToAudioPipeline('txt_in', consumer, {
+          segmentation: { mode: 'auto' },
+          sampleRate: 16000,
+          signal: controller.signal,
+        })
+      );
+      expect(consumer).toHaveBeenCalledTimes(1);
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith(
+        'off_tmp_out'
+      );
+      expect(audio.releasePipelineAudioBuffer).toHaveBeenCalledWith('live_acc');
+      expect(audio.transferOfflineAudioBufferFromLive).not.toHaveBeenCalled();
+    });
+
+    it('reports segment start and end in ms for audio input', async () => {
+      setupAudioInput();
+      const onProgress = jest.fn();
+
+      await runOfflineAudioPipeline(
+        'off_input',
+        jest.fn().mockResolvedValue(undefined),
+        { segmentation: { mode: 'auto' }, onProgress }
+      );
+
+      expect(onProgress.mock.calls.map(([p]) => p)).toEqual([
+        expect.objectContaining({
+          currentSegment: 0,
+          currentSegmentStartMs: 0,
+          currentSegmentEndMs: 1000,
+        }),
+        expect.objectContaining({
+          currentSegment: 1,
+          currentSegmentStartMs: 1000,
+          currentSegmentEndMs: 2500,
+        }),
+        expect.objectContaining({
+          currentSegment: 2,
+          currentSegmentStartMs: 2500,
+          currentSegmentEndMs: 3000,
+        }),
+      ]);
+    });
+
+    it('reports segment times on audio->text progress, also on retries', async () => {
+      setupAudioInput();
+      segment.getSegments.mockResolvedValue([speechSegment(0, 8000, 24000)]);
+      const onProgress = jest.fn();
+      const consumer = jest
+        .fn()
+        .mockRejectedValueOnce(new Error('transient'))
+        .mockResolvedValueOnce(undefined);
+
+      await runOfflineAudioToTextPipeline('off_input', consumer, {
+        segmentation: { mode: 'auto' },
+        errorRecovery: 'retry',
+        maxRetriesPerSegment: 1,
+        onProgress,
+      });
+
+      expect(onProgress).toHaveBeenCalledTimes(2);
+      for (const [p] of onProgress.mock.calls) {
+        expect(p).toMatchObject({
+          currentSegmentStartMs: 500,
+          currentSegmentEndMs: 1500,
+        });
+      }
+    });
+
+    it('omits segment times for text input', async () => {
+      segment.getSegments.mockResolvedValue([textSegment(0, 'one.')]);
+      const onProgress = jest.fn();
+
+      await runOfflineTextPipeline(
+        'txt_in',
+        jest.fn().mockResolvedValue(undefined),
+        { segmentation: { mode: 'auto' }, onProgress }
+      );
+
+      expect(onProgress).toHaveBeenCalledTimes(1);
+      expect(onProgress.mock.calls[0]![0]).not.toHaveProperty(
+        'currentSegmentStartMs'
+      );
+    });
+
+    it('calls audio->text onSegment in order with text and times', async () => {
+      setupAudioInput();
+      const texts = ['one ', 'two ', 'three'];
+      let call = 0;
+      text.getOfflineTextBufferTextSlice.mockImplementation(async () => {
+        const value = texts[call] ?? '';
+        call += 1;
+        return value;
+      });
+      const onSegment = jest.fn();
+
+      const result = await runOfflineAudioToTextPipeline(
+        'off_input',
+        jest.fn().mockResolvedValue(undefined),
+        { segmentation: { mode: 'auto' }, onSegment }
+      );
+
+      expect(result.status).toBe('complete');
+      expect(onSegment.mock.calls.map(([e]) => e)).toEqual([
+        {
+          segmentIndex: 0,
+          segmentCount: 3,
+          startMs: 0,
+          endMs: 1000,
+          durationMs: 1000,
+          text: 'one ',
+          speechSegmentId: 'seg_1',
+          textSegmentId: result.segmentMappings[0]!.textSegmentId,
+        },
+        expect.objectContaining({
+          segmentIndex: 1,
+          startMs: 1000,
+          endMs: 2500,
+          text: 'two ',
+          speechSegmentId: 'seg_2',
+        }),
+        expect.objectContaining({
+          segmentIndex: 2,
+          startMs: 2500,
+          endMs: 3000,
+          text: 'three',
+          speechSegmentId: 'seg_3',
+        }),
+      ]);
+    });
+
+    it('does not call onSegment for skipped segments', async () => {
+      setupAudioInput();
+      const consumer = jest
+        .fn()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('boom'))
+        .mockResolvedValueOnce(undefined);
+      const onSegment = jest.fn();
+
+      const result = await runOfflineAudioToTextPipeline(
+        'off_input',
+        consumer,
+        {
+          segmentation: { mode: 'auto' },
+          errorRecovery: 'skip',
+          onSegment,
+        }
+      );
+
+      expect(result.skippedSegments).toHaveLength(1);
+      expect(onSegment.mock.calls.map(([e]) => e.segmentIndex)).toEqual([0, 2]);
+    });
+
+    it('a throwing onSegment does not fail the run', async () => {
+      setupAudioInput();
+      const onSegment = jest.fn(() => {
+        throw new Error('callback failed');
+      });
+      const consumer = jest.fn().mockResolvedValue(undefined);
+
+      const result = await runOfflineAudioToTextPipeline(
+        'off_input',
+        consumer,
+        {
+          segmentation: { mode: 'auto' },
+          onSegment,
+        }
+      );
+
+      expect(result.status).toBe('complete');
+      expect(result.completedSegments).toBe(3);
+      expect(result.skippedSegments).toHaveLength(0);
+      expect(onSegment).toHaveBeenCalledTimes(3);
+      expect(consumer).toHaveBeenCalledTimes(3);
+    });
+  });
 });
