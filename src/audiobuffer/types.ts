@@ -242,6 +242,8 @@ export interface LiveAudioBufferSegmentEvent {
  * - 'session': spool retains every sample until buffer release.
  * - 'none': no spool; ring-only; lossless only if consumer never lags.
  * - { mode: 'maxSeconds', seconds, path? }: currently accepted but not trimmed yet; behaves like session retention.
+ *
+ * A spool file the SDK creates itself is deleted on release; a `path` you pass is kept.
  * - { mode: 'path', path, trim? }: explicit persistence path.
  */
 export type LiveBufferRetention =

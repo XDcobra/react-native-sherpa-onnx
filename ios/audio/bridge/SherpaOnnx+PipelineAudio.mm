@@ -1890,7 +1890,8 @@ static std::string pa_tempDir() {
         NSString *tmpFile = [NSString stringWithFormat:@"live_spool_%llu.wav", (unsigned long long)(CFAbsoluteTimeGetCurrent() * 1000.0)];
         spoolPath = [[tmpDir stringByAppendingPathComponent:tmpFile] UTF8String];
       }
-      isTemporary = (retentionMode != "path");
+      // Only a spool path the SDK chose is deleted on release; a caller's path is kept.
+      isTemporary = retentionPath.empty();
     } else if (retentionMode == "path") {
       spoolPath = retentionPath;
       NSString *retentionTrimNS = options.retentionTrim();
