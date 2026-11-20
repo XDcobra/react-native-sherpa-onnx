@@ -42,12 +42,45 @@ static void RejectTtsGenerateError(RCTPromiseRejectBlock reject,
     reject(code ?: @"TTS_GENERATE_ERROR", message ?: @"TTS generated empty audio", nil);
 }
 
+/**
+ * Batch synthesis runs here, not on the module's method queue, so other SDK calls
+ * (buffers, unload, player) are not blocked while a model generates. Serial: one
+ * batch synthesis at a time, as before.
+ */
+static dispatch_queue_t TtsSynthesisQueue() {
+    static dispatch_queue_t queue;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(
+            DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0);
+        queue = dispatch_queue_create("com.sherpaonnx.tts.synthesis", attr);
+    });
+    return queue;
+}
+
 - (void)so_synthesizeTts:(NSString *)instanceId
          textInBufferId:(NSString *)textInBufferId
         audioOutBufferId:(NSString *)audioOutBufferId
                  options:(NSDictionary *)options
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject
+{
+    dispatch_async(TtsSynthesisQueue(), ^{
+        [self so_synthesizeTtsNow:instanceId
+                   textInBufferId:textInBufferId
+                  audioOutBufferId:audioOutBufferId
+                           options:options
+                           resolve:resolve
+                            reject:reject];
+    });
+}
+
+- (void)so_synthesizeTtsNow:(NSString *)instanceId
+             textInBufferId:(NSString *)textInBufferId
+            audioOutBufferId:(NSString *)audioOutBufferId
+                     options:(NSDictionary *)options
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
 {
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_GENERATE_ERROR", @"instanceId is required", nil);
@@ -66,14 +99,28 @@ static void RejectTtsGenerateError(RCTPromiseRejectBlock reject,
     std::string textInIdStr = [textInBufferId UTF8String];
     std::string audioOutIdStr = [audioOutBufferId UTF8String];
 
-    // 1. Resolve TTS engine
-    std::lock_guard<std::mutex> ttsLock(g_tts_mutex);
-    auto ttsIt = g_tts_instances.find(instanceIdStr);
-    if (ttsIt == g_tts_instances.end() || ttsIt->second->wrapper == nullptr || !ttsIt->second->wrapper->isInitialized()) {
+    // 1. Resolve TTS engine. Keep our own references so unload cannot free the
+    // wrapper mid-run, and hold only this instance's engine lock while generating.
+    std::shared_ptr<sherpaonnx::TtsWrapper> wrapperRef;
+    std::shared_ptr<std::mutex> engineMutex;
+    {
+        std::lock_guard<std::mutex> ttsLock(g_tts_mutex);
+        auto ttsIt = g_tts_instances.find(instanceIdStr);
+        if (ttsIt != g_tts_instances.end() && ttsIt->second) {
+            wrapperRef = ttsIt->second->wrapper;
+            engineMutex = ttsIt->second->engineMutex;
+        }
+    }
+    if (wrapperRef == nullptr || engineMutex == nullptr) {
         reject(@"TTS_GENERATE_ERROR", @"TTS not initialized. Call initializeTts() first.", nil);
         return;
     }
-    sherpaonnx::TtsWrapper *wrapper = ttsIt->second->wrapper.get();
+    std::lock_guard<std::mutex> engineLock(*engineMutex);
+    if (!wrapperRef->isInitialized()) {
+        reject(@"TTS_GENERATE_ERROR", @"TTS not initialized. Call initializeTts() first.", nil);
+        return;
+    }
+    sherpaonnx::TtsWrapper *wrapper = wrapperRef.get();
 
     // 2. Resolve input text buffer
     if (textInIdStr.find("txt_off_") != 0) {

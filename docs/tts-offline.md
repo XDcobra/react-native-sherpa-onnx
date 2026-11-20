@@ -272,6 +272,8 @@ synthesize(
 ): Promise<void>
 ```
 
+The model runs on a native background thread, so other SDK calls (buffers, player, `destroy()` of another engine) are not blocked while it generates. Batch syntheses still run one at a time, in call order.
+
 ```ts
 await tts.synthesize(textBuf, audioBuf);                          // defaults
 await tts.synthesize(textBuf, audioBuf, { sid: 1, speed: 0.9 }); // speaker + speed

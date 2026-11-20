@@ -15,10 +15,18 @@ import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.RejectedExecutionException
 
 internal class TtsBatchGenerationService(
   private val repository: TtsEngineRepository,
   private val reactContext: ReactApplicationContext,
+  /**
+   * Runs synthesis off the React Native module thread, so other SDK calls (buffers,
+   * unload, player) are not blocked while a model generates. Single-threaded: calls
+   * on one engine never overlap, as before.
+   */
+  private val synthesisExecutor: ExecutorService,
 ) {
 
   /**
@@ -29,6 +37,22 @@ internal class TtsBatchGenerationService(
    * emits `ttsGenerateProgress` events `{ operationId, progress }`.
    */
   fun synthesizeTts(
+    instanceId: String,
+    textInBufferId: String,
+    audioOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    try {
+      synthesisExecutor.execute {
+        synthesizeTtsNow(instanceId, textInBufferId, audioOutBufferId, options, promise)
+      }
+    } catch (e: RejectedExecutionException) {
+      promise.reject("TTS_GENERATE_ERROR", "TTS is shutting down", e)
+    }
+  }
+
+  private fun synthesizeTtsNow(
     instanceId: String,
     textInBufferId: String,
     audioOutBufferId: String,
@@ -266,7 +290,8 @@ internal class TtsBatchGenerationService(
         OfflineOomError.message("text-to-speech"),
         e
       )
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      // Off the module thread an escaping Throwable would leave the promise unsettled.
       Log.e("SherpaOnnxTts", "synthesizeTts error: ${e.message}", e)
       promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to synthesize speech", e)
     }
