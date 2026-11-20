@@ -475,4 +475,170 @@ describe('createLanguageIdentification - segmented mode & labeling', () => {
       )
     ).rejects.toThrow(/destroyed/);
   });
+
+  describe('signal', () => {
+    const cancelled = { name: 'AbortError', code: 'ORCHESTRATION_CANCELLED' };
+    const twoSpans: SegmentMeta[] = [
+      {
+        id: 's1',
+        sourceAudioBufferId: audioId,
+        kind: 'speech',
+        startSample: 0,
+        endSample: 16000,
+        sampleRate: 16000,
+        durationMs: 1000,
+      },
+      {
+        id: 's2',
+        sourceAudioBufferId: audioId,
+        kind: 'speech',
+        startSample: 16000,
+        endSample: 32000,
+        sampleRate: 16000,
+        durationMs: 1000,
+      },
+    ];
+
+    async function makeEngine() {
+      return createLanguageIdentification({
+        customConfig: {
+          encoder: { kind: 'fs', path: '/models/encoder.onnx' },
+          decoder: { kind: 'fs', path: '/models/decoder.onnx' },
+        },
+      });
+    }
+
+    function abortedSignal(): AbortSignal {
+      const controller = new AbortController();
+      controller.abort();
+      return controller.signal;
+    }
+
+    beforeEach(() => {
+      (segmentOfflineBuffer as jest.Mock).mockResolvedValue({
+        segmentBufferId: 'seg_off_temp',
+      });
+      (getOfflineSegmentBufferSegments as jest.Mock).mockResolvedValue(
+        twoSpans
+      );
+      (createLiveSegmentBuffer as jest.Mock).mockResolvedValue({
+        bufferId: 'seg_live_staging',
+      });
+      (appendLiveSegment as jest.Mock).mockResolvedValue({
+        segmentId: 'x',
+        segmentIndex: 0,
+      });
+      (releasePipelineSegmentBuffer as jest.Mock).mockResolvedValue(undefined);
+      (SherpaOnnx.identifyLanguageOffline as jest.Mock).mockResolvedValue({
+        lang: 'en',
+        audioDuration: 1,
+        elapsedMs: 5,
+      });
+    });
+
+    it('rejects oneshot identify before the native call when already aborted', async () => {
+      const engine = await makeEngine();
+      await expect(
+        engine.identify(audioId, { signal: abortedSignal() })
+      ).rejects.toMatchObject(cancelled);
+      expect(SherpaOnnx.identifyLanguageOffline).not.toHaveBeenCalled();
+    });
+
+    it('rejects segmented identify before segmentation when already aborted', async () => {
+      const engine = await makeEngine();
+      await expect(
+        engine.identify(audioId, {
+          segmentation: { mode: 'auto' },
+          signal: abortedSignal(),
+        })
+      ).rejects.toMatchObject(cancelled);
+      expect(segmentOfflineBuffer).not.toHaveBeenCalled();
+      expect(SherpaOnnx.identifyLanguageOffline).not.toHaveBeenCalled();
+    });
+
+    it('runs span by span instead of the native fast path when a signal is passed', async () => {
+      const engine = await makeEngine();
+      const result = await engine.identify(audioId, {
+        segmentation: { mode: 'auto' },
+        signal: new AbortController().signal,
+      });
+
+      expect(SherpaOnnx.labelLanguageIdOfflineSegments).not.toHaveBeenCalled();
+      expect(SherpaOnnx.identifyLanguageOffline).toHaveBeenCalledTimes(2);
+      expect(result.totalSegments).toBe(2);
+    });
+
+    it('stops segmented identify between segments and releases temporaries', async () => {
+      const engine = await makeEngine();
+      const controller = new AbortController();
+      const onProgress = jest.fn();
+      const onLanguageChanged = jest.fn();
+      const onSegment = jest.fn(() => controller.abort());
+
+      await expect(
+        engine.identify(audioId, {
+          segmentation: { mode: 'auto' },
+          targetSegmentBuffer: 'seg_off_77777777-7777-7777-7777-777777777777',
+          onProgress,
+          onSegment,
+          onLanguageChanged,
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject(cancelled);
+
+      expect(SherpaOnnx.identifyLanguageOffline).toHaveBeenCalledTimes(1);
+      expect(onProgress).toHaveBeenCalledTimes(1);
+      expect(onSegment).toHaveBeenCalledTimes(1);
+      expect(onLanguageChanged).toHaveBeenCalledTimes(1);
+      expect(populateOfflineSegmentBufferIfEmpty).not.toHaveBeenCalled();
+      expect(releasePipelineSegmentBuffer).toHaveBeenCalledWith('seg_off_temp');
+      expect(releasePipelineSegmentBuffer).toHaveBeenCalledWith(
+        'seg_live_staging'
+      );
+    });
+
+    it('rejects labelOfflineSegments before reading spans when already aborted', async () => {
+      const engine = await makeEngine();
+      await expect(
+        engine.labelOfflineSegments(
+          audioId,
+          'seg_off_88888888-8888-8888-8888-888888888888',
+          'seg_off_99999999-9999-9999-9999-999999999999',
+          {
+            signal: abortedSignal(),
+          }
+        )
+      ).rejects.toMatchObject(cancelled);
+      expect(getOfflineSegmentBufferSegments).not.toHaveBeenCalled();
+      expect(SherpaOnnx.labelLanguageIdOfflineSegments).not.toHaveBeenCalled();
+      expect(SherpaOnnx.identifyLanguageOffline).not.toHaveBeenCalled();
+    });
+
+    it('stops labelOfflineSegments between segments and leaves segmentsOut empty', async () => {
+      const engine = await makeEngine();
+      const controller = new AbortController();
+      const onSegment = jest.fn(() => controller.abort());
+
+      await expect(
+        engine.labelOfflineSegments(
+          audioId,
+          'seg_off_88888888-8888-8888-8888-888888888888',
+          'seg_off_99999999-9999-9999-9999-999999999999',
+          {
+            onSegment,
+            signal: controller.signal,
+          }
+        )
+      ).rejects.toMatchObject(cancelled);
+
+      expect(SherpaOnnx.labelLanguageIdOfflineSegments).not.toHaveBeenCalled();
+      expect(SherpaOnnx.identifyLanguageOffline).toHaveBeenCalledTimes(1);
+      expect(onSegment).toHaveBeenCalledTimes(1);
+      expect(finalizeLiveSegmentBuffer).not.toHaveBeenCalled();
+      expect(populateOfflineSegmentBufferIfEmpty).not.toHaveBeenCalled();
+      expect(releasePipelineSegmentBuffer).toHaveBeenCalledWith(
+        'seg_live_staging'
+      );
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import { segmentOfflineBuffer } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
 import {
@@ -125,6 +126,18 @@ export function computeLanguageTimelineAndDistribution(
   };
 }
 
+/** True when the call has callbacks or a signal and must run span by span. */
+function needsSpanLoop(
+  options: LanguageIdentificationOptions | LanguageIdLabelOptions | undefined
+): boolean {
+  return (
+    typeof options?.onProgress === 'function' ||
+    typeof options?.onSegment === 'function' ||
+    typeof options?.onLanguageChanged === 'function' ||
+    options?.signal != null
+  );
+}
+
 export async function runOfflineLanguageIdSegmentation(
   instanceId: string,
   audioIn: OfflineAudioBufferIdSource,
@@ -154,19 +167,17 @@ export async function runOfflineLanguageIdSegmentation(
     ? resolveOfflineSegmentBufferId(options.targetSegmentBuffer)
     : null;
 
+  const signal = options?.signal;
+  throwIfOrchestrationAborted(signal);
   const t0 = Date.now();
   const segRef = await segmentOfflineBuffer(
     audioBufferId,
     segmentation.policy!
   );
 
-  const hasCallbacks =
-    typeof options?.onProgress === 'function' ||
-    typeof options?.onSegment === 'function' ||
-    typeof options?.onLanguageChanged === 'function';
-
-  // Fast-path: When no callbacks are registered, perform buffer-to-buffer labeling directly in native
-  if (!hasCallbacks) {
+  // Fast path: without callbacks or signal, label all spans in one native call.
+  // A signal needs the per-span JS loop below so it can stop between spans.
+  if (!needsSpanLoop(options)) {
     let tempTargetBufferId: string | null = null;
     try {
       const outBufferId =
@@ -216,6 +227,7 @@ export async function runOfflineLanguageIdSegmentation(
       segRef.segmentBufferId
     );
     const spans = collectSpeechSpans(rawSegments);
+    throwIfOrchestrationAborted(signal);
 
     if (targetSegmentBufferId != null) {
       const staging = await createLiveSegmentBuffer({
@@ -229,6 +241,7 @@ export async function runOfflineLanguageIdSegmentation(
     let previousLang: string | null = null;
 
     for (let i = 0; i < spans.length; i++) {
+      throwIfOrchestrationAborted(signal);
       const span = spans[i]!;
       const durationMs = spanDurationMs(span);
       const sampleRate = span.sampleRate > 0 ? span.sampleRate : 16000;
@@ -342,14 +355,12 @@ export async function runOfflineLanguageIdLabeling(
 
   const segmentsInId = resolveOfflineSegmentBufferId(segmentsIn);
   const segmentsOutId = resolveOfflineSegmentBufferId(segmentsOut);
+  const signal = options?.signal;
+  throwIfOrchestrationAborted(signal);
 
-  const hasCallbacks =
-    typeof options?.onProgress === 'function' ||
-    typeof options?.onSegment === 'function' ||
-    typeof options?.onLanguageChanged === 'function';
-
-  // Fast-path: When no callbacks are registered, perform buffer-to-buffer labeling directly in native
-  if (!hasCallbacks) {
+  // Fast path: without callbacks or signal, label all spans in one native call.
+  // A signal needs the per-span JS loop below so it can stop between spans.
+  if (!needsSpanLoop(options)) {
     const nativeRes = await SherpaOnnx.labelLanguageIdOfflineSegments(
       instanceId,
       audioBufferId,
@@ -366,6 +377,7 @@ export async function runOfflineLanguageIdLabeling(
 
   const rawSegments = await getOfflineSegmentBufferSegments(segmentsInId);
   const spans = collectSpeechSpans(rawSegments);
+  throwIfOrchestrationAborted(signal);
 
   if (spans.length === 0) {
     return {
@@ -390,6 +402,7 @@ export async function runOfflineLanguageIdLabeling(
     let previousLang: string | null = null;
 
     for (let i = 0; i < spans.length; i++) {
+      throwIfOrchestrationAborted(signal);
       const span = spans[i]!;
       const durationMs = spanDurationMs(span);
       const sampleRate = span.sampleRate > 0 ? span.sampleRate : 16000;

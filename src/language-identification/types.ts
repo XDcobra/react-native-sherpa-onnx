@@ -160,6 +160,14 @@ export interface LanguageIdentificationOptions {
   onLanguageChanged?: (event: LanguageChangedEvent) => void;
   /** Optional target OfflineSegmentBuffer to populate with LanguageIdSpeechSegmentPayload. */
   targetSegmentBuffer?: OfflineSegmentBufferIdSource;
+  /**
+   * Stops the call. Checked before the call and before each segment; a segment
+   * that is already running finishes first. On abort the promise rejects with
+   * `code: 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`), temporary
+   * segment buffers are released and `targetSegmentBuffer` stays empty.
+   * A segmented call with a signal runs span by span (no single native pass).
+   */
+  signal?: AbortSignal;
 }
 
 /** Options for `labelOfflineSegments`. */
@@ -169,6 +177,14 @@ export interface LanguageIdLabelOptions {
   onSegment?: (event: LanguageIdSegmentEvent) => void;
   /** Fired specifically when a language switch is detected between segments. */
   onLanguageChanged?: (event: LanguageChangedEvent) => void;
+  /**
+   * Stops the call. Checked before the call and before each segment; a segment
+   * that is already running finishes first. On abort the promise rejects with
+   * `code: 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`), the staging
+   * buffer is released and `segmentsOut` stays empty. A call with a signal
+   * runs span by span (no single native pass).
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -206,6 +222,7 @@ export interface LanguageIdentificationEngine {
    * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
    * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   identify(
     audio: OfflineAudioBufferIdSource,
@@ -224,6 +241,7 @@ export interface LanguageIdentificationEngine {
    * @throws {Error} `LANGUAGE_ID_IDENTIFY_FAILED` — native identify failed.
    * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   identify(
     audio: OfflineAudioBufferIdSource,
@@ -257,6 +275,7 @@ export interface LanguageIdentificationEngine {
    * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
    * @throws {Error} `SEGMENTATION_POLICY_INVALID` — segmented auto policy fields are invalid.
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   identify(
     audio: OfflineAudioBufferIdSource,
@@ -273,6 +292,7 @@ export interface LanguageIdentificationEngine {
    * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_NOT_FOUND` — audio buffer is unknown.
    * @throws {Error} `LANGUAGE_ID_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   labelOfflineSegments(
     audioIn: OfflineAudioBufferIdSource,
