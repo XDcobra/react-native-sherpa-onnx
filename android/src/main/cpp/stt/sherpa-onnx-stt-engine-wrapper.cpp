@@ -6,6 +6,7 @@
  */
 
 #include "sherpa-onnx-stt-engine-wrapper.h"
+#include "sherpa-onnx-stt-modeling-unit.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-validate-stt.h"
 #include <algorithm>
@@ -155,14 +156,19 @@ static std::optional<std::string> ValidateHotwordsFile(const std::string& filePa
 static std::optional<std::string> ApplyHotwordsModelingUnit(
     sherpa_onnx::cxx::OfflineModelConfig& modelConfig,
     const std::optional<std::string>& modelingUnit,
-    const std::optional<std::string>& bpeVocab) {
+    const std::optional<std::string>& bpeVocab,
+    bool hasHotwords) {
     if (bpeVocab.has_value() && !bpeVocab->empty()) {
         modelConfig.bpe_vocab = *bpeVocab;
     }
-    if (!modelingUnit.has_value() || modelingUnit->empty()) {
+    std::string unit = modelingUnit.value_or("");
+    if (unit.empty() && hasHotwords) {
+        // No unit given: follow the model, so English BPE models tokenize hotwords as BPE.
+        unit = AutoHotwordsModelingUnit(modelConfig.tokens, modelConfig.bpe_vocab);
+    }
+    if (unit.empty()) {
         return std::nullopt;
     }
-    const std::string& unit = *modelingUnit;
     const bool needsBpe = unit == "bpe" || unit == "cjkchar+bpe";
     if (!needsBpe && unit != "cjkchar") {
         return "INVALID_MODELING_UNIT: modelingUnit must be 'cjkchar', 'bpe' or 'cjkchar+bpe', got '" +
@@ -336,7 +342,8 @@ SttInitializeResult SttWrapper::initialize(
         if (!detect.paths.bpeVocab.empty()) {
             config.model_config.bpe_vocab = detect.paths.bpeVocab;
         }
-        if (auto unitErr = ApplyHotwordsModelingUnit(config.model_config, modelingUnit, bpeVocab)) {
+        if (auto unitErr = ApplyHotwordsModelingUnit(config.model_config, modelingUnit, bpeVocab,
+                                                   hotwordsFile.has_value() && !hotwordsFile->empty())) {
             result.error = *unitErr;
             LOGE("%s", result.error.c_str());
             return result;
@@ -666,7 +673,8 @@ SttInitializeResult SttWrapper::initializeCustom(
         if (!detect.paths.bpeVocab.empty()) {
             config.model_config.bpe_vocab = detect.paths.bpeVocab;
         }
-        if (auto unitErr = ApplyHotwordsModelingUnit(config.model_config, modelingUnit, bpeVocab)) {
+        if (auto unitErr = ApplyHotwordsModelingUnit(config.model_config, modelingUnit, bpeVocab,
+                                                   hotwordsFile.has_value() && !hotwordsFile->empty())) {
             result.error = *unitErr;
             LOGE("%s", result.error.c_str());
             return result;
