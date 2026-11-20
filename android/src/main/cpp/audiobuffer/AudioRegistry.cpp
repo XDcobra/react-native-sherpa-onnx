@@ -333,7 +333,11 @@ void pa_sweepOrphanedTempFiles(int maxAgeSec) {
 }
 
 void pa_sweepOrphanedOrchestrationFiles(int maxAgeSec) {
-  sweepDirByPrefix(pa_temp_dir(), "orch_", nullptr, maxAgeSec);
+  // Orchestration spools live in resolveAppBaseDir('tmp'): the temp dir itself on iOS,
+  // its "tmp" subfolder on Android (cacheDir/tmp). Sweep both.
+  const std::string dir = pa_temp_dir();
+  sweepDirByPrefix(dir, "orch_", nullptr, maxAgeSec);
+  sweepDirByPrefix(dir + "/tmp", "orch_", nullptr, maxAgeSec);
 }
 
 void pa_cleanupOrphanedOrchestrationFiles(int maxAgeSec) {
