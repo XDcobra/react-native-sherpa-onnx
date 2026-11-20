@@ -1,5 +1,6 @@
 package com.sherpaonnx.fileio
 
+import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
@@ -7,6 +8,7 @@ import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReadableArray
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
@@ -15,7 +17,7 @@ import java.io.FileInputStream
 import java.io.OutputStream
 
 /**
- * Android file I/O helper implementing copyFile, saveText, shareFile, cancelFileIO.
+ * Android file I/O helper implementing copyFile, saveText, shareFiles, cancelFileIO.
  * Delegates resolution to [FileIOResolver] and streaming to [FileIOStreamCopy].
  */
 internal class FileIOHelper(private val context: ReactApplicationContext) {
@@ -228,65 +230,86 @@ internal class FileIOHelper(private val context: ReactApplicationContext) {
     }
   }
 
-  fun shareFile(
-    source: ReadableMap,
-    mimeType: String,
-    title: String,
+  /** A content URI another app can read for [source] (FileProvider or the source's own URI). */
+  private fun uriForShare(source: ReadableMap): Uri {
+    val readHandle = resolver.resolveSource(source)
+    readHandle.close()
+    val sourceKind = source.getString("kind")
+    val authority = context.packageName + ".fileprovider"
+    return when (readHandle) {
+      is FileIOResolver.ReadHandle.FilePath ->
+        FileProvider.getUriForFile(context, authority, readHandle.file)
+      is FileIOResolver.ReadHandle.FileDescriptor,
+      is FileIOResolver.ReadHandle.Stream ->
+        if (sourceKind == "contentUri") {
+          Uri.parse(source.getString("uri")!!)
+        } else {
+          FileProvider.getUriForFile(context, authority, resolver.resolveSourceToFilePath(source))
+        }
+    }
+  }
+
+  /** The common type of several files: one type stays, one top-level type becomes a wildcard subtype, else any type. */
+  private fun commonMimeType(types: List<String>): String {
+    val distinct = types.distinct()
+    if (distinct.size == 1) return distinct[0]
+    val tops = distinct.map { it.substringBefore('/') }.distinct()
+    return if (tops.size == 1) "${tops[0]}/*" else "*/*"
+  }
+
+  /**
+   * Opens the chooser for one or more files. Resolves once the chooser is shown;
+   * Android does not report whether the user shared, so `completed` is null.
+   */
+  fun shareFiles(
+    sources: ReadableArray,
+    options: ReadableMap?,
     promise: Promise,
   ) {
     try {
-      val readHandle = resolver.resolveSource(source)
-      val uri: Uri = when (readHandle) {
-        is FileIOResolver.ReadHandle.FilePath -> {
-          readHandle.close()
-          val authority = context.packageName + ".fileprovider"
-          FileProvider.getUriForFile(context, authority, readHandle.file)
-        }
-        is FileIOResolver.ReadHandle.FileDescriptor -> {
-          readHandle.close()
-          val sourceKind = source.getString("kind")
-          if (sourceKind == "contentUri") {
-            Uri.parse(source.getString("uri")!!)
-          } else {
-            val tmpFile = resolver.resolveSourceToFilePath(source)
-            val authority = context.packageName + ".fileprovider"
-            FileProvider.getUriForFile(context, authority, tmpFile)
-          }
-        }
-        is FileIOResolver.ReadHandle.Stream -> {
-          readHandle.close()
-          // For streams (contentUri), we can pass the URI directly
-          val sourceKind = source.getString("kind")
-          if (sourceKind == "contentUri") {
-            Uri.parse(source.getString("uri")!!)
-          } else {
-            // For other stream sources, copy to temp file first
-            val tmpFile = resolver.resolveSourceToFilePath(source)
-            val authority = context.packageName + ".fileprovider"
-            FileProvider.getUriForFile(context, authority, tmpFile)
-          }
-        }
+      if (sources.size() == 0) {
+        throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "shareFiles needs at least one source")
+      }
+      val uris = (0 until sources.size()).map { i ->
+        val source = sources.getMap(i)
+          ?: throw FileIOException(FileIOErrorCodes.INVALID_ARGUMENT, "Each source must be an object")
+        uriForShare(source)
+      }
+      val requestedType = options?.takeIf { it.hasKey("mimeType") }?.getString("mimeType").orEmpty()
+      val effectiveMimeType = requestedType.ifEmpty {
+        commonMimeType(uris.map { context.contentResolver.getType(it) ?: "application/octet-stream" })
       }
 
-      val effectiveMimeType = mimeType.ifEmpty {
-        context.contentResolver.getType(uri) ?: "application/octet-stream"
-      }
-
-      val shareIntent = Intent(Intent.ACTION_SEND).apply {
+      val shareIntent = if (uris.size == 1) {
+        Intent(Intent.ACTION_SEND).apply { putExtra(Intent.EXTRA_STREAM, uris[0]) }
+      } else {
+        Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+          putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+        }
+      }.apply {
         type = effectiveMimeType
-        putExtra(Intent.EXTRA_STREAM, uri)
+        // ClipData carries the read grant for every URI, not only the first.
+        clipData = ClipData.newRawUri(null, uris[0]).also { clip ->
+          uris.drop(1).forEach { clip.addItem(ClipData.Item(it)) }
+        }
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       }
-      val chooserTitle = title.ifEmpty { "Share" }
+      val chooserTitle = options?.takeIf { it.hasKey("title") }?.getString("title").orEmpty().ifEmpty { "Share" }
       val chooser = Intent.createChooser(shareIntent, chooserTitle)
       chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       context.startActivity(chooser)
-      promise.resolve(null)
+      promise.resolve(
+        Arguments.createMap().apply {
+          putNull("completed")
+          putNull("activityType")
+        },
+      )
     } catch (e: FileIOException) {
       promise.reject(e.code, e.message, e)
     } catch (e: Exception) {
-      Log.e(logTag, "shareFile error", e)
-      promise.reject(FileIOErrorCodes.READ_ERROR, "Failed to share file: ${e.message}", e)
+      Log.e(logTag, "shareFiles error", e)
+      promise.reject(FileIOErrorCodes.READ_ERROR, "Failed to share files: ${e.message}", e)
     }
   }
 

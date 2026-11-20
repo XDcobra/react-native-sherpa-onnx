@@ -1,7 +1,7 @@
 /**
  * SherpaOnnx+FileIO.mm
  *
- * File I/O bridge methods: copyFile, saveText, shareFile, cancelFileIO.
+ * File I/O bridge methods: copyFile, saveText, shareFiles, cancelFileIO.
  */
 
 #import "SherpaOnnx.h"
@@ -10,6 +10,49 @@
 #import <React/RCTLog.h>
 #import <React/RCTUtils.h>
 #import <UIKit/UIKit.h>
+
+static void FIOCleanupHandles(NSArray<FileIOReadHandle *> *handles)
+{
+  for (FileIOReadHandle *h in handles) {
+    [h cleanup];
+  }
+}
+
+/**
+ * One open share sheet. The completion handler also runs when a target is cancelled
+ * while the sheet stays open, so the promise settles only once the sheet is gone; the
+ * files stay readable until then.
+ */
+@interface FIOShareSession : NSObject
+@property (nonatomic, strong) NSArray<FileIOReadHandle *> *handles;
+@property (nonatomic, copy) RCTPromiseResolveBlock resolve;
+@property (nonatomic, weak) UIActivityViewController *sheet;
+@property (nonatomic, copy, nullable) NSString *activityType;
+@property (nonatomic, assign) BOOL completed;
+@property (nonatomic, assign) BOOL settled;
+- (void)settleWhenClosed;
+@end
+
+@implementation FIOShareSession
+- (void)settleWhenClosed
+{
+  if (self.settled) return;
+  UIActivityViewController *sheet = self.sheet;
+  if (!self.completed && sheet != nil && sheet.view.window != nil) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                     [self settleWhenClosed];
+                   });
+    return;
+  }
+  self.settled = YES;
+  FIOCleanupHandles(self.handles);
+  self.resolve(@{
+    @"completed": @(self.completed),
+    @"activityType": self.activityType ?: (id)[NSNull null],
+  });
+}
+@end
 
 @implementation SherpaOnnx (FileIO)
 
@@ -129,41 +172,86 @@ createParentDirectories:(BOOL)createParentDirectories
   }
 }
 
-- (void)shareFile:(NSDictionary *)source
-         mimeType:(NSString *)mimeType
-            title:(NSString *)title
-          resolve:(RCTPromiseResolveBlock)resolve
-           reject:(RCTPromiseRejectBlock)reject
+- (void)shareFiles:(NSArray *)sources
+           options:(NSDictionary *)options
+           resolve:(RCTPromiseResolveBlock)resolve
+            reject:(RCTPromiseRejectBlock)reject
 {
-  NSString *errCode = nil, *errMsg = nil;
-  FileIOReadHandle *rh = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
-  if (!rh) {
-    reject(errCode, errMsg, nil);
+  if (![sources isKindOfClass:[NSArray class]] || sources.count == 0) {
+    reject(kFIOErrInvalidArgument, @"shareFiles needs at least one source", nil);
     return;
   }
 
-  if (!rh.isFilePath) {
-    [rh cleanup];
-    reject(kFIOErrInvalidArgument, @"Cannot share stream sources directly", nil);
-    return;
+  NSMutableArray<FileIOReadHandle *> *handles = [NSMutableArray arrayWithCapacity:sources.count];
+  NSMutableArray<NSURL *> *urls = [NSMutableArray arrayWithCapacity:sources.count];
+  for (id source in sources) {
+    if (![source isKindOfClass:[NSDictionary class]]) {
+      FIOCleanupHandles(handles);
+      reject(kFIOErrInvalidArgument, @"Each source must be an object", nil);
+      return;
+    }
+    NSString *errCode = nil, *errMsg = nil;
+    FileIOReadHandle *rh = [FileIOResolver resolveSource:source error:&errCode message:&errMsg];
+    if (!rh) {
+      FIOCleanupHandles(handles);
+      reject(errCode, errMsg, nil);
+      return;
+    }
+    [handles addObject:rh];
+    if (!rh.isFilePath) {
+      FIOCleanupHandles(handles);
+      reject(kFIOErrInvalidArgument, @"Cannot share stream sources directly", nil);
+      return;
+    }
+    [urls addObject:[NSURL fileURLWithPath:rh.filePath]];
   }
 
-  NSURL *fileURL = [NSURL fileURLWithPath:rh.filePath];
+  NSDictionary *anchor = nil;
+  if ([options isKindOfClass:[NSDictionary class]] &&
+      [options[@"anchor"] isKindOfClass:[NSDictionary class]]) {
+    anchor = options[@"anchor"];
+  }
 
   dispatch_async(dispatch_get_main_queue(), ^{
     UIViewController *controller = RCTPresentedViewController();
     if (!controller) {
-      [rh cleanup];
+      FIOCleanupHandles(handles);
       reject(kFIOErrResolveError, @"No active view controller", nil);
       return;
     }
 
     UIActivityViewController *activity =
-        [[UIActivityViewController alloc] initWithActivityItems:@[fileURL]
-                                          applicationActivities:nil];
+        [[UIActivityViewController alloc] initWithActivityItems:urls applicationActivities:nil];
+
+    // On iPad the sheet is a popover; without a source it raises an exception.
+    UIPopoverPresentationController *popover = activity.popoverPresentationController;
+    if (popover) {
+      UIView *view = controller.view;
+      popover.sourceView = view;
+      if (anchor) {
+        CGRect inWindow = CGRectMake([anchor[@"x"] doubleValue], [anchor[@"y"] doubleValue],
+                                     [anchor[@"width"] doubleValue], [anchor[@"height"] doubleValue]);
+        popover.sourceRect = [view convertRect:inWindow fromView:nil];
+      } else {
+        popover.sourceRect = CGRectMake(CGRectGetMidX(view.bounds), CGRectGetMidY(view.bounds), 0, 0);
+        popover.permittedArrowDirections = 0;
+      }
+    }
+
+    FIOShareSession *session = [FIOShareSession new];
+    session.handles = handles;
+    session.resolve = resolve;
+    session.sheet = activity;
+    activity.completionWithItemsHandler =
+        ^(UIActivityType activityType, BOOL completed, NSArray *returnedItems, NSError *error) {
+          dispatch_async(dispatch_get_main_queue(), ^{
+            session.activityType = activityType;
+            session.completed = completed;
+            [session settleWhenClosed];
+          });
+        };
+
     [controller presentViewController:activity animated:YES completion:nil];
-    [rh cleanup];
-    resolve(nil);
   });
 }
 

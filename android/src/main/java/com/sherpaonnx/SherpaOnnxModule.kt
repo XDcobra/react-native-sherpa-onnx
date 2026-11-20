@@ -8237,13 +8237,12 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     fileIOHelper.saveText(text, destination, encoding, overwrite, promise)
   }
 
-  override fun shareFile(
-    source: ReadableMap,
-    mimeType: String,
-    title: String,
+  override fun shareFiles(
+    sources: ReadableArray,
+    options: ReadableMap,
     promise: Promise,
   ) {
-    fileIOHelper.shareFile(source, mimeType, title, promise)
+    fileIOHelper.shareFiles(sources, options, promise)
   }
 
   override fun cancelFileIO(operationId: String, promise: Promise) {

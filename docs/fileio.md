@@ -8,8 +8,6 @@ Generic file operations using **`FileSource`** and **`FileDestination`** descrip
 
 **Import path:** `react-native-sherpa-onnx/fileio`
 
-The package root also re-exports `copyFile`, `saveText`, `shareFile`, and all types for convenience.
-
 ## Concepts
 
 Instead of method-per-platform helpers (`copyContentUriToCache`, `copyFileToContentUri`, etc.), all file operations use a unified **source → destination** pattern with discriminated union descriptors:
@@ -145,20 +143,45 @@ Write UTF-8 text to the destination. Returns a `ResolvedFileRef`.
 - `encoding?: 'utf8'` — text encoding (default: `utf8`)
 - `overwrite?: boolean` — overwrite destination if it already exists (default: `true`)
 
-### `shareFile(source, options?)`
+### `shareFile(source, options?)` / `shareFiles(sources, options?)`
 
 ```ts
 function shareFile(
   source: FileSource,
   options?: ShareFileOptions
-): Promise<void>;
+): Promise<ShareResult>;
+
+function shareFiles(
+  sources: ReadonlyArray<FileSource>,
+  options?: ShareFileOptions
+): Promise<ShareResult>;
 ```
 
-Open the system share sheet for the given file.
+Open the system share sheet for one file or for several files at once.
+
+- **iOS:** resolves when the sheet is closed. Files stay readable until then (temporary copies and security-scoped access are released afterwards). On iPad the sheet is a popover that points at `options.anchor`; without an anchor it opens in the centre of the window.
+- **Android:** resolves once the chooser is shown; `completed` is `null` because Android does not report what the user did. The receiving app reads the files later, so keep them until the user is back in your app.
 
 **Options:**
 
-- `mimeType?: string` — MIME type hint
+- `mimeType?: string` — MIME type for the intent (Android). Omitted: the content type; several files of different types share as their common top-level type (e.g. `audio/*`).
+- `title?: string` — chooser title (Android)
+- `anchor?: { x, y, width, height }` — popover anchor in window coordinates (points), e.g. from `measureInWindow` on the button that opened the sheet (iPad)
+
+**Result (`ShareResult`):**
+
+- `completed: boolean | null` — iOS: `true` when the user finished sharing to a target, `false` when the sheet was dismissed; Android: `null`
+- `activityType: string | null` — iOS: the chosen target's activity type
+
+```ts
+const { completed } = await shareFiles(
+  [
+    { kind: 'fs', path: audioPath },
+    { kind: 'fs', path: notesPath },
+  ],
+  { anchor: { x, y, width, height } }
+);
+```
 
 ### `configureFileIO(options?)`
 
