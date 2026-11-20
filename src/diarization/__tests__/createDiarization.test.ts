@@ -186,6 +186,35 @@ describe('createDiarization', () => {
     expect(native.cancelDiarization).toBeDefined();
   });
 
+  it('rejects with an AbortError when the signal stops a running diarize', async () => {
+    const engine = await createDiarization({
+      segmentation: {
+        modelSource: { kind: 'fs', path: '/models/seg/model.onnx' },
+      },
+      embedding: {
+        modelSource: { kind: 'fs', path: '/models/emb/model.onnx' },
+      },
+    });
+    const controller = new AbortController();
+    native.diarizeOffline.mockImplementation(async () => {
+      controller.abort();
+      return {
+        success: false,
+        errorCode: 'DIARIZATION_CANCELLED',
+        sampleRate: 16000,
+      };
+    });
+    await expect(
+      engine.diarize('off_audio', 'seg_off_out', { signal: controller.signal })
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'DIARIZATION_CANCELLED',
+    });
+    await expect(
+      engine.diarize('off_audio', 'seg_off_out', { signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('resolves model directory FileSource to detected onnx model files with quantization', async () => {
     native.detectDiarizationModel.mockResolvedValue({
       success: true,

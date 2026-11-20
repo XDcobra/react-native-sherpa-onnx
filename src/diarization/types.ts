@@ -141,7 +141,7 @@ export interface DiarizationEngine {
   /**
    * Cluster speakers in offline audio and write spans into `segmentOut`.
    * @throws {Error} `DIARIZATION_INVALID_ARGUMENT` — buffers or options are invalid.
-   * @throws {Error} `DIARIZATION_CANCELLED` — diarize was aborted.
+   * @throws {Error} `DIARIZATION_CANCELLED` (`name: 'AbortError'`) — `options.signal` aborted before or during the call. A cancel without the signal (`cancelDiarization`) resolves with `status: 'cancelled'`.
    * @throws {Error} `DIARIZATION_ERROR` — native diarize failed.
    * @throws {Error} `DIARIZATION_BUFFER_NOT_FOUND` — audio or segment buffer is unknown.
    * @throws {Error} `DIARIZATION_NOT_INITIALIZED` — engine is not initialized.
