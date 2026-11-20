@@ -84,10 +84,22 @@ export type AudioTaggingTagOptions = {
     policy?: SegmentationPolicy;
   };
   errorRecovery?: ErrorRecoveryStrategy;
+  /**
+   * Called at the start of each segment (segmented runs only). Audio position
+   * of the segment: `currentSegmentStartMs` / `currentSegmentEndMs`.
+   */
   onProgress?: (progress: OrchestrationProgress) => void;
+  /** Called as each segment is tagged (segmented runs only). */
   onSegment?: (event: AudioTaggingSegmentEvent) => void;
   /** Optional OfflineSegmentBuffer to populate with AudioTaggingSpeechSegmentPayload. */
   targetSegmentBuffer?: OfflineSegmentBufferIdSource;
+  /**
+   * Stops the call. Checked before the call and before each segment; a segment
+   * that is already running finishes first. On abort the promise rejects with
+   * `code: 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`), temporary
+   * segment buffers are released and `targetSegmentBuffer` stays empty.
+   */
+  signal?: AbortSignal;
 };
 
 export type AudioTaggingEvent = {
@@ -105,13 +117,22 @@ export type AudioTaggingResult = {
   topK: number;
 };
 
+/** One tagged segment of a segmented offline `tag()` run. */
 export type AudioTaggingSegmentEvent = {
+  /** 0-based position of the segment in this run. */
   segmentIndex: number;
-  totalSegments: number;
-  startTime: number;
-  endTime: number;
+  segmentCount: number;
+  /** Position in the input audio, in ms. */
+  startMs: number;
+  endMs: number;
   durationMs: number;
   result: AudioTaggingResult;
+  /** @deprecated Use `segmentCount`. */
+  totalSegments: number;
+  /** @deprecated Seconds; use `startMs`. */
+  startTime: number;
+  /** @deprecated Seconds; use `endMs`. */
+  endTime: number;
 };
 
 export type SegmentedAudioTaggingResult = {
@@ -154,6 +175,7 @@ export interface AudioTaggingEngine {
    * @throws {Error} `AUDIO_TAGGING_BUFFER_NOT_FOUND` — audio buffer is unknown.
    * @throws {Error} `AUDIO_TAGGING_BUFFER_EMPTY` — audio buffer has no samples.
    * @throws {Error} `AUDIO_TAGGING_OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   tag(
     offlineAudio: OfflineAudioBufferIdSource,

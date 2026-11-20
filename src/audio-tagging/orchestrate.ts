@@ -3,6 +3,7 @@ import SherpaOnnx, {
 } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
 import type { OfflineAudioBufferIdSource } from '../audiobuffer/types';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import { segmentOfflineBuffer } from '../segment';
 import { validateSegmentationConfig } from '../segment/validation';
 import {
@@ -116,7 +117,9 @@ export async function runOfflineAudioTaggingSegmentation(
       ? options.topK
       : null;
   const fallbackTopK = topK ?? 5;
+  const signal = options?.signal;
 
+  throwIfOrchestrationAborted(signal);
   const t0 = Date.now();
   const segRef = await segmentOfflineBuffer(
     audioBufferId,
@@ -129,6 +132,7 @@ export async function runOfflineAudioTaggingSegmentation(
       segRef.segmentBufferId
     );
     const spans = collectSpeechSpans(rawSegments);
+    throwIfOrchestrationAborted(signal);
 
     if (targetSegmentBufferId != null) {
       const staging = await createLiveSegmentBuffer({
@@ -141,11 +145,14 @@ export async function runOfflineAudioTaggingSegmentation(
     const segments: AudioTaggingSegmentEvent[] = [];
 
     for (let i = 0; i < spans.length; i++) {
+      throwIfOrchestrationAborted(signal);
       const span = spans[i]!;
       const durationMs = spanDurationMs(span);
       const sampleRate = span.sampleRate > 0 ? span.sampleRate : 16000;
       const startTime = span.startSample / sampleRate;
       const endTime = span.endSample / sampleRate;
+      const startMs = startTime * 1000;
+      const endMs = endTime * 1000;
 
       options?.onProgress?.({
         currentSegment: i,
@@ -153,6 +160,8 @@ export async function runOfflineAudioTaggingSegmentation(
         fraction: spans.length > 0 ? i / spans.length : 1,
         currentSegmentDurationMs: durationMs,
         elapsedMs: Date.now() - t0,
+        currentSegmentStartMs: startMs,
+        currentSegmentEndMs: endMs,
       });
 
       const nativeRes = await SherpaOnnx.tagAudioOffline(
@@ -166,11 +175,14 @@ export async function runOfflineAudioTaggingSegmentation(
 
       const event: AudioTaggingSegmentEvent = {
         segmentIndex: i,
+        segmentCount: spans.length,
+        startMs,
+        endMs,
+        durationMs,
+        result,
         totalSegments: spans.length,
         startTime,
         endTime,
-        durationMs,
-        result,
       };
       segments.push(event);
       options?.onSegment?.(event);

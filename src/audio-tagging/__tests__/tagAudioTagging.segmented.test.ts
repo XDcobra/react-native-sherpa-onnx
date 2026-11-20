@@ -250,6 +250,152 @@ describe('createAudioTagging - segmented mode', () => {
     expect(SherpaOnnx.tagAudioOffline).not.toHaveBeenCalled();
   });
 
+  const twoSpans: SegmentMeta[] = [
+    {
+      id: 's1',
+      sourceAudioBufferId: audioId,
+      kind: 'speech',
+      startSample: 8000,
+      endSample: 24000,
+      sampleRate: 16000,
+      durationMs: 1000,
+    },
+    {
+      id: 's2',
+      sourceAudioBufferId: audioId,
+      kind: 'speech',
+      startSample: 32000,
+      endSample: 48000,
+      sampleRate: 16000,
+      durationMs: 1000,
+    },
+  ];
+
+  it('reports segment times in ms next to the deprecated second fields', async () => {
+    const engine = await makeEngine();
+    (segmentOfflineBuffer as jest.Mock).mockResolvedValue({
+      segmentBufferId: 'seg_off_temp',
+    });
+    (getOfflineSegmentBufferSegments as jest.Mock).mockResolvedValue(twoSpans);
+    (SherpaOnnx.tagAudioOffline as jest.Mock).mockResolvedValue({
+      events: [{ name: 'Speech', index: 0, prob: 0.9 }],
+      audioDuration: 1,
+      elapsedMs: 5,
+      topK: 5,
+    });
+    const onProgress = jest.fn();
+    const onSegment = jest.fn();
+
+    await engine.tag(audioId, {
+      segmentation: { mode: 'auto' },
+      onProgress,
+      onSegment,
+    });
+
+    expect(onSegment).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        segmentIndex: 1,
+        segmentCount: 2,
+        startMs: 2000,
+        endMs: 3000,
+        durationMs: 1000,
+        totalSegments: 2,
+        startTime: 2,
+        endTime: 3,
+      })
+    );
+    expect(onProgress).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 2,
+        currentSegmentStartMs: 500,
+        currentSegmentEndMs: 1500,
+      })
+    );
+  });
+
+  describe('signal', () => {
+    it('rejects before segmentation when the signal is already aborted', async () => {
+      const engine = await makeEngine();
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        engine.tag(audioId, {
+          segmentation: { mode: 'auto' },
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject({
+        name: 'AbortError',
+        code: 'ORCHESTRATION_CANCELLED',
+      });
+      expect(segmentOfflineBuffer).not.toHaveBeenCalled();
+      expect(SherpaOnnx.tagAudioOffline).not.toHaveBeenCalled();
+    });
+
+    it('rejects before the one-shot native call when already aborted', async () => {
+      const engine = await makeEngine();
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        engine.tag(audioId, { signal: controller.signal })
+      ).rejects.toMatchObject({ code: 'ORCHESTRATION_CANCELLED' });
+      expect(SherpaOnnx.tagAudioOffline).not.toHaveBeenCalled();
+    });
+
+    it('stops between segments, releases temporaries and leaves the target empty', async () => {
+      const engine = await makeEngine();
+      (segmentOfflineBuffer as jest.Mock).mockResolvedValue({
+        segmentBufferId: 'seg_off_temp',
+      });
+      (getOfflineSegmentBufferSegments as jest.Mock).mockResolvedValue(
+        twoSpans
+      );
+      (createLiveSegmentBuffer as jest.Mock).mockResolvedValue({
+        bufferId: 'seg_live_staging',
+      });
+      (appendLiveSegment as jest.Mock).mockResolvedValue({
+        segmentId: 'x',
+        segmentIndex: 0,
+      });
+      (SherpaOnnx.tagAudioOffline as jest.Mock).mockResolvedValue({
+        events: [{ name: 'Speech', index: 0, prob: 0.9 }],
+        audioDuration: 1,
+        elapsedMs: 5,
+        topK: 5,
+      });
+      const controller = new AbortController();
+      const onProgress = jest.fn();
+      const onSegment = jest.fn(() => controller.abort());
+
+      await expect(
+        engine.tag(audioId, {
+          segmentation: { mode: 'auto' },
+          targetSegmentBuffer: targetSegId,
+          onProgress,
+          onSegment,
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject({
+        name: 'AbortError',
+        code: 'ORCHESTRATION_CANCELLED',
+      });
+
+      expect(SherpaOnnx.tagAudioOffline).toHaveBeenCalledTimes(1);
+      expect(onProgress).toHaveBeenCalledTimes(1);
+      expect(onSegment).toHaveBeenCalledTimes(1);
+      expect(finalizeLiveSegmentBuffer).not.toHaveBeenCalled();
+      expect(populateOfflineSegmentBufferIfEmpty).not.toHaveBeenCalled();
+      expect(releasePipelineSegmentBuffer).toHaveBeenCalledWith('seg_off_temp');
+      expect(releasePipelineSegmentBuffer).toHaveBeenCalledWith(
+        'seg_live_staging'
+      );
+    });
+  });
+
   it('rejects segmentation.mode manual', async () => {
     const engine = await makeEngine();
     await expect(
