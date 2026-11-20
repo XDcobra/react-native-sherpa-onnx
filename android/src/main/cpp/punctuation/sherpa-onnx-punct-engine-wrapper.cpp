@@ -184,7 +184,7 @@ class OnlinePunctuationWrapper::Impl {
       PUNCT_LOGE("online addPunct fail: %s", out.error.c_str());
       return out;
     }
-    out.text = result;
+    out.text = punct_text::RestoreInputWordBreaks(text, result);
     SherpaOnnxOnlinePunctuationFreeText(result);
     out.success = true;
     return out;
