@@ -76,6 +76,24 @@ describe('enhancement segmented offline API', () => {
     expect(native.populateOfflineAudioBufferIfEmpty).not.toHaveBeenCalled();
   });
 
+  it('rejects before the native call when signal is already aborted', async () => {
+    const enhancement = await createEnhancement({
+      modelSource: { kind: 'fs', path: '/models/enhancement' },
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      enhancement.enhance('off_input', 'off_output', {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ORCHESTRATION_CANCELLED',
+    });
+    expect(native.enhanceOfflineAudioBuffers).not.toHaveBeenCalled();
+  });
+
   it('runs segmented orchestration and populates caller-owned audioOut', async () => {
     (runOfflineEnhancementPipeline as jest.Mock).mockResolvedValue({
       status: 'complete',

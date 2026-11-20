@@ -34,6 +34,7 @@ import type {
   LiveAudioBufferRef,
 } from '../audiobuffer/types';
 import { runOfflineEnhancementPipeline } from './orchestrate';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import { validateLiveOfflinePipelineOptions } from '../livePipeline';
 import type { EnhancementLivePipelineOptions } from './types';
 import type { EnhancementPipelineHandle } from './streamingTypes';
@@ -351,6 +352,9 @@ export async function createEnhancement<O extends EnhancementInitializeOptions>(
 
       const segmentationMode = enhanceOptions?.segmentation?.mode ?? 'off';
       if (segmentationMode === 'off') {
+        throwIfOrchestrationAborted(
+          (enhanceOptions as EnhanceOptions | undefined)?.signal
+        );
         await SherpaOnnx.enhanceOfflineAudioBuffers(instanceId, inId, outId);
         return {
           status: 'complete',
@@ -463,3 +467,9 @@ export {
   isEnhancementConcreteModelType,
   isEnhancementModelType,
 } from './types';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';
+export type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
