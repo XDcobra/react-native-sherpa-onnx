@@ -560,7 +560,7 @@ export async function runAccurateAsrMediated(
             sampleCount: frameCount,
           };
           if (numThreadsOpt != null) {
-            return SherpaOnnx.alignAccurateFromPcm(
+            return await SherpaOnnx.alignAccurateFromPcm(
               resolvedModelPath,
               preparedText,
               pcm,
@@ -573,7 +573,7 @@ export async function runAccurateAsrMediated(
             );
           }
           if (providerOpt) {
-            return SherpaOnnx.alignAccurateFromPcm(
+            return await SherpaOnnx.alignAccurateFromPcm(
               resolvedModelPath,
               preparedText,
               pcm,
@@ -584,7 +584,7 @@ export async function runAccurateAsrMediated(
               providerOpt
             );
           }
-          return SherpaOnnx.alignAccurateFromPcm(
+          return await SherpaOnnx.alignAccurateFromPcm(
             resolvedModelPath,
             preparedText,
             pcm,
