@@ -64,7 +64,7 @@ COMMON_CONFIGURE=(
 --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
 --enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska,webm
 --enable-parser=${PARSERS}
---enable-encoder=pcm_s16le,flac,aac,alac,libshine,libopus,libvpx_vp9
+--enable-encoder=pcm_s16le,flac,aac,alac,libshine,libopus,libvpx_vp9,mov_text,subrip,ass,webvtt
 
 --enable-protocol=file
 --enable-libshine
@@ -214,7 +214,14 @@ if ! grep -q '^#define CONFIG_VP9_DECODER 1$' "$FFMPEG_SRC/config_components.h";
   echo "===== FFmpeg iOS configure did not enable native vp9 decoder ====="
   exit 1
 fi
-echo "FFmpeg iOS configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1"
+# Subtitle tracks for exportVideo: mov_text (mp4/mov), subrip + ass (mkv), webvtt (webm/mkv).
+for enc in MOV_TEXT SUBRIP ASS WEBVTT; do
+  if ! grep -q "^#define CONFIG_${enc}_ENCODER 1$" "$FFMPEG_SRC/config_components.h"; then
+    echo "===== FFmpeg iOS configure did not enable the ${enc} subtitle encoder ====="
+    exit 1
+  fi
+done
+echo "FFmpeg iOS configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1, subtitle encoders mov_text,subrip,ass,webvtt"
 
 make -j"$(sysctl -n hw.ncpu)"
 

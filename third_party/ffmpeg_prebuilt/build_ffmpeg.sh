@@ -59,6 +59,8 @@ if [ "${VIDEO_SW_DECODERS:-0}" = "1" ]; then
     DECODERS="${DECODERS},h264,hevc"
     PARSERS="${PARSERS},h264,hevc"
 fi
+# Subtitle tracks for exportVideo: mov_text (mp4/mov), subrip + ass (mkv), webvtt (webm/mkv).
+SUBTITLE_ENCODERS="mov_text,subrip,ass,webvtt"
 COMMON_CONFIGURE=(
     --enable-shared
     --disable-static
@@ -71,7 +73,7 @@ COMMON_CONFIGURE=(
     --enable-decoder=${DECODERS}
     --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
     --enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska,webm
-    --enable-encoder=pcm_s16le,flac,libshine,aac,alac,libopus,libvpx_vp9
+    --enable-encoder=pcm_s16le,flac,libshine,aac,alac,libopus,libvpx_vp9,${SUBTITLE_ENCODERS}
     --enable-parser=${PARSERS}
     --enable-protocol=file
     --enable-swresample
@@ -352,7 +354,13 @@ PC
         echo "===== FFmpeg configure did not enable native vp9 decoder ====="
         exit 1
     fi
-    echo "FFmpeg configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1"
+    for enc in MOV_TEXT SUBRIP ASS WEBVTT; do
+        if ! grep -q "^#define CONFIG_${enc}_ENCODER 1$" "$COMPONENTS_H"; then
+            echo "===== FFmpeg configure did not enable the ${enc} subtitle encoder ====="
+            exit 1
+        fi
+    done
+    echo "FFmpeg configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1, subtitle encoders ${SUBTITLE_ENCODERS}"
 
     make -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | tee -a "$FFMPEG_BUILD_LOG"
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
