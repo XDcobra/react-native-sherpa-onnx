@@ -205,7 +205,7 @@ INSTANTIATE_TEST_SUITE_P(
             {"en"}},
         NameOnlyLanguageHintCase{
             LanguageHintDomain::kSpeakerEmbedding, "wespeaker_en_voxceleb_CAM++", {"en"}},
-        // Diarization: pyannote / reverb language-agnostic; NeMo Sortformer EN
+        // Diarization: pyannote, reverb, Sortformer and Nemotron are language-agnostic
         NameOnlyLanguageHintCase{
             LanguageHintDomain::kDiarization,
             "sherpa-onnx-pyannote-segmentation-3-0",
@@ -217,8 +217,7 @@ INSTANTIATE_TEST_SUITE_P(
         NameOnlyLanguageHintCase{
             LanguageHintDomain::kDiarization,
             "diar_streaming_sortformer_4spk-v2.1",
-            {"en"}},
-        // No curated pack entry → empty (multilingual / language-agnostic).
+            {}},
         NameOnlyLanguageHintCase{
             LanguageHintDomain::kDiarization,
             "diar_streaming_nemotron3_sortformer_8spk",
