@@ -6,6 +6,7 @@
  */
 
 #include "sherpa-onnx-online-stt-engine-wrapper.h"
+#include "sherpa-onnx-stt-modeling-unit.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-validate-online-stt.h"
 
@@ -115,10 +116,20 @@ static std::unordered_map<std::string, std::string> onlinePathsToMap(
  */
 static bool applyHotwordsModelingUnit(
     const std::unordered_map<std::string, std::string>& paths,
-    const std::string& modelingUnit, const std::string& bpeVocab,
-    sherpa_onnx::cxx::OnlineModelConfig& modelConfig, std::string& error) {
+    const std::string& requestedUnit, const std::string& bpeVocab,
+    bool hasHotwords, sherpa_onnx::cxx::OnlineModelConfig& modelConfig,
+    std::string& error) {
   if (!bpeVocab.empty()) {
     modelConfig.bpe_vocab = bpeVocab;
+  }
+  std::string modelingUnit = requestedUnit;
+  if (modelingUnit.empty() && hasHotwords) {
+    // No unit given: follow the model, so English BPE models tokenize hotwords as BPE.
+    auto it = paths.find("bpeVocab");
+    const std::string& vocab = !modelConfig.bpe_vocab.empty() || it == paths.end()
+                                   ? modelConfig.bpe_vocab
+                                   : it->second;
+    modelingUnit = AutoHotwordsModelingUnit(modelConfig.tokens, vocab);
   }
   if (modelingUnit.empty()) {
     return true;
@@ -222,7 +233,8 @@ static OnlineSttInitResult createOnlineRecognizerFromPaths(
     return result;
   }
   if (!applyHotwordsModelingUnit(paths, modelingUnit, bpeVocab,
-                                 config.model_config, result.error)) {
+                                 !hotwordsFile.empty(), config.model_config,
+                                 result.error)) {
     LOGE("%s", result.error.c_str());
     return result;
   }

@@ -1843,3 +1843,13 @@ else()
     "tts_host_test skipped (set SHERPA_ONNX_HOST_LIBDIR to libsherpa-onnx-c-api dir)")
 endif()
 
+
+# Hotwords modeling unit chosen from the model (header-only helper).
+add_executable(stt_modeling_unit_host_test
+  "${CMAKE_CURRENT_SOURCE_DIR}/stt/stt_modeling_unit_test.cpp"
+)
+target_include_directories(stt_modeling_unit_host_test PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/stt"
+)
+target_link_libraries(stt_modeling_unit_host_test PRIVATE ${SEGMENTBUFFER_GTEST_LIBS})
+add_test(NAME stt_modeling_unit_host_test COMMAND $<TARGET_FILE:stt_modeling_unit_host_test>)

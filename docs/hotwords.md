@@ -101,7 +101,7 @@ Pass these in `createSTT()` (or `createStreamingSTT()`):
 | --- | --- | --- | --- |
 | `hotwordsFile` | `FileSource` (`createSTT`) / `string` (`createStreamingSTT`) | — | Hotwords text file |
 | `hotwordsScore` | `number` | `1.5` | Global boost score (higher = stronger bias) |
-| `modelingUnit` | `'cjkchar' \| 'bpe' \| 'cjkchar+bpe'` | sherpa-onnx default (`'cjkchar'`) | How hotword phrases are split into model tokens; see [Modeling Unit & BPE Vocab](#modeling-unit--bpe-vocab) |
+| `modelingUnit` | `'cjkchar' \| 'bpe' \| 'cjkchar+bpe'` | from the model when hotwords are set (see below) | How hotword phrases are split into model tokens; see [Modeling Unit & BPE Vocab](#modeling-unit--bpe-vocab) |
 | `bpeVocab` | `FileSource` | — | BPE vocab file; needed when `modelingUnit` includes `'bpe'` unless the model directory has a `bpe.vocab` |
 
 For streaming STT, hotwords only take effect with `decodingMethod: 'modified_beam_search'`.
@@ -202,7 +202,7 @@ For some transducer models, you may need to specify how hotwords are tokenized:
 | `'cjkchar+bpe'` | Mixed CJK + BPE models | Yes — `bpe.vocab` |
 | (omitted) | sherpa-onnx default (`'cjkchar'`) | No |
 
-With the default unit, hotwords on a BPE model are split into single characters and usually do not match anything, so set `modelingUnit: 'bpe'` for such models.
+When hotwords are set and `modelingUnit` is omitted, the unit follows the model: `'bpe'` when it has a BPE vocab (given or a `bpe.vocab` in the model directory), `'cjkchar+bpe'` when its tokens also contain Chinese characters, and sherpa-onnx's default `'cjkchar'` without a BPE vocab. Set `modelingUnit` only to override that.
 
 The BPE vocabulary is usually shipped with the model as `bpe.vocab`. It is taken from, in this order:
 
