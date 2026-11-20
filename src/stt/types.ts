@@ -366,6 +366,7 @@ export interface SttEngine {
    * @throws {Error} `STT_BUFFER_NOT_FOUND` — audio or text buffer id is unknown.
    * @throws {Error} `STT_BUFFER_KIND_MISMATCH` — buffer is not the required offline/live kind.
    * @throws {Error} `STT_BUFFER_EMPTY` — input audio has no samples.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    */
   transcribe(
     buffer: OfflineAudioBufferRef | OfflineBufferHandle | string,

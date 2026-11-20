@@ -625,6 +625,7 @@ export interface TtsEngine {
    * @throws {Error} `TTS_GENERATE_ERROR` — native synthesis failed.
    * @throws {Error} `TTS_TEXT_BUFFER_NOT_FOUND` — input text buffer is unknown.
    * @throws {Error} `TTS_AUDIO_OUT_NOT_FOUND` — output audio buffer is unknown.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    */
   synthesize(
     textIn: OfflineTextBufferRef | OfflineTextBufferHandle,

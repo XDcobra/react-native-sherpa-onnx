@@ -107,6 +107,7 @@ export type OfflinePunctuationEngine = {
    * @throws {Error} `PUNCTUATION_ERROR` — native punctuate failed.
    * @throws {Error} `PUNCTUATION_INSTANCE_NOT_FOUND` — engine was destroyed.
    * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — text buffers or options are invalid.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    */
   punctuate(
     textIn: OfflineTextBufferIdSource,
@@ -136,6 +137,7 @@ export type OfflinePunctuationEngine = {
    * @throws {Error} `PUNCTUATION_ERROR` — native punctuate failed.
    * @throws {Error} `PUNCTUATION_INSTANCE_NOT_FOUND` — engine was destroyed.
    * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — `textOut` or options are invalid.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    */
   punctuateString(
     plain: string,

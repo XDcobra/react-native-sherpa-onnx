@@ -112,6 +112,7 @@ export interface SeparationEngine {
    * @throws {Error} `SEPARATION_BUFFER_EMPTY` — input audio has no samples.
    * @throws {Error} `SEPARATION_OUTPUT_NOT_EMPTY` — an output buffer already has samples.
    * @throws {Error} `SEPARATION_STEM_COUNT_MISMATCH` — `audioOuts.length` does not match the model.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   separate(

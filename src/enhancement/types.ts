@@ -207,6 +207,7 @@ type EnhancementEngineCore<F extends EnhancementConcreteModelType> = {
    * @throws {Error} `ENHANCEMENT_BUFFER_KIND_MISMATCH` — buffer is not the required offline kind.
    * @throws {Error} `ENHANCEMENT_BUFFER_EMPTY` — input audio has no samples.
    * @throws {Error} `ENHANCEMENT_OUTPUT_NOT_EMPTY` — `audioOut` already has samples.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   enhance(
