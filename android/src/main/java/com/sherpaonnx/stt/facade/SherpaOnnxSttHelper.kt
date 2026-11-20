@@ -221,11 +221,14 @@ internal class SherpaOnnxSttHelper(
       return
     }
 
-    val paths = HashMap(pathStrings)
-    val bpe = parsed.bpeVocab?.trim().orEmpty()
-    if (bpe.isNotEmpty() && paths["bpeVocab"].isNullOrEmpty()) {
-      paths["bpeVocab"] = bpe
+    val resolvedBpeVocab = try {
+      pathResolver.resolveContentUriToFile(parsed.bpeVocab?.trim().orEmpty(), "stt_bpe_vocab")
+    } catch (e: Exception) {
+      promise.reject(SttErrorCodes.INIT_FAILED, e.message ?: "BPE vocab could not be resolved", e)
+      return
     }
+
+    val paths = HashMap(pathStrings)
 
     val whisper = stringOptionsMap(parsed.modelOptions?.getMap("whisper"))
     val senseVoice = stringOptionsMap(parsed.modelOptions?.getMap("senseVoice"))
@@ -264,6 +267,8 @@ internal class SherpaOnnxSttHelper(
           funasr,
           qwen3,
           cohere,
+          parsed.modelingUnit?.trim()?.ifEmpty { null },
+          resolvedBpeVocab.ifEmpty { null },
         ) as? HashMap<String, Any>
         val ok = raw?.get("success") as? Boolean ?: false
         if (!ok) {
@@ -562,6 +567,8 @@ internal class SherpaOnnxSttHelper(
       funasr: HashMap<String, String>?,
       qwen3: HashMap<String, String>?,
       cohere: HashMap<String, String>?,
+      modelingUnit: String?,
+      bpeVocab: String?,
     ): HashMap<String, Any>?
 
     @JvmStatic

@@ -55,6 +55,57 @@ TEST(SttOfflineHost, InitCustomRejectsMissingPaths) {
   EXPECT_FALSE(stt.isInitialized());
 }
 
+sherpaonnx::SttModelPaths FakeTransducerPaths() {
+  sherpaonnx::SttModelPaths paths;
+  paths.encoder = "/nonexistent/encoder.onnx";
+  paths.decoder = "/nonexistent/decoder.onnx";
+  paths.joiner = "/nonexistent/joiner.onnx";
+  paths.tokens = "/nonexistent/tokens.txt";
+  return paths;
+}
+
+TEST(SttOfflineHost, InitCustomRejectsBpeModelingUnitWithoutVocab) {
+  sherpaonnx::SttWrapper stt;
+  const auto r = stt.initializeCustom(
+      "transducer", FakeTransducerPaths(), false, std::nullopt, std::nullopt,
+      std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      std::string("bpe"), std::nullopt);
+  EXPECT_FALSE(r.success);
+  EXPECT_NE(r.error.find("BPE_VOCAB_REQUIRED"), std::string::npos) << r.error;
+  EXPECT_FALSE(stt.isInitialized());
+}
+
+TEST(SttOfflineHost, InitCustomRejectsUnknownModelingUnit) {
+  sherpaonnx::SttWrapper stt;
+  const auto r = stt.initializeCustom(
+      "transducer", FakeTransducerPaths(), false, std::nullopt, std::nullopt,
+      std::nullopt, std::nullopt, std::nullopt, std::nullopt, std::nullopt,
+      nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+      std::string("phone"), std::string("/nonexistent/bpe.vocab"));
+  EXPECT_FALSE(r.success);
+  EXPECT_NE(r.error.find("INVALID_MODELING_UNIT"), std::string::npos)
+      << r.error;
+  EXPECT_FALSE(stt.isInitialized());
+}
+
+TEST(SttOfflineHost, InitCustomAcceptsBpeVocabFromPathsForBpeUnit) {
+  // bpeVocab in the custom paths satisfies the BPE requirement; init then
+  // fails later only because the fake model files do not exist.
+  sherpaonnx::SttWrapper stt;
+  auto paths = FakeTransducerPaths();
+  paths.bpeVocab = "/nonexistent/bpe.vocab";
+  const auto r = stt.initializeCustom(
+      "transducer", paths, false, std::nullopt, std::nullopt, std::nullopt,
+      std::nullopt, std::nullopt, std::nullopt, std::nullopt, nullptr, nullptr,
+      nullptr, nullptr, nullptr, nullptr, std::string("cjkchar+bpe"),
+      std::nullopt);
+  EXPECT_FALSE(r.success);
+  EXPECT_EQ(r.error.find("BPE_VOCAB_REQUIRED"), std::string::npos) << r.error;
+  EXPECT_EQ(r.error.find("INVALID_MODELING_UNIT"), std::string::npos)
+      << r.error;
+}
+
 TEST(SttOfflineHost, InitTranscribeWithRealModel) {
   if (!HostInferenceEnabled()) {
     GTEST_SKIP()

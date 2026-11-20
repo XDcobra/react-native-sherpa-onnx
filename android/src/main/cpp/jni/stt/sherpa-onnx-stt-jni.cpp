@@ -202,7 +202,7 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxSttHelper_nativeInitializeCustom(
     jint numThreads, jstring provider, jstring ruleFsts, jstring ruleFars,
     jfloat dither, jobject whisperMap, jobject senseVoiceMap,
     jobject canaryMap, jobject funasrMap, jobject qwen3Map,
-    jobject cohereMap) {
+    jobject cohereMap, jstring modelingUnit, jstring bpeVocab) {
   const std::string id = CopyJstring(env, instanceId);
   const std::string type = CopyJstring(env, modelType);
   auto pathStrings = HashMapToStringMap(env, pathsMap);
@@ -232,6 +232,8 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxSttHelper_nativeInitializeCustom(
   auto rfar = OptJstring(env, ruleFars);
   std::optional<float> dith =
       dither >= 0.f ? std::optional<float>(dither) : std::nullopt;
+  auto unit = OptJstring(env, modelingUnit);
+  auto bpe = OptJstring(env, bpeVocab);
 
   sherpaonnx::SttInitializeResult result;
   {
@@ -243,7 +245,7 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxSttHelper_nativeInitializeCustom(
         dith, whisperMap ? &whisper : nullptr,
         senseVoiceMap ? &senseVoice : nullptr, canaryMap ? &canary : nullptr,
         funasrMap ? &funasr : nullptr, qwen3Map ? &qwen3 : nullptr,
-        cohereMap ? &cohere : nullptr);
+        cohereMap ? &cohere : nullptr, unit, bpe);
     if (result.success) {
       g_stt[id] = std::move(inst);
       LOGI("nativeInitializeCustom ok id=%s type=%s", id.c_str(), type.c_str());

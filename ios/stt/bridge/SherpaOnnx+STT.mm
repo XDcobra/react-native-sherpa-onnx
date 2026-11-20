@@ -205,6 +205,18 @@ static void FillSttModelPathsFromDict(
             ditherOpt = (float)dither.value();
         }
 
+        NSString *modelingUnit = options.modelingUnit();
+        std::optional<std::string> modelingUnitOpt = std::nullopt;
+        if (modelingUnit != nil && [modelingUnit length] > 0) {
+            modelingUnitOpt = [modelingUnit UTF8String];
+        }
+
+        NSString *bpeVocab = options.bpeVocab();
+        std::optional<std::string> bpeVocabOpt = std::nullopt;
+        if (bpeVocab != nil && [bpeVocab length] > 0) {
+            bpeVocabOpt = [bpeVocab UTF8String];
+        }
+
         // Parse model-specific options (only the block for the loaded model type is applied in C++).
         sherpaonnx::SttWhisperOptions whisperOpts;
         sherpaonnx::SttSenseVoiceOptions senseVoiceOpts;
@@ -304,14 +316,16 @@ static void FillSttModelPathsFromDict(
                 canaryOptsPtr,
                 funasrNanoOptsPtr,
                 qwen3AsrOptsPtr,
-                cohereTranscribeOptsPtr
+                cohereTranscribeOptsPtr,
+                modelingUnitOpt,
+                bpeVocabOpt
             );
         } else {
             result = inst->wrapper->initialize(
                 modelDirStr, quantizationStr, modelTypeOpt, debugVal, hotwordsFileOpt, hotwordsScoreOpt,
                 numThreadsOpt, providerOpt, ruleFstsOpt, ruleFarsOpt, ditherOpt,
                 whisperOptsPtr, senseVoiceOptsPtr, canaryOptsPtr, funasrNanoOptsPtr, qwen3AsrOptsPtr,
-                cohereTranscribeOptsPtr);
+                cohereTranscribeOptsPtr, modelingUnitOpt, bpeVocabOpt);
         }
 
         if (result.success) {

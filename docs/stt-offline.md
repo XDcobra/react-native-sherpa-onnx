@@ -388,7 +388,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [Live over
 | `sttSupportsHotwords(modelType)` | Runtime guard for hotword support |
 | `SttDetectModelResult` | Return of `detectSttModel()` |
 | `STTInitializeOptions` | Auto or custom init union for `createSTT` |
-| `STTInitializeOptionsBase` | Shared fields: `modelSource`, `numThreads?`, `provider?`, `debug?`, `hotwordsFile?`, `modelOptions?`, `ruleFsts?`, … |
+| `STTInitializeOptionsBase` | Shared fields: `modelSource`, `numThreads?`, `provider?`, `debug?`, `hotwordsFile?`, `hotwordsScore?`, `modelingUnit?`, `bpeVocab?`, `modelOptions?`, `ruleFsts?`, … |
 | `SttModelOptions` | Aggregate model-specific options (`whisper?`, `senseVoice?`, `canary?`, `funasrNano?`, `qwen3Asr?`, `cohereTranscribe?`) |
 | `SttWhisperModelOptions` | `{ language?, task?, tailPaddings?, enableTokenTimestamps?, enableSegmentTimestamps? }` |
 | `SttSenseVoiceModelOptions` | `{ language?, useItn? }` |
