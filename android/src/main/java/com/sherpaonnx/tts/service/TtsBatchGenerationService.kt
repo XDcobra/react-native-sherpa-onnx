@@ -15,8 +15,6 @@ import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal class TtsBatchGenerationService(
   private val repository: TtsEngineRepository,
@@ -28,10 +26,7 @@ internal class TtsBatchGenerationService(
    * writes PCM into an empty OfflineAudioBuffer.
    *
    * When `options.operationId` is set, uses Sherpa Generate callback progress and
-   * emits `ttsGenerateProgress` events `{ operationId, progress }`. Such a call
-   * can be stopped with [requestCancel]: the progress callback then returns 0,
-   * sherpa-onnx stops after the current sentence batch and the call rejects
-   * with `TTS_CANCELLED` (audioOut stays empty).
+   * emits `ttsGenerateProgress` events `{ operationId, progress }`.
    */
   fun synthesizeTts(
     instanceId: String,
@@ -39,27 +34,6 @@ internal class TtsBatchGenerationService(
     audioOutBufferId: String,
     options: ReadableMap?,
     promise: Promise
-  ) {
-    val operationId = options?.getString("operationId")?.trim().orEmpty()
-    if (operationId.isEmpty()) {
-      synthesizeTtsCancellable(instanceId, textInBufferId, audioOutBufferId, options, promise, null)
-      return
-    }
-    val cancelFlag = beginCancellable(operationId)
-    try {
-      synthesizeTtsCancellable(instanceId, textInBufferId, audioOutBufferId, options, promise, cancelFlag)
-    } finally {
-      endCancellable(operationId)
-    }
-  }
-
-  private fun synthesizeTtsCancellable(
-    instanceId: String,
-    textInBufferId: String,
-    audioOutBufferId: String,
-    options: ReadableMap?,
-    promise: Promise,
-    cancelFlag: AtomicBoolean?,
   ) {
     try {
       val inst = repository[instanceId] ?: run {
@@ -122,11 +96,7 @@ internal class TtsBatchGenerationService(
       val sid = TtsGenerationOptionsParser.getSid(options)
       val speed = TtsGenerationOptionsParser.getSpeed(options)
       val operationId = options?.getString("operationId")?.trim().orEmpty()
-      val progressCallback = makeProgressCallback(operationId, cancelFlag)
-      if (cancelFlag?.get() == true) {
-        promise.reject(TTS_CANCELLED, "TTS generation cancelled")
-        return
-      }
+      val progressCallback = makeProgressCallback(operationId)
 
       val gateKey = inst.gateKey()
       if (!NativeInstanceGate.beginUse(gateKey)) {
@@ -279,12 +249,6 @@ internal class TtsBatchGenerationService(
         NativeInstanceGate.endUse(gateKey)
       }
 
-      if (cancelFlag?.get() == true) {
-        // Stopped early: drop the partial audio, leave audioOut empty.
-        promise.reject(TTS_CANCELLED, "TTS generation cancelled")
-        return
-      }
-
       val (samples, _) = audioPair
       val adopted = audioEntry.tryAdoptSamples(samples)
       if (!adopted) {
@@ -308,14 +272,11 @@ internal class TtsBatchGenerationService(
     }
   }
 
-  private fun makeProgressCallback(
-    operationId: String,
-    cancelFlag: AtomicBoolean?,
-  ): TtsGenerateProgressCallback? {
+  private fun makeProgressCallback(operationId: String): TtsGenerateProgressCallback? {
     if (operationId.isEmpty()) return null
     return TtsGenerateProgressCallback { progress ->
       emitGenerateProgress(operationId, progress)
-      if (cancelFlag?.get() == true) 0 else 1
+      1
     }
   }
 
@@ -330,37 +291,6 @@ internal class TtsBatchGenerationService(
         .emit("ttsGenerateProgress", payload)
     } catch (_: Exception) {
       // Bridge may already be tearing down.
-    }
-  }
-
-  companion object {
-    const val TTS_CANCELLED = "TTS_CANCELLED"
-
-    private class CancelEntry {
-      val cancelled = AtomicBoolean(false)
-      @Volatile var active = false
-    }
-
-    // Keyed by options.operationId. A cancel that arrives before its call
-    // starts leaves a flag the call then sees.
-    private val cancelEntries = ConcurrentHashMap<String, CancelEntry>()
-
-    private fun beginCancellable(operationId: String): AtomicBoolean {
-      val entry = cancelEntries.computeIfAbsent(operationId) { CancelEntry() }
-      entry.active = true
-      return entry.cancelled
-    }
-
-    private fun endCancellable(operationId: String) {
-      cancelEntries.remove(operationId)
-    }
-
-    /** Stops the synthesizeTts call with this operationId; true when it is running. */
-    fun requestCancel(operationId: String): Boolean {
-      if (operationId.isBlank()) return false
-      val entry = cancelEntries.computeIfAbsent(operationId.trim()) { CancelEntry() }
-      entry.cancelled.set(true)
-      return entry.active
     }
   }
 }

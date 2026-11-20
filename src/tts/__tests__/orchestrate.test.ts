@@ -1,10 +1,3 @@
-jest.mock('react-native', () => ({
-  NativeEventEmitter: jest.fn().mockImplementation(() => ({
-    addListener: jest.fn(() => ({ remove: jest.fn() })),
-  })),
-  NativeModules: { SherpaOnnx: {} },
-}));
-
 jest.mock('../../NativeSherpaOnnx', () => ({
   __esModule: true,
   default: {

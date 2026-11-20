@@ -6849,10 +6849,6 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     offlineTtsHelper.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
   }
 
-  /** Synchronous so it is not queued behind the running synthesizeTts call. */
-  override fun cancelTtsGeneration(operationId: String): Boolean =
-    com.sherpaonnx.tts.service.TtsBatchGenerationService.requestCancel(operationId)
-
   override fun alignOfflineTextToAudio(
     textInBufferId: String,
     audioInBufferId: String,

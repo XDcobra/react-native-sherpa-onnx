@@ -58,8 +58,7 @@ export async function runOfflineTtsPipeline(
                 elapsedMs: Date.now() - startedAtMs,
               });
             }
-          : undefined,
-        options.signal
+          : undefined
       );
       emit({
         segmentIndex: ctx.segmentIndex,

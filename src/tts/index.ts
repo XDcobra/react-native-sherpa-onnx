@@ -547,8 +547,7 @@ export async function createTTS(
                   elapsedMs: Date.now() - startedAtMs,
                 });
               }
-            : undefined,
-          batchOpts?.signal
+            : undefined
         );
         emit({
           segmentIndex: 0,

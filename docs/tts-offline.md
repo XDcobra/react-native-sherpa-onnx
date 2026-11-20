@@ -171,7 +171,7 @@ Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live pa
 
 ### Cancel
 
-Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry, and it also stops the segment that is running in native code: generation ends after the sentence batch the model is working on (models that speak a segment in one step, such as zero-shot cloning models, finish that step first). This works in both `segmentation.mode: 'off'` and `'auto'`. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK drops the partial audio of the stopped segment, releases its temporary buffers, and `audioOut` stays empty.
+Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code finishes first, so a run stops at segment granularity; with `segmentation.mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and `audioOut` stays empty. If the signal aborts while the last segment runs, the call still resolves.
 
 ```ts
 const controller = new AbortController();

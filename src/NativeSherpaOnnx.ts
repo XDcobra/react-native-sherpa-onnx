@@ -2103,15 +2103,6 @@ export interface Spec extends TurboModule {
     options?: Object
   ): Promise<void>;
 
-  /**
-   * Stop the `synthesizeTts` call started with `options.operationId`.
-   * Synchronous so it is not queued behind that call. Generation stops after
-   * the current sentence batch and the call rejects with `TTS_CANCELLED`
-   * (audioOut stays empty). A cancel before the call starts makes it reject
-   * at once. Returns true when the call was running.
-   */
-  cancelTtsGeneration(operationId: string): boolean;
-
   // ==================== Alignment / Subtitle Methods ====================
 
   /**
