@@ -123,6 +123,7 @@ const FieldList kStreamingTransducerFields = {
     {"decoder", true, std::nullopt},
     {"joiner", true, std::nullopt},
     {"tokens", true, std::nullopt},
+    {"bpeVocab", false, std::nullopt},
 };
 
 const FieldList kStreamingParaformerFields = {

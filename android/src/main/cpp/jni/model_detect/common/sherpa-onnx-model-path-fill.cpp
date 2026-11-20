@@ -195,6 +195,7 @@ void FillOnlineSttModelPathsFromStringMap(
     SetPathFromMap(paths, "joiner", out.joiner);
     SetPathFromMap(paths, "tokens", out.tokens);
     SetPathFromMap(paths, "model", out.model);
+    SetPathFromMap(paths, "bpeVocab", out.bpeVocab);
 }
 
 void PutPathIfNonEmpty(

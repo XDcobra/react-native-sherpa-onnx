@@ -142,7 +142,7 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxOnlineSttHelper_nativeInitialize(
     jfloat rule1MinUtteranceLength, jboolean rule2MustContainNonSilence,
     jfloat rule2MinTrailingSilence, jfloat rule2MinUtteranceLength,
     jboolean rule3MustContainNonSilence, jfloat rule3MinTrailingSilence,
-    jfloat rule3MinUtteranceLength) {
+    jfloat rule3MinUtteranceLength, jstring modelingUnit, jstring bpeVocab) {
   const std::string id = CopyJstring(env, instanceId);
   sherpaonnx::OnlineSttInitResult result;
   {
@@ -159,7 +159,8 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxOnlineSttHelper_nativeInitialize(
         rule1MinUtteranceLength, rule2MustContainNonSilence == JNI_TRUE,
         rule2MinTrailingSilence, rule2MinUtteranceLength,
         rule3MustContainNonSilence == JNI_TRUE, rule3MinTrailingSilence,
-        rule3MinUtteranceLength);
+        rule3MinUtteranceLength, CopyJstring(env, modelingUnit),
+        CopyJstring(env, bpeVocab));
     if (result.success) {
       g_online_stt[id] = std::move(inst);
       LOGI("nativeInitialize ok id=%s", id.c_str());
@@ -182,7 +183,7 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxOnlineSttHelper_nativeInitializeCustom(
     jfloat rule1MinUtteranceLength, jboolean rule2MustContainNonSilence,
     jfloat rule2MinTrailingSilence, jfloat rule2MinUtteranceLength,
     jboolean rule3MustContainNonSilence, jfloat rule3MinTrailingSilence,
-    jfloat rule3MinUtteranceLength) {
+    jfloat rule3MinUtteranceLength, jstring modelingUnit, jstring bpeVocab) {
   const std::string id = CopyJstring(env, instanceId);
   sherpaonnx::OnlineSttModelPaths paths;
   sherpaonnx::FillOnlineSttModelPathsFromStringMap(
@@ -203,7 +204,8 @@ Java_com_sherpaonnx_stt_facade_SherpaOnnxOnlineSttHelper_nativeInitializeCustom(
         rule1MinUtteranceLength, rule2MustContainNonSilence == JNI_TRUE,
         rule2MinTrailingSilence, rule2MinUtteranceLength,
         rule3MustContainNonSilence == JNI_TRUE, rule3MinTrailingSilence,
-        rule3MinUtteranceLength);
+        rule3MinUtteranceLength, CopyJstring(env, modelingUnit),
+        CopyJstring(env, bpeVocab));
     if (result.success) {
       g_online_stt[id] = std::move(inst);
       LOGI("nativeInitializeCustom ok id=%s", id.c_str());

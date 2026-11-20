@@ -42,6 +42,8 @@ export type OnlineSttInitBridgeOptions = {
   maxActivePaths?: number;
   hotwordsFile?: string;
   hotwordsScore?: number;
+  modelingUnit?: string;
+  bpeVocab?: string;
   numThreads?: number;
   provider?: string;
   ruleFsts?: string;
