@@ -100,6 +100,10 @@ export interface OrchestrationConfig {
    * composed progress (used by offline TTS with Sherpa generateFraction).
    */
   deferProgressToConsumer?: boolean;
+  /**
+   * Audio pipelines: input samples before each part (after the first) given to the
+   * consumer as context and cut from its output again, so parts join without seams.
+   */
   overlapSamples?: number;
   overlapChars?: number;
   textSkipPlaceholder?: string;
@@ -603,9 +607,18 @@ async function releaseLiveAudioAccumulators(
   }
 }
 
+/**
+ * Appends one part's output so that it covers exactly the part's input time: the
+ * leading context (`contextFrames`) is cut, and an output a few samples shorter or
+ * longer than the input (model framing) is padded with silence or trimmed. Without
+ * this the result drifts against the input by a little at every part.
+ *
+ * Frames are counted at the accumulator's rate (the input rate); the output may use
+ * another rate. Returns the frames appended (always `expectedFrames`).
+ */
 async function appendAudioSegmentOutputToAccumulator(args: {
-  segmentIndex: number;
-  overlapSamples: number;
+  contextFrames: number;
+  expectedFrames: number;
   inputInfo: OfflineAudioBufferInfo;
   tempOut: OfflineAudioBufferRef;
   accumulator: LiveAudioBufferRef;
@@ -617,32 +630,36 @@ async function appendAudioSegmentOutputToAccumulator(args: {
     );
   }
 
-  let appendedSamples = outInfo.numSamples;
-  if (outInfo.numSamples > 0) {
-    if (args.overlapSamples > 0 && args.segmentIndex > 0) {
-      const trim = Math.min(args.overlapSamples, outInfo.numSamples);
-      const kept = outInfo.numSamples - trim;
-      appendedSamples = Math.max(0, kept);
-      if (kept > 0) {
-        const trimmed = getOfflineAudioBufferSamplesSlice(
-          args.tempOut.bufferId,
-          trim,
-          kept
-        );
-        appendSamplesToLiveAudioBuffer(
-          args.accumulator.bufferId,
-          trimmed,
-          args.inputInfo.sampleRate
-        );
-      }
-    } else {
+  const accRate = args.inputInfo.sampleRate;
+  const outRate = outInfo.sampleRate > 0 ? outInfo.sampleRate : accRate;
+  const toOut = (frames: number) => Math.round((frames * outRate) / accRate);
+  const toAcc = (samples: number) => Math.round((samples * accRate) / outRate);
+
+  const head = Math.min(toOut(args.contextFrames), outInfo.numSamples);
+  const keep = Math.min(outInfo.numSamples - head, toOut(args.expectedFrames));
+  if (keep > 0) {
+    if (head === 0 && keep === outInfo.numSamples) {
       await appendOfflineToLiveAudioBuffer(
         args.accumulator.bufferId,
         args.tempOut.bufferId
       );
+    } else {
+      appendSamplesToLiveAudioBuffer(
+        args.accumulator.bufferId,
+        getOfflineAudioBufferSamplesSlice(args.tempOut.bufferId, head, keep),
+        outRate
+      );
     }
   }
-  return appendedSamples;
+  const missing = args.expectedFrames - toAcc(Math.max(0, keep));
+  if (missing > 0) {
+    appendSamplesToLiveAudioBuffer(
+      args.accumulator.bufferId,
+      new Float32Array(missing),
+      accRate
+    );
+  }
+  return args.expectedFrames;
 }
 
 function appendSilenceToAccumulators(
@@ -773,12 +790,17 @@ async function runOfflineAudioSegmentLoop(
         let tempOuts: OfflineAudioBufferRef[] | undefined;
         try {
           const segLength = Math.max(0, seg.endOffset - seg.startOffset);
+          // The overlap is context before the part: given to the consumer, cut again.
+          const contextFrames =
+            i > 0 && segLength > 0
+              ? Math.min(overlapSamples, Math.max(0, seg.startOffset))
+              : 0;
           const segSamples =
             segLength > 0
               ? getOfflineAudioBufferSamplesSlice(
                   input,
-                  seg.startOffset,
-                  segLength
+                  seg.startOffset - contextFrames,
+                  segLength + contextFrames
                 )
               : new Float32Array(0);
 
@@ -800,8 +822,8 @@ async function runOfflineAudioSegmentLoop(
           for (let o = 0; o < outputCount; o++) {
             totalSamplesAppended[o]! +=
               await appendAudioSegmentOutputToAccumulator({
-                segmentIndex: i,
-                overlapSamples,
+                contextFrames,
+                expectedFrames: segLength,
                 inputInfo,
                 tempOut: tempOuts[o]!,
                 accumulator: accumulators[o]!,
