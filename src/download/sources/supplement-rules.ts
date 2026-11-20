@@ -18,6 +18,11 @@ export type SupplementRule = {
  * English lexicon (the distilled ZipVoice zh-en packs ship only a Chinese one).
  * Upstream's examples download `lexicon-en-us.txt` from the `tts-models` release next
  * to each of them.
+ *
+ * The full (not distilled) ZipVoice zh-en pack ships no Chinese `lexicon.txt` either,
+ * and no release asset can stand in for it: `lexicon-zh-g2pw.txt` spells pinyin with
+ * other tokens (`zh ong 1 _`, ZipVoice uses `zh0 ong1`). The caller has to place the
+ * distilled pack's `lexicon.txt` there itself.
  */
 export const SUPPLEMENT_RULES: ReadonlyArray<SupplementRule> = [
   {
