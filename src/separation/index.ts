@@ -53,6 +53,7 @@ import {
   runOfflineSeparationDirect,
   runOfflineSeparationPipeline,
 } from './orchestrate';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 
 let separationInstanceCounter = 0;
 
@@ -382,6 +383,9 @@ export async function createSeparation(
       }
 
       if (mode === 'off') {
+        throwIfOrchestrationAborted(
+          (separateOptions as SeparateOptions | undefined)?.signal
+        );
         const startedAtMs = Date.now();
         await runOfflineSeparationDirect(
           instanceId,
@@ -483,3 +487,9 @@ export {
   type SpleeterCustomPathKey,
   type UvrCustomPathKey,
 } from './customConfig';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';
+export type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';

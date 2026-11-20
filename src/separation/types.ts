@@ -68,6 +68,12 @@ export interface SeparateOptions {
   retryExhaustedFallback?: 'abort' | 'skip';
   onProgress?: (progress: OrchestrationProgress) => void;
   overlapSamples?: number;
+  /**
+   * Stops the call. Checked before the call and before each segment and retry; a segment that is already running
+   * finishes first. On abort the promise rejects with `code:
+   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and `audioOuts` stays empty.
+   */
+  signal?: AbortSignal;
 }
 
 export interface SeparationResult {

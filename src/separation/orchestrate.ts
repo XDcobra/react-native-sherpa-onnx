@@ -75,6 +75,7 @@ export async function runOfflineSeparationPipeline(
         retryExhaustedFallback: options.retryExhaustedFallback,
         onProgress: options.onProgress,
         overlapSamples: options.overlapSamples,
+        signal: options.signal,
       }
     );
 
