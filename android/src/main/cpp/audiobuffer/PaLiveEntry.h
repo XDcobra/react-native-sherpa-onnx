@@ -190,6 +190,7 @@ inline void pa_writeWavHeaderToStream(std::ofstream &f, int sampleRate, int bits
 
 struct PaLiveEntry {
   enum State { RECORDING, FINISHED };
+  bool released_ = false;
   enum class AppendResult { APPENDED, BUFFER_FINALIZED };
 
   std::string bufferId;
@@ -645,6 +646,21 @@ struct PaLiveEntry {
     if (state == FINISHED) return;
     state = FINISHED;
 
+    finalizeSpoolFile_();
+
+    flushPendingFramesAppended();
+
+    // Wake any blocked producers (backpressure)
+    notifyCursorAdvanced();
+
+    // Wake pipeline workers so they detect the FINISHED state immediately
+    notifyAppendListeners();
+
+    seg_engine_on_buffer_finalized(bufferId);
+  }
+
+  /** Writes the WAV sizes into the spool header and closes it. */
+  void finalizeSpoolFile_() {
     if (hasActiveSpool && spoolFile.is_open()) {
       spoolFile.flush();
       int64_t dataSize = spoolSamplesWritten * 4;
@@ -659,16 +675,22 @@ struct PaLiveEntry {
 
       spoolFile.close();
     }
+  }
 
-    flushPendingFramesAppended();
-
-    // Wake any blocked producers (backpressure)
-    notifyCursorAdvanced();
-
-    // Wake pipeline workers so they detect the FINISHED state immediately
-    notifyAppendListeners();
-
-    seg_engine_on_buffer_finalized(bufferId);
+  void releaseStorage_() {
+    if (released_) return;
+    released_ = true;
+    if (spoolFile.is_open()) spoolFile.close();
+    {
+      std::lock_guard<std::mutex> lock(spoolReadMutex);
+      if (spoolReadFile.is_open()) spoolReadFile.close();
+      spoolReadFileOpen = false;
+    }
+    if (isTemporarySpool && !spoolPath.empty()) {
+      std::remove(spoolPath.c_str());
+    }
+    cursors.clear();
+    seg_engine_on_buffer_released(bufferId);
   }
 
   std::vector<float> snapshotRing() {
@@ -880,19 +902,23 @@ struct PaLiveEntry {
   }
 
   void release() {
+    if (released_) return;
     if (state == RECORDING) finalize_();
     flushPendingFramesAppended();
-    if (spoolFile.is_open()) spoolFile.close();
-    {
-      std::lock_guard<std::mutex> lock(spoolReadMutex);
-      if (spoolReadFile.is_open()) spoolReadFile.close();
-      spoolReadFileOpen = false;
+    releaseStorage_();
+  }
+
+  // pa_release_buffer frees an entry only when the registry held the last reference.
+  // When another holder (a view, an ingest worker) outlives the id, the last one frees
+  // the storage here: the spool is closed as a valid WAV and a temporary spool deleted.
+  // No events: the buffer was already released.
+  ~PaLiveEntry() {
+    if (released_) return;
+    if (state == RECORDING) {
+      state = FINISHED;
+      finalizeSpoolFile_();
     }
-    if (isTemporarySpool && !spoolPath.empty()) {
-      std::remove(spoolPath.c_str());
-    }
-    cursors.clear();
-    seg_engine_on_buffer_released(bufferId);
+    releaseStorage_();
   }
 
   void detachSpoolForTransfer() {

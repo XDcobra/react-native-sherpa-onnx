@@ -970,6 +970,32 @@ TEST_F(AudioRegistryFixture, CreateOffline_ForcesMmapWhenOverLowThreshold) {
   EXPECT_TRUE(pa_release_buffer(id));
 }
 
+// A release while another holder still uses a live entry leaves the storage to that
+// holder; when it lets go, the temporary spool is deleted.
+TEST_F(AudioRegistryFixture, LiveReleaseWithOtherHolderFreesSpoolWithLastHolder) {
+  std::string id;
+  std::string errCode;
+  std::string errMsg;
+  ASSERT_TRUE(pa_create_live(16000, 1, 1.0, "", false, 0, &id, &errCode, &errMsg)) << errMsg;
+  const std::string spoolPath = (cacheDir_ / "live_release_last_holder.wav").string();
+  {
+    auto holder = pa_get_live_entry(id);
+    ASSERT_NE(holder, nullptr);
+    holder->enableSpool(spoolPath, /*temporary=*/true);
+    ASSERT_TRUE(holder->hasActiveSpool);
+    std::vector<float> chunk(320, 0.25f);
+    ASSERT_TRUE(
+        pa_append_samples_to_live(id, chunk.data(), chunk.size(), 16000, &errCode, &errMsg))
+        << errMsg;
+
+    EXPECT_TRUE(pa_release_buffer(id));
+    EXPECT_EQ(pa_get_live_entry(id), nullptr);
+    // The holder still reads it: storage stays.
+    EXPECT_TRUE(fs::exists(spoolPath));
+  }
+  EXPECT_FALSE(fs::exists(spoolPath));
+}
+
 // Spool keeps full history behind a tiny ring window.
 // Perf keep: docs/internal/audiobuffer/performance/audiobuffer-perf-plan.md (B — live spool).
 TEST_F(AudioRegistryFixture, LiveSpool_BehindRingDrainMatchesFullHistory) {
