@@ -58,6 +58,7 @@
 * **diarization:** Opt-in per-segment silhouette `confidence` (`clustering.computeConfidence`, default **false**, upstream parity). Ported into the shared offline C++ core — not via Kotlin `OfflineSpeakerDiarization`.
 * **pcm:** Standalone PCM player: `createPcmPlayer({ sampleRate, feed, ttsInstanceId? })` — play any mono float PCM, not just TTS output. Import from `react-native-sherpa-onnx/pcm`.
 * **pcm:** Player controls: `pause()`, `resume()`, `destroy()` on `PcmPlayer`.
+* **pcm:** `createPcmPlayer(audioBuffer, { startMs, autoplay })`: `startMs` starts playback at a position (clamped to the buffer; nothing before it is heard, the first `onPosition` reports it). `autoplay: false` creates the player paused there and `resume()` starts it. Default: start at once from the beginning, as before.
 * **tts:** Native streaming playback: `generateSpeechStream(text, opts, handlers, { playback: true })` — zero-bridge-PCM playback.
 * **tts:** `emitChunks` option on `generateSpeechStream`: opt out of chunk callbacks when only playback is needed.
 * **tts:** `autoDestroy` option on `generateSpeechStream`: auto-destroy the internal player after stream ends (default `true`).
