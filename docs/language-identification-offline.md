@@ -185,6 +185,19 @@ const result = await slid.identify(audio, {
 });
 ```
 
+**Cancel.** Pass an `AbortSignal` as `signal` (segmented `identify`, oneshot `identify` and `labelOfflineSegments`). It is checked before the call starts and before each segment. A segment that is already running in native code finishes first; in oneshot mode only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary segment buffers and `targetSegmentBuffer` / `segmentsOut` stays empty. No callback follows the rejection. If the signal aborts while the last segment runs, the call still resolves.
+
+Without callbacks, segmented calls label all spans in one native pass. A call with a `signal` runs span by span instead, so it can stop between spans.
+
+```ts
+const controller = new AbortController();
+const run = slid.identify(audio, {
+  segmentation: { mode: 'auto' },
+  signal: controller.signal,
+});
+// elsewhere: controller.abort();
+```
+
 Live overload `identify(liveAudio, liveText, options)`: [language-identification-live.md](language-identification-live.md).
 
 ### `slid.labelOfflineSegments(audioIn, segmentsIn, segmentsOut, options?)`
@@ -260,7 +273,7 @@ flowchart LR
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
 | `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented / `labelOfflineSegments` only; oneshot: none |
-| `onSegment` | `LanguageIdSegmentEvent` | after each committed span is identified | feature callback — already includes `lang` / ranges (no buffer pull); order: progress → identify → optional segment append → `onSegment` |
+| `onSegment` | `LanguageIdSegmentEvent` | after each committed span is identified | feature callback — already includes `lang` / ranges (no buffer pull); order: progress → identify → `onSegment` → optional segment append (`labelOfflineSegments`: append → `onSegment`) |
 | `onLanguageChanged` | `LanguageChangedEvent` | predicted `lang` differs from previous non-empty language | includes first span (`previousLang: null`); same list as result `switches` |
 
 Shapes: [Types](#types).
@@ -290,19 +303,20 @@ Live overload uses `onSegment` / `onLanguageChanged` only (no offline `onProgres
 | `LanguageIdDetectResult` | Return of `detectLanguageIdModel()` |
 | `LanguageIdentificationInitializeOptions` | Init options for `createLanguageIdentification` (`modelSource`, `customConfig`, `quantization`, `numThreads`, …) |
 | `LanguageIdCustomConfig` | `{ encoder, decoder }` `FileSource` paths for custom init |
-| `LanguageIdentificationOptions` | Optional `segmentation`, `onProgress`, `onSegment`, `onLanguageChanged`, `targetSegmentBuffer` |
+| `LanguageIdentificationOptions` | Optional `segmentation`, `onProgress`, `onSegment`, `onLanguageChanged`, `targetSegmentBuffer`, `signal` |
 | `LanguageIdentificationResult` | `{ lang, audioDuration, elapsedMs }` |
 | `SegmentedLanguageIdentificationResult` | `{ dominantLanguage, distribution, switches, segments, totalSegments, processingTimeMs }` |
 | `LanguageIdSegmentEntry` | Per-segment detail: `segmentIndex`, `startTime`, `endTime`, `durationMs`, `lang` |
 | `LanguageSwitchEntry` | `{ timestamp, from, to, segmentIndex }` |
 | `LanguageIdSegmentEvent` | Per-span callback event (`segmentIndex`, ranges, `lang`) |
 | `LanguageChangedEvent` | Language transition (`previousLang`, `currentLang`, `timestamp`, `segmentIndex`) |
-| `LanguageIdLabelOptions` | Options for `labelOfflineSegments` (`onProgress`, `onSegment`, `onLanguageChanged`) |
+| `LanguageIdLabelOptions` | Options for `labelOfflineSegments` (`onProgress`, `onSegment`, `onLanguageChanged`, `signal`) |
 | `LabelOfflineSegmentsResult` | `{ labeledCount, dominantLanguage, distribution, switches }` |
 | `LanguageIdentificationEngine` | `identify` (oneshot / segmented / live), `labelOfflineSegments`, `destroy` |
 | `DEFAULT_LANGUAGE_ID_SEGMENTATION_POLICY` | Runtime constant — energy silence, `minSegmentMs: 1500` |
 | `LanguageIdErrorCode` | Offline/live error code object |
 | `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 
 Live-only types (`LanguageIdentificationLivePipelineOptions`, `LanguageIdentificationPipelineHandle`, `StreamingPipelineCompletion`, `StreamingPipelineStatus`): [language-identification-live.md](language-identification-live.md#types).
 
@@ -327,6 +341,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `LANGUAGE_ID_INIT_ERROR` | Model load / native construct failed. |
 | `LANGUAGE_ID_IDENTIFY_FAILED` | Identify / label path failed. |
 | `LANGUAGE_ID_DESTROYED` | Call after `destroy()`. |
+| `ORCHESTRATION_CANCELLED` | `signal` aborted; `name` is `'AbortError'`. |
 | `SEGMENT_*` / `FILEIO_*` | Segment buffers / `FileSource` resolution (same as other offline features). |
 
 ## Use case examples

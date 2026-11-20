@@ -315,6 +315,18 @@ const { summary, segmentBufferId } = await engine.process({
 console.log(summary.segmentCount, segmentBufferId);
 ```
 
+**Cancel.** Pass an `AbortSignal` as `options.signal` (offline only; a live pipeline stops with `stop()`). It is checked before the call starts and, with `segmentation.mode: 'auto'`, before each segment. A segment that is already running in native code finishes first; with `mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`) and the SDK releases its slice and staging buffers. An offline `segmentOut` stays empty; a live `segmentOut` keeps the segments appended before the abort. No `onProgress` call follows the rejection. If the signal aborts while the last segment runs, the call still resolves.
+
+```ts
+const controller = new AbortController();
+const run = engine.process({
+  audioIn: offlineAudio,
+  segmentOut: offlineSegOut,
+  options: { segmentation: { mode: 'auto' }, signal: controller.signal },
+});
+// elsewhere: controller.abort();
+```
+
 ### `engine.isSpeechDetected()`
 
 Returns the current VAD speech state without polling the pipeline handle.
@@ -479,7 +491,7 @@ const segmentOut = await createLiveSegmentBuffer({
 | `VADRuntimeOptions` | `SileroVadRuntimeOptions \| TenVadRuntimeOptions` — strict model-matched union |
 | `VADRuntimeTuningOptions` | `scoreThreshold?`, `minSilenceDurationMs?`, `minSpeechDurationMs?`, `maxSpeechDurationMs?`, `windowSize?` |
 | `VADLiveRunOptions` | `chunkSize?`, `autoFlushOnInputEnded?`, `sourceTag?`, `speechStateEventMinIntervalMs?` |
-| `VADOfflineRunOptions` | `sourceTag?`, `segmentation?`, `onProgress?` |
+| `VADOfflineRunOptions` | `sourceTag?`, `segmentation?`, `onProgress?`, `signal?` |
 | `VADRunOptions` | `VADLiveRunOptions \| VADOfflineRunOptions` |
 | `VADLiveProcessInput` | `audioIn` (live), `segmentOut` (live), `options?: VADLiveRunOptions` |
 | `VADOfflineProcessInput` | `audioIn` (offline), `segmentOut` (offline or live), `options?: VADOfflineRunOptions` |
@@ -493,6 +505,7 @@ const segmentOut = await createLiveSegmentBuffer({
 | `VadCustomPathKey` | `'model'` |
 | `VadErrorCode` | `{ INVALID_ARGUMENT: 'VAD_INVALID_ARGUMENT' }` |
 | `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 | `DetectionSource` | Trace literals from native detection |
 | `DetectedModelEntry` | `{ type: string; modelDir: string }` |
 
@@ -521,6 +534,7 @@ See [audiobuffer-streaming.md](audiobuffer-streaming.md) · [audiobuffer-offline
 | `VAD_PIPELINE_NOT_FOUND` | Unknown or already-stopped pipeline id |
 | `VAD_PIPELINE_ALREADY_RUNNING` | Engine already has an active live pipeline |
 | `VAD_INTERNAL_ERROR` | Unexpected native/runtime failure |
+| `ORCHESTRATION_CANCELLED` | Offline `signal` aborted; `name` is `'AbortError'` |
 
 ## Deterministic lifecycle contract
 

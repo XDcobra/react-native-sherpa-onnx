@@ -200,6 +200,25 @@ const result = await tagger.tag(audio, {
 });
 ```
 
+**Per-segment results.** `onSegment` gets each tagged span with its position in the input audio: `segmentIndex`, `segmentCount`, `startMs`, `endMs`, `durationMs` and `result`. The older `totalSegments`, `startTime` and `endTime` (seconds) are still set but deprecated.
+
+**Cancel.** Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment. A segment that is already running in native code finishes first, so a run stops at segment granularity; in oneshot mode only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary segment buffers and `targetSegmentBuffer` stays empty. No `onProgress` or `onSegment` call follows the rejection. If the signal aborts while the last segment runs, the call still resolves.
+
+```ts
+import { isOrchestrationCancelledError } from 'react-native-sherpa-onnx/audio-tagging';
+
+const controller = new AbortController();
+try {
+  await tagger.tag(audio, {
+    segmentation: { mode: 'auto' },
+    signal: controller.signal,
+  });
+} catch (e) {
+  if (!isOrchestrationCancelledError(e)) throw e;
+}
+// elsewhere: controller.abort();
+```
+
 Live overload `tag(liveAudio, liveText, options)`: [audio-tagging-live.md](audio-tagging-live.md).
 
 ### `tagger.destroy()`
@@ -256,8 +275,8 @@ flowchart LR
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only; oneshot: none |
-| `onSegment` | `AudioTaggingSegmentEvent` | after each committed span is tagged | feature callback — already includes `result` / ranges (no buffer pull); order: progress → tag → optional segment append → `onSegment` |
+| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only; oneshot: none. `currentSegmentStartMs` / `currentSegmentEndMs` give the segment position in the input audio (ms) |
+| `onSegment` | `AudioTaggingSegmentEvent` | after each committed span is tagged | feature callback — already includes `result` / ranges in ms (no buffer pull); order: progress → tag → `onSegment` → optional segment append |
 
 Shapes: [Types](#types).
 
@@ -266,7 +285,8 @@ await tagger.tag(audio, {
   segmentation: { mode: 'auto', policy: DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY },
   onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
   // feature callback — already includes result (no pull):
-  onSegment: (e) => console.log(e.segmentIndex, e.result.primary?.name),
+  onSegment: (e) =>
+    console.log(e.segmentIndex, e.startMs, e.endMs, e.result.primary?.name),
 });
 ```
 
@@ -285,15 +305,16 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [audio-tag
 | `AudioTaggingDetectModelResult` | Return of `detectAudioTaggingModel()` |
 | `AudioTaggingInitializeOptions` | Auto or custom init union for `createAudioTagging` |
 | `AudioTaggingCustomConfig` | `{ model, labels }` `FileSource` paths for custom init |
-| `AudioTaggingTagOptions` | Optional `topK`, segmentation, `onProgress`, `onSegment`, `targetSegmentBuffer`, `errorRecovery` |
+| `AudioTaggingTagOptions` | Optional `topK`, segmentation, `onProgress`, `onSegment`, `targetSegmentBuffer`, `errorRecovery`, `signal` |
 | `AudioTaggingEvent` | `{ name: string; index: number; prob: number }` |
 | `AudioTaggingResult` | `{ events, primary?, audioDuration, elapsedMs, topK }` |
-| `AudioTaggingSegmentEvent` | Per-span offline result (`segmentIndex`, ranges, `result`) |
+| `AudioTaggingSegmentEvent` | Per-span offline result: `{ segmentIndex, segmentCount, startMs, endMs, durationMs, result }`, plus deprecated `totalSegments`, `startTime`, `endTime` (seconds) |
 | `SegmentedAudioTaggingResult` | `{ segments, totalSegments, processingTimeMs }` |
 | `AudioTaggingEngine` | `tag` (oneshot / segmented / live), `destroy` |
 | `DEFAULT_AUDIO_TAGGING_SEGMENTATION_POLICY` | Runtime constant — energy silence, `minSegmentMs: 1500` |
 | `AudioTaggingErrorCode` | Offline/live error code object |
-| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, `currentSegmentStartMs?`, `currentSegmentEndMs?`, …) |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 
 Live-only types (`AudioTaggingLivePipelineOptions`, `AudioTaggingLiveSegmentEvent`, `AudioTaggingPipelineHandle`, `AUDIO_TAGGING_LIVE_MIN_SPAN_MS`): [audio-tagging-live.md](audio-tagging-live.md#types).
 
@@ -319,6 +340,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `AUDIO_TAGGING_BUFFER_EMPTY` | Offline audio has no samples (native). |
 | `AUDIO_TAGGING_INIT_ERROR` | Native init error token (native). |
 | `AUDIO_TAGGING_OFFLINE_OOM` | Offline compute ran out of memory (native). |
+| `ORCHESTRATION_CANCELLED` | `signal` aborted; `name` is `'AbortError'`. |
 | `SEGMENT_*` / `FILEIO_*` | Segment buffers / `FileSource` resolution (same as other offline features). |
 
 ## Use case examples
