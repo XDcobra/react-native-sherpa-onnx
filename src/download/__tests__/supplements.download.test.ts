@@ -485,6 +485,29 @@ describe('ensureModel — installed model without its supplement', () => {
     expect(manifest.downloadedAt).toBe('then');
   });
 
+  it('returns the installed model when the lexicon cannot be fetched', async () => {
+    mockTaskBehaviors.push((task) =>
+      task.handlers.error?.({ error: 'offline', errorCode: -1 })
+    );
+
+    const result = await ensureModel(ModelCategory.Tts, MODEL_ID);
+
+    expect(result).toEqual({ modelId: MODEL_ID, localPath: packDir });
+    expect(mockFsEntries.has(`${packDir}/lexicon-en-us.txt`)).toBe(false);
+  });
+
+  it('still throws when the caller cancels the lexicon fetch', async () => {
+    const controller = new AbortController();
+    mockTaskBehaviors.push((task) => {
+      mockWriteFile(task.destination, 3);
+      controller.abort();
+    });
+
+    await expect(
+      ensureModel(ModelCategory.Tts, MODEL_ID, { signal: controller.signal })
+    ).rejects.toThrow();
+  });
+
   it('downloads nothing when the lexicon is already there', async () => {
     mockWriteFile(`${packDir}/lexicon-en-us.txt`, 10);
 

@@ -14,8 +14,10 @@ import {
 } from './modelExtraction';
 import { getArchivePath } from './paths';
 import { getModelById } from './registry';
+import { DOWNLOAD_ERROR_CODES, isDownloadError } from './sources/errors';
 import { getArchiveBytes, repairMissingSupplements } from './supplementFiles';
 import {
+  PauseError,
   type EnsureModelOptions,
   type ModelCategory,
   type EnsureModelResult,
@@ -25,7 +27,9 @@ import {
  * Ensure a model is ready locally by handling ready state, resume states,
  * archive-only extraction and full download. A model that is already installed but
  * lacks a supplement file its catalog entry lists (see `ModelMeta.supplements`) gets
- * just that file downloaded.
+ * just that file downloaded. That repair is best effort: when it fails (for example
+ * offline), the installed model is returned as it is and the next call tries again;
+ * only a cancel or pause through `signal` is thrown.
  *
  * @throws {DownloadError} `DOWNLOAD_UNKNOWN_SOURCE` — `source` is not registered.
  * @throws {DownloadError} `DOWNLOAD_NETWORK_FAILED` — transport failed before an HTTP status.
@@ -71,16 +75,22 @@ export async function ensureModel(
     if (localPath) {
       // Fetch files the catalog now lists but this download predates (for example an
       // English lexicon added after the pack was installed).
-      await repairMissingSupplements({
-        category,
-        model,
-        sourceId: modelSourceId,
-        targetDir: localPath,
-        signal: opts?.signal,
-        verifyChecksum: opts?.verifyChecksum,
-        onChecksumMismatch: opts?.onChecksumMismatch,
-        onProgress: opts?.onProgress,
-      });
+      try {
+        await repairMissingSupplements({
+          category,
+          model,
+          sourceId: modelSourceId,
+          targetDir: localPath,
+          signal: opts?.signal,
+          verifyChecksum: opts?.verifyChecksum,
+          onChecksumMismatch: opts?.onChecksumMismatch,
+          onProgress: opts?.onProgress,
+        });
+      } catch (error) {
+        // The model worked before the catalog listed the file, so a failed repair
+        // must not make it unusable (offline, server error).
+        if (isRepairStop(error, opts?.signal)) throw error;
+      }
       return {
         modelId: id,
         localPath,
@@ -168,4 +178,16 @@ export async function ensureModel(
     deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
     showExtractionNotifications: opts?.showExtractionNotifications,
   });
+}
+
+function isRepairStop(
+  error: unknown,
+  signal: AbortSignal | undefined
+): boolean {
+  if (signal?.aborted) return true;
+  if (error instanceof PauseError) return true;
+  if (error instanceof Error && error.name === 'AbortError') return true;
+  return (
+    isDownloadError(error) && error.code === DOWNLOAD_ERROR_CODES.CANCELLED
+  );
 }
