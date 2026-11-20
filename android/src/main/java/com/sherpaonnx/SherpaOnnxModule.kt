@@ -6856,9 +6856,11 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     playerId: String,
     audioBufferId: String,
     volume: Double,
+    startMs: Double,
+    autoplay: Boolean,
     promise: Promise
   ) {
-    pcmPlayerService.create(playerId, audioBufferId, volume, promise)
+    pcmPlayerService.create(playerId, audioBufferId, volume, startMs, autoplay, promise)
   }
 
   override fun listAvailableOutputDevices(promise: Promise) {

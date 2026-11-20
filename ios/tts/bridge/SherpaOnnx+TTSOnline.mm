@@ -17,6 +17,8 @@ static std::mutex g_tts_pipeline_mutex;
 - (void)so_createPcmPlayer:(NSString *)playerId
           audioBufferId:(NSString *)audioBufferId
               volume:(double)volume
+             startMs:(double)startMs
+            autoplay:(BOOL)autoplay
                      resolve:(RCTPromiseResolveBlock)resolve
                       reject:(RCTPromiseRejectBlock)reject;
 - (void)so_pausePcmPlayer:(NSString *)playerId
@@ -280,11 +282,15 @@ static std::mutex g_tts_pipeline_mutex;
 - (void)createPcmPlayer:(NSString *)playerId
          audioBufferId:(NSString *)audioBufferId
               volume:(double)volume
+             startMs:(double)startMs
+            autoplay:(BOOL)autoplay
                   resolve:(RCTPromiseResolveBlock)resolve
                    reject:(RCTPromiseRejectBlock)reject {
   [self so_createPcmPlayer:playerId
           audioBufferId:audioBufferId
               volume:volume
+             startMs:startMs
+            autoplay:autoplay
                     resolve:resolve
                      reject:reject];
 }

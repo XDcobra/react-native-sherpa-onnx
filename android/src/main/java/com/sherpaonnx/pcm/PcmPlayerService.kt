@@ -10,6 +10,8 @@ import android.os.Build
 import android.util.Log
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
+import com.sherpaonnx.audio.pipeline.LiveEntry
+import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.audio.session.PaAudioSessionCoordinator
@@ -32,6 +34,8 @@ internal class PcmPlayerService(
     playerId: String,
     audioBufferId: String,
     volume: Double,
+    startMs: Double,
+    autoplay: Boolean,
     promise: Promise
   ) {
     var intentId: String? = null
@@ -67,6 +71,7 @@ internal class PcmPlayerService(
         return
       }
       val clampedVolume = volume.toFloat().coerceIn(0f, 1f)
+      val startSample = resolveStartSample(startMs, sr, offlineEntry, liveEntry)
 
       val channelConfig = AudioFormat.CHANNEL_OUT_MONO
       val audioFormat = AudioFormat.Builder()
@@ -137,13 +142,22 @@ internal class PcmPlayerService(
       }
 
       registry.put(session)
-      track.play()
-      session.startPositionReporting()
+      // Set the start position before the first tick and the first write, so
+      // nothing from 0 is played or reported.
+      if (startSample != null) {
+        session.setStartPosition(startSample)
+      }
+      if (autoplay) {
+        track.play()
+        session.startPositionReporting()
+      }
+      // autoplay == false: the track stays stopped while the drain primes it;
+      // resume() re-seeks to the start position and starts playback.
 
       if (liveEntry != null) {
-        session.startLiveDrain()
+        session.startLiveDrain(startAbsolutePos = startSample ?: -1L)
       } else if (offlineEntry != null) {
-        session.startOfflineDrain()
+        session.startOfflineDrain(startSampleIndex = startSample ?: 0L)
       }
 
       val createError = session.terminalErrorSnapshot()
@@ -360,6 +374,30 @@ internal class PcmPlayerService(
         PaAudioSessionCoordinator.releaseIntent("pcm:$playerId")
       }
     }
+  }
+
+  /**
+   * Map a create-time start position in ms to a sample index, or null when
+   * not set (negative or NaN). Offline buffers clamp to `[0, numSamples]`,
+   * live buffers to the retained ring window `[oldest, totalSamplesWritten]`.
+   */
+  private fun resolveStartSample(
+    startMs: Double,
+    sampleRate: Int,
+    offlineEntry: OfflineEntry?,
+    liveEntry: LiveEntry?,
+  ): Long? {
+    if (startMs.isNaN() || startMs < 0.0) return null
+    val requested = ((startMs / 1000.0) * sampleRate).toLong().coerceAtLeast(0L)
+    if (liveEntry != null) {
+      val oldest = liveEntry.oldestAvailablePos()
+      val newest = maxOf(oldest, liveEntry.totalSamplesWritten)
+      return requested.coerceIn(oldest, newest)
+    }
+    if (offlineEntry != null) {
+      return requested.coerceAtMost(offlineEntry.numSamples.toLong())
+    }
+    return null
   }
 
   private fun findOutputDeviceById(deviceId: Int): AudioDeviceInfo? {

@@ -81,12 +81,14 @@ console.log(finished.info.durationMs);
 
 ### `createPcmPlayer(audioBuffer, options?)`
 
-Creates and starts a native playback session that consumes from a pipeline audio buffer.
+Creates a native playback session that consumes from a pipeline audio buffer. By default it starts playing at once from the start of the buffer; `startMs` and `autoplay` change where and whether it starts.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `audioBuffer` | `OfflineAudioBufferRef \| LiveAudioBufferRef \| OfflineBufferHandle \| LiveBufferHandle \| string` | required | Buffer ref/handle or raw `bufferId` |
 | `options.volume` | `number` | `1.0` | Volume scale in range `[0, 1]` |
+| `options.startMs` | `number` | start of buffer | Start position in ms. The player seeks here before any audio is played. Clamped like `seekToMs` (offline: `[0, durationMs]`; live: retained ring window). Must be finite and `>= 0`, else rejects with `PCM_PLAYER_INVALID_CONFIG`. |
+| `options.autoplay` | `boolean` | `true` | `false` creates the player paused at `startMs`; `resume()` starts it. |
 | `options.onEnded` | `(event: { playerId: string; bufferId: string }) => void` | `undefined` | Called once when playback run reaches EOF |
 | `options.onPosition` | `(event: { playerId: string; bufferId: string; positionMs: number }) => void` | `undefined` | Native playhead push while PLAYING (~50 ms). Prefer this over polling `getPlaybackPositionMs` for UI. |
 
@@ -102,6 +104,8 @@ function createPcmPlayer(
     | string,
   options?: {
     volume?: number;
+    startMs?: number;
+    autoplay?: boolean;
     onEnded?: (event: { playerId: string; bufferId: string }) => void;
     onPosition?: (event: {
       playerId: string;
@@ -118,6 +122,19 @@ const player = await createPcmPlayer(audioBuffer, {
   onEnded: (event) => console.log(event.playerId, event.bufferId),
   onPosition: (event) => console.log('pos', event.positionMs),
 });
+```
+
+Start paused at a position, then play:
+
+```ts
+const player = await createPcmPlayer(audioBuffer, {
+  startMs: 12_500,
+  autoplay: false,
+  onPosition: (event) => console.log('pos', event.positionMs), // first event: ~12500
+});
+
+// Later: playback starts at 12.5 s; nothing before it is heard.
+await player.resume();
 ```
 
 ### `player.pause()`
@@ -183,6 +200,13 @@ await player.destroy();
 
 ## Playback Semantics
 
+### Start position and autoplay
+
+- `startMs` is applied before the first audio is written (Android) or scheduled (iOS), so nothing before it is heard and the first `onPosition` event reports `startMs`, not 0.
+- `startMs` is clamped like `seekToMs`; a `startMs` at or past the end behaves like `seekToMs(durationMs)`.
+- With `autoplay: false` the player is created paused: `getPlaybackPositionMs()` returns `startMs`, no `onPosition` events fire, and `resume()` starts playback from `startMs`. `seekToMs` while paused keeps it paused.
+- Without `startMs` a live buffer starts where a new read cursor starts (the oldest sample it can read), as before.
+
 ### Offline buffer
 
 - `seekToMs(positionMs)` is clamped to `[0, durationMs]`.
@@ -227,6 +251,7 @@ const player = await createPcmPlayer(audioBuffer, {
 | Code | Meaning |
 | --- | --- |
 | `PCM_PLAYER_NOT_FOUND` | Player id not found in native registry |
+| `PCM_PLAYER_INVALID_CONFIG` | Invalid create options (for example a negative or non-finite `startMs`, a non-boolean `autoplay`) or the native backend could not be set up |
 | `PCM_PLAYER_INVALID_STATE` | Operation not valid in current player state |
 | `PCM_PLAYER_SEEK_OUT_OF_RANGE` | Seek target is outside current playable range |
 | `PCM_PLAYER_BUFFER_NOT_FOUND` | Referenced audio buffer id does not exist |
@@ -242,7 +267,7 @@ import { createPcmPlayer } from 'react-native-sherpa-onnx/pcm'; // create pipeli
 
 import type {
   PcmPlayer, // player handle with pause/resume/seek/restart/destroy
-  PcmPlayerOptions, // create options (volume, onEnded, onPosition)
+  PcmPlayerOptions, // create options (volume, startMs, autoplay, onEnded, onPosition)
   PcmPlayerAudioBuffer, // accepted audio-buffer id source for player input
   PcmPlayerEndedEvent, // onEnded callback payload
   PcmPlayerPositionEvent, // onPosition callback payload
@@ -252,7 +277,7 @@ import type {
 | Type | Description |
 | --- | --- |
 | `PcmPlayer` | Session handle: `pause`, `resume`, `seekToMs`, `restart`, `getPlaybackPositionMs`, `destroy` |
-| `PcmPlayerOptions` | `{ volume?, onEnded?, onPosition? }` |
+| `PcmPlayerOptions` | `{ volume?, startMs?, autoplay?, onEnded?, onPosition? }` |
 | `PcmPlayerAudioBuffer` | Offline/live ref, handle, or raw `bufferId` string |
 | `PcmPlayerEndedEvent` | `{ playerId, bufferId }` — see [JS Events](#js-events) |
 | `PcmPlayerPositionEvent` | `{ playerId, bufferId, positionMs }` — see [JS Events](#js-events) |
@@ -296,6 +321,27 @@ await player.seekToMs(backTargetMs + 5000);
 await player.pause();
 await player.destroy();
 ```
+
+</details>
+
+<details>
+<summary>Switch between two buffers at the same position</summary>
+
+```ts
+// Compare two renderings of the same audio: keep the position, swap the buffer.
+let player = await createPcmPlayer(bufferA);
+
+async function switchTo(nextBuffer: OfflineAudioBufferRef) {
+  const positionMs = await player.getPlaybackPositionMs();
+  await player.destroy();
+  // Starts at positionMs at once; nothing from 0 is heard.
+  player = await createPcmPlayer(nextBuffer, { startMs: positionMs });
+}
+
+await switchTo(bufferB);
+```
+
+To prepare the next player while playback is paused, pass `autoplay: false` and call `resume()` when the user presses play.
 
 </details>
 

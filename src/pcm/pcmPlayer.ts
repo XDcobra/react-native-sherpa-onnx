@@ -28,18 +28,54 @@ function getEventEmitter(): NativeEventEmitter {
   return eventEmitter;
 }
 
+function invalidConfig(message: string): Error {
+  return Object.assign(new Error(`PCM_PLAYER_INVALID_CONFIG: ${message}`), {
+    code: 'PCM_PLAYER_INVALID_CONFIG',
+  });
+}
+
+/**
+ * Validate `startMs` / `autoplay` and map them to the native arguments.
+ * A missing `startMs` becomes `-1` ("not set"), so native keeps its default
+ * start position (0 for offline buffers, the cursor default for live ones).
+ */
+function resolveStartOptions(options?: PcmPlayerOptions): {
+  startMs: number;
+  autoplay: boolean;
+} {
+  const startMs = options?.startMs;
+  if (startMs !== undefined) {
+    if (typeof startMs !== 'number' || !Number.isFinite(startMs)) {
+      throw invalidConfig('startMs must be a finite number');
+    }
+    if (startMs < 0) {
+      throw invalidConfig('startMs must be >= 0');
+    }
+  }
+  const autoplay = options?.autoplay;
+  if (autoplay !== undefined && typeof autoplay !== 'boolean') {
+    throw invalidConfig('autoplay must be a boolean');
+  }
+  return { startMs: startMs ?? -1, autoplay: autoplay ?? true };
+}
+
 /**
  * Create a pipeline audio buffer player session for mono float audio playback.
  *
  * The player consumes audio frames from a pipeline buffer (offline or live)
  * and plays them via native audio backend (AudioTrack on Android, AVAudioEngine on iOS).
  *
+ * By default playback starts at once from the start of the buffer. Pass
+ * `startMs` to start at a later position (nothing before it is heard) and
+ * `autoplay: false` to create the player paused there; `resume()` starts it.
+ *
  * @param audioBuffer - Live or offline audio buffer to play from
- * @param options - Player configuration (volume, onEnded, onPosition, etc.)
+ * @param options - Player configuration (volume, startMs, autoplay, onEnded, onPosition)
  * @returns Promise resolving to a PcmPlayer handle
  * @throws {Error} `AUDIO_INVALID_ARGUMENT` — audio buffer id is malformed.
  * @throws {Error} `AUDIO_BUFFER_NOT_FOUND` — buffer is not in the native registry.
- * @throws {Error} `PCM_PLAYER_INVALID_CONFIG` — player config or backend setup is invalid.
+ * @throws {Error} `PCM_PLAYER_INVALID_CONFIG` — player config or backend setup is invalid
+ *   (also: `startMs` is negative or not finite, `autoplay` is not a boolean).
  * @throws {Error} `PCM_PLAYER_ERROR` — native player create failed.
  */
 export async function createPcmPlayer(
@@ -49,6 +85,7 @@ export async function createPcmPlayer(
   const playerId = `pcm_player_${++pcmPlayerCounter}`;
   const bufferId = resolvePipelineAudioBufferId(audioBuffer);
   const volume = options?.volume ?? 1.0;
+  const { startMs, autoplay } = resolveStartOptions(options);
 
   // Subscribe before create to avoid missing the first events.
   let endedSubscription: ReturnType<NativeEventEmitter['addListener']> | null =
@@ -90,7 +127,13 @@ export async function createPcmPlayer(
   }
 
   try {
-    await SherpaOnnx.createPcmPlayer(playerId, bufferId, volume);
+    await SherpaOnnx.createPcmPlayer(
+      playerId,
+      bufferId,
+      volume,
+      startMs,
+      autoplay
+    );
   } catch (e) {
     endedSubscription?.remove();
     positionSubscription?.remove();
