@@ -169,6 +169,61 @@ describe('stt segmented transcribe', () => {
     expect(setOfflineTextSegments).toHaveBeenCalled();
   });
 
+  it('counts skip placeholders in the offsets of later text segments', async () => {
+    (runOfflineAudioToTextPipeline as jest.Mock).mockResolvedValue({
+      status: 'partial',
+      totalSegments: 3,
+      completedSegments: 2,
+      skippedSegments: [
+        { segmentIndex: 1, segmentId: 'sp_2', error: 'x', retryCount: 0 },
+      ],
+      processingTimeMs: 12,
+      outputBuffer: undefined,
+      segmentMappings: [
+        {
+          speechSegmentId: 'sp_1',
+          textSegmentId: 't1',
+          segmentIndex: 0,
+          text: 'hi ',
+        },
+        {
+          speechSegmentId: 'sp_3',
+          textSegmentId: 't3',
+          segmentIndex: 2,
+          text: 'there',
+        },
+      ],
+    });
+    const stt = await createSTT({
+      modelSource: { kind: 'fs', path: '/models/stt' },
+    });
+    await stt.transcribe(
+      'off_11111111-1111-1111-1111-111111111111',
+      'txt_off_11111111-1111-1111-1111-111111111111',
+      {
+        textSkipPlaceholder: '[…]',
+        segmentation: {
+          mode: 'auto',
+          policy: {
+            evaluator: 'speech_vad_model',
+            modelPath: { kind: 'fs', path: '/models/vad/silero_vad.onnx' },
+          },
+        },
+      }
+    );
+    // Joined text: 'hi ' + '[…]' + 'there'.
+    const written = (setOfflineTextSegments as jest.Mock).mock.calls[0]![1];
+    expect(
+      written.map((t: { startOffset: number; endOffset: number }) => [
+        t.startOffset,
+        t.endOffset,
+      ])
+    ).toEqual([
+      [0, 3],
+      [6, 11],
+    ]);
+  });
+
   it('uses native single-shot path when segmentation mode is off', async () => {
     const stt = await createSTT({
       modelSource: { kind: 'fs', path: '/models/stt' },

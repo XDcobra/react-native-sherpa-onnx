@@ -617,9 +617,24 @@ export async function createSTT(
         );
       }
 
+      // The joined text holds the placeholder of every skipped segment in
+      // speech order; offsets of later parts must count it.
+      const placeholderLength = (batchOptions?.textSkipPlaceholder ?? '')
+        .length;
+      const skippedIndexes = orchestrated.skippedSegments
+        .map((s) => s.segmentIndex)
+        .sort((a, b) => a - b);
+      let skippedCounted = 0;
       let runningOffset = 0;
       const textSegments: TextSegment[] = orchestrated.segmentMappings.map(
         (mapping, index) => {
+          while (
+            skippedCounted < skippedIndexes.length &&
+            skippedIndexes[skippedCounted]! < mapping.segmentIndex
+          ) {
+            runningOffset += placeholderLength;
+            skippedCounted += 1;
+          }
           const segmentText = mapping.text;
           const startOffset = runningOffset;
           const endOffset = startOffset + segmentText.length;
