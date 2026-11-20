@@ -8,6 +8,7 @@ import type {
   ResolvedFileRef,
   SaveTextOptions,
   ShareFileOptions,
+  ShareResult,
   FileIOProgressEvent,
   ConfigureFileIOOptions,
 } from './types';
@@ -30,6 +31,8 @@ export type {
   CopyFileResult,
   SaveTextOptions,
   ShareFileOptions,
+  ShareAnchor,
+  ShareResult,
   FileIOProgressEvent,
   FileIOErrorCodeValue,
   NoFdCacheOptions,
@@ -203,10 +206,7 @@ export async function saveText(
  * @throws {Error} `FILEIO_READ_ERROR` — native could not open the file for sharing.
  * @throws {Error} `FILEIO_RESOLVE_ERROR` — source could not be opened.
  */
-export async function shareFile(
-  input: FileSource,
-  options?: ShareFileOptions
-): Promise<void> {
+function assertShareable(input: FileSource): void {
   if (input.kind === 'auto') {
     throw Object.assign(
       new Error(
@@ -216,12 +216,69 @@ export async function shareFile(
     );
   }
   assertFileSourceSupportedOnPlatform(input);
+}
 
-  await SherpaOnnx.shareFile(
-    input as any,
-    options?.mimeType ?? '',
-    options?.title ?? ''
-  );
+function toShareResult(raw: unknown): ShareResult {
+  const r = (raw ?? {}) as { completed?: unknown; activityType?: unknown };
+  return {
+    completed: typeof r.completed === 'boolean' ? r.completed : null,
+    activityType:
+      typeof r.activityType === 'string' && r.activityType.length > 0
+        ? r.activityType
+        : null,
+  };
+}
+
+/**
+ * Open the system share sheet for one file. Same as {@link shareFiles} with one source.
+ */
+export async function shareFile(
+  input: FileSource,
+  options?: ShareFileOptions
+): Promise<ShareResult> {
+  return shareFiles([input], options);
+}
+
+/**
+ * Open the system share sheet for one or more files at once.
+ *
+ * - iOS: resolves when the sheet is closed. Temporary copies made for the share
+ *   (stream sources) stay until then. On iPad the sheet is a popover at
+ *   `options.anchor` (default: the window centre).
+ * - Android: resolves once the chooser is shown (`completed: null`); the receiving
+ *   app reads the files later, so keep them until the user is back in your app.
+ *
+ * @throws {Error} `INVALID_ARGUMENT` — no sources, an `auto` source, or an invalid anchor.
+ */
+export async function shareFiles(
+  inputs: ReadonlyArray<FileSource>,
+  options?: ShareFileOptions
+): Promise<ShareResult> {
+  if (inputs.length === 0) {
+    throw createFileIOError(
+      FileIOErrorCode.INVALID_ARGUMENT,
+      'shareFiles needs at least one source'
+    );
+  }
+  inputs.forEach(assertShareable);
+  const anchor = options?.anchor;
+  if (
+    anchor != null &&
+    ![anchor.x, anchor.y, anchor.width, anchor.height].every((v) =>
+      Number.isFinite(v)
+    )
+  ) {
+    throw createFileIOError(
+      FileIOErrorCode.INVALID_ARGUMENT,
+      'anchor needs finite x, y, width and height'
+    );
+  }
+  const raw = await SherpaOnnx.shareFiles(inputs as any, {
+    mimeType: options?.mimeType ?? '',
+    title: options?.title ?? '',
+    ...(anchor ? { anchor } : {}),
+  });
+  return toShareResult(raw);
 }
 
 function assertNonNegInt(name: string, value: number, min: number): void {

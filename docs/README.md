@@ -181,7 +181,7 @@ This index maps every user-facing guide to its canonical file. Internal and migr
 
 | Guide | Description |
 |-------|-------------|
-| [fileio.md](./fileio.md) | `copyFile`, `saveText`, `shareFile` — file-based I/O |
+| [fileio.md](./fileio.md) | `copyFile`, `saveText`, `shareFile`, `shareFiles` — file-based I/O |
 | [extraction.md](./extraction.md) | Archive extraction API (compressed .tar.zst / .tar.bz2) |
 | [download-manager.md](./download-manager.md) | Runtime model download, background downloads (iOS/Android) |
 | [hotwords.md](./hotwords.md) | Hotword / boosted-phrase configuration |

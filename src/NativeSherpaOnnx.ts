@@ -3127,9 +3127,12 @@ export interface Spec extends TurboModule {
   }>;
 
   /**
-   * Open system share sheet for source file.
+   * Open the system share sheet for one or more file sources.
+   * `options`: `{ mimeType?: string; title?: string; anchor?: { x, y, width, height } }`.
+   * Resolves `{ completed: boolean | null; activityType: string | null }`: on iOS when the
+   * sheet is closed, on Android once the chooser is shown (`completed: null`).
    */
-  shareFile(source: Object, mimeType: string, title: string): Promise<void>;
+  shareFiles(sources: Object[], options: Object): Promise<Object>;
 
   /**
    * Cancel an in-progress file I/O operation by operationId.

@@ -140,10 +140,37 @@ export interface SaveTextOptions {
 }
 
 export interface ShareFileOptions {
-  /** MIME type for the share intent. Inferred from file extension if omitted. */
+  /**
+   * MIME type for the share intent. Inferred if omitted (Android: from the content
+   * resolver; several files of different types share as their common top-level type, e.g. `audio/*`).
+   * iOS: ignored, the type comes from the file name.
+   */
   mimeType?: string;
   /** Android: chooser title. iOS: ignored. */
   title?: string;
+  /**
+   * iPad and Mac: the rectangle the share popover points at, in window coordinates
+   * (points), e.g. from `measureInWindow` on the button that opened it. Default: the
+   * centre of the window, without an arrow. Ignored where the sheet is not a popover.
+   */
+  anchor?: ShareAnchor;
+}
+
+export interface ShareAnchor {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ShareResult {
+  /**
+   * iOS: `true` when the user finished sharing to a target, `false` when the sheet was
+   * dismissed or the target was cancelled. Android: `null`; the chooser does not report it.
+   */
+  completed: boolean | null;
+  /** iOS: the activity type of the chosen target (e.g. `com.apple.UIKit.activity.Mail`); otherwise `null`. */
+  activityType: string | null;
 }
 
 /**
