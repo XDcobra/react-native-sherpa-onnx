@@ -2860,7 +2860,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         else -> throw IllegalArgumentException("Unknown retentionMode '$retentionModeStr'")
       }
 
-      val isTemporary = retentionModeStr != "path" && persistence != null
+      // Only a spool path the SDK chose is deleted on release; a caller's path is kept
+      // ('auto' always uses its own temp file).
+      val isTemporary = persistence != null &&
+        (retentionModeStr == "auto" || (retentionModeStr != "path" && retentionPath == null))
 
       val entry = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createLive(
         sampleRate = sampleRate,
