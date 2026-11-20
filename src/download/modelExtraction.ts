@@ -24,6 +24,7 @@ import {
   getSourceModelsBaseDir,
 } from './paths';
 import { runPostDownloadProcessing } from './postDownloadProcessing';
+import { getArchiveBytes } from './supplementFiles';
 import { getModelById } from './registry';
 import {
   type DownloadResult,
@@ -152,9 +153,10 @@ async function runExtraction(
   }
 
   const archiveStat = await stat(downloadPath);
-  if (model.bytes > 0 && archiveStat.size < model.bytes) {
+  const archiveBytes = getArchiveBytes(model);
+  if (archiveBytes > 0 && archiveStat.size < archiveBytes) {
     throw new Error(
-      `Archive is truncated (${archiveStat.size}/${model.bytes} bytes). Re-download or replace the file.`
+      `Archive is truncated (${archiveStat.size}/${archiveBytes} bytes). Re-download or replace the file.`
     );
   }
 
@@ -168,7 +170,7 @@ async function runExtraction(
       lowerPath.endsWith('.tar.xz'))
   ) {
     await probeArchiveIntegrity(downloadPath, {
-      expectedBytes: model.bytes > 0 ? model.bytes : undefined,
+      expectedBytes: archiveBytes > 0 ? archiveBytes : undefined,
     });
   }
 
@@ -321,7 +323,8 @@ export async function getIncompleteExtractions(
       }
 
       const sourceStat = await stat(state.archivePath);
-      if (state.model.bytes > 0 && sourceStat.size < state.model.bytes) {
+      const archiveBytes = getArchiveBytes(state.model);
+      if (archiveBytes > 0 && sourceStat.size < archiveBytes) {
         continue;
       }
     } catch {

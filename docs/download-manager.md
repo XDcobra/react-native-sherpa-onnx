@@ -293,6 +293,24 @@ function ensureModel(
 
 One-call flow: ready check → resume extraction → resume download → extract archive → download. Integrity: see [table](#integrity-download--extractmodel).
 
+A model that is already installed but lacks a [supplement file](#supplement-files) its catalog entry lists gets only that file downloaded before `ensureModel` returns (with `onProgress` and `signal` as usual). Call `ensureModel` before each use to pick up such repairs. That fetch needs the network: offline, `ensureModel` then throws instead of returning the local path.
+
+### Supplement files
+
+Some packs need a file that the source publishes as a separate asset of the same release. Upstream's English TTS packs that ship no English lexicon (ZipVoice zh-en, Kokoro EN v0.19, Kitten, Matcha EN, Piper `en_US` / `en_GB`) read English only through `lexicon-en-us.txt` from the `tts-models` release. A rule table matches such model ids; the GitHub catalog then lists the file in `ModelMeta.supplements` with its size and digest, and `bytes` includes it.
+
+```mermaid
+flowchart LR
+  A[archive downloaded] --> B[extract] --> C[supplements into the model directory] --> D[ready marker]
+  E[installed model, supplement missing] -->|ensureModel| C
+```
+
+- The file goes into the model directory the engine reads, after extraction and before the model counts as downloaded. A file the pack already ships is kept.
+- Progress continues in phase `downloading` from the archive bytes; `assetIndex` / `assetCount` include the supplements.
+- SHA-256 is checked like the archive's (`verifyChecksum`, `onChecksumMismatch`). The file is written as `<name>.part` and moved into place only after the check.
+- Cancel: the usual cleanup runs. Failure: the model is not marked ready; the archive stays, so the next `ensureModel` extracts again and retries the file.
+- A catalog cached before a rule existed has no `supplements`; `refreshModels` adds them.
+
 ## Registry
 
 ### `refreshModels(category, options?)`
@@ -402,9 +420,10 @@ Automatic checks before/around unpack. Digests come from HF LFS (when listed) or
 
 | Check | When | Opt-out |
 | --- | --- | --- |
-| Size vs `model.bytes` | `model.bytes > 0` and on-disk size smaller | none |
+| Archive size vs its asset `bytes` (`model.bytes` also counts supplements) | size known and on-disk size smaller | none |
 | [`probeArchiveIntegrity`](extraction.md#probearchiveintegrityfilepath-options) | path ends with `.tar.bz2` / `.tar.zst` / `.tar.gz` / `.tar.xz` | `skipIntegrityProbe: true` |
 | SHA-256 vs `model.sha256` | digest known | `verifyChecksum: false` |
+| SHA-256 of each supplement vs its `sha256` | digest known | `verifyChecksum: false` |
 
 On a SHA-256 mismatch the model's entry is reloaded from its source once (bypassing the catalog cache). If the source replaced the file and the download matches the new digest, it is accepted; otherwise it is rejected as before.
 
@@ -742,6 +761,9 @@ type ModelMeta = {
   sourceId: string;
   layout: SourceAssetLayout;
   assets: SourceAssetEntry[];
+  /** Files the pack does not ship, downloaded into the model directory. */
+  supplements?: SourceAssetEntry[];
+  /** Total download size: assets plus supplements. */
   bytes: number;
   sha256?: string;
   category: ModelCategory;

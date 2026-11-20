@@ -19,6 +19,11 @@ import {
   getReadyMarkerPath,
 } from './paths';
 import {
+  downloadSupplements,
+  getArchiveBytes,
+  getSupplementBytes,
+} from './supplementFiles';
+import {
   type ChecksumMismatchInfo,
   type DownloadResult,
   type ExtractionState,
@@ -143,6 +148,8 @@ export type RunPostDownloadProcessingOptions = {
   statePath: string;
   signal?: AbortSignal;
   verifyChecksum?: boolean;
+  /** Checksum check for supplement files; default `verifyChecksum`. */
+  verifySupplementChecksum?: boolean;
   onChecksumMismatch?: (issue: ChecksumMismatchInfo) => Promise<boolean>;
   deleteArchiveAfterExtract?: boolean;
   onProgress?: (progress: Progress) => void;
@@ -183,6 +190,7 @@ async function runPostDownloadProcessingBody(
     statePath,
     signal,
     verifyChecksum,
+    verifySupplementChecksum,
     onChecksumMismatch,
     deleteArchiveAfterExtract,
     onProgress,
@@ -218,10 +226,11 @@ async function runPostDownloadProcessingBody(
   if (isArchive) {
     try {
       const archiveStat = await stat(downloadPath);
-      if (model.bytes > 0 && archiveStat.size < model.bytes) {
+      const archiveBytes = getArchiveBytes(model);
+      if (archiveBytes > 0 && archiveStat.size < archiveBytes) {
         await unlink(downloadPath);
         throw new Error(
-          `Archive file is truncated (${archiveStat.size}/${model.bytes} bytes). Please retry the download.`
+          `Archive file is truncated (${archiveStat.size}/${archiveBytes} bytes). Please retry the download.`
         );
       }
     } catch (error) {
@@ -395,6 +404,30 @@ async function runPostDownloadProcessingBody(
     );
   }
 
+  // Files the pack does not ship (for example an English lexicon) go next to the model
+  // files, before the ready marker. On failure the archive and the extraction state stay,
+  // so a retry extracts again and fetches the file; abort surfaces as AbortError, which
+  // the callers clean up like any other cancel.
+  const supplementBytes = getSupplementBytes(model);
+  if (model.supplements?.length) {
+    await downloadSupplements({
+      category,
+      model,
+      sourceId,
+      targetDir: await resolveActualModelDir(modelDir),
+      signal,
+      verifyChecksum: verifySupplementChecksum ?? verifyChecksum,
+      onChecksumMismatch,
+      onProgress,
+      precedingBytes: Math.max(0, model.bytes - supplementBytes),
+      precedingAssetCount: model.assets.length,
+    });
+  }
+
+  if (isAborted()) {
+    throw createAbortError();
+  }
+
   await writeFile(getReadyMarkerPath(category, id, sourceId), 'ready', 'utf8');
 
   const now = new Date().toISOString();
@@ -416,6 +449,9 @@ async function runPostDownloadProcessingBody(
         // ignore
       }
     }
+  }
+  if (sizeOnDisk != null) {
+    sizeOnDisk += supplementBytes;
   }
 
   await writeFile(

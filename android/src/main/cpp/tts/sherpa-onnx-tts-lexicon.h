@@ -10,6 +10,8 @@
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -41,6 +43,59 @@ inline std::string ResolveTtsLexiconPaths(
         joined += c.path;
     }
     return joined;
+}
+
+/** Init error code: the model needs a lexicon file its directory lacks. */
+inline constexpr const char* kTtsErrorLexiconMissing = "TTS_LEXICON_MISSING";
+
+/** Upstream's English lexicon, published next to the packs that need it. */
+inline constexpr const char* kTtsEnglishLexiconFile = "lexicon-en-us.txt";
+
+/**
+ * True for a lexicon language id (from lexicon-<id>.txt) that names English:
+ * "en", "en-us", "en_gb", "us-en", "gb-en".
+ */
+inline bool IsEnglishLexiconLanguageId(const std::string& languageId) {
+    std::string id(languageId);
+    std::transform(id.begin(), id.end(), id.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (id == "en") return true;
+    if (id.size() > 3 && id.compare(0, 2, "en") == 0 && (id[2] == '-' || id[2] == '_')) {
+        return true;
+    }
+    const size_t n = id.size();
+    return n > 3 && id.compare(n - 2, 2, "en") == 0 && (id[n - 3] == '-' || id[n - 3] == '_');
+}
+
+/**
+ * Lexicon file auto init must refuse to start without, or "" when nothing is missing.
+ *
+ * ZipVoice reads Chinese and English text only through its lexicons and skips every
+ * word that is in none of them without an error. With lexicons but no English one,
+ * every English word is lost, so the voice reads garbage instead of failing. Without
+ * any lexicon upstream already fails on text, and callers may pass tokens instead, so
+ * that case is left alone. An explicit \p languageId is the caller's own pick.
+ */
+inline std::string MissingTtsLexiconFile(
+    TtsModelKind kind,
+    const std::vector<model_detect::LexiconCandidate>& candidates,
+    const std::string& languageId = ""
+) {
+    if (kind != TtsModelKind::kZipvoice || !languageId.empty() || candidates.empty()) {
+        return "";
+    }
+    for (const auto& c : candidates) {
+        if (IsEnglishLexiconLanguageId(c.languageId)) return "";
+    }
+    return kTtsEnglishLexiconFile;
+}
+
+/** Message for kTtsErrorLexiconMissing; starts with the code. */
+inline std::string TtsLexiconMissingMessage(const std::string& fileName) {
+    return std::string(kTtsErrorLexiconMissing) + ": ZipVoice needs an English lexicon (" +
+        fileName + ") in the model directory; without it every English word is skipped. " +
+        "ensureModel() downloads it for catalog models, or add the upstream file next to " +
+        "lexicon.txt. Set lexiconLanguageId to load only the lexicon you pick.";
 }
 
 }  // namespace sherpaonnx

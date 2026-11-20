@@ -106,6 +106,9 @@ function toModelMeta(
     sourceId,
     layout: sourceModel.layout,
     assets: sourceModel.assets,
+    ...(sourceModel.supplements?.length
+      ? { supplements: sourceModel.supplements }
+      : {}),
     bytes: sourceModel.bytes,
     sha256: primaryAsset.sha256,
     category: sourceModel.category,
@@ -285,6 +288,15 @@ export async function refreshModels(
         model.sha256 = checksum;
       } else if (model.sha256) {
         model.sha256 = model.sha256.toLowerCase();
+      }
+
+      for (const supplement of model.supplements ?? []) {
+        const supplementChecksum = checksums.get(supplement.relativePath);
+        if (supplementChecksum) {
+          supplement.sha256 = supplementChecksum;
+        } else if (supplement.sha256) {
+          supplement.sha256 = supplement.sha256.toLowerCase();
+        }
       }
     }
 

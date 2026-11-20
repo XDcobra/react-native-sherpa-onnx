@@ -93,7 +93,7 @@ export interface TtsDetectModelResult extends ModelDetectResultBase {
   sizeTier?: string;
   /**
    * Lexicon files detected on disk (`lexicon.txt`, `lexicon-*.txt`).
-   * Use with init `lexiconLanguageId` (vits/matcha/kokoro/zipvoice). Not kitten/pocket/supertonic.
+   * Use with init `lexiconLanguageId` (vits/matcha/kokoro/kitten/zipvoice). Not pocket/supertonic.
    * Not the same as catalog `languages` hints.
    */
   lexiconLanguages?: ReadonlyArray<TtsLexiconLanguage>;

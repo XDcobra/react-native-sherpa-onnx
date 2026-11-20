@@ -12,6 +12,7 @@
 #include "../../detect/native/sherpa-onnx-public-language-row-bridge.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "sherpa-onnx-tts-engine-wrapper.h"
+#include "sherpa-onnx-tts-lexicon.h"
 
 #include <memory>
 #include <map>
@@ -235,7 +236,11 @@ static NSString *TtsTrimmedString(NSString *value) {
                 ? @"Failed to initialize TTS"
                 : [NSString stringWithUTF8String:result.error.c_str()];
             RCTLogError(@"TTS init failed: %@", errorMsg);
-            reject(@"TTS_INIT_ERROR", errorMsg, nil);
+            NSString *lexiconMissingCode = @(sherpaonnx::kTtsErrorLexiconMissing);
+            NSString *errorCode = [errorMsg hasPrefix:lexiconMissingCode]
+                ? lexiconMissingCode
+                : @"TTS_INIT_ERROR";
+            reject(errorCode, errorMsg, nil);
         }
     } @catch (NSException *exception) {
         NSString *errorMsg = [NSString stringWithFormat:@"Exception during TTS init: %@", exception.reason];

@@ -168,6 +168,14 @@ TtsInitializeResult TtsWrapper::initialize(
             return result;
         }
 
+        const std::string missingLexicon = MissingTtsLexiconFile(
+            detect.selectedKind, detect.lexiconLanguages, lexiconLanguageId.value_or(""));
+        if (!missingLexicon.empty()) {
+            result.error = TtsLexiconMissingMessage(missingLexicon);
+            LOGE("%s", result.error.c_str());
+            return result;
+        }
+
         std::string lexiconPath = ResolveTtsLexiconPaths(
             detect.selectedKind,
             detect.lexiconLanguages,

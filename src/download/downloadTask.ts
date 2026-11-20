@@ -9,6 +9,17 @@ import {
   writeFile,
 } from '@dr.pogodin/react-native-fs';
 import { makeModelOperationKey } from './activeModelOperations';
+import {
+  type ActiveDownloadOperation,
+  activeDownloadOperations,
+  activeDownloadTasks,
+  createAbortError,
+  isAbortError,
+  makeDownloadTaskId,
+  resolveDownloadHeaders,
+  trackAssetDownloadTask,
+  verifyDownloadedAssetChecksum,
+} from './assetDownload';
 import { runAssetIndicesWithConcurrency } from './downloadConcurrency';
 import {
   cancelForegroundDownload,
@@ -28,9 +39,8 @@ import {
   getTempModelDir,
 } from './paths';
 import { runPostDownloadProcessing } from './postDownloadProcessing';
+import { getArchiveBytes, getSupplementBytes } from './supplementFiles';
 import { getModelById } from './registry';
-import { buildSourceFetchContext, getSource } from './sources/registry';
-import { DownloadError, DOWNLOAD_ERROR_CODES } from './sources/errors';
 import {
   assertSupportedLayout,
   assertValidLayoutAssets,
@@ -42,11 +52,7 @@ import {
   ModelCategory,
   PauseError,
 } from './types';
-import {
-  checkDiskSpace,
-  removeDirectoryRecursive,
-  validateChecksum,
-} from './validation';
+import { checkDiskSpace, removeDirectoryRecursive } from './validation';
 
 const DOWNLOAD_STATE_PREFIX = '.download-state-';
 const DOWNLOAD_STATE_SUFFIX = '.json';
@@ -65,14 +71,6 @@ type DownloadStateFile = {
   failedAssetIndices?: number[];
 };
 
-type ActiveDownloadOperation = {
-  taskId: string;
-  task: ForegroundDownloadTask;
-  pauseRequested: boolean;
-  aborted: boolean;
-  rejectPause?: () => void;
-};
-
 export type DownloadManagerConfig = {
   maxParallelDownloads?: number;
 };
@@ -85,42 +83,7 @@ function resolveSourceId(source?: string | 'default'): string {
   return source;
 }
 
-function makeDownloadTaskId(
-  category: ModelCategory,
-  id: string,
-  sourceId: string
-): string {
-  return `${category}:${sourceId}:${id}`;
-}
-
-const activeDownloadTasks = new Map<string, ForegroundDownloadTask>();
-const activeDownloadOperations = new Map<string, ActiveDownloadOperation>();
-
 let multiAssetParallelLimit = 3;
-
-function resolveDownloadHeaders(sourceId: string): Record<string, string> {
-  try {
-    const provider = getSource(sourceId);
-    const ctx = buildSourceFetchContext(sourceId, provider);
-    const headers: Record<string, string> = { ...ctx.headers };
-    if (ctx.token) {
-      headers.Authorization = `${ctx.tokenScheme ?? 'Bearer'} ${ctx.token}`;
-    }
-    return headers;
-  } catch {
-    return {};
-  }
-}
-
-function createAbortError(): Error {
-  const abortError = new Error('Download aborted');
-  abortError.name = 'AbortError';
-  return abortError;
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError';
-}
 
 function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
@@ -283,7 +246,12 @@ function trackDownloadTask({
           return;
         }
 
-        const total = bytesTotal ?? model.bytes ?? 0;
+        // Supplements download after the archive, so the total counts them too.
+        const archiveTotal = bytesTotal ?? getArchiveBytes(model);
+        const total =
+          archiveTotal > 0
+            ? archiveTotal + getSupplementBytes(model)
+            : archiveTotal;
         const percent = total > 0 ? (bytesDownloaded / total) * 100 : 0;
         const progress = {
           bytesProcessed: bytesDownloaded,
@@ -427,180 +395,6 @@ function trackDownloadTask({
       });
     }
   });
-}
-
-async function trackAssetDownloadTask(params: {
-  category: ModelCategory;
-  id: string;
-  sourceId: string;
-  task: ForegroundDownloadTask;
-  signal?: AbortSignal;
-  onProgress?: (bytesDownloaded: number, bytesTotal: number) => void;
-}): Promise<void> {
-  const key =
-    params.task.id ??
-    makeDownloadTaskId(params.category, params.id, params.sourceId);
-
-  await new Promise<void>((resolve, reject) => {
-    let settled = false;
-    let abortHandler: (() => void) | undefined;
-
-    const cleanup = () => {
-      if (abortHandler && params.signal) {
-        params.signal.removeEventListener('abort', abortHandler);
-        abortHandler = undefined;
-      }
-      activeDownloadTasks.delete(key);
-      activeDownloadOperations.delete(key);
-    };
-
-    const safeResolve = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      resolve();
-    };
-
-    const safeReject = (error: Error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      cleanup();
-      reject(error);
-    };
-
-    const operation: ActiveDownloadOperation = {
-      taskId: key,
-      task: params.task,
-      pauseRequested: false,
-      aborted: Boolean(params.signal?.aborted),
-      rejectPause: () => {
-        safeReject(
-          new PauseError(params.category, params.id, 'Download paused')
-        );
-      },
-    };
-
-    activeDownloadTasks.set(key, params.task);
-    activeDownloadOperations.set(key, operation);
-
-    params.task
-      .progress(({ bytesDownloaded, bytesTotal }) => {
-        if (
-          operation.pauseRequested ||
-          operation.aborted ||
-          params.signal?.aborted
-        ) {
-          return;
-        }
-        params.onProgress?.(bytesDownloaded, bytesTotal ?? 0);
-      })
-      .done(() => {
-        if (operation.pauseRequested) {
-          safeReject(
-            new PauseError(params.category, params.id, 'Download paused')
-          );
-          return;
-        }
-
-        if (operation.aborted || params.signal?.aborted) {
-          safeReject(createAbortError());
-          return;
-        }
-
-        safeResolve();
-      })
-      .error(({ error, errorCode }) => {
-        if (operation.pauseRequested) {
-          safeReject(
-            new PauseError(params.category, params.id, 'Download paused')
-          );
-          return;
-        }
-        if (operation.aborted || params.signal?.aborted) {
-          safeReject(createAbortError());
-          return;
-        }
-        safeReject(
-          new Error(
-            typeof error === 'string' ? error : String(errorCode ?? error)
-          )
-        );
-      });
-
-    if (params.signal) {
-      abortHandler = () => {
-        operation.aborted = true;
-        cancelForegroundDownload(params.task.id ?? key).catch(() => {});
-        safeReject(createAbortError());
-      };
-      params.signal.addEventListener('abort', abortHandler);
-    }
-
-    params.task.start();
-  });
-}
-
-async function verifyDownloadedAssetChecksum(params: {
-  category: ModelCategory;
-  modelId: string;
-  sourceId: string;
-  relativePath: string;
-  filePath: string;
-  expectedSha256?: string;
-  verifyChecksum?: boolean;
-  onChecksumMismatch?: DownloadOptions['onChecksumMismatch'];
-}): Promise<void> {
-  const {
-    category,
-    modelId,
-    sourceId,
-    relativePath,
-    filePath,
-    expectedSha256,
-    verifyChecksum,
-    onChecksumMismatch,
-  } = params;
-
-  if (verifyChecksum === false || !expectedSha256) {
-    return;
-  }
-
-  const expected = expectedSha256.toLowerCase();
-  const result = await validateChecksum(filePath, expected);
-  if (result.success) {
-    return;
-  }
-
-  const issue = {
-    category,
-    modelId,
-    filePath,
-    expected,
-    reason:
-      result.error === 'CHECKSUM_MISMATCH'
-        ? ('CHECKSUM_MISMATCH' as const)
-        : ('CHECKSUM_FAILED' as const),
-  };
-
-  const keepFile = onChecksumMismatch ? await onChecksumMismatch(issue) : false;
-  if (keepFile) {
-    return;
-  }
-
-  throw new DownloadError(
-    DOWNLOAD_ERROR_CODES.INTEGRITY_CHECKSUM_MISMATCH,
-    `Checksum verification failed for ${relativePath}`,
-    {
-      source: sourceId,
-      category,
-      modelId,
-      cause: result.message ?? `checksum mismatch/failure for ${relativePath}`,
-    }
-  );
 }
 
 async function downloadModelOnce(
@@ -913,6 +707,7 @@ async function downloadModelOnce(
         statePath,
         signal: opts?.signal,
         verifyChecksum: false,
+        verifySupplementChecksum: opts?.verifyChecksum,
         onChecksumMismatch: opts?.onChecksumMismatch,
         deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
         onProgress: opts?.onProgress,
@@ -1193,6 +988,10 @@ export async function deleteIncompleteDownload(
     for (let index = 0; index < model.assets.length; index += 1) {
       await cancelForegroundDownload(`${taskId}:${index}`);
     }
+  }
+  for (const supplement of model?.supplements ?? []) {
+    const fileName = supplement.relativePath.split('/').pop();
+    await cancelForegroundDownload(`${taskId}:supplement:${fileName}`);
   }
 
   activeDownloadTasks.delete(taskId);

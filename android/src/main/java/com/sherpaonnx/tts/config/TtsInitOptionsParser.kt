@@ -67,6 +67,48 @@ internal object TtsInitOptionsParser {
     return paths.takeIf { it.isNotEmpty() }?.joinToString(",")
   }
 
+  /** Init error code: the model needs a lexicon file its directory lacks. */
+  const val LEXICON_MISSING_CODE = "TTS_LEXICON_MISSING"
+
+  /** Upstream's English lexicon, published next to the packs that need it. */
+  private const val ENGLISH_LEXICON_FILE = "lexicon-en-us.txt"
+
+  /** Lexicon language id (from lexicon-<id>.txt) that names English: en, en-us, us-en, gb-en. */
+  fun isEnglishLexiconLanguageId(languageId: String): Boolean {
+    val id = languageId.lowercase()
+    if (id == "en") return true
+    if (id.length > 3 && id.startsWith("en") && (id[2] == '-' || id[2] == '_')) return true
+    val n = id.length
+    return n > 3 && id.endsWith("en") && (id[n - 3] == '-' || id[n - 3] == '_')
+  }
+
+  /**
+   * Lexicon file auto init must refuse to start without, or null. Mirrors
+   * MissingTtsLexiconFile in sherpa-onnx-tts-lexicon.h: ZipVoice skips every word that is
+   * in none of its lexicons without an error, so with lexicons but no English one English
+   * text is lost. No lexicon at all is left alone (upstream fails on text; tokens still
+   * work). An explicit [languageId] is the caller's pick and is not second-guessed.
+   */
+  fun missingLexiconFile(
+    modelType: String,
+    lexiconLanguages: ArrayList<*>?,
+    languageId: String?
+  ): String? {
+    if (modelType != "zipvoice" || !languageId.isNullOrBlank() || lexiconLanguages.isNullOrEmpty()) {
+      return null
+    }
+    val hasEnglish = lexiconLanguages.any { item ->
+      ((item as? HashMap<*, *>)?.get("id") as? String)?.let { isEnglishLexiconLanguageId(it) } == true
+    }
+    return if (hasEnglish) null else ENGLISH_LEXICON_FILE
+  }
+
+  /** Message for [LEXICON_MISSING_CODE]; starts with the code (same text as on iOS). */
+  fun lexiconMissingMessage(fileName: String): String =
+    "$LEXICON_MISSING_CODE: ZipVoice needs an English lexicon ($fileName) in the model directory; " +
+      "without it every English word is skipped. ensureModel() downloads it for catalog models, " +
+      "or add the upstream file next to lexicon.txt. Set lexiconLanguageId to load only the lexicon you pick."
+
   fun resolveLexiconPathFromDetect(
     lexiconLanguages: ArrayList<*>?,
     languageId: String?

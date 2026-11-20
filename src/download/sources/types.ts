@@ -27,6 +27,11 @@ export interface SourceModel {
   category: ModelCategory;
   layout: SourceAssetLayout;
   assets: SourceAssetEntry[];
+  /**
+   * Files the pack does not ship, published as separate assets (for example an English
+   * lexicon). Downloaded into the model directory after the assets; `bytes` includes them.
+   */
+  supplements?: SourceAssetEntry[];
   bytes: number;
   modelType?: string;
   languages?: string[];

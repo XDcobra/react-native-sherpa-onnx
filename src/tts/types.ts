@@ -243,7 +243,9 @@ export type TTSAutoInitOptionsBase = TTSInitOptionsShared & {
    *
    * Default: the first detected lexicon, except `zipvoice`, which loads all of them
    * (a word missing from every loaded lexicon is skipped, so English text with the
-   * zh-en pack needs `lexicon-en-us.txt` next to `lexicon.txt`).
+   * zh-en pack needs `lexicon-en-us.txt` next to `lexicon.txt`). Without this option,
+   * `zipvoice` init fails with `TTS_LEXICON_MISSING` when lexicons are detected but no
+   * English one (`lexicon-en*.txt`, `lexicon-*-en.txt`); setting it skips that check.
    *
    * Auto-detect only sees `lexicon.txt` / `lexicon-*.txt` **inside** `modelSource`
    * (e.g. drop `lexicon-en-us.txt` into the Piper folder). A lexicon outside that
