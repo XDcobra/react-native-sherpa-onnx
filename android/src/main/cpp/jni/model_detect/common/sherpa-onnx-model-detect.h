@@ -783,6 +783,17 @@ AlignmentDetectResult DetectAlignmentModel(
 );
 
 /**
+ * Name-only alignment detection for a catalog asset name (no files): the model type
+ * the name implies, catalog languages and quantization. `ok` stays false; the result
+ * carries a name-only detection source, like the other name-only detectors.
+ */
+AlignmentDetectResult DetectAlignmentModelFromName(
+    const std::string& assetName,
+    const std::string& modelType = "auto",
+    const std::string& quantization = ""
+);
+
+/**
  * OCR pack detection. Pass at least one of `model_dir` or `asset_name`.
  * v1 family: ppocr via Det+Rec+dict co-occurrence (dynamic filename tokens).
  * No ORT online-guard (offline multi-file layout; same rationale as Alignment).

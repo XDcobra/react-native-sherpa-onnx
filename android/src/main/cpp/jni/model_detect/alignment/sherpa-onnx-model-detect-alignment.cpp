@@ -129,6 +129,32 @@ AlignmentDetectResult DetectAlignmentModel(
     return result;
 }
 
+AlignmentDetectResult DetectAlignmentModelFromName(
+    const std::string& assetName,
+    const std::string& modelType,
+    const std::string& quantization
+) {
+    AlignmentDetectResult result;
+    AppendUniqueDetectionSource(result.detectionSources, DetectionSource::kNameOnly);
+    if (assetName.empty()) {
+        result.error = "Alignment: asset name is empty";
+        return result;
+    }
+    const std::string type = (modelType.empty() || modelType == "auto")
+        ? InferAlignmentModelTypeFromKey(assetName)
+        : modelType;
+    result.selectedKind = ParseAlignmentModelType(type);
+    if (result.selectedKind == AlignmentModelKind::kUnknown) {
+        result.error = "Alignment: no model type in name " + assetName;
+        return result;
+    }
+    if (!quantization.empty()) result.quantization = quantization;
+    std::string ignoredSizeTier;
+    FillDerivedCatalogMetadata(result.derivedLanguages, result.quantization, ignoredSizeTier, assetName);
+    AppendCuratedAlignmentLanguageRowsIfEmpty(result, assetName);
+    return result;
+}
+
 // Test-only: used by host-side model_detect_test; not used in production.
 AlignmentDetectResult DetectAlignmentModelFromFileList(
     const std::vector<model_detect::FileEntry>& files,
