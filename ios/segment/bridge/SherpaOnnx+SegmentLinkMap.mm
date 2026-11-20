@@ -231,7 +231,7 @@ static void slmRejectFromError(RCTPromiseRejectBlock reject, const std::string &
     for (const auto &l : links) {
       [arr addObject:slmLinkToDict(l)];
     }
-    resolve(arr);
+    resolve(@{ @"links": arr });
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
@@ -258,7 +258,7 @@ static void slmRejectFromError(RCTPromiseRejectBlock reject, const std::string &
     for (const auto &l : links) {
       [arr addObject:slmLinkToDict(l)];
     }
-    resolve(arr);
+    resolve(@{ @"links": arr });
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
@@ -285,7 +285,7 @@ static void slmRejectFromError(RCTPromiseRejectBlock reject, const std::string &
     for (const auto &l : links) {
       [arr addObject:slmLinkToDict(l)];
     }
-    resolve(arr);
+    resolve(@{ @"links": arr });
   } @catch (NSException *exception) {
     reject(@"SEGMENT_LINK_INTERNAL_ERROR", exception.reason, nil);
   }
