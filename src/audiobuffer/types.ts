@@ -335,6 +335,43 @@ export type OfflineFromOfflineOptions = {
   targetSampleRateHz?: number;
 };
 
+/** A time range in an audio buffer, in ms from its start (`endMs` exclusive). */
+export interface AudioTimeRange {
+  startMs: number;
+  endMs: number;
+}
+
+/** Options for {@link createOfflineAudioBufferFromRanges}. */
+export interface OfflineFromRangesOptions {
+  /** Silence inserted between two copied ranges, in ms (default `0`). */
+  gapMs?: number;
+  /**
+   * Output sample rate. omitted / `0`: keep the source rate; `> 0`: resample
+   * the result to that rate (one more native pass, see the docs).
+   */
+  targetSampleRateHz?: number;
+  /** Stops the copy between two chunks; the call rejects with `ORCHESTRATION_CANCELLED`. */
+  signal?: AbortSignal;
+  /** Called after each copied chunk with the done fraction (`0`–`1`). */
+  onProgress?: (fraction: number) => void;
+}
+
+/** Where one copied range sits in the source and in the result, in ms. */
+export interface AudioRangeMapping {
+  sourceStartMs: number;
+  sourceEndMs: number;
+  outputStartMs: number;
+  outputEndMs: number;
+}
+
+/**
+ * Result of {@link createOfflineAudioBufferFromRanges}: the new offline buffer
+ * plus one `mapping` entry per copied range, in output order.
+ */
+export interface OfflineAudioBufferFromRangesRef extends OfflineAudioBufferRef {
+  mapping: AudioRangeMapping[];
+}
+
 /** Mode for transferring a live spool into a new offline buffer (ownership handover). */
 export type OfflineTransferFromLiveMode = 'fullIfSpooled';
 

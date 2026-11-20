@@ -36,6 +36,7 @@ When this buffer is used in a playback or mic+playback pipeline, choose input/ou
 ### Offline buffer
 
 - `createEmptyOfflineAudioBuffer`, `createOfflineAudioBufferFromFile`, `createOfflineAudioBufferFromSamples`, `createOfflineAudioBufferFromLive`, `createOfflineAudioBufferFromOffline`
+- `createOfflineAudioBufferFromRanges` (copy time ranges into a new buffer, with a time mapping)
 - `getOfflineAudioBufferSamplesSlice`
 - `installJSI`, `isJSIAvailable`
 
@@ -331,6 +332,81 @@ const forEnhancement = await createOfflineAudioBufferFromOffline(offline16k, {
 });
 ```
 
+#### `createOfflineAudioBufferFromRanges(offlineBuffer, ranges, options?)`
+
+```ts
+function createOfflineAudioBufferFromRanges(
+  offlineBuffer: OfflineAudioBufferIdSource,
+  ranges: ReadonlyArray<AudioTimeRange>, // { startMs, endMs }, endMs exclusive
+  options?: OfflineFromRangesOptions
+): Promise<OfflineAudioBufferFromRangesRef>; // OfflineAudioBufferRef & { mapping }
+```
+
+Copies only some time ranges of an offline buffer into a **new** offline buffer, for example only the speech parts, or only the parts in one language, so they can be handed to another engine. The source stays valid.
+
+The ranges are normalised first:
+
+1. Each range is clamped to the source length; ranges that are empty afterwards (`endMs <= startMs`, or fully outside the source) are dropped.
+2. The rest are sorted by start and merged where they overlap or touch (touching ranges get no gap between them).
+3. If nothing is left, the call rejects with `AUDIO_INVALID_ARGUMENT` before anything is created.
+
+The merged ranges are copied in source order:
+
+```mermaid
+flowchart LR
+  S["source: A · · B · · C"] --> N["normalise: clamp, drop empty, sort, merge"]
+  N --> R["result: A | gap | B | gap | C"]
+  R --> M["mapping: one entry per merged range"]
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `gapMs` | `0` | Silence inserted between two merged ranges |
+| `targetSampleRateHz` | keep source | `0` keeps the source rate; `> 0` resamples the result (one more native pass over the result, see `createOfflineAudioBufferFromOffline`) |
+| `signal` | — | Stops the copy between two chunks; rejects with `ORCHESTRATION_CANCELLED` (`name: 'AbortError'`) |
+| `onProgress` | — | `fraction` (`0`–`1`) after each copied chunk, `1` at the end |
+
+`mapping` has one entry per merged range, in output order: `{ sourceStartMs, sourceEndMs, outputStartMs, outputEndMs }`. The values come from the clamped sample positions, so `outputEndMs - outputStartMs` is exactly the copied length; they stay valid after a resample because they are in ms.
+
+Memory: the source is read in chunks of at most 5 seconds of audio and appended to a live accumulator that spools to a file in the app's temp directory; the finished spool is handed over to the result without a copy. Memory use does not grow with the range lengths (a resample with `targetSampleRateHz` holds the resampled result in one pass).
+
+Only **mono** sources are supported (`channelCount` other than `1` rejects with `AUDIO_INVALID_ARGUMENT`); decode with `forceMono: true` (the default of `createOfflineAudioBufferFromFile`).
+
+On error or abort the accumulator is released and its spool file deleted. On success the result owns the spool; release it with `releasePipelineAudioBuffer` when done.
+
+```ts
+import {
+  createOfflineAudioBufferFromRanges,
+  releasePipelineAudioBuffer,
+} from 'react-native-sherpa-onnx/audiobuffer';
+
+// e.g. the parts of a recording where one language is spoken
+const parts = [
+  { startMs: 12_000, endMs: 47_500 },
+  { startMs: 95_200, endMs: 130_000 },
+];
+
+const controller = new AbortController();
+const selected = await createOfflineAudioBufferFromRanges(recording, parts, {
+  gapMs: 300,
+  targetSampleRateHz: 16000,
+  signal: controller.signal,
+  onProgress: (fraction) => console.log(Math.round(fraction * 100), '%'),
+});
+
+// ... run another engine on `selected`, get times in the result ...
+
+// Translate a time in the result back to the source
+function toSourceMs(outputMs: number): number | undefined {
+  const m = selected.mapping.find(
+    (e) => outputMs >= e.outputStartMs && outputMs < e.outputEndMs
+  );
+  return m ? m.sourceStartMs + (outputMs - m.outputStartMs) : undefined; // undefined: inside a gap
+}
+
+await releasePipelineAudioBuffer(selected);
+```
+
 ### Rate-conversion matrix tests (JVM)
 
 Android unit tests cover the buffer rate matrix with committed mono WAV fixtures
@@ -365,7 +441,7 @@ Out of scope: video pixels (use [`videobuffer`](videobuffer-offline.md)), AC-3 /
 
 ## JS Events
 
-Create-time callbacks on `createOfflineAudioBufferFromFile` only (not `FromSamples` / empty / from-live / from-offline).
+Create-time callbacks on `createOfflineAudioBufferFromFile` (below) and `createOfflineAudioBufferFromRanges` ([above](#createofflineaudiobufferfromrangesofflinebuffer-ranges-options)); not on `FromSamples` / empty / from-live / from-offline.
 
 | Callback / control | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
@@ -397,6 +473,10 @@ import type {
   OfflineFromLiveMode, // 'fullIfSpooled' | 'windowSnapshot'
   OfflineFromLiveOptions, // mode + optional targetSampleRateHz
   OfflineFromOfflineOptions, // optional targetSampleRateHz
+  AudioTimeRange, // { startMs, endMs } for createOfflineAudioBufferFromRanges
+  OfflineFromRangesOptions, // gapMs, targetSampleRateHz, signal, onProgress
+  OfflineAudioBufferFromRangesRef, // OfflineAudioBufferRef + mapping
+  AudioRangeMapping, // { sourceStartMs, sourceEndMs, outputStartMs, outputEndMs }
   AudioDecodeOptions, // decode options for createOfflineAudioBufferFromFile
   DecodeProgressEvent, // progress payload during decode
   PipelineAudioErrorCodeValue, // string union of audio error codes
@@ -417,7 +497,9 @@ import {
 | `AUDIO_BUFFER_NOT_FOUND` | Referenced pipeline audio buffer id does not exist |
 | `AUDIO_BUFFER_KIND_MISMATCH` | Buffer kind does not match the called API (offline vs live) |
 | `AUDIO_BUFFER_EMPTY` | Buffer has no samples for the requested operation |
-| `AUDIO_INVALID_ARGUMENT` | Invalid buffer id/argument passed to API |
+| `AUDIO_INVALID_ARGUMENT` | Invalid buffer id/argument passed to API; for `createOfflineAudioBufferFromRanges` also a multi-channel source or no range left inside the source |
+| `AUDIO_SPOOL_NOT_AVAILABLE` | `createOfflineAudioBufferFromRanges` could not get a spool file for its accumulator |
+| `ORCHESTRATION_CANCELLED` | `createOfflineAudioBufferFromRanges` stopped through `signal` (`name: 'AbortError'`) |
 | `DECODE_NOT_FOUND` | Source file not found or not accessible |
 | `DECODE_OPEN_FAILED` | Input could not be opened/probed by native decode |
 | `DECODE_NO_AUDIO_STREAM` | Input file/container has no audio stream |

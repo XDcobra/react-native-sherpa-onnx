@@ -1477,6 +1477,10 @@ export type {
   OfflineFromLiveMode,
   OfflineFromLiveOptions,
   OfflineFromOfflineOptions,
+  OfflineFromRangesOptions,
+  OfflineAudioBufferFromRangesRef,
+  AudioTimeRange,
+  AudioRangeMapping,
   OfflineTransferFromLiveMode,
   LiveAudioIngressSource,
   LiveAudioPipelineWriter,
@@ -1499,6 +1503,7 @@ export type {
 } from './types';
 
 export { PipelineAudioErrorCode, DecodeErrorCode } from './types';
+export { createOfflineAudioBufferFromRanges } from './ranges';
 export type { StreamEventSpec } from '../pipeline/streamEvents';
 export { isJSIAvailable } from './jsi';
 
