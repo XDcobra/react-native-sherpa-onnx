@@ -48,7 +48,11 @@ export function createAudioSaveProgressForwarder(
     lastPercent = event.percent;
     lastFrames = event.framesProcessed;
     if (event.phase === 'finalize') finalized = true;
-    onProgress(event);
+    try {
+      onProgress(event);
+    } catch {
+      // A failing progress callback must not fail or interrupt the save.
+    }
   };
 
   return {

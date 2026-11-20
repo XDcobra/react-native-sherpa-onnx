@@ -87,3 +87,13 @@ describe('createAudioSaveProgressForwarder', () => {
     expect(seen).toEqual([ev('finalize', 0, 0, 100)]);
   });
 });
+
+describe('progress callback errors', () => {
+  it('a throwing onProgress does not escape the forwarder', () => {
+    const { createAudioSaveProgressForwarder } = require('../progress');
+    const forwarder = createAudioSaveProgressForwarder('op-1', () => {
+      throw new Error('boom');
+    });
+    expect(() => forwarder.complete()).not.toThrow();
+  });
+});
