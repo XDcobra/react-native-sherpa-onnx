@@ -15,7 +15,9 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <regex>
 #include <string>
@@ -994,6 +996,24 @@ TEST_F(AudioRegistryFixture, LiveReleaseWithOtherHolderFreesSpoolWithLastHolder)
     EXPECT_TRUE(fs::exists(spoolPath));
   }
   EXPECT_FALSE(fs::exists(spoolPath));
+}
+
+// Orchestration spools are written to resolveAppBaseDir('tmp'), which is the "tmp"
+// subfolder of the cache dir on Android; the startup sweep must find them there too.
+TEST_F(AudioRegistryFixture, OrchestrationSweepCoversTmpSubfolder) {
+  const fs::path tmpDir = cacheDir_ / "tmp";
+  fs::create_directories(tmpDir);
+  const fs::path inTmp = tmpDir / "orch_session_acc.wav";
+  const fs::path inRoot = cacheDir_ / "orch_session2_acc.wav";
+  const fs::path other = tmpDir / "keep_me.wav";
+  for (const auto &p : {inTmp, inRoot, other}) {
+    std::ofstream(p) << "x";
+    fs::last_write_time(p, fs::file_time_type::clock::now() - std::chrono::hours(2));
+  }
+  pa_cleanupOrphanedOrchestrationFiles(60);
+  EXPECT_FALSE(fs::exists(inTmp));
+  EXPECT_FALSE(fs::exists(inRoot));
+  EXPECT_TRUE(fs::exists(other));
 }
 
 // Spool keeps full history behind a tiny ring window.
