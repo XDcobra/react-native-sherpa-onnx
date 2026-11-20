@@ -1,5 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import type {
   LiveAudioBufferIdSource,
   OfflineAudioBufferIdSource,
@@ -161,6 +162,7 @@ export async function createAudioTagging(
         ? tagOptions.topK
         : null;
 
+    throwIfOrchestrationAborted(tagOptions?.signal);
     const res = await SherpaOnnx.tagAudioOffline(
       instanceId,
       audioBufferId,

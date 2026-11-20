@@ -34,3 +34,8 @@ export {
   type VadCustomConfig,
   type VadCustomPathKey,
 } from './customConfig';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';

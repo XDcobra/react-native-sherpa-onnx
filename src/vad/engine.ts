@@ -14,6 +14,7 @@ import {
   releasePipelineAudioBuffer,
   resolvePipelineAudioBufferId,
 } from '../audiobuffer';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import { getSegments, segmentOfflineBuffer } from '../segment';
 import type { SegmentationPolicy } from '../segment/engine-types';
 import type { SpeechSegment } from '../segment/segment';
@@ -447,6 +448,9 @@ export async function createStreamingVAD(
         },
       });
 
+      const signal = offlineOptions.signal;
+      throwIfOrchestrationAborted(signal);
+
       const nativeOfflineOptions =
         typeof offlineOptions.sourceTag === 'string' &&
         offlineOptions.sourceTag.trim().length > 0
@@ -467,6 +471,7 @@ export async function createStreamingVAD(
           audioInBufferId,
           segmentationPolicy
         );
+        throwIfOrchestrationAborted(signal);
         const progressSession = createVadProgressSession(
           offlineOptions.onProgress
         );
@@ -503,6 +508,7 @@ export async function createStreamingVAD(
             segmentIndex,
             speechSegment,
           ] of speechSegments.entries()) {
+            throwIfOrchestrationAborted(signal);
             const startSample = Math.max(
               0,
               Math.trunc(speechSegment.startOffset)

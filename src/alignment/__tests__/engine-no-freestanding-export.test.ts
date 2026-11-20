@@ -31,6 +31,7 @@ describe('alignment public exports', () => {
   it('exports only runtime alignment APIs expected in P1', () => {
     expect(Object.keys(alignment).sort()).toEqual([
       'AlignmentErrorCode',
+      'OrchestrationErrorCode',
       'accurateOptionsToModelConfig',
       'applyVocabRomanizerToProfile',
       'assertAlignmentCustomConfig',
@@ -40,6 +41,7 @@ describe('alignment public exports', () => {
       'hasAlignableAlignmentLetters',
       'identityRomanizer',
       'inferRomanizerFromVocabTokens',
+      'isOrchestrationCancelledError',
       'latinDiacriticRomanizer',
       'prepareAlignmentTranscript',
       'resolveAlignmentCustomConfigPaths',

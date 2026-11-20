@@ -276,6 +276,26 @@ const { matchCount, mismatchCount, matches } = await sid.verifyOfflineSegments(
 );
 ```
 
+### Cancel (segment-buffer calls)
+
+`enrollOfflineSegments`, `labelOfflineSegments` and `verifyOfflineSegments` take an `AbortSignal` as `signal`. It is checked before the call starts and before each native step: each span for label and verify, each speaker for enroll. A step that is already running in native code finishes first. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`). No callback follows the rejection. If the signal aborts while the last step runs, the call still resolves.
+
+| Call | State after abort |
+| --- | --- |
+| `enrollOfflineSegments` | Speakers this call already enrolled are removed again; the gallery is as before the call. |
+| `labelOfflineSegments` | The staging buffer is released; `segmentsOut` stays empty. |
+| `verifyOfflineSegments` | Nothing to release; no result. |
+
+Without callbacks, `labelOfflineSegments` labels all spans in one native pass. A call with a `signal` runs span by span instead, so it can stop between spans.
+
+```ts
+const controller = new AbortController();
+const run = sid.labelOfflineSegments(audio, vadSegs, labeledOut, {
+  signal: controller.signal,
+});
+// elsewhere: controller.abort();
+```
+
 ### `sid.removeSpeaker(name)` / `sid.listSpeakers()` / `sid.contains(name)` / `sid.numSpeakers()`
 
 Named-speaker manager helpers.
@@ -405,7 +425,7 @@ Live overload uses `onLabeled` only (no offline `onProgress`) — see [speaker-i
 | `LabelOfflineSegmentsResult` | `{ labeledCount: number; unknownCount: number }` |
 | `VerifyOfflineSegmentsResult` | `{ matchCount: number; mismatchCount: number; matches: boolean[] }` |
 | `SpeakerIdentificationThresholdOptions` | `{ threshold?: number }` (default `0.5`) |
-| `SpeakerIdentificationSegmentOptions` | Threshold + optional `onProgress` |
+| `SpeakerIdentificationSegmentOptions` | Threshold + optional `onProgress`, `signal` |
 | `SpeakerIdentificationLabelOptions` | Segment options + optional `onLabeled` |
 | `SpeakerIdentificationVerifyOptions` | Segment options + optional `onVerified` |
 | `SidLabeledSegmentEvent` | Per-span offline label result (`segmentIndex`, `totalSegments`, ranges, `speakerName`) |
@@ -415,6 +435,7 @@ Live overload uses `onLabeled` only (no offline `onProgress`) — see [speaker-i
 | `ImportEnrollmentsOptions` | `{ replaceExisting?: boolean }` |
 | `ImportEnrollmentsResult` | `{ imported: number; skipped: number }` |
 | `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 | `SpeakerEmbeddingErrorCode` | Error code object from the native speaker-embedding layer |
 
 Live-only types (`SpeakerIdentificationLiveLabelOptions`, `SidLiveLabeledSegmentEvent`, `SpeakerIdentificationPipelineHandle`): [speaker-identification-live.md](speaker-identification-live.md#types).
@@ -441,6 +462,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `SPEAKER_EMBEDDING_BUFFER_EMPTY` | Offline audio buffer (or extracted range) has no samples. |
 | `SPEAKER_EMBEDDING_INVALID_ARGUMENT` | Invalid `customConfig` / init arguments on the JS custom-path resolver. |
 | `SID_INVALID_OPTIONS` | `onProgress` / `onLabeled` / `onVerified` provided but not a function. |
+| `ORCHESTRATION_CANCELLED` | `signal` aborted; `name` is `'AbortError'`. |
 | `SID_ENROLL_INVALID_RESULT` | Export listed a speaker but native `GetEmbedding` returned no usable vector. |
 | `SID_ENROLLMENT_BUNDLE_INVALID` | Malformed `SpeakerEnrollmentBundle` (version, speakers, embeddings). |
 | `SID_ENROLLMENT_DIM_MISMATCH` | Bundle `dim` ≠ current manager dim. |

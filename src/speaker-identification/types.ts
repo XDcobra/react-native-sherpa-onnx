@@ -42,6 +42,17 @@ export type SpeakerIdentificationSegmentOptions =
   SpeakerIdentificationThresholdOptions & {
     /** Coarse start-of-step progress for multi-span enroll/label/verify loops. */
     onProgress?: (progress: OrchestrationProgress) => void;
+    /**
+     * Stops the call. Checked before the call and before each native step
+     * (each span for label/verify, each speaker for enroll); a step that is
+     * already running finishes first. On abort the promise rejects with
+     * `code: 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`):
+     * `labelOfflineSegments` releases its staging buffer and `segmentsOut`
+     * stays empty; `enrollOfflineSegments` removes the speakers this call
+     * already enrolled. A `labelOfflineSegments` call with a signal runs span
+     * by span (no single native pass).
+     */
+    signal?: AbortSignal;
   };
 
 /** Fired after a speech span is searched and staged during `labelOfflineSegments`. */
@@ -176,6 +187,7 @@ export interface SpeakerIdentificationEngine {
    * @throws {Error} `SID_INVALID_OPTIONS` — names, spans, or options are invalid.
    * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
    * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native manager add failed.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   enrollOfflineSegments(
     nameOrNames: string | string[],
@@ -215,6 +227,7 @@ export interface SpeakerIdentificationEngine {
    * @throws {Error} `SID_INVALID_OPTIONS` — buffers or label options are invalid.
    * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
    * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native search failed.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   labelOfflineSegments(
     audioIn: OfflineAudioBufferIdSource,
@@ -261,6 +274,7 @@ export interface SpeakerIdentificationEngine {
    * @throws {Error} `SID_INVALID_OPTIONS` — names, spans, or options are invalid.
    * @throws {Error} `SPEAKER_EMBEDDING_COMPUTE_ERROR` — embedding extract failed.
    * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — native verify failed.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   verifyOfflineSegments(
     nameOrNames: string | string[],

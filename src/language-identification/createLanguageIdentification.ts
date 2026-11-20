@@ -2,6 +2,7 @@ import SherpaOnnx, {
   type LanguageIdProcessNativeResult,
 } from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import type {
   LiveAudioBufferIdSource,
   OfflineAudioBufferIdSource,
@@ -143,6 +144,7 @@ export async function createLanguageIdentification(
       );
     }
 
+    throwIfOrchestrationAborted(identifyOptions?.signal);
     const res: LanguageIdProcessNativeResult =
       await SherpaOnnx.identifyLanguageOffline(
         instanceId,

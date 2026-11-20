@@ -1464,4 +1464,177 @@ describe('createSpeakerIdentification', () => {
       expect.objectContaining({ speakers: [] })
     );
   });
+
+  describe('signal', () => {
+    const cancelled = { name: 'AbortError', code: 'ORCHESTRATION_CANCELLED' };
+    const twoSpans = [
+      {
+        id: 'a',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 0,
+        endSample: 1600,
+        sampleRate: 16000,
+        durationMs: 100,
+      },
+      {
+        id: 'b',
+        kind: 'speech',
+        sourceAudioBufferId: AUDIO_ID,
+        startSample: 3200,
+        endSample: 4800,
+        sampleRate: 16000,
+        durationMs: 100,
+      },
+    ];
+
+    function abortedSignal(): AbortSignal {
+      const controller = new AbortController();
+      controller.abort();
+      return controller.signal;
+    }
+
+    async function makeSid() {
+      return createSpeakerIdentification({
+        modelSource: { kind: 'fs', path: '/models/speaker-embedding' },
+      });
+    }
+
+    beforeEach(() => {
+      segs.getOfflineSegmentBufferSegments.mockResolvedValue(twoSpans);
+    });
+
+    it('enrollOfflineSegments rejects before reading spans when already aborted', async () => {
+      const sid = await makeSid();
+      await expect(
+        sid.enrollOfflineSegments(['alice', 'bob'], AUDIO_ID, SEGS_IN, {
+          signal: abortedSignal(),
+        })
+      ).rejects.toMatchObject(cancelled);
+      expect(segs.getOfflineSegmentBufferSegments).not.toHaveBeenCalled();
+      expect(native.enrollSpeakerOffline).not.toHaveBeenCalled();
+    });
+
+    it('enrollOfflineSegments stops between speakers and removes the ones it enrolled', async () => {
+      const sid = await makeSid();
+      const controller = new AbortController();
+      native.enrollSpeakerOffline.mockImplementationOnce(async () => {
+        controller.abort();
+        return { ok: true, embeddings: emb };
+      });
+
+      await expect(
+        sid.enrollOfflineSegments(['alice', 'bob'], AUDIO_ID, SEGS_IN, {
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject(cancelled);
+
+      expect(native.enrollSpeakerOffline).toHaveBeenCalledTimes(1);
+      expect(native.speakerEmbeddingManagerRemove).toHaveBeenCalledTimes(1);
+      expect(native.speakerEmbeddingManagerRemove).toHaveBeenCalledWith(
+        sid.managerId,
+        'alice'
+      );
+    });
+
+    it('enrollOfflineSegments reports no progress after the abort', async () => {
+      const sid = await makeSid();
+      const controller = new AbortController();
+      const onProgress = jest.fn(() => controller.abort());
+
+      await expect(
+        sid.enrollOfflineSegments(['alice', 'bob'], AUDIO_ID, SEGS_IN, {
+          onProgress,
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject(cancelled);
+
+      expect(onProgress).toHaveBeenCalledTimes(1);
+      expect(native.enrollSpeakerOffline).not.toHaveBeenCalled();
+      expect(native.speakerEmbeddingManagerRemove).not.toHaveBeenCalled();
+    });
+
+    it('labelOfflineSegments rejects before the native call when already aborted', async () => {
+      const sid = await makeSid();
+      await expect(
+        sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
+          signal: abortedSignal(),
+        })
+      ).rejects.toMatchObject(cancelled);
+      expect(
+        native.labelSpeakerIdentificationOfflineSegments
+      ).not.toHaveBeenCalled();
+      expect(native.identifySpeakerOffline).not.toHaveBeenCalled();
+      expect(segs.createLiveSegmentBuffer).not.toHaveBeenCalled();
+    });
+
+    it('labelOfflineSegments runs span by span when a signal is passed', async () => {
+      const sid = await makeSid();
+      const result = await sid.labelOfflineSegments(
+        AUDIO_ID,
+        SEGS_IN,
+        SEGS_OUT,
+        { signal: new AbortController().signal }
+      );
+      expect(
+        native.labelSpeakerIdentificationOfflineSegments
+      ).not.toHaveBeenCalled();
+      expect(native.identifySpeakerOffline).toHaveBeenCalledTimes(2);
+      expect(result).toEqual({ labeledCount: 2, unknownCount: 0 });
+    });
+
+    it('labelOfflineSegments stops between spans, releases staging and leaves segmentsOut empty', async () => {
+      const sid = await makeSid();
+      const controller = new AbortController();
+      const onProgress = jest.fn();
+      const onLabeled = jest.fn(() => controller.abort());
+
+      await expect(
+        sid.labelOfflineSegments(AUDIO_ID, SEGS_IN, SEGS_OUT, {
+          onProgress,
+          onLabeled,
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject(cancelled);
+
+      expect(native.identifySpeakerOffline).toHaveBeenCalledTimes(1);
+      expect(onProgress).toHaveBeenCalledTimes(1);
+      expect(onLabeled).toHaveBeenCalledTimes(1);
+      expect(segs.finalizeLiveSegmentBuffer).not.toHaveBeenCalled();
+      expect(segs.populateOfflineSegmentBufferIfEmpty).not.toHaveBeenCalled();
+      expect(segs.releasePipelineSegmentBuffer).toHaveBeenCalledWith(
+        STAGING_LIVE
+      );
+    });
+
+    it('verifyOfflineSegments rejects before reading spans when already aborted', async () => {
+      const sid = await makeSid();
+      await expect(
+        sid.verifyOfflineSegments('alice', AUDIO_ID, SEGS_IN, {
+          signal: abortedSignal(),
+        })
+      ).rejects.toMatchObject(cancelled);
+      expect(segs.getOfflineSegmentBufferSegments).not.toHaveBeenCalled();
+      expect(native.verifySpeakerOffline).not.toHaveBeenCalled();
+    });
+
+    it('verifyOfflineSegments stops between spans with no callback after the abort', async () => {
+      const sid = await makeSid();
+      const controller = new AbortController();
+      const onProgress = jest.fn();
+      const onVerified = jest.fn(() => controller.abort());
+
+      await expect(
+        sid.verifyOfflineSegments('alice', AUDIO_ID, SEGS_IN, {
+          onProgress,
+          onVerified,
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject(cancelled);
+
+      expect(native.verifySpeakerOffline).toHaveBeenCalledTimes(1);
+      expect(onProgress).toHaveBeenCalledTimes(1);
+      expect(onVerified).toHaveBeenCalledTimes(1);
+    });
+  });
 });

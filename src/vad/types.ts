@@ -134,6 +134,16 @@ export type VADOfflineRunOptions = {
    * single-pass behaviour. Payload matches `OrchestrationProgress` in `pipeline/offlineOrchestrator.ts`.
    */
   onProgress?: (progress: OrchestrationProgress) => void;
+  /**
+   * Stops the offline call. Checked before the call and before each segment
+   * (`segmentation.mode: 'auto'`); a segment that is already running finishes
+   * first. With `mode: 'off'` only an abort before the start has an effect.
+   * On abort the promise rejects with `code: 'ORCHESTRATION_CANCELLED'`
+   * (`name: 'AbortError'`) and the SDK releases its slice and staging
+   * buffers. An offline `segmentOut` stays empty; a live `segmentOut` keeps
+   * the segments appended before the abort.
+   */
+  signal?: AbortSignal;
 };
 
 export type VADRunOptions = VADLiveRunOptions | VADOfflineRunOptions;
@@ -190,6 +200,7 @@ export interface VADEngine {
    * @throws {Error} `VAD_BUFFER_NOT_FOUND` — audio or segment buffer is unknown.
    * @throws {Error} `VAD_BUFFER_KIND_MISMATCH` — buffer is not the required kind.
    * @throws {Error} `VAD_INTERNAL_ERROR` — native VAD failed.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — offline `options.signal` aborted.
    */
   process(
     input: VADLiveProcessInput | VADOfflineProcessInput

@@ -53,3 +53,9 @@ export type {
   AudioTaggingTagOptions,
   SegmentedAudioTaggingResult,
 } from './types';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';
+export type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';

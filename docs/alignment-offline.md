@@ -345,6 +345,23 @@ const write = await engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
 console.log(write.segmentsWritten);
 ```
 
+**Cancel.** Pass an `AbortSignal` as `signal` (all modes). It is checked before the call starts. For `accurate` with `segmentation.mode: 'auto'` it is also checked before each anchor and before each retry of an anchor; an anchor that is already running in native code finishes first. The other modes run one native pass, so only an abort before it starts has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and the link map it created, and `segmentOut` stays empty. No `onProgress` call follows the rejection. If the signal aborts while the last anchor runs, the call still resolves.
+
+```ts
+const controller = new AbortController();
+const run = engine.alignTextToAudio(textBuf, audioBuf, segmentOut, {
+  mode: 'accurate',
+  modelSource: { kind: 'fs', path: '/abs/path/to/model.onnx' },
+  segmentation: {
+    mode: 'auto',
+    anchorSegmentBuffer: vadSegmentOut,
+    mappingStrategy: 'chunked_forced_ctc',
+  },
+  signal: controller.signal,
+});
+// elsewhere: controller.abort();
+```
+
 ### `engine.destroy()`
 
 Marks the engine as destroyed. Methods throw `ALIGNMENT_ENGINE_DESTROYED` after this call.
@@ -493,7 +510,9 @@ Caveats:
 | `AlignmentDetectResult` | Return of `detectAlignmentModel()` |
 | `AlignmentEngine` | `alignTextToAudio`, `destroy` |
 | `AlignmentProgressCallbacks` | `{ onProgress?: (progress: OrchestrationProgress) => void }` |
+| `AlignmentCancelOptions` | `{ signal?: AbortSignal }` (part of every `AlignTextToAudioOptions` variant) |
 | `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 
 ### Related buffer types
 
@@ -525,6 +544,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [textbuffer-offline.md](
 | `ALIGNMENT_LINKER_NO_MAPPING` | `asrMediated` linker produced no usable mapping units |
 | `ALIGNMENT_FORCED_CTC_STUCK` | `chunkedForcedCtc` had no progress on three consecutive anchors |
 | `ALIGNMENT_NATIVE_UNKNOWN` | native bridge returned unknown error shape |
+| `ORCHESTRATION_CANCELLED` | `signal` aborted; `name` is `'AbortError'` |
 | `OFFLINE_OOM` | Not enough memory for offline alignment; native message suggests smaller chunks / streaming-friendly pipelines and points to [segmentation-engine.md](./segmentation-engine.md). |
 
 ## Use case examples
