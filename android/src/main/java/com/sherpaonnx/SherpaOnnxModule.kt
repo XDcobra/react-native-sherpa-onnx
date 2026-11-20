@@ -4673,11 +4673,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     decodeExecutor.execute {
       val cancelFlagAddr = nativeAllocateCancelFlag()
       val cancelChecker = startNativeCancelBridge(cancelFlag, cancelFlagAddr, operationId)
+      // Deleted in finally unless an mmap buffer took it over (also on exceptions/cancel).
+      var pendingTmp: java.io.File? = null
       try {
         com.sherpaonnx.video.VideoBufferService.ensureInitialized(reactApplicationContext)
         val dir = com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.cacheDir
           ?: reactApplicationContext.cacheDir
         val tmpF32 = java.io.File(dir, "vid_aud_${java.util.UUID.randomUUID()}.f32")
+        pendingTmp = tmpF32
         val progressCallback = object {
           @Suppress("unused")
           fun onProgress(percent: Int, decodedMs: Long) {
@@ -4713,7 +4716,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val entry = if (rawSize >= threshold) {
           com.sherpaonnx.audio.pipeline.PipelineAudioRegistry.createOfflineFromMmapFile(
             tmpF32.absolutePath, numSamples, sampleRate, 1
-          )
+          ).also { pendingTmp = null }
         } else {
           val samples = FloatArray(numSamples)
           java.io.RandomAccessFile(tmpF32, "r").use { raf ->
@@ -4738,6 +4741,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
         val code = if (msg.startsWith("VIDEO_")) msg.substringBefore(":").trim() else "VIDEO_INTERNAL"
         promise.reject(code, msg, e)
       } finally {
+        pendingTmp?.delete()
         stopNativeCancelBridge(cancelChecker, operationId)
         nativeFreeCancelFlag(cancelFlagAddr)
         decodeCancelFlags.remove(operationId)
