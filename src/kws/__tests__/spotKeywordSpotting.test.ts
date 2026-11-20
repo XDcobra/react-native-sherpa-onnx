@@ -30,6 +30,7 @@ jest.mock('../../textbuffer', () => ({
     typeof v === 'string' ? v : v.bufferId
   ),
   subscribeLiveTextBufferEvents: jest.fn(),
+  readLiveTextSegment: jest.fn(),
 }));
 
 jest.mock('../../audiobuffer/streamingPipelineCompletion', () => {
@@ -44,7 +45,10 @@ jest.mock('../../audiobuffer/streamingPipelineCompletion', () => {
 
 import SherpaOnnx from '../../NativeSherpaOnnx';
 import { resolveFileSourceForModelInit } from '../../detect/resolveModelInput';
-import { subscribeLiveTextBufferEvents } from '../../textbuffer';
+import {
+  readLiveTextSegment,
+  subscribeLiveTextBufferEvents,
+} from '../../textbuffer';
 import { createKeywordSpotting } from '../createKeywordSpotting';
 import { detectKwsModel } from '../detectKwsModel';
 
@@ -59,6 +63,7 @@ describe('KeywordSpottingEngine.spot', () => {
   const resolveModel = resolveFileSourceForModelInit as jest.Mock;
   const detect = detectKwsModel as jest.Mock;
   const subscribe = subscribeLiveTextBufferEvents as jest.Mock;
+  const readSegment = readLiveTextSegment as jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -149,20 +154,27 @@ describe('KeywordSpottingEngine.spot', () => {
       expect.objectContaining({ onSegment: expect.any(Function) })
     );
 
-    onSegment?.({
-      bufferId: 'live_text',
-      totalSegments: 1,
-      segment: {
-        domain: 'text',
-        text: 'hi',
-        reason: 'endpoint',
-        segmentIndex: 0,
-        tokens: ['h', 'i'],
-        timestamps: [0.1, 0.2],
-        meta: { source: 'kws_stream', keyword: 'hi', startTime: 0.05 },
-      },
+    // The event only announces the segment; its content is read afterwards.
+    readSegment.mockResolvedValue({
+      domain: 'text',
+      text: 'hi',
+      tokens: ['h', 'i'],
+      timestamps: [0.1, 0.2],
+      meta: { source: 'kws_stream', keyword: 'hi', startTime: 0.05 },
     });
+    onSegment?.({
+      liveBufferId: 'live_text',
+      segmentIndex: 0,
+      totalSegments: 1,
+      utf16Length: 2,
+      source: 'kws_stream',
+    });
+    await new Promise((r) => setImmediate(r));
 
+    expect(readSegment).toHaveBeenCalledWith(
+      expect.objectContaining({ segmentIndex: 0 }),
+      expect.objectContaining({ includeTokens: true, includeMeta: true })
+    );
     expect(onKeyword).toHaveBeenCalledWith({
       keyword: 'hi',
       tokens: ['h', 'i'],
@@ -182,18 +194,21 @@ describe('KeywordSpottingEngine.spot', () => {
     const engine = await createEngine();
     await engine.spot('live_audio', 'live_text', { onKeyword });
 
-    onSegment?.({
-      bufferId: 'live_text',
-      totalSegments: 1,
-      segment: {
-        domain: 'text',
-        text: 'hello from stt',
-        reason: 'endpoint',
-        segmentIndex: 0,
-        meta: { source: 'stt_stream' },
-      },
+    readSegment.mockResolvedValue({
+      domain: 'text',
+      text: 'hello from stt',
+      meta: { source: 'stt_stream' },
     });
+    onSegment?.({
+      liveBufferId: 'live_text',
+      segmentIndex: 0,
+      totalSegments: 1,
+      utf16Length: 14,
+      source: 'stt_stream',
+    });
+    await new Promise((r) => setImmediate(r));
 
+    expect(readSegment).toHaveBeenCalledTimes(1);
     expect(onKeyword).not.toHaveBeenCalled();
   });
 
