@@ -3104,7 +3104,14 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
             val wantFrames = minOf(chunkFrames.toLong(), span.endFrame - at).toInt()
             val wantSamples = wantFrames * channelCount
             val samplesRead = reader.readSamples(scratch, 0, wantSamples)
-            if (samplesRead <= 0) break
+            if (samplesRead <= 0) {
+              // Offline buffers are immutable and spans are clamped to their length, so a
+              // short read means the buffer was released during the save. Fail instead of
+              // resolving with a truncated file.
+              throw IllegalArgumentException(
+                "Offline buffer not found: ${entry.bufferId} was released during the save"
+              )
+            }
             if ((samplesRead % channelCount) != 0) {
               throw RuntimeException("AUDIO_SAVE_ENCODE_ERROR: Invalid read alignment")
             }
