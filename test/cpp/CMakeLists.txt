@@ -1003,6 +1003,10 @@ target_include_directories(segengine_host_test PRIVATE
 )
 target_compile_definitions(segengine_host_test PRIVATE SHERPA_SEG_ENGINE_STUB_INFERENCE)
 target_link_libraries(segengine_host_test PRIVATE ${SEGMENTBUFFER_GTEST_LIBS} Threads::Threads ZLIB::ZLIB)
+if(APPLE)
+  # AudioRegistry uses vDSP on Apple platforms.
+  target_link_libraries(segengine_host_test PRIVATE "-framework Accelerate")
+endif()
 add_test(NAME segengine_host_test COMMAND $<TARGET_FILE:segengine_host_test>)
 set_tests_properties(segengine_host_test PROPERTIES
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../.."
