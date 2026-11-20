@@ -406,6 +406,8 @@ Automatic checks before/around unpack. Digests come from HF LFS (when listed) or
 | [`probeArchiveIntegrity`](extraction.md#probearchiveintegrityfilepath-options) | path ends with `.tar.bz2` / `.tar.zst` / `.tar.gz` / `.tar.xz` | `skipIntegrityProbe: true` |
 | SHA-256 vs `model.sha256` | digest known | `verifyChecksum: false` |
 
+On a SHA-256 mismatch the model's entry is reloaded from its source once (bypassing the catalog cache). If the source replaced the file and the download matches the new digest, it is accepted; otherwise it is rejected as before.
+
 Related options: `verifyChecksum?`, `skipIntegrityProbe?`, `onChecksumMismatch?`, `deleteArchiveAfterExtract?`, `showExtractionNotifications?` (Android only).
 
 ## Download

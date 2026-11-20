@@ -12,6 +12,7 @@ import {
   unregisterActivePostProcess,
 } from './activeModelOperations';
 import { emitDownloadProgress, emitModelsListUpdated } from './downloadEvents';
+import { refreshModels } from './registry';
 import {
   getExtractionStatePath,
   getManifestPath,
@@ -31,6 +32,27 @@ import {
   validateChecksum,
   validateExtractedFiles,
 } from './validation';
+
+/**
+ * A source can replace a file under the same name (a new upload of a release asset).
+ * A cached catalog then still holds the old digest. Reload the model's entry from its
+ * source once, bypassing the cache, and return the new digest if it changed.
+ */
+async function replacedUpstreamSha256(
+  category: ModelCategory,
+  model: ModelMeta
+): Promise<string | null> {
+  try {
+    const models = await refreshModels(category, {
+      forceRefresh: true,
+      ...(model.sourceId ? { source: model.sourceId } : {}),
+    });
+    const fresh = models.find((m) => m.id === model.id)?.sha256?.toLowerCase();
+    return fresh && fresh !== model.sha256?.toLowerCase() ? fresh : null;
+  } catch {
+    return null;
+  }
+}
 
 function extractionProgressPhase(
   skipEntriesTarget: number,
@@ -329,6 +351,16 @@ async function runPostDownloadProcessingBody(
               ? 'CHECKSUM_MISMATCH'
               : 'CHECKSUM_FAILED',
         };
+      }
+    }
+
+    if (issue?.reason === 'CHECKSUM_MISMATCH') {
+      const fresh = await replacedUpstreamSha256(category, model);
+      if (fresh != null) {
+        const matchesFresh = isArchive
+          ? extractResult?.sha256?.toLowerCase() === fresh
+          : (await validateChecksum(downloadPath, fresh)).success;
+        if (matchesFresh) issue = null;
       }
     }
 
