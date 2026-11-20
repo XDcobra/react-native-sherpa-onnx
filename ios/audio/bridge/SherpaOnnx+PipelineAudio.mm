@@ -2735,30 +2735,11 @@ static std::string pa_encodeViaDecodeFile(
                             reject:(RCTPromiseRejectBlock)reject
 {
   std::string bid = [bufferId UTF8String];
-  std::lock_guard<std::mutex> lock(g_pa_mutex);
-  auto offIt = g_pa_offline.find(bid);
-  if (offIt != g_pa_offline.end()) {
-    // Drop the id, but free the PCM only if the registry held the last reference.
-    // A running encode (saveAudioBufferToFile) or a sample view may still read it; the
-    // last holder frees it (~PaOfflineEntry unmaps / frees). Same rule as pa_release_buffer.
-    std::shared_ptr<PaOfflineEntry> entry = std::move(offIt->second);
-    g_pa_offline.erase(offIt);
-    if (entry.use_count() == 1) entry->release();
-    resolve(nil);
-    return;
-  }
-  auto liveIt = g_pa_live.find(bid);
-  if (liveIt != g_pa_live.end()) {
-    liveIt->second->release();
-    g_pa_live.erase(liveIt);
-    resolve(nil);
-    return;
-  }
-  auto invalidatedIt = g_pa_invalidated_live_ids.find(bid);
-  if (invalidatedIt != g_pa_invalidated_live_ids.end()) {
-    g_pa_invalidated_live_ids.erase(invalidatedIt);
-    resolve(nil);
-    return;
+  // Same rule as Android: the id leaves the registry at once, the storage goes with
+  // the last holder (a running encode, a sample view, an ingest worker).
+  if (!pa_release_buffer(bid)) {
+    std::lock_guard<std::mutex> lock(g_pa_mutex);
+    g_pa_invalidated_live_ids.erase(bid);
   }
   resolve(nil); // idempotent
 }
