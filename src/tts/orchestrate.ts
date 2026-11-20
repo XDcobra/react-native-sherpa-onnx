@@ -76,6 +76,7 @@ export async function runOfflineTtsPipeline(
       overlapChars: options.overlapChars,
       textSkipPlaceholder: options.textSkipPlaceholder,
       linkMap: options.linkMap,
+      signal: options.signal,
       sampleRate,
       channels: 1,
     }

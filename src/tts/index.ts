@@ -62,6 +62,7 @@ import type {
   LiveTextBufferRef,
 } from '../textbuffer/types';
 import { runOfflineTtsPipeline } from './orchestrate';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import {
   createTtsProgressEmitter,
   synthesizeTtsWithProgress,
@@ -515,6 +516,7 @@ export async function createTTS(
       });
 
       if (segmentation.mode === 'off') {
+        throwIfOrchestrationAborted(batchOpts?.signal);
         const emit = createTtsProgressEmitter(
           batchOpts?.onProgress,
           startedAtMs
@@ -782,3 +784,8 @@ export {
   type TtsLexiconLanguage,
   type AlignmentDetectModelResult,
 } from '../types/modelDetect';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';
