@@ -352,11 +352,18 @@ sherpaonnx::TtsWrapper::AudioResult GenerateCollecting(
     return InvokeProgress(bridge, progress);
   };
 
+  // The chunks drive progress; the result is the model's complete audio, which keeps
+  // the pauses between sentences and silence scaling the chunks lack.
+  sherpaonnx::TtsWrapper::AudioResult finalAudio;
+  finalAudio.sampleRate = 0;
   bool ok = false;
   if (cloning.has_value()) {
-    ok = inst->generateStream(text, sid, speed, streamCb, cloning);
+    ok = inst->generateStream(text, sid, speed, streamCb, cloning, &finalAudio);
   } else {
-    ok = inst->generateStream(text, sid, speed, streamCb);
+    ok = inst->generateStream(text, sid, speed, streamCb, &finalAudio);
+  }
+  if (ok && !finalAudio.samples.empty() && finalAudio.sampleRate > 0) {
+    return finalAudio;
   }
   if (!ok || samples.empty()) {
     return result;
