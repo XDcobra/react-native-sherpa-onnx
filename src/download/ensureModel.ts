@@ -14,6 +14,7 @@ import {
 } from './modelExtraction';
 import { getArchivePath } from './paths';
 import { getModelById } from './registry';
+import { getArchiveBytes, repairMissingSupplements } from './supplementFiles';
 import {
   type EnsureModelOptions,
   type ModelCategory,
@@ -22,7 +23,9 @@ import {
 
 /**
  * Ensure a model is ready locally by handling ready state, resume states,
- * archive-only extraction and full download.
+ * archive-only extraction and full download. A model that is already installed but
+ * lacks a supplement file its catalog entry lists (see `ModelMeta.supplements`) gets
+ * just that file downloaded.
  *
  * @throws {DownloadError} `DOWNLOAD_UNKNOWN_SOURCE` — `source` is not registered.
  * @throws {DownloadError} `DOWNLOAD_NETWORK_FAILED` — transport failed before an HTTP status.
@@ -66,6 +69,18 @@ export async function ensureModel(
       source: modelSourceId,
     });
     if (localPath) {
+      // Fetch files the catalog now lists but this download predates (for example an
+      // English lexicon added after the pack was installed).
+      await repairMissingSupplements({
+        category,
+        model,
+        sourceId: modelSourceId,
+        targetDir: localPath,
+        signal: opts?.signal,
+        verifyChecksum: opts?.verifyChecksum,
+        onChecksumMismatch: opts?.onChecksumMismatch,
+        onProgress: opts?.onProgress,
+      });
       return {
         modelId: id,
         localPath,
@@ -125,7 +140,8 @@ export async function ensureModel(
     if (await exists(downloadPath)) {
       try {
         const sourceStat = await stat(downloadPath);
-        if (model.bytes <= 0 || sourceStat.size >= model.bytes) {
+        const archiveBytes = getArchiveBytes(model);
+        if (archiveBytes <= 0 || sourceStat.size >= archiveBytes) {
           return extractModel(category, id, {
             source: modelSourceId,
             onProgress: opts?.onProgress,

@@ -39,6 +39,7 @@ import {
   getTempModelDir,
 } from './paths';
 import { runPostDownloadProcessing } from './postDownloadProcessing';
+import { getArchiveBytes, getSupplementBytes } from './supplementFiles';
 import { getModelById } from './registry';
 import {
   assertSupportedLayout,
@@ -245,7 +246,12 @@ function trackDownloadTask({
           return;
         }
 
-        const total = bytesTotal ?? model.bytes ?? 0;
+        // Supplements download after the archive, so the total counts them too.
+        const archiveTotal = bytesTotal ?? getArchiveBytes(model);
+        const total =
+          archiveTotal > 0
+            ? archiveTotal + getSupplementBytes(model)
+            : archiveTotal;
         const percent = total > 0 ? (bytesDownloaded / total) * 100 : 0;
         const progress = {
           bytesProcessed: bytesDownloaded,
@@ -701,6 +707,7 @@ async function downloadModelOnce(
         statePath,
         signal: opts?.signal,
         verifyChecksum: false,
+        verifySupplementChecksum: opts?.verifyChecksum,
         onChecksumMismatch: opts?.onChecksumMismatch,
         deleteArchiveAfterExtract: opts?.deleteArchiveAfterExtract,
         onProgress: opts?.onProgress,
@@ -981,6 +988,10 @@ export async function deleteIncompleteDownload(
     for (let index = 0; index < model.assets.length; index += 1) {
       await cancelForegroundDownload(`${taskId}:${index}`);
     }
+  }
+  for (const supplement of model?.supplements ?? []) {
+    const fileName = supplement.relativePath.split('/').pop();
+    await cancelForegroundDownload(`${taskId}:supplement:${fileName}`);
   }
 
   activeDownloadTasks.delete(taskId);
