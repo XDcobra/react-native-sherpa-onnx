@@ -135,6 +135,14 @@ export type VADOfflineRunOptions = {
    */
   onProgress?: (progress: OrchestrationProgress) => void;
   /**
+   * Called for each speech segment as soon as it is written, in input order.
+   * Only for **segmented** offline runs (`segmentation.mode: 'auto'`); with
+   * `mode: 'off'` the single native pass writes all segments at once and this
+   * is not called (read `segmentOut` after the call). Errors thrown by the
+   * callback are ignored.
+   */
+  onSegment?: (segment: VADOfflineSegmentEvent) => void;
+  /**
    * Stops the offline call. Checked before the call and before each segment
    * (`segmentation.mode: 'auto'`); a segment that is already running finishes
    * first. With `mode: 'off'` only an abort before the start has an effect.
@@ -144,6 +152,21 @@ export type VADOfflineRunOptions = {
    * the segments appended before the abort.
    */
   signal?: AbortSignal;
+};
+
+/** One speech segment of an offline run, passed to `VADOfflineRunOptions.onSegment`. */
+export type VADOfflineSegmentEvent = {
+  /** 0-based position of the segment among the segments written so far. */
+  segmentIndex: number;
+  /** Segment range in the input audio, in samples. */
+  startSample: number;
+  endSample: number;
+  sampleRate: number;
+  /** Segment range in the input audio, in ms. */
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  confidence?: number;
 };
 
 export type VADRunOptions = VADLiveRunOptions | VADOfflineRunOptions;
@@ -196,7 +219,7 @@ export interface VADEngine {
   /**
    * Run VAD on live or offline audio.
    * @throws {Error} `VAD_INVALID_STATE` — a pipeline is already running.
-   * @throws {Error} `VAD_INVALID_OPTIONS` — `onProgress` is not a function.
+   * @throws {Error} `VAD_INVALID_OPTIONS` — `onProgress` or `onSegment` is not a function.
    * @throws {Error} `VAD_BUFFER_NOT_FOUND` — audio or segment buffer is unknown.
    * @throws {Error} `VAD_BUFFER_KIND_MISMATCH` — buffer is not the required kind.
    * @throws {Error} `VAD_INTERNAL_ERROR` — native VAD failed.

@@ -61,7 +61,8 @@ interface VadProgressSession {
   emitStep(
     currentSegment: number,
     totalSegments: number,
-    currentSegmentDurationMs: number
+    currentSegmentDurationMs: number,
+    range?: { startMs: number; endMs: number }
   ): void;
 }
 
@@ -73,7 +74,8 @@ function createVadProgressSession(
     emitStep(
       currentSegment: number,
       totalSegments: number,
-      currentSegmentDurationMs: number
+      currentSegmentDurationMs: number,
+      range?: { startMs: number; endMs: number }
     ): void {
       if (!onProgress) {
         return;
@@ -86,6 +88,12 @@ function createVadProgressSession(
         fraction,
         currentSegmentDurationMs,
         elapsedMs: Date.now() - startedAtMs,
+        ...(range
+          ? {
+              currentSegmentStartMs: range.startMs,
+              currentSegmentEndMs: range.endMs,
+            }
+          : {}),
       });
     },
   };
@@ -431,6 +439,17 @@ export async function createStreamingVAD(
           { code: 'VAD_INVALID_OPTIONS' }
         );
       }
+      if (
+        offlineOptions.onSegment != null &&
+        typeof offlineOptions.onSegment !== 'function'
+      ) {
+        throw Object.assign(
+          new Error(
+            'VAD_INVALID_OPTIONS: options.onSegment must be a function'
+          ),
+          { code: 'VAD_INVALID_OPTIONS' }
+        );
+      }
 
       const segmentation = validateSegmentationConfig({
         mode: offlineOptions.segmentation?.mode,
@@ -476,6 +495,8 @@ export async function createStreamingVAD(
           offlineOptions.onProgress
         );
         const totalSegments = speechSegments.length;
+        const onSegment = offlineOptions.onSegment;
+        let segmentsWritten = 0;
 
         const aggregated: VADSummary = {
           chunksProcessed: 0,
@@ -534,7 +555,11 @@ export async function createStreamingVAD(
             progressSession.emitStep(
               segmentIndex,
               totalSegments,
-              currentSegmentDurationMs
+              currentSegmentDurationMs,
+              {
+                startMs: (startSample / sampleRate) * 1000,
+                endMs: (endSample / sampleRate) * 1000,
+              }
             );
 
             if (frameCount <= 0) {
@@ -597,11 +622,13 @@ export async function createStreamingVAD(
 
                   const segmentSampleRate =
                     segment.sampleRate > 0 ? segment.sampleRate : sampleRate;
+                  const absStartSample = startSample + segment.startSample;
+                  const absEndSample = startSample + segment.endSample;
                   await appendLiveSegment(mergeTargetId, {
                     kind: 'speech',
                     sourceAudioBufferId: audioInBufferId,
-                    startSample: startSample + segment.startSample,
-                    endSample: startSample + segment.endSample,
+                    startSample: absStartSample,
+                    endSample: absEndSample,
                     sampleRate: segmentSampleRate,
                     durationMs: segment.durationMs,
                     confidence: segment.confidence,
@@ -609,6 +636,27 @@ export async function createStreamingVAD(
                       ? { payload: segment.payload }
                       : {}),
                   });
+                  if (onSegment) {
+                    const startMs = (absStartSample / segmentSampleRate) * 1000;
+                    const endMs = (absEndSample / segmentSampleRate) * 1000;
+                    try {
+                      onSegment({
+                        segmentIndex: segmentsWritten,
+                        startSample: absStartSample,
+                        endSample: absEndSample,
+                        sampleRate: segmentSampleRate,
+                        startMs,
+                        endMs,
+                        durationMs: endMs - startMs,
+                        ...(typeof segment.confidence === 'number'
+                          ? { confidence: segment.confidence }
+                          : {}),
+                      });
+                    } catch {
+                      // Errors thrown by the callback are ignored.
+                    }
+                  }
+                  segmentsWritten += 1;
                 }
               }
             } finally {

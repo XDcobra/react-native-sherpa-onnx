@@ -399,6 +399,65 @@ describe('VAD offline process: segmentation modes, native passes, and onProgress
     });
   });
 
+  it('segmented mode reports each speech segment through onSegment as it is written', async () => {
+    const engine = await createEngine();
+    const onSegment = jest.fn(() => {
+      throw new Error('ignored');
+    });
+    const onProgress = jest.fn();
+
+    await engine.process({
+      audioIn: 'off_audio',
+      segmentOut: 'seg_off_output',
+      options: { segmentation: { mode: 'auto' }, onSegment, onProgress },
+    });
+
+    expect(onSegment).toHaveBeenCalledTimes(2);
+    expect(onSegment.mock.calls[0]).toEqual([
+      {
+        segmentIndex: 0,
+        startSample: 110,
+        endSample: 220,
+        sampleRate: 16000,
+        startMs: 6.875,
+        endMs: 13.75,
+        durationMs: 6.875,
+      },
+    ]);
+    expect(onSegment.mock.calls[1]).toEqual([
+      expect.objectContaining({
+        segmentIndex: 1,
+        startSample: 920,
+        endSample: 1060,
+        startMs: 57.5,
+        endMs: 66.25,
+      }),
+    ]);
+    // The first segment arrives before the second slice runs.
+    expect(onSegment.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
+      mockRunVadOffline.mock.invocationCallOrder[1] ?? 0
+    );
+    expect(onProgress.mock.calls[1]?.[0]).toMatchObject({
+      currentSegmentStartMs: 56.25,
+      currentSegmentEndMs: 93.75,
+    });
+  });
+
+  it('rejects a non-function onSegment', async () => {
+    const engine = await createEngine();
+
+    await expect(
+      engine.process({
+        audioIn: 'off_audio',
+        segmentOut: 'seg_off_output',
+        options: {
+          segmentation: { mode: 'auto' },
+          onSegment: 'nope' as unknown as () => void,
+        },
+      })
+    ).rejects.toMatchObject({ code: 'VAD_INVALID_OPTIONS' });
+  });
+
   it('segmented mode does not emit progress when onProgress is undefined', async () => {
     const engine = await createEngine();
 
