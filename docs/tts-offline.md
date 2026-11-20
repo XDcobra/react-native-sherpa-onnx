@@ -175,7 +175,7 @@ With segmentation on, a failing segment does not reject the call: the result has
 
 ### Cancel
 
-Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code finishes first, so a run stops at segment granularity; with `segmentation.mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and `audioOut` stays empty. If the signal aborts while the last segment runs, the call still resolves.
+Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code stops at the model's next chunk boundary (ZipVoice: a group of up to 20 words; Pocket and most other models: a sentence), with `segmentation.mode: 'off'` too. The model cannot stop inside a chunk, so a long chunk still runs to its end first. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and `audioOut` stays empty. If the signal aborts while the last segment runs, the call still resolves.
 
 ```ts
 const controller = new AbortController();
@@ -559,6 +559,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTS_GENERATE_ERROR` | `synthesize` | Model-level synthesis failed (the message carries the native error text), or voice clone on unsupported model type |
 | `TTS_EMPTY_OUTPUT` | `synthesize` | The model ran without an error but returned no audio for non-empty input. Upstream skips text it cannot speak without saying why, so the message names the usual causes per model (for ZipVoice: words missing from the loaded lexicons, or text too short for the reference audio and speed) |
 | `ORCHESTRATION_CANCELLED` | `synthesize` | `signal` aborted; `name` is `'AbortError'` |
+| `TTS_CANCELLED` | native `synthesizeTts` | The call was stopped through `cancelTtsSynthesis(operationId)`. `synthesize` reports it as `ORCHESTRATION_CANCELLED` |
 | `OFFLINE_OOM` | `synthesize`, `createTTS` (Android) | Not enough memory for offline synthesis (also when the model fails to allocate memory during generation), or to load the model. Prefer streaming TTS for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 
 ## Troubleshooting

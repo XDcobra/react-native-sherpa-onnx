@@ -520,9 +520,11 @@ export type TtsSynthesisOptions = {
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;
   /**
-   * Stops the call. Checked before the call and before each segment and retry; a segment that is already running
-   * finishes first. On abort the promise rejects with `code:
-   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and `audioOut` stays empty.
+   * Stops the call. Checked before the call and before each segment and retry; a
+   * segment that is already running in native code stops at the model's next chunk
+   * (a sentence or a group of words, depending on the model). On abort the promise
+   * rejects with `code: 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and
+   * `audioOut` stays empty.
    */
   signal?: AbortSignal;
   /**

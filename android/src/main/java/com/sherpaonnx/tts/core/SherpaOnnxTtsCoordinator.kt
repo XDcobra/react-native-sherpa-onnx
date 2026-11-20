@@ -79,6 +79,9 @@ internal class SherpaOnnxTtsCoordinator(
   fun synthesizeTts(instanceId: String, textInBufferId: String, audioOutBufferId: String, options: ReadableMap?, promise: Promise) =
     batchGenerationService.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
 
+  fun cancelTtsSynthesis(operationId: String, promise: Promise) =
+    batchGenerationService.cancelTtsSynthesis(operationId, promise)
+
   fun getTtsSampleRate(instanceId: String, promise: Promise) =
     lifecycleService.getTtsSampleRate(instanceId, promise)
 
