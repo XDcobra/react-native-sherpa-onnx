@@ -71,10 +71,10 @@ inline TtsGenerateError TtsErrorForEmptyOutput(TtsModelKind kind) {
     switch (kind) {
         case TtsModelKind::kZipvoice:
             return {kTtsErrorEmptyOutput,
-                    "ZipVoice produced no audio for this text. The text may be too short for "
-                    "the reference audio and speed (ZipVoice skips such text without an error), "
-                    "or have no words in the model's lexicon. Try a longer text, a shorter "
-                    "reference clip or a lower speed."};
+                    "ZipVoice produced no audio for this text. ZipVoice skips every word that "
+                    "is missing from its loaded lexicons without an error, so English text needs "
+                    "an English lexicon (e.g. lexicon-en-us.txt) next to the Chinese one. The "
+                    "text may also be too short for the reference audio and speed."};
         case TtsModelKind::kPocket:
             return {kTtsErrorEmptyOutput,
                     "Pocket TTS produced no audio for this text. Check that the text has words "

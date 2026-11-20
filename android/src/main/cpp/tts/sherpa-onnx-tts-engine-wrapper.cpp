@@ -7,6 +7,7 @@
 
 #include "sherpa-onnx-tts-engine-wrapper.h"
 #include "sherpa-onnx-tts-generate-error.h"
+#include "sherpa-onnx-tts-lexicon.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-model-path-fill.h"
@@ -167,7 +168,8 @@ TtsInitializeResult TtsWrapper::initialize(
             return result;
         }
 
-        std::string lexiconPath = ResolveLexiconPath(
+        std::string lexiconPath = ResolveTtsLexiconPaths(
+            detect.selectedKind,
             detect.lexiconLanguages,
             lexiconLanguageId.value_or(""));
         if (!lexiconPath.empty()) {

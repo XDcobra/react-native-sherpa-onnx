@@ -113,6 +113,7 @@ internal class TtsInitializationService(
       rejectOnUiThread(promise, "TTS_INIT_ERROR", reason ?: "Failed to detect TTS model")
       return
     }
+    val modelTypeStr = result["modelType"] as? String ?: "vits"
     var paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
     val lexiconLanguages = result["lexiconLanguages"] as? ArrayList<*>
     if (!parsed.lexiconLanguageId.isNullOrBlank()) {
@@ -124,10 +125,14 @@ internal class TtsInitializationService(
         return
       }
       paths = paths + ("lexicon" to resolvedLexicon)
+    } else if (modelTypeStr == "zipvoice") {
+      // Bilingual ZipVoice skips words missing from every loaded lexicon: load them all.
+      TtsInitOptionsParser.joinAllLexiconPathsFromDetect(lexiconLanguages)?.let {
+        paths = paths + ("lexicon" to it)
+      }
     } else {
       paths = pathsWithLexiconOverride(paths, lexiconLanguages, null)
     }
-    val modelTypeStr = result["modelType"] as? String ?: "vits"
     val detectedModels = result["detectedModels"] as? ArrayList<*>
 
     finishInitializeWithPaths(

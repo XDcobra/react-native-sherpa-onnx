@@ -1,5 +1,6 @@
 #include "sherpa-onnx-tts-engine-wrapper.h"
 #include "sherpa-onnx-tts-generate-error.h"
+#include "sherpa-onnx-tts-lexicon.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -84,11 +85,31 @@ TEST(TtsGenerateError, EmptyOutputNamesTheZipvoiceCause) {
   const auto zipvoice =
       sherpaonnx::TtsErrorForEmptyOutput(sherpaonnx::TtsModelKind::kZipvoice);
   EXPECT_EQ(zipvoice.code, sherpaonnx::kTtsErrorEmptyOutput);
+  EXPECT_NE(zipvoice.message.find("lexicon"), std::string::npos);
   EXPECT_NE(zipvoice.message.find("too short"), std::string::npos);
   const auto vits =
       sherpaonnx::TtsErrorForEmptyOutput(sherpaonnx::TtsModelKind::kVits);
   EXPECT_EQ(vits.code, sherpaonnx::kTtsErrorEmptyOutput);
   EXPECT_FALSE(vits.message.empty());
+}
+
+TEST(TtsLexicon, ZipvoiceLoadsEveryDetectedLexicon) {
+  const std::vector<sherpaonnx::model_detect::LexiconCandidate> candidates = {
+      {"/m/lexicon.txt", "default"}, {"/m/lexicon-en-us.txt", "en-us"}};
+  EXPECT_EQ(sherpaonnx::ResolveTtsLexiconPaths(
+                sherpaonnx::TtsModelKind::kZipvoice, candidates),
+            "/m/lexicon.txt,/m/lexicon-en-us.txt");
+  // An explicit language still picks one file.
+  EXPECT_EQ(sherpaonnx::ResolveTtsLexiconPaths(
+                sherpaonnx::TtsModelKind::kZipvoice, candidates, "en-us"),
+            "/m/lexicon-en-us.txt");
+  // Single-lexicon models keep choosing the first file.
+  EXPECT_EQ(sherpaonnx::ResolveTtsLexiconPaths(
+                sherpaonnx::TtsModelKind::kVits, candidates),
+            "/m/lexicon.txt");
+  EXPECT_EQ(sherpaonnx::ResolveTtsLexiconPaths(
+                sherpaonnx::TtsModelKind::kZipvoice, {}),
+            "");
 }
 
 TEST(TtsHost, InitCustomRejectsUnknownType) {

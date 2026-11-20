@@ -241,6 +241,10 @@ export type TTSAutoInitOptionsBase = TTSInitOptionsShared & {
    * Supported model types: `vits`, `matcha`, `kokoro`, `kitten`, `zipvoice`. No-op for
    * `pocket` and `supertonic`. Changing this requires a new `createTTS()` (engine re-init).
    *
+   * Default: the first detected lexicon, except `zipvoice`, which loads all of them
+   * (a word missing from every loaded lexicon is skipped, so English text with the
+   * zh-en pack needs `lexicon-en-us.txt` next to `lexicon.txt`).
+   *
    * Auto-detect only sees `lexicon.txt` / `lexicon-*.txt` **inside** `modelSource`
    * (e.g. drop `lexicon-en-us.txt` into the Piper folder). A lexicon outside that
    * directory must be passed as `customConfig.lexicon`.
