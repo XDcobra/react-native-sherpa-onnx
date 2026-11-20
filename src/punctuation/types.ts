@@ -53,6 +53,12 @@ export type OfflinePunctuateOptions = {
   overlapChars?: number;
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;
+  /**
+   * Stops the call. Checked before the call and before each segment and retry; a segment that is already running
+   * finishes first. On abort the promise rejects with `code:
+   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and `textOut` stays empty.
+   */
+  signal?: AbortSignal;
 };
 
 export type OfflinePunctuationModelType = 'ct_transformer' | 'auto';

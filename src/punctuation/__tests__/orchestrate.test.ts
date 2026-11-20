@@ -54,6 +54,20 @@ describe('runOfflinePunctuationPipeline', () => {
     );
   });
 
+  it('passes signal through to the text orchestrator', async () => {
+    const controller = new AbortController();
+    await runOfflinePunctuationPipeline('txt_off_in', 'punc_off_1', {
+      segmentation: { mode: 'auto' },
+      signal: controller.signal,
+    });
+
+    expect(runOfflineTextPipeline).toHaveBeenCalledWith(
+      'txt_off_in',
+      expect.any(Function),
+      expect.objectContaining({ signal: controller.signal })
+    );
+  });
+
   it('passes recovery, overlap and policy overrides through to the text orchestrator', async () => {
     const linkMap = { linkMapId: 'link_map_1' };
     await runOfflinePunctuationPipeline('txt_off_in', 'punc_off_1', {

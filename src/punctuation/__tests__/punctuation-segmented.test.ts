@@ -97,6 +97,26 @@ describe('offline punctuation segmentation', () => {
     expect(runOfflineTextPipeline).not.toHaveBeenCalled();
   });
 
+  it('rejects one-shot punctuation when signal is already aborted', async () => {
+    const punc = await createOfflinePunctuation({
+      modelSource: { kind: 'fs', path: '/models/punctuation-offline' },
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      punc.punctuate(
+        'txt_off_11111111-1111-1111-1111-111111111111',
+        'txt_off_22222222-2222-2222-2222-222222222222',
+        { signal: controller.signal }
+      )
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ORCHESTRATION_CANCELLED',
+    });
+    expect(native.punctuateOfflineTextBuffers).not.toHaveBeenCalled();
+  });
+
   it('runs segmented orchestration and populates caller-owned textOut', async () => {
     (runOfflineTextPipeline as jest.Mock).mockResolvedValue({
       status: 'complete',
