@@ -125,11 +125,17 @@ public:
         const std::optional<VoiceCloneOptions>& cloning
     );
 
+    /**
+     * Streams chunks to \p callback (progress, live playback). When \p finalAudio is set
+     * it receives the model's complete audio, which keeps the pauses between sentences and
+     * silence scaling that the chunks alone do not carry.
+     */
     bool generateStream(
         const std::string& text,
         int32_t sid,
         float speed,
-        const TtsStreamCallback& callback
+        const TtsStreamCallback& callback,
+        AudioResult* finalAudio = nullptr
     );
 
     /** Non-clone streaming with explicit num_steps via GenerationConfig. */
@@ -138,7 +144,8 @@ public:
         int32_t sid,
         float speed,
         const TtsStreamCallback& callback,
-        int32_t numSteps
+        int32_t numSteps,
+        AudioResult* finalAudio = nullptr
     );
 
     /** Pocket: streaming with reference audio. Zipvoice + cloning is not supported (match Android). */
@@ -147,7 +154,8 @@ public:
         int32_t sid,
         float speed,
         const TtsStreamCallback& callback,
-        const std::optional<VoiceCloneOptions>& cloning
+        const std::optional<VoiceCloneOptions>& cloning,
+        AudioResult* finalAudio = nullptr
     );
 
     int32_t getSampleRate() const;

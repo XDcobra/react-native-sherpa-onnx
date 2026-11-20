@@ -236,6 +236,10 @@ static NSString *const kOfflineTtsOomMessage =
                 });
                 return 1;
             };
+            // The chunks drive progress; the result is the model's complete audio, which
+            // keeps the pauses between sentences and silence scaling the chunks lack.
+            sherpaonnx::TtsWrapper::AudioResult finalAudio;
+            finalAudio.sampleRate = 0;
             bool ok = false;
             if (cloneOpt.has_value()) {
                 ok = wrapper->generateStream(
@@ -243,20 +247,26 @@ static NSString *const kOfflineTtsOomMessage =
                     static_cast<int32_t>(sid),
                     static_cast<float>(speed),
                     streamCb,
-                    cloneOpt);
+                    cloneOpt,
+                    &finalAudio);
             } else {
                 ok = wrapper->generateStream(
                     text,
                     static_cast<int32_t>(sid),
                     static_cast<float>(speed),
-                    streamCb);
+                    streamCb,
+                    &finalAudio);
             }
-            if (!ok || collected.empty()) {
-                reject(@"TTS_GENERATE_ERROR", @"TTS generated empty audio", nil);
-                return;
+            if (ok && !finalAudio.samples.empty() && finalAudio.sampleRate > 0) {
+                result = std::move(finalAudio);
+            } else {
+                if (!ok || collected.empty()) {
+                    reject(@"TTS_GENERATE_ERROR", @"TTS generated empty audio", nil);
+                    return;
+                }
+                result.samples = std::move(collected);
+                result.sampleRate = wrapper->getSampleRate();
             }
-            result.samples = std::move(collected);
-            result.sampleRate = wrapper->getSampleRate();
         } else {
             result = wrapper->generate(
                 text,

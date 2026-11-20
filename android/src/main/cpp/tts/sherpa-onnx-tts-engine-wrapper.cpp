@@ -660,11 +660,22 @@ TtsWrapper::AudioResult TtsWrapper::generate(
     }
 }
 
+namespace {
+/** Hands the model's complete audio to a caller that asked for it. */
+template <typename Generated>
+void KeepFinalAudio(Generated& generated, TtsWrapper::AudioResult* finalAudio) {
+    if (finalAudio == nullptr) return;
+    finalAudio->samples = std::move(generated.samples);
+    finalAudio->sampleRate = generated.sample_rate;
+}
+}  // namespace
+
 bool TtsWrapper::generateStream(
     const std::string& text,
     int32_t sid,
     float speed,
-    const TtsStreamCallback& callback
+    const TtsStreamCallback& callback,
+    AudioResult* finalAudio
 ) {
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
@@ -687,13 +698,14 @@ bool TtsWrapper::generateStream(
             return (*cb)(samples, numSamples, progress);
         };
 
-        pImpl->tts.value().Generate(
+        auto generated = pImpl->tts.value().Generate(
             text,
             sid,
             speed,
             callbackCopy ? shim : nullptr,
             callbackCopy ? &callbackCopy : nullptr
         );
+        KeepFinalAudio(generated, finalAudio);
 
         return true;
     } catch (const std::exception& e) {
@@ -710,7 +722,8 @@ bool TtsWrapper::generateStream(
     int32_t sid,
     float speed,
     const TtsStreamCallback& callback,
-    int32_t numSteps
+    int32_t numSteps,
+    AudioResult* finalAudio
 ) {
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
@@ -738,12 +751,13 @@ bool TtsWrapper::generateStream(
         gc.sid = sid;
         gc.num_steps = numSteps;
 
-        pImpl->tts.value().Generate(
+        auto generated = pImpl->tts.value().Generate(
             text,
             gc,
             callbackCopy ? shim : nullptr,
             callbackCopy ? &callbackCopy : nullptr
         );
+        KeepFinalAudio(generated, finalAudio);
 
         return true;
     } catch (const std::exception& e) {
@@ -760,7 +774,8 @@ bool TtsWrapper::generateStream(
     int32_t sid,
     float speed,
     const TtsStreamCallback& callback,
-    const std::optional<VoiceCloneOptions>& cloning
+    const std::optional<VoiceCloneOptions>& cloning,
+    AudioResult* finalAudio
 ) {
     if (cloning.has_value() &&
         !VoiceCloneHasReferencePcm(*cloning) &&
@@ -790,12 +805,13 @@ bool TtsWrapper::generateStream(
                 gc.extra = cloning->extra;
             }
             ApplyPhonemesToGc(gc, *cloning);
-            pImpl->tts.value().Generate(
+            auto generated = pImpl->tts.value().Generate(
                 text,
                 gc,
                 callbackCopy ? shim : nullptr,
                 callbackCopy ? &callbackCopy : nullptr
             );
+            KeepFinalAudio(generated, finalAudio);
             return true;
         } catch (const std::exception& e) {
             LOGE("TTS: Exception during streaming generation (extra/phonemes): %s", e.what());
@@ -807,7 +823,7 @@ bool TtsWrapper::generateStream(
     }
 
     if (!cloning.has_value() || !VoiceCloneHasReferencePcm(*cloning)) {
-        return generateStream(text, sid, speed, callback);
+        return generateStream(text, sid, speed, callback, finalAudio);
     }
 
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
@@ -838,12 +854,13 @@ bool TtsWrapper::generateStream(
         gc.extra = cloning->extra;
         ApplyPhonemesToGc(gc, *cloning);
 
-        pImpl->tts.value().Generate(
+        auto generated = pImpl->tts.value().Generate(
             text,
             gc,
             callbackCopy ? shim : nullptr,
             callbackCopy ? &callbackCopy : nullptr
         );
+        KeepFinalAudio(generated, finalAudio);
 
         return true;
     } catch (const std::exception& e) {
