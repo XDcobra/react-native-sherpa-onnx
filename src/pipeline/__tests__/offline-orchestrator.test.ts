@@ -955,6 +955,54 @@ describe('offline orchestrator', () => {
     );
   });
 
+  it('text->audio keeps the native error code of a failed or skipped segment', async () => {
+    const seg = (i: number, body: string, start: number) => ({
+      segmentId: `txt_seg_${i}`,
+      domain: 'text',
+      startOffset: start,
+      endOffset: start + body.length,
+      reason: 'manual_commit',
+      source: 'external',
+      createdAtMs: 0,
+      segmentIndex: i,
+      text: body,
+      utf16Length: body.length,
+    });
+    segment.getSegments.mockResolvedValue([seg(0, 'hi', 0)]);
+    const nativeError = Object.assign(new Error('no audio for this text'), {
+      code: 'TTS_EMPTY_OUTPUT',
+    });
+    const failing = jest.fn().mockRejectedValue(nativeError);
+
+    const failed = await runOfflineTextToAudioPipeline('txt_in', failing, {
+      segmentation: { mode: 'auto' },
+      sampleRate: 16000,
+      channels: 1,
+    });
+    expect(failed.status).toBe('failed');
+    expect(failed.failedSegment).toEqual(
+      expect.objectContaining({
+        error: 'no audio for this text',
+        code: 'TTS_EMPTY_OUTPUT',
+      })
+    );
+
+    const skipped = await runOfflineTextToAudioPipeline('txt_in', failing, {
+      segmentation: { mode: 'auto' },
+      errorRecovery: 'skip',
+      sampleRate: 16000,
+      channels: 1,
+    });
+    expect(skipped.skippedSegments[0]?.code).toBe('TTS_EMPTY_OUTPUT');
+
+    const plain = await runOfflineTextToAudioPipeline(
+      'txt_in',
+      jest.fn().mockRejectedValue(new Error('plain')),
+      { segmentation: { mode: 'auto' }, sampleRate: 16000, channels: 1 }
+    );
+    expect(plain.failedSegment).not.toHaveProperty('code');
+  });
+
   it('text->audio timeline accumulates sample offsets across segments', async () => {
     const seg = (i: number, start: number, end: number) => ({
       segmentId: `txt_seg_${i}`,

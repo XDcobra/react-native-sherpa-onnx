@@ -103,6 +103,8 @@ static NSString *TtsTrimmedString(NSString *value) {
             g_tts_instances[instanceIdStr] = std::make_shared<TtsInstanceState>();
         }
         TtsInstanceState *inst = g_tts_instances[instanceIdStr].get();
+        // Waits for a running batch synthesis on this instance.
+        std::lock_guard<std::mutex> engineLock(*inst->engineMutex);
         if (inst->wrapper == nullptr) {
             inst->wrapper = std::make_shared<sherpaonnx::TtsWrapper>();
         }
@@ -336,6 +338,8 @@ static NSString *TtsTrimmedString(NSString *value) {
         return;
     }
     TtsInstanceState *inst = it->second.get();
+    // Waits for a running batch synthesis on this instance.
+    std::lock_guard<std::mutex> engineLock(*inst->engineMutex);
 
     NSNumber *nextNoiseScale = nil;
     if (noiseScale == nil) {

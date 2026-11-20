@@ -9,6 +9,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.tts.config.TtsInitOptionsParser
 import com.sherpaonnx.tts.core.TtsEngineInstance
 import com.sherpaonnx.tts.core.TtsEngineRepository
@@ -77,7 +78,16 @@ internal class TtsInitializationService(
         } else {
           initializeTtsAuto(instanceId, parsed, promise)
         }
-      } catch (e: Exception) {
+      } catch (e: OutOfMemoryError) {
+        // Not an Exception: without this branch the init promise never settles.
+        Log.e("SherpaOnnxTts", "[SherpaOnnx:init] tts Create branch=reject OOM", e)
+        rejectOnUiThread(
+          promise,
+          OfflineOomError.CODE,
+          "Not enough memory to load the TTS model. Free memory or use a smaller model.",
+          e
+        )
+      } catch (e: Throwable) {
         Log.e("SherpaOnnxTts", "[SherpaOnnx:init] tts Create branch=reject ${e.message}", e)
         rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to initialize TTS: ${e.message}", e)
       }
@@ -103,6 +113,7 @@ internal class TtsInitializationService(
       rejectOnUiThread(promise, "TTS_INIT_ERROR", reason ?: "Failed to detect TTS model")
       return
     }
+    val modelTypeStr = result["modelType"] as? String ?: "vits"
     var paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
     val lexiconLanguages = result["lexiconLanguages"] as? ArrayList<*>
     if (!parsed.lexiconLanguageId.isNullOrBlank()) {
@@ -114,10 +125,14 @@ internal class TtsInitializationService(
         return
       }
       paths = paths + ("lexicon" to resolvedLexicon)
+    } else if (modelTypeStr == "zipvoice") {
+      // Bilingual ZipVoice skips words missing from every loaded lexicon: load them all.
+      TtsInitOptionsParser.joinAllLexiconPathsFromDetect(lexiconLanguages)?.let {
+        paths = paths + ("lexicon" to it)
+      }
     } else {
       paths = pathsWithLexiconOverride(paths, lexiconLanguages, null)
     }
-    val modelTypeStr = result["modelType"] as? String ?: "vits"
     val detectedModels = result["detectedModels"] as? ArrayList<*>
 
     finishInitializeWithPaths(

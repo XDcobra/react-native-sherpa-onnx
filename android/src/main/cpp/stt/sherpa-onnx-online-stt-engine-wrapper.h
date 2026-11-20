@@ -40,6 +40,11 @@ public:
     OnlineSttWrapper();
     ~OnlineSttWrapper();
 
+    /**
+     * `modelingUnit` ("cjkchar", "bpe", "cjkchar+bpe"; empty = sherpa-onnx default "cjkchar") and
+     * `bpeVocab` set how hotwords are tokenized. A non-empty `bpeVocab` wins over `paths.bpeVocab`
+     * (custom) and over a `bpe.vocab` found in `modelDir` (auto; used only for a BPE unit).
+     */
     OnlineSttInitResult initialize(
         const std::string& modelDir,
         const std::string& modelType,
@@ -63,7 +68,9 @@ public:
         float rule2MinUtteranceLength,
         bool rule3MustContainNonSilence,
         float rule3MinTrailingSilence,
-        float rule3MinUtteranceLength
+        float rule3MinUtteranceLength,
+        const std::string& modelingUnit,
+        const std::string& bpeVocab
     );
 
     OnlineSttInitResult initializeCustom(
@@ -89,7 +96,9 @@ public:
         float rule2MinUtteranceLength,
         bool rule3MustContainNonSilence,
         float rule3MinTrailingSilence,
-        float rule3MinUtteranceLength
+        float rule3MinUtteranceLength,
+        const std::string& modelingUnit,
+        const std::string& bpeVocab
     );
 
     bool createStream(const std::string& streamId, const std::string& hotwords);

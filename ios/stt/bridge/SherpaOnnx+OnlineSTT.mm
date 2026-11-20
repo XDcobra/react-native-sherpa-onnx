@@ -104,6 +104,10 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
     auto rule3MustContainNonSilence = options.rule3MustContainNonSilence();
     auto rule3MinTrailingSilence = options.rule3MinTrailingSilence();
     auto rule3MinUtteranceLength = options.rule3MinUtteranceLength();
+    NSString *modelingUnit = options.modelingUnit();
+    NSString *bpeVocab = options.bpeVocab();
+    std::string modelingUnitStr = modelingUnit != nil ? [modelingUnit UTF8String] : "";
+    std::string bpeVocabStr = bpeVocab != nil ? [bpeVocab UTF8String] : "";
 
     @try {
         std::lock_guard<std::mutex> lock(g_online_stt_mutex);
@@ -147,7 +151,9 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
                 rule2MinUtteranceLength.has_value() ? (float)rule2MinUtteranceLength.value() : 0.f,
                 rule3MustContainNonSilence.has_value() && rule3MustContainNonSilence.value(),
                 rule3MinTrailingSilence.has_value() ? (float)rule3MinTrailingSilence.value() : 0.f,
-                rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f
+                rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f,
+                modelingUnitStr,
+                bpeVocabStr
             );
         } else {
             result = wrapper->initialize(
@@ -173,7 +179,9 @@ static sherpaonnx::OnlineSttWrapper* getOnlineSttInstance(NSString* instanceId) 
                 rule2MinUtteranceLength.has_value() ? (float)rule2MinUtteranceLength.value() : 0.f,
                 rule3MustContainNonSilence.has_value() && rule3MustContainNonSilence.value(),
                 rule3MinTrailingSilence.has_value() ? (float)rule3MinTrailingSilence.value() : 0.f,
-                rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f
+                rule3MinUtteranceLength.has_value() ? (float)rule3MinUtteranceLength.value() : 20.f,
+                modelingUnitStr,
+                bpeVocabStr
             );
         }
 

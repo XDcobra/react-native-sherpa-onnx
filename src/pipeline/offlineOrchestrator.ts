@@ -76,6 +76,8 @@ export interface SkippedSegmentInfo {
   segmentIndex: number;
   segmentId: string;
   error: string;
+  /** Native error code (e.g. `OFFLINE_OOM`) when the error carried one. Text-to-audio runs fill it. */
+  code?: string;
   retryCount: number;
 }
 
@@ -83,6 +85,8 @@ export interface FailedSegmentInfo {
   segmentIndex: number;
   segmentId: string;
   error: string;
+  /** Native error code (e.g. `OFFLINE_OOM`) when the error carried one. Text-to-audio runs fill it. */
+  code?: string;
   retryCount: number;
 }
 
@@ -334,6 +338,12 @@ function formatError(err: unknown): string {
     return err.message;
   }
   return String(err);
+}
+
+/** `{ code }` when `err` carries a string code (native promise rejections do). */
+function errorCodeField(err: unknown): { code?: string } {
+  const code = (err as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' && code.length > 0 ? { code } : {};
 }
 
 function hasSynthesizableText(text: string): boolean {
@@ -1467,6 +1477,7 @@ export async function runOfflineTextToAudioPipeline(
         } catch (err) {
           if (isOrchestrationCancelledError(err)) throw err;
           const error = formatError(err);
+          const code = errorCodeField(err);
           session.markRecovering();
 
           if (strategy === 'retry' && attempts < maxRetries) {
@@ -1494,6 +1505,7 @@ export async function runOfflineTextToAudioPipeline(
               segmentIndex: seg.segmentIndex,
               segmentId: seg.segmentId,
               error,
+              ...code,
               retryCount: attempts,
             });
             completed = true;
@@ -1503,6 +1515,7 @@ export async function runOfflineTextToAudioPipeline(
               segmentIndex: seg.segmentIndex,
               segmentId: seg.segmentId,
               error,
+              ...code,
               retryCount: attempts,
             });
             session.markCompleting();
@@ -1512,6 +1525,7 @@ export async function runOfflineTextToAudioPipeline(
               segmentIndex: seg.segmentIndex,
               segmentId: seg.segmentId,
               error,
+              ...code,
               retryCount: attempts,
             });
             completed = true;
@@ -1607,6 +1621,7 @@ export async function runOfflineTextToAudioPipeline(
         segmentIndex: -1,
         segmentId: `${session.sessionId}_fatal`,
         error: formatError(err),
+        ...errorCodeField(err),
         retryCount: 0,
       },
       processingTimeMs: Date.now() - session.startedAtMs,

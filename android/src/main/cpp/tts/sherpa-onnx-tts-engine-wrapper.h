@@ -92,6 +92,12 @@ public:
     struct AudioResult {
         std::vector<float> samples;  // Audio samples in range [-1.0, 1.0]
         int32_t sampleRate;          // Sample rate in Hz
+        /**
+         * Set when samples is empty: a stable code (see sherpa-onnx-tts-generate-error.h,
+         * e.g. OFFLINE_OOM, TTS_EMPTY_OUTPUT) and a readable message. Empty otherwise.
+         */
+        std::string errorCode;
+        std::string errorMessage;
     };
 
     using TtsStreamCallback = std::function<int32_t(

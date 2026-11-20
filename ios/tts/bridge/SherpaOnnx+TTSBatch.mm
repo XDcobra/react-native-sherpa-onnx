@@ -8,21 +8,105 @@
 #include "engine/TtsEngineStore.h"
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "sherpa-onnx-tts-engine-wrapper.h"
+#include "sherpa-onnx-tts-generate-error.h"
 #include "AudioRegistry.h"
 #include "TextRegistry.h"
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+namespace {
+
+/** Cancel flags of running synthesizeTts calls, keyed by operationId. */
+class TtsSynthesisCancellation {
+public:
+    static TtsSynthesisCancellation &Instance() {
+        static TtsSynthesisCancellation inst;
+        return inst;
+    }
+
+    std::shared_ptr<std::atomic<bool>> Begin(const std::string &operationId) {
+        if (operationId.empty()) return nullptr;
+        auto flag = std::make_shared<std::atomic<bool>>(false);
+        std::lock_guard<std::mutex> lock(mutex_);
+        flags_[operationId] = flag;
+        return flag;
+    }
+
+    void Cancel(const std::string &operationId) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = flags_.find(operationId);
+        if (it != flags_.end() && it->second) it->second->store(true);
+    }
+
+    void End(const std::string &operationId, const std::shared_ptr<std::atomic<bool>> &flag) {
+        if (operationId.empty()) return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = flags_.find(operationId);
+        if (it != flags_.end() && it->second == flag) flags_.erase(it);
+    }
+
+private:
+    std::mutex mutex_;
+    std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> flags_;
+};
+
+std::string TtsOperationIdFromOptions(NSDictionary *options) {
+    id raw = options != nil ? options[@"operationId"] : nil;
+    if (![raw isKindOfClass:[NSString class]]) return "";
+    NSString *trimmed = [(NSString *)raw stringByTrimmingCharactersInSet:
+                         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    return trimmed.length > 0 ? std::string([trimmed UTF8String]) : "";
+}
+
+}  // namespace
 
 @implementation SherpaOnnx (TTSBatch)
 
 static NSString *const kOfflineOomCode = @"OFFLINE_OOM";
+static NSString *const kTtsCancelledCode = @"TTS_CANCELLED";
 static NSString *const kOfflineTtsOomMessage =
     @"Not enough memory for offline text-to-speech. Please use a streaming mode for large inputs. "
     @"Alternatively, use the segmentation engine to process smaller segments with offline models "
     @"(see docs/segmentation-engine.md).";
+
+/** Rejects with the reason the shared wrapper gave for a result without audio. */
+static void RejectTtsGenerateError(RCTPromiseRejectBlock reject,
+                                   const sherpaonnx::TtsWrapper::AudioResult &audio) {
+    if (audio.errorCode == sherpaonnx::kTtsErrorOom) {
+        RCTLogError(@"synthesizeTts native OOM: %s", audio.errorMessage.c_str());
+        reject(kOfflineOomCode, kOfflineTtsOomMessage, nil);
+        return;
+    }
+    NSString *code = audio.errorCode.empty()
+        ? @"TTS_GENERATE_ERROR"
+        : [NSString stringWithUTF8String:audio.errorCode.c_str()];
+    NSString *message = audio.errorMessage.empty()
+        ? nil
+        : [NSString stringWithUTF8String:audio.errorMessage.c_str()];
+    reject(code ?: @"TTS_GENERATE_ERROR", message ?: @"TTS generated empty audio", nil);
+}
+
+/**
+ * Batch synthesis runs here, not on the module's method queue, so other SDK calls
+ * (buffers, unload, player) are not blocked while a model generates. Serial: one
+ * batch synthesis at a time, as before.
+ */
+static dispatch_queue_t TtsSynthesisQueue() {
+    static dispatch_queue_t queue;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(
+            DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0);
+        queue = dispatch_queue_create("com.sherpaonnx.tts.synthesis", attr);
+    });
+    return queue;
+}
 
 - (void)so_synthesizeTts:(NSString *)instanceId
          textInBufferId:(NSString *)textInBufferId
@@ -31,6 +115,52 @@ static NSString *const kOfflineTtsOomMessage =
                  resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject
 {
+    // Registered here, on the module queue, so a later cancelTtsSynthesis call always finds it.
+    std::string operationId = TtsOperationIdFromOptions(options);
+    std::shared_ptr<std::atomic<bool>> cancelFlag =
+        TtsSynthesisCancellation::Instance().Begin(operationId);
+    dispatch_async(TtsSynthesisQueue(), ^{
+        [self so_synthesizeTtsNow:instanceId
+                   textInBufferId:textInBufferId
+                  audioOutBufferId:audioOutBufferId
+                           options:options
+                       cancelFlag:cancelFlag
+                           resolve:resolve
+                            reject:reject];
+        TtsSynthesisCancellation::Instance().End(operationId, cancelFlag);
+    });
+}
+
+/**
+ * Stops the synthesizeTts call started with this operationId: the model stops at its
+ * next chunk (the progress callback returns 0) and that call rejects with TTS_CANCELLED
+ * instead of keeping partial audio. Unknown ids are ignored.
+ */
+- (void)cancelTtsSynthesis:(NSString *)operationId
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
+{
+    NSString *trimmed = [operationId ?: @"" stringByTrimmingCharactersInSet:
+                         [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length > 0) {
+        TtsSynthesisCancellation::Instance().Cancel(std::string([trimmed UTF8String]));
+    }
+    resolve(nil);
+}
+
+- (void)so_synthesizeTtsNow:(NSString *)instanceId
+             textInBufferId:(NSString *)textInBufferId
+            audioOutBufferId:(NSString *)audioOutBufferId
+                     options:(NSDictionary *)options
+                  cancelFlag:(std::shared_ptr<std::atomic<bool>>)cancelFlag
+                     resolve:(RCTPromiseResolveBlock)resolve
+                      reject:(RCTPromiseRejectBlock)reject
+{
+    auto isCancelled = [cancelFlag]() { return cancelFlag != nullptr && cancelFlag->load(); };
+    if (isCancelled()) {
+        reject(kTtsCancelledCode, @"TTS synthesis was cancelled", nil);
+        return;
+    }
     if (instanceId == nil || [instanceId length] == 0) {
         reject(@"TTS_GENERATE_ERROR", @"instanceId is required", nil);
         return;
@@ -48,14 +178,28 @@ static NSString *const kOfflineTtsOomMessage =
     std::string textInIdStr = [textInBufferId UTF8String];
     std::string audioOutIdStr = [audioOutBufferId UTF8String];
 
-    // 1. Resolve TTS engine
-    std::lock_guard<std::mutex> ttsLock(g_tts_mutex);
-    auto ttsIt = g_tts_instances.find(instanceIdStr);
-    if (ttsIt == g_tts_instances.end() || ttsIt->second->wrapper == nullptr || !ttsIt->second->wrapper->isInitialized()) {
+    // 1. Resolve TTS engine. Keep our own references so unload cannot free the
+    // wrapper mid-run, and hold only this instance's engine lock while generating.
+    std::shared_ptr<sherpaonnx::TtsWrapper> wrapperRef;
+    std::shared_ptr<std::mutex> engineMutex;
+    {
+        std::lock_guard<std::mutex> ttsLock(g_tts_mutex);
+        auto ttsIt = g_tts_instances.find(instanceIdStr);
+        if (ttsIt != g_tts_instances.end() && ttsIt->second) {
+            wrapperRef = ttsIt->second->wrapper;
+            engineMutex = ttsIt->second->engineMutex;
+        }
+    }
+    if (wrapperRef == nullptr || engineMutex == nullptr) {
         reject(@"TTS_GENERATE_ERROR", @"TTS not initialized. Call initializeTts() first.", nil);
         return;
     }
-    sherpaonnx::TtsWrapper *wrapper = ttsIt->second->wrapper.get();
+    std::lock_guard<std::mutex> engineLock(*engineMutex);
+    if (!wrapperRef->isInitialized()) {
+        reject(@"TTS_GENERATE_ERROR", @"TTS not initialized. Call initializeTts() first.", nil);
+        return;
+    }
+    sherpaonnx::TtsWrapper *wrapper = wrapperRef.get();
 
     // 2. Resolve input text buffer
     if (textInIdStr.find("txt_off_") != 0) {
@@ -215,7 +359,7 @@ static NSString *const kOfflineTtsOomMessage =
             collected.reserve(16000);
             __weak SherpaOnnx *weakSelf = self;
             NSString *opIdCopy = [operationId copy];
-            auto streamCb = [&collected, weakSelf, opIdCopy](
+            auto streamCb = [&collected, weakSelf, opIdCopy, isCancelled](
                                 const float *chunk, int32_t n, float progress) -> int32_t {
                 if (chunk != nullptr && n > 0) {
                     collected.insert(collected.end(), chunk, chunk + n);
@@ -234,7 +378,8 @@ static NSString *const kOfflineTtsOomMessage =
                                               @"progress": @(clamped),
                                           }];
                 });
-                return 1;
+                // 0 tells the model to stop after this chunk.
+                return isCancelled() ? 0 : 1;
             };
             // The chunks drive progress; the result is the model's complete audio, which
             // keeps the pauses between sentences and silence scaling the chunks lack.
@@ -260,8 +405,12 @@ static NSString *const kOfflineTtsOomMessage =
             if (ok && !finalAudio.samples.empty() && finalAudio.sampleRate > 0) {
                 result = std::move(finalAudio);
             } else {
+                if (isCancelled()) {
+                    reject(kTtsCancelledCode, @"TTS synthesis was cancelled", nil);
+                    return;
+                }
                 if (!ok || collected.empty()) {
-                    reject(@"TTS_GENERATE_ERROR", @"TTS generated empty audio", nil);
+                    RejectTtsGenerateError(reject, finalAudio);
                     return;
                 }
                 result.samples = std::move(collected);
@@ -276,8 +425,13 @@ static NSString *const kOfflineTtsOomMessage =
             );
         }
 
+        // A cancelled run may still return the chunks made before it stopped: drop them.
+        if (isCancelled()) {
+            reject(kTtsCancelledCode, @"TTS synthesis was cancelled", nil);
+            return;
+        }
         if (result.samples.empty() || result.sampleRate == 0) {
-            reject(@"TTS_GENERATE_ERROR", @"TTS generated empty audio", nil);
+            RejectTtsGenerateError(reject, result);
             return;
         }
 

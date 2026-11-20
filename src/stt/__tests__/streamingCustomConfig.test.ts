@@ -22,6 +22,7 @@ jest.mock('../../detect/validateCustomModelPaths', () => {
         { key: 'decoder', required: true, kind: 'file' },
         { key: 'joiner', required: true, kind: 'file' },
         { key: 'tokens', required: true, kind: 'file' },
+        { key: 'bpeVocab', required: false, kind: 'file' },
       ],
     })),
     validateCustomModelPaths: jest.fn(async () => ({ ok: true })),
@@ -42,6 +43,17 @@ describe('streamingCustomConfig', () => {
       joiner: '/join.onnx',
       tokens: '/tokens.txt',
     });
+  });
+
+  it('resolveStreamingSttCustomConfigPaths resolves an optional transducer bpeVocab', async () => {
+    const paths = await resolveStreamingSttCustomConfigPaths('transducer', {
+      encoder: { kind: 'fs', path: '/enc.onnx' },
+      decoder: { kind: 'fs', path: '/dec.onnx' },
+      joiner: { kind: 'fs', path: '/join.onnx' },
+      tokens: { kind: 'fs', path: '/tokens.txt' },
+      bpeVocab: { kind: 'fs', path: '/bpe.vocab' },
+    });
+    expect(paths.bpeVocab).toBe('/bpe.vocab');
   });
 
   it('assertStreamingSttCustomConfig rejects non-FileSource values', () => {

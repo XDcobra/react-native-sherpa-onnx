@@ -129,10 +129,16 @@ public:
         const SttCanaryOptions* canaryOpts = nullptr,
         const SttFunAsrNanoOptions* funasrNanoOpts = nullptr,
         const SttQwen3AsrOptions* qwen3AsrOpts = nullptr,
-        const SttCohereTranscribeOptions* cohereTranscribeOpts = nullptr
+        const SttCohereTranscribeOptions* cohereTranscribeOpts = nullptr,
+        const std::optional<std::string>& modelingUnit = std::nullopt,
+        const std::optional<std::string>& bpeVocab = std::nullopt
     );
 
-    /** Skip auto-detection; use explicit resolved model file paths. */
+    /**
+     * Skip auto-detection; use explicit resolved model file paths.
+     * `modelingUnit` / `bpeVocab` (also on `initialize`) set how hotwords are tokenized; a non-empty
+     * `bpeVocab` wins over `paths.bpeVocab` and over a detected `bpe.vocab`.
+     */
     SttInitializeResult initializeCustom(
         const std::string& modelType,
         const SttModelPaths& paths,
@@ -149,7 +155,9 @@ public:
         const SttCanaryOptions* canaryOpts = nullptr,
         const SttFunAsrNanoOptions* funasrNanoOpts = nullptr,
         const SttQwen3AsrOptions* qwen3AsrOpts = nullptr,
-        const SttCohereTranscribeOptions* cohereTranscribeOpts = nullptr
+        const SttCohereTranscribeOptions* cohereTranscribeOpts = nullptr,
+        const std::optional<std::string>& modelingUnit = std::nullopt,
+        const std::optional<std::string>& bpeVocab = std::nullopt
     );
 
     SttRecognitionResult transcribeFile(const std::string& filePath);

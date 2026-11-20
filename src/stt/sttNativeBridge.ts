@@ -120,7 +120,8 @@ export async function buildStreamingSttInitBridgeOptions(
   options: StreamingSttInitOptions,
   resolvedModelType: string
 ): Promise<OnlineSttInitBridgeOptions> {
-  const shared = appendStreamingInitBridgeFields(options);
+  const bpeVocab = await resolveOptionalFileSourcePath(options.bpeVocab);
+  const shared = appendStreamingInitBridgeFields(options, bpeVocab);
 
   if (options.initMode === 'custom') {
     const modelPaths = await resolveStreamingSttCustomConfigPaths(
@@ -145,7 +146,8 @@ export async function buildStreamingSttInitBridgeOptions(
 }
 
 function appendStreamingInitBridgeFields(
-  options: StreamingSttInitOptions
+  options: StreamingSttInitOptions,
+  bpeVocab: string | undefined
 ): Omit<
   OnlineSttInitBridgeOptions,
   'initMode' | 'modelDir' | 'modelPaths' | 'modelType'
@@ -167,6 +169,10 @@ function appendStreamingInitBridgeFields(
     ...(options.hotwordsScore !== undefined
       ? { hotwordsScore: options.hotwordsScore }
       : {}),
+    ...(options.modelingUnit !== undefined
+      ? { modelingUnit: options.modelingUnit }
+      : {}),
+    ...(bpeVocab !== undefined ? { bpeVocab } : {}),
     ...(options.numThreads !== undefined
       ? { numThreads: options.numThreads }
       : {}),
@@ -210,6 +216,7 @@ function appendStreamingInitBridgeFields(
 
 /**
  * Flatten public streaming init options for `initializeOnlineStt` (endpoint rules → top-level keys).
+ * Synchronous, so `bpeVocab` (a `FileSource`) is not resolved or passed; `modelingUnit` is.
  * @deprecated Prefer {@link buildStreamingSttInitBridgeOptions}.
  */
 export function buildOnlineSttInitBridgeOptions(
@@ -229,6 +236,9 @@ export function buildOnlineSttInitBridgeOptions(
       : {}),
     ...(options.hotwordsScore !== undefined
       ? { hotwordsScore: options.hotwordsScore }
+      : {}),
+    ...(options.modelingUnit !== undefined
+      ? { modelingUnit: options.modelingUnit }
       : {}),
     ...(options.numThreads !== undefined
       ? { numThreads: options.numThreads }

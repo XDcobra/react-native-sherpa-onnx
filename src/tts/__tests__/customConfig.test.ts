@@ -161,4 +161,60 @@ describe('resolveTtsCustomConfigPaths', () => {
       tokens: '/tokens.txt',
     });
   });
+
+  it('joins a zipvoice lexicon array so all lexicons load', async () => {
+    mockGetRequirements.mockResolvedValue({
+      fields: [
+        { key: 'encoder', required: true, kind: 'file' },
+        { key: 'decoder', required: true, kind: 'file' },
+        { key: 'vocoder', required: true, kind: 'file' },
+        { key: 'tokens', required: true, kind: 'file' },
+        { key: 'lexicon', required: false, kind: 'file' },
+      ],
+    });
+    const base = {
+      encoder: fsPath('/enc.onnx'),
+      decoder: fsPath('/dec.onnx'),
+      vocoder: fsPath('/voc.onnx'),
+      tokens: fsPath('/tokens.txt'),
+    };
+    const paths = await resolveTtsCustomConfigPaths('zipvoice', {
+      ...base,
+      lexicon: [fsPath('/zh/lexicon.txt'), fsPath('/en/lexicon-en-us.txt')],
+    });
+    expect(paths.lexicon).toBe('/zh/lexicon.txt,/en/lexicon-en-us.txt');
+    expect(paths.encoder).toBe('/enc.onnx');
+
+    await expect(
+      resolveTtsCustomConfigPaths('zipvoice', {
+        ...base,
+        lexicon: [fsPath('/a,b/lexicon.txt')],
+      })
+    ).rejects.toThrow(TtsErrorCode.INVALID_ARGUMENT);
+    await expect(
+      resolveTtsCustomConfigPaths('zipvoice', { ...base, lexicon: [] })
+    ).rejects.toThrow(TtsErrorCode.INVALID_ARGUMENT);
+  });
+
+  it('rejects a lexicon array on single-lexicon models', async () => {
+    await expect(
+      resolveTtsCustomConfigPaths('vits', {
+        ttsModel: fsPath('/model.onnx'),
+        tokens: fsPath('/tokens.txt'),
+        lexicon: [fsPath('/a.txt'), fsPath('/b.txt')],
+      } as never)
+    ).rejects.toThrow(TtsErrorCode.INVALID_ARGUMENT);
+  });
+
+  it('assertTtsCustomConfig accepts a lexicon array of FileSource', () => {
+    expect(() =>
+      assertTtsCustomConfig({
+        tokens: fsPath('/tokens.txt'),
+        lexicon: [fsPath('/zh.txt'), fsPath('/en.txt')],
+      })
+    ).not.toThrow();
+    expect(() => assertTtsCustomConfig({ lexicon: ['/zh.txt'] })).toThrow(
+      TtsErrorCode.INVALID_ARGUMENT
+    );
+  });
 });

@@ -99,10 +99,12 @@ Pass these in `createSTT()` (or `createStreamingSTT()`):
 
 | Option | Type | Default | Description |
 | --- | --- | --- | --- |
-| `hotwordsFile` | `string` | — | Absolute path to hotwords text file |
+| `hotwordsFile` | `FileSource` (`createSTT`) / `string` (`createStreamingSTT`) | — | Hotwords text file |
 | `hotwordsScore` | `number` | `1.5` | Global boost score (higher = stronger bias) |
-| `modelingUnit` | `string` | — | `'cjkchar'`, `'bpe'`, or `'cjkchar+bpe'` |
-| `bpeVocab` | `string` | — | Path to BPE vocab file (required when `modelingUnit` includes `'bpe'`) |
+| `modelingUnit` | `'cjkchar' \| 'bpe' \| 'cjkchar+bpe'` | from the model when hotwords are set (see below) | How hotword phrases are split into model tokens; see [Modeling Unit & BPE Vocab](#modeling-unit--bpe-vocab) |
+| `bpeVocab` | `FileSource` | — | BPE vocab file; needed when `modelingUnit` includes `'bpe'` unless the model directory has a `bpe.vocab` |
+
+For streaming STT, hotwords only take effect with `decodingMethod: 'modified_beam_search'`.
 
 ---
 
@@ -159,6 +161,8 @@ The native STT layer validates hotword configuration during initialization and r
 | --- | --- |
 | `HOTWORDS_NOT_SUPPORTED` | Model type does not support hotwords (`transducer`/`nemo_transducer` only) |
 | `INVALID_HOTWORDS_FILE` | Hotwords file does not exist, is unreadable, is not a regular file, or contains null bytes |
+| `BPE_VOCAB_REQUIRED` | `modelingUnit` is `'bpe'` / `'cjkchar+bpe'` but no BPE vocab was given or found |
+| `INVALID_MODELING_UNIT` | `modelingUnit` is not `'cjkchar'`, `'bpe'` or `'cjkchar+bpe'` |
 
 ---
 
@@ -194,19 +198,35 @@ For some transducer models, you may need to specify how hotwords are tokenized:
 | `modelingUnit` | Use Case | `bpeVocab` Required? |
 | --- | --- | --- |
 | `'cjkchar'` | Chinese/CJK models | No |
-| `'bpe'` | BPE-tokenized models | Yes — path to `bpe.vocab` |
-| `'cjkchar+bpe'` | Mixed CJK + BPE models | Yes — path to `bpe.vocab` |
-| (omitted) | Default tokenization | No |
+| `'bpe'` | BPE-tokenized models (most English models) | Yes — `bpe.vocab` |
+| `'cjkchar+bpe'` | Mixed CJK + BPE models | Yes — `bpe.vocab` |
+| (omitted) | sherpa-onnx default (`'cjkchar'`) | No |
 
-The `bpeVocab` file is typically distributed with the model (e.g. `bpe.vocab` in the model directory). When `modelingUnit` includes `'bpe'`, you must provide this file, otherwise hotwords may not work correctly.
+When hotwords are set and `modelingUnit` is omitted, the unit follows the model: `'bpe'` when it has a BPE vocab (given or a `bpe.vocab` in the model directory), `'cjkchar+bpe'` when its tokens also contain Chinese characters, and sherpa-onnx's default `'cjkchar'` without a BPE vocab. Set `modelingUnit` only to override that.
+
+The BPE vocabulary is usually shipped with the model as `bpe.vocab`. It is taken from, in this order:
+
+1. the `bpeVocab` option,
+2. `customConfig.bpeVocab` (custom init; transducer / nemo_transducer),
+3. a `bpe.vocab` file in the model directory (auto init).
+
+When `modelingUnit` is `'bpe'` or `'cjkchar+bpe'` and none of these is available, init fails with `BPE_VOCAB_REQUIRED`. An unknown `modelingUnit` fails with `INVALID_MODELING_UNIT`. Both options work the same for `createSTT` and `createStreamingSTT`.
 
 ```typescript
 const stt = await createSTT({
   modelSource: { kind: 'app', base: 'apkAsset', path: 'models/zipformer-bilingual' },
   modelType: 'transducer',
-  hotwordsFile: '/path/to/hotwords.txt',
+  hotwordsFile: { kind: 'fs', path: '/path/to/hotwords.txt' },
   modelingUnit: 'cjkchar+bpe',
-  bpeVocab: '/path/to/bpe.vocab',
+  bpeVocab: { kind: 'fs', path: '/path/to/bpe.vocab' }, // optional when the model dir has bpe.vocab
+});
+
+const streaming = await createStreamingSTT({
+  modelSource: { kind: 'fs', path: '/path/to/streaming-zipformer-en' },
+  modelType: 'transducer',
+  decodingMethod: 'modified_beam_search',
+  hotwordsFile: '/path/to/hotwords.txt',
+  modelingUnit: 'bpe', // bpe.vocab is picked up from the model directory
 });
 ```
 

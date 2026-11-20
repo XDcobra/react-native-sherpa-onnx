@@ -43,7 +43,12 @@ internal class SherpaOnnxTtsCoordinator(
     ttsInitExecutor
   )
 
-  private val batchGenerationService = TtsBatchGenerationService(repository, reactContext)
+  private val ttsSynthesisExecutor = Executors.newSingleThreadExecutor { runnable ->
+    Thread(runnable, "SherpaOnnx-tts-synthesis")
+  }
+
+  private val batchGenerationService =
+    TtsBatchGenerationService(repository, reactContext, ttsSynthesisExecutor)
 
   private val lifecycleService = TtsLifecycleService(
     repository,
@@ -51,7 +56,11 @@ internal class SherpaOnnxTtsCoordinator(
     detectTtsModel
   )
 
-  fun shutdown() = lifecycleService.shutdown()
+  fun shutdown() {
+    // Queued syntheses are dropped; a running one finishes before its engine is released.
+    ttsSynthesisExecutor.shutdownNow()
+    lifecycleService.shutdown()
+  }
 
   fun initializeTts(
     instanceId: String,
@@ -69,6 +78,9 @@ internal class SherpaOnnxTtsCoordinator(
 
   fun synthesizeTts(instanceId: String, textInBufferId: String, audioOutBufferId: String, options: ReadableMap?, promise: Promise) =
     batchGenerationService.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
+
+  fun cancelTtsSynthesis(operationId: String, promise: Promise) =
+    batchGenerationService.cancelTtsSynthesis(operationId, promise)
 
   fun getTtsSampleRate(instanceId: String, promise: Promise) =
     lifecycleService.getTtsSampleRate(instanceId, promise)

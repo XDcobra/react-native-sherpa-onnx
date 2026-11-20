@@ -69,6 +69,20 @@ export interface StreamingSttInitOptionsBase {
   hotwordsFile?: string;
   /** Hotwords score. Default: 1.5. */
   hotwordsScore?: number;
+  /**
+   * How hotword phrases are split into model tokens (transducer / nemo_transducer).
+   * Use `'bpe'` for BPE-token models (most English models) and `'cjkchar+bpe'` for mixed
+   * Chinese + English models. Default (omitted): sherpa-onnx default `'cjkchar'`.
+   * `'bpe'` and `'cjkchar+bpe'` need a BPE vocabulary: `bpeVocab`, `customConfig.bpeVocab`, or a
+   * `bpe.vocab` found in the model directory (auto init); init fails when none is available.
+   * Hotwords only apply with `decodingMethod: 'modified_beam_search'`.
+   */
+  modelingUnit?: 'cjkchar' | 'bpe' | 'cjkchar+bpe';
+  /**
+   * BPE vocabulary (`bpe.vocab`) used with `modelingUnit` `'bpe'` / `'cjkchar+bpe'`.
+   * Wins over `customConfig.bpeVocab` and over a `bpe.vocab` found in the model directory.
+   */
+  bpeVocab?: FileSource;
   /** Number of threads for inference. Default: 1. */
   numThreads?: number;
   /** Execution provider (e.g. "cpu"). */

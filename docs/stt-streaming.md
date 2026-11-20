@@ -149,7 +149,7 @@ const engine = await createStreamingSTT({
 
 | `modelType` | Required files | Custom-init keys |
 | --- | --- | --- |
-| `transducer`, `nemo_transducer` | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt` | `encoder`, `decoder`, `joiner`, `tokens` |
+| `transducer`, `nemo_transducer` | `encoder*.onnx`, `decoder*.onnx`, `joiner*.onnx`, `tokens.txt` (optional `bpe.vocab`) | `encoder`, `decoder`, `joiner`, `tokens`, optional `bpeVocab` |
 | `paraformer` | `encoder*.onnx`, `decoder*.onnx`, `tokens.txt` | `encoder`, `decoder`, `tokens` |
 | `zipformer2_ctc`, `nemo_ctc`, `tone_ctc` | `model*.onnx`, `tokens.txt` | `model`, `tokens` |
 
@@ -362,7 +362,7 @@ const textOut = await createLiveTextBuffer({
 | `OnlineSTTModelType` | `'transducer' \| 'nemo_transducer' \| 'paraformer' \| 'zipformer2_ctc' \| 'nemo_ctc' \| 'tone_ctc'` |
 | `ONLINE_STT_MODEL_TYPES` | Readonly runtime list of online model types |
 | `StreamingSttInitOptions` | Auto or custom init union for `createStreamingSTT` |
-| `StreamingSttInitOptionsBase` | Shared fields: `enableEndpoint?`, `endpointConfig?`, `decodingMethod?`, `maxActivePaths?`, `numThreads?`, `provider?`, `debug?`, … |
+| `StreamingSttInitOptionsBase` | Shared fields: `enableEndpoint?`, `endpointConfig?`, `decodingMethod?`, `maxActivePaths?`, `hotwordsFile?`, `hotwordsScore?`, `modelingUnit?`, `bpeVocab?`, `numThreads?`, `provider?`, `debug?`, … ([hotwords.md](hotwords.md)) |
 | `EndpointConfig` | `{ rule1?, rule2?, rule3? }` — three endpoint rules |
 | `EndpointRule` | `{ mustContainNonSilence, minTrailingSilence, minUtteranceLength }` |
 | `SttPipelineOptions` | `{ chunkSize? }` — samples drained per worker loop |

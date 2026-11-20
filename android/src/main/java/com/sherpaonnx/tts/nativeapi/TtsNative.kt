@@ -124,6 +124,18 @@ internal object TtsNative {
     return samples to rate
   }
 
+  /**
+   * Code and message for a generate result without audio. The code comes from the
+   * shared C++ wrapper (e.g. `OFFLINE_OOM`, `TTS_EMPTY_OUTPUT`); `TTS_GENERATE_ERROR`
+   * when native gave none.
+   */
+  fun generateError(raw: HashMap<String, Any>?): Pair<String, String> {
+    if (raw == null) return "TTS_GENERATE_ERROR" to "native generate returned null"
+    val code = (raw["errorCode"] as? String)?.takeIf { it.isNotBlank() } ?: "TTS_GENERATE_ERROR"
+    val message = (raw["error"] as? String)?.takeIf { it.isNotBlank() } ?: "TTS generated empty audio"
+    return code to message
+  }
+
   fun initError(raw: HashMap<String, Any>?): String? {
     if (raw == null) return "native init returned null"
     val ok = raw["success"] as? Boolean ?: false

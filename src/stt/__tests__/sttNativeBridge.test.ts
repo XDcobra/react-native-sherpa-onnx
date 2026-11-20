@@ -52,6 +52,49 @@ describe('sttNativeBridge', () => {
     });
   });
 
+  it('buildSttInitBridgeOptions maps modelingUnit and resolves bpeVocab to a path', async () => {
+    const bridge = await buildSttInitBridgeOptions({
+      modelSource: { kind: 'fs', path: '/models/zipformer-en' },
+      modelType: 'transducer',
+      hotwordsFile: { kind: 'fs', path: '/data/hotwords.txt' },
+      modelingUnit: 'bpe',
+      bpeVocab: { kind: 'fs', path: '/models/zipformer-en/bpe.vocab' },
+    });
+    expect(bridge).toMatchObject({
+      initMode: 'auto',
+      hotwordsFile: '/data/hotwords.txt',
+      modelingUnit: 'bpe',
+      bpeVocab: '/models/zipformer-en/bpe.vocab',
+    });
+  });
+
+  it('buildSttInitBridgeOptions omits modelingUnit and bpeVocab when not set', async () => {
+    const bridge = await buildSttInitBridgeOptions({
+      modelSource: { kind: 'fs', path: '/models/zipformer-en' },
+      modelType: 'transducer',
+    });
+    expect(bridge).not.toHaveProperty('modelingUnit');
+    expect(bridge).not.toHaveProperty('bpeVocab');
+  });
+
+  it('buildSttInitBridgeOptions passes modelingUnit and bpeVocab for custom init', async () => {
+    const bridge = await buildSttInitBridgeOptions({
+      initMode: 'custom',
+      modelType: 'transducer',
+      customConfig: {
+        encoder: { kind: 'fs', path: '/enc.onnx' },
+        decoder: { kind: 'fs', path: '/dec.onnx' },
+        joiner: { kind: 'fs', path: '/join.onnx' },
+        tokens: { kind: 'fs', path: '/tokens.txt' },
+      },
+      modelingUnit: 'cjkchar+bpe',
+      bpeVocab: { kind: 'fs', path: '/bpe.vocab' },
+    });
+    expect(bridge.initMode).toBe('custom');
+    expect(bridge.modelingUnit).toBe('cjkchar+bpe');
+    expect(bridge.bpeVocab).toBe('/bpe.vocab');
+  });
+
   it('buildSttInitBridgeOptions maps custom STT options to modelPaths', async () => {
     const bridge = await buildSttInitBridgeOptions({
       initMode: 'custom',
@@ -97,6 +140,70 @@ describe('sttNativeBridge', () => {
       tokens: '/tokens.txt',
     });
     expect(bridge.modelType).toBe('transducer');
+  });
+
+  it('buildStreamingSttInitBridgeOptions maps modelingUnit and resolves bpeVocab for auto init', async () => {
+    const bridge = await buildStreamingSttInitBridgeOptions(
+      {
+        modelSource: { kind: 'fs', path: '/models/stream' },
+        modelType: 'transducer',
+        decodingMethod: 'modified_beam_search',
+        hotwordsFile: '/data/hotwords.txt',
+        modelingUnit: 'bpe',
+        bpeVocab: { kind: 'fs', path: '/models/stream/bpe.vocab' },
+      },
+      'transducer'
+    );
+    expect(bridge).toMatchObject({
+      initMode: 'auto',
+      modelType: 'transducer',
+      decodingMethod: 'modified_beam_search',
+      hotwordsFile: '/data/hotwords.txt',
+      modelingUnit: 'bpe',
+      bpeVocab: '/models/stream/bpe.vocab',
+    });
+  });
+
+  it('buildStreamingSttInitBridgeOptions passes modelingUnit and bpeVocab for custom init', async () => {
+    const bridge = await buildStreamingSttInitBridgeOptions(
+      {
+        initMode: 'custom',
+        modelType: 'transducer',
+        customConfig: {
+          encoder: { kind: 'fs', path: '/enc.onnx' },
+          decoder: { kind: 'fs', path: '/dec.onnx' },
+          joiner: { kind: 'fs', path: '/join.onnx' },
+          tokens: { kind: 'fs', path: '/tokens.txt' },
+        },
+        modelingUnit: 'cjkchar+bpe',
+        bpeVocab: { kind: 'fs', path: '/bpe.vocab' },
+      },
+      'transducer'
+    );
+    expect(bridge.initMode).toBe('custom');
+    expect(bridge.modelingUnit).toBe('cjkchar+bpe');
+    expect(bridge.bpeVocab).toBe('/bpe.vocab');
+  });
+
+  it('buildStreamingSttInitBridgeOptions omits modelingUnit and bpeVocab when not set', async () => {
+    const bridge = await buildStreamingSttInitBridgeOptions(
+      {
+        modelSource: { kind: 'fs', path: '/models/stream' },
+        modelType: 'transducer',
+      },
+      'transducer'
+    );
+    expect(bridge).not.toHaveProperty('modelingUnit');
+    expect(bridge).not.toHaveProperty('bpeVocab');
+  });
+
+  it('buildOnlineSttInitBridgeOptions passes modelingUnit', () => {
+    const bridge = buildOnlineSttInitBridgeOptions('/models/stream', {
+      modelSource: { kind: 'fs', path: '/models/stream' },
+      modelType: 'transducer',
+      modelingUnit: 'bpe',
+    });
+    expect(bridge.modelingUnit).toBe('bpe');
   });
 
   it('buildOnlineSttInitBridgeOptions flattens endpoint rules', () => {

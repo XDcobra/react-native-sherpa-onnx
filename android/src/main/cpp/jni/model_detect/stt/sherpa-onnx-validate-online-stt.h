@@ -24,6 +24,8 @@ struct OnlineSttModelPaths {
   std::string tokens;
   /** Single ONNX for zipformer2_ctc / nemo_ctc / tone_ctc streaming models. */
   std::string model;
+  /** BPE vocabulary for hotwords tokenization (sentencepiece export bpe.vocab). Optional. */
+  std::string bpeVocab;
 };
 
 struct OnlineSttValidationResult {

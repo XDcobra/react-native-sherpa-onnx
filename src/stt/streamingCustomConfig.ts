@@ -11,6 +11,7 @@ export type StreamingSttCustomPathKey =
   | 'decoder'
   | 'joiner'
   | 'tokens'
+  | 'bpeVocab'
   | 'model';
 
 export interface StreamingTransducerCustomConfig {
@@ -18,6 +19,8 @@ export interface StreamingTransducerCustomConfig {
   decoder: FileSource;
   joiner: FileSource;
   tokens: FileSource;
+  /** Optional BPE vocabulary for hotwords with `modelingUnit` `'bpe'` / `'cjkchar+bpe'`. */
+  bpeVocab?: FileSource;
 }
 
 export interface StreamingParaformerCustomConfig {

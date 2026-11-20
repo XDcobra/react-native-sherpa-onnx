@@ -55,6 +55,18 @@ internal object TtsInitOptionsParser {
   fun optionalString(options: ReadableMap, key: String): String? =
     if (options.hasKey(key)) options.getString(key)?.trim()?.takeIf { it.isNotEmpty() } else null
 
+  /**
+   * All detected lexicon paths joined with ',' (upstream's multi-lexicon form), in detect
+   * order; null when none. Used for ZipVoice, which loads every lexicon (zh + en).
+   */
+  fun joinAllLexiconPathsFromDetect(lexiconLanguages: ArrayList<*>?): String? {
+    if (lexiconLanguages.isNullOrEmpty()) return null
+    val paths = lexiconLanguages.mapNotNull { item ->
+      ((item as? HashMap<*, *>)?.get("path") as? String)?.takeIf { it.isNotBlank() }
+    }
+    return paths.takeIf { it.isNotEmpty() }?.joinToString(",")
+  }
+
   fun resolveLexiconPathFromDetect(
     lexiconLanguages: ArrayList<*>?,
     languageId: String?

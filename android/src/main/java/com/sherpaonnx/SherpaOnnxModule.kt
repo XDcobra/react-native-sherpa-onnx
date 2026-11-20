@@ -6849,6 +6849,10 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     offlineTtsHelper.synthesizeTts(instanceId, textInBufferId, audioOutBufferId, options, promise)
   }
 
+  override fun cancelTtsSynthesis(operationId: String, promise: Promise) {
+    offlineTtsHelper.cancelTtsSynthesis(operationId, promise)
+  }
+
   override fun alignOfflineTextToAudio(
     textInBufferId: String,
     audioInBufferId: String,
