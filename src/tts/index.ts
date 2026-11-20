@@ -408,6 +408,9 @@ export async function detectTtsModel(
  * @param options - TTS initialization options
  * @returns Promise resolving to a TtsEngine instance
  * @throws {Error} `TTS_INVALID_ARGUMENT` — custom model paths are incomplete or invalid.
+ * @throws {Error} `TTS_LEXICON_MISSING` — auto init of a `zipvoice` model found no English
+ *   lexicon (the message names the file, e.g. `lexicon-en-us.txt`); `ensureModel()` fetches
+ *   it for catalog models.
  * @throws {Error} Native init failed (`TTS initialization failed` / `TTS_INIT_ERROR`).
  * @example
  * ```typescript

@@ -116,6 +116,12 @@ internal class TtsInitializationService(
     val modelTypeStr = result["modelType"] as? String ?: "vits"
     var paths = (result["paths"] as? Map<*, *>)?.mapValues { (_, v) -> (v as? String).orEmpty() }?.mapKeys { it.key.toString() } ?: emptyMap()
     val lexiconLanguages = result["lexiconLanguages"] as? ArrayList<*>
+    TtsInitOptionsParser.missingLexiconFile(modelTypeStr, lexiconLanguages, parsed.lexiconLanguageId)?.let { file ->
+      val msg = TtsInitOptionsParser.lexiconMissingMessage(file)
+      Log.e("SherpaOnnxTts", msg)
+      rejectOnUiThread(promise, TtsInitOptionsParser.LEXICON_MISSING_CODE, msg)
+      return
+    }
     if (!parsed.lexiconLanguageId.isNullOrBlank()) {
       val resolvedLexicon = TtsInitOptionsParser.resolveLexiconPathFromDetect(lexiconLanguages, parsed.lexiconLanguageId)
       if (resolvedLexicon.isNullOrBlank()) {

@@ -112,6 +112,43 @@ TEST(TtsLexicon, ZipvoiceLoadsEveryDetectedLexicon) {
             "");
 }
 
+TEST(TtsLexicon, ZipvoiceWithoutEnglishLexiconIsRejected) {
+  using sherpaonnx::MissingTtsLexiconFile;
+  using sherpaonnx::TtsModelKind;
+  const std::vector<sherpaonnx::model_detect::LexiconCandidate> chineseOnly = {
+      {"/m/lexicon.txt", "default"}};
+  // The distilled zh-en pack ships only the Chinese lexicon.
+  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice, chineseOnly),
+            "lexicon-en-us.txt");
+  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice, {}), "lexicon-en-us.txt");
+  // With the English lexicon next to it nothing is missing.
+  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice,
+                                  {{"/m/lexicon.txt", "default"},
+                                   {"/m/lexicon-en-us.txt", "en-us"}}),
+            "");
+  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice,
+                                  {{"/m/lexicon-us-en.txt", "us-en"}}),
+            "");
+  // An explicit pick is the caller's choice.
+  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice, chineseOnly, "default"), "");
+  // Other models load one lexicon and are not checked.
+  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kVits, chineseOnly), "");
+  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kKokoro, {}), "");
+
+  const std::string message = sherpaonnx::TtsLexiconMissingMessage("lexicon-en-us.txt");
+  EXPECT_EQ(message.rfind("TTS_LEXICON_MISSING: ", 0), 0u) << message;
+  EXPECT_NE(message.find("lexicon-en-us.txt"), std::string::npos);
+}
+
+TEST(TtsLexicon, EnglishLexiconLanguageIds) {
+  for (const char* id : {"en", "en-us", "EN_gb", "us-en", "gb-en"}) {
+    EXPECT_TRUE(sherpaonnx::IsEnglishLexiconLanguageId(id)) << id;
+  }
+  for (const char* id : {"default", "zh", "ten", "enx", "zh-en-x", ""}) {
+    EXPECT_FALSE(sherpaonnx::IsEnglishLexiconLanguageId(id)) << id;
+  }
+}
+
 TEST(TtsHost, InitCustomRejectsUnknownType) {
   sherpaonnx::TtsWrapper tts;
   sherpaonnx::TtsModelPaths paths;
