@@ -101,6 +101,19 @@ const result = await sep.separate(mixed, [vocalsOut, accompOut], {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [separation-live.md](separation-live.md#segmentation-mandatory).
 
+### Cancel
+
+Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code finishes first, so a run stops at segment granularity; with `segmentation.mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and the `audioOuts` stays empty. If the signal aborts while the last segment runs, the call still resolves.
+
+```ts
+const controller = new AbortController();
+const run = sep.separate(mixed, [vocalsOut, accompOut], {
+  segmentation: { mode: 'auto' },
+  signal: controller.signal,
+});
+// elsewhere: controller.abort();
+```
+
 ## Models
 
 | `modelType` | Required files | Custom-init keys |
@@ -253,14 +266,14 @@ flowchart LR
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none |
+| `onProgress` | `OrchestrationProgress` | start of each segment and of each retry | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none. `currentSegmentStartMs` / `currentSegmentEndMs` give the segment position in the input audio (ms) |
 
 Shapes: [Types](#types).
 
 ```ts
 const result = await sep.separate(mixed, [vocalsOut, accompOut], {
   segmentation: { mode: 'auto' },
-  onProgress: (p) => console.log(`${p.completedSegments}/${p.totalSegments}`),
+  onProgress: (p) => console.log(`${p.currentSegment + 1}/${p.totalSegments}`),
 });
 ```
 
@@ -278,7 +291,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [separatio
 | `SeparationDetectResult` | Return of `detectSeparationModel()` |
 | `SeparationInitializeOptions` | Auto or custom init union for `createSeparation` |
 | `SeparationInitOptionsShared` | Shared fields: `numThreads?`, `provider?`, `debug?` |
-| `SeparateOptions` | Optional segmentation, `errorRecovery`, `maxRetriesPerSegment`, `onProgress`, `overlapSamples` |
+| `SeparateOptions` | Optional segmentation, `errorRecovery`, `maxRetriesPerSegment`, `onProgress`, `overlapSamples`, `signal` |
 | `SeparateSegmentationConfig` | `{ mode?: 'off' \| 'auto'; policy?: SegmentationPolicy }` |
 | `SeparationResult` | `{ status, totalSegments, completedSegments, skippedSegments, failedSegment?, processingTimeMs }` |
 | `SeparationStemIndex` | `0 \| 1` |
@@ -286,7 +299,8 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [separatio
 | `SeparationEngine` | `separate` (offline / live), `getSampleRate`, `getNumStems`, `destroy` |
 | `SeparationEngineInfo` | `{ instanceId, modelType, sampleRate, numStems }` |
 | `SeparationErrorCode` | Error code object |
-| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, `currentSegmentStartMs?`, `currentSegmentEndMs?`, …) |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 
 Live-only types (`SeparationLivePipelineOptions`, `SeparationPipelineHandle`): [separation-live.md](separation-live.md#types).
 
@@ -312,6 +326,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md).
 | `SEPARATION_BUFFER_EMPTY` | Input offline buffer contains no samples. |
 | `SEPARATION_OUTPUT_NOT_EMPTY` | An output buffer must be empty before calling `separate(...)`. |
 | `SEPARATION_STEM_COUNT_MISMATCH` | `audioOuts.length !== getNumStems()`. |
+| `ORCHESTRATION_CANCELLED` | `signal` aborted; `name` is `'AbortError'`. |
 | `OFFLINE_OOM` | Not enough memory for offline separation. Prefer `segmentation.mode: 'auto'` for long inputs. See [segmentation-engine.md](./segmentation-engine.md) · [memory-and-models.md](./memory-and-models.md). |
 | `SEPARATION_INVALID_ARGUMENT` | TypeScript-side validation (e.g. wrong stem count, unsupported offline segmentation mode). |
 
@@ -365,7 +380,7 @@ await sep.separate(mixed, stems, {
     mode: 'auto',
     policy: { evaluator: 'continuous_frames', checkpointIntervalMs: 2000 },
   },
-  onProgress: (p) => console.log(p.completedSegments, p.totalSegments),
+  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
 });
 ```
 

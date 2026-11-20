@@ -28,6 +28,14 @@ Features (STT, TTS, enhancement, punctuation, …) pass **`segmentation`** on th
 
 **Modes (overview):** `off` = one-shot; `manual` = you commit boundaries (streaming where supported); `auto` = engine + `policy`. Offline features in `src/` often only `off`/`auto`; streaming often `off`/`manual`/`auto`.
 
+**Offline runs (STT, enhancement, separation, punctuation, TTS)** share these options next to `segmentation`:
+
+| Option | Meaning |
+| --- | --- |
+| `errorRecovery`, `maxRetriesPerSegment`, `retryExhaustedFallback` | What happens when a segment fails |
+| `onProgress` | Called at the start of each segment and retry. Audio input adds `currentSegmentStartMs` / `currentSegmentEndMs` (position in the input, ms) |
+| `signal` | `AbortSignal`. Checked before the run and before each segment and retry; a running segment finishes first. Rejects with `code: 'ORCHESTRATION_CANCELLED'`, `name: 'AbortError'` |
+
 ### Evaluators (domain & behavior)
 
 Policies are **domain-specific**: only **text** evaluators go on text buffers; only **speech** evaluators on speech buffers. Wrong domain → `POLICY_INVALID`.

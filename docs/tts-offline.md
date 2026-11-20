@@ -169,6 +169,19 @@ await tts.synthesize(textBuf, audioBuf, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [tts-live.md](tts-live.md#segmentation-mandatory).
 
+### Cancel
+
+Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code finishes first, so a run stops at segment granularity; with `segmentation.mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and `audioOut` stays empty. If the signal aborts while the last segment runs, the call still resolves.
+
+```ts
+const controller = new AbortController();
+const run = tts.synthesize(textBuf, audioBuf, {
+  segmentation: { mode: 'auto' },
+  signal: controller.signal,
+});
+// elsewhere: controller.abort();
+```
+
 ## Models
 
 | `modelType` | Required files | Custom-init keys |
@@ -491,7 +504,8 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTSInitializeOptions` | Discriminated union: concrete `modelType` required for `modelOptions` |
 | `TTSInitializeOptionsBase` | Shared fields: `modelSource`, `provider?`, `numThreads?`, `debug?`, `ruleFsts?`, `ruleFars?`, `maxNumSentences?`, `silenceScale?` |
 | `TtsUpdateOptions` | Arg to `updateParams()` — same per-`modelType` coupling as init |
-| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, lang?, extra?, voiceClone?, phonemeCodepoints?, tokens?, segmentation?, onProgress?, … }` — `numSteps` for **supertonic** (no clone), **zipvoice**, **pocket** (with `voiceClone`); `phonemeCodepoints` (vits/matcha/kokoro/kitten) or `tokens` (ZipVoice) are exclusive; see `supportsNumSteps` / `requiresVoiceCloneForNumSteps` |
+| `TtsSynthesisOptions` | `{ sid?, speed?, silenceScale?, numSteps?, lang?, extra?, voiceClone?, phonemeCodepoints?, tokens?, segmentation?, onProgress?, signal?, … }` — `numSteps` for **supertonic** (no clone), **zipvoice**, **pocket** (with `voiceClone`); `phonemeCodepoints` (vits/matcha/kokoro/kitten) or `tokens` (ZipVoice) are exclusive; see `supportsNumSteps` / `requiresVoiceCloneForNumSteps` |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 | `TtsSynthesisProgress` | `{ fraction, segmentIndex, segmentCount, generateFraction, elapsedMs }` — composed offline progress; see [JS Events](#js-events) |
 | `TtsPhonemeInput` | `{ phonemeCodepoints: number[][] } \| { tokens: string[][] }` — Unicode codepoints vs ZipVoice phoneme strings; not `tokens.txt` |
 | `TtsKittenCustomConfig` | `{ ttsModel, tokens, voices, lexicon? }` — no `dataDir` |
@@ -537,6 +551,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND` | `synthesize` (voice clone) | `referenceAudioBufferId` not in registry — released before synthesis |
 | `TTS_REFERENCE_AUDIO_BUFFER_KIND_MISMATCH` | `synthesize` (voice clone) | Reference buffer is not an offline audio buffer |
 | `TTS_GENERATE_ERROR` | `synthesize` | Model-level synthesis failed, or voice clone on unsupported model type, or empty audio result |
+| `ORCHESTRATION_CANCELLED` | `synthesize` | `signal` aborted; `name` is `'AbortError'` |
 | `OFFLINE_OOM` | `synthesize` | Not enough memory for offline synthesis. Prefer streaming TTS for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 
 ## Troubleshooting
