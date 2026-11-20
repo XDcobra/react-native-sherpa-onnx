@@ -1267,7 +1267,15 @@ export async function runOfflineTextToAudioPipeline(
     segOut: OfflineAudioBufferRef,
     ctx: TextToAudioSegmentContext
   ) => Promise<void>,
-  config: OrchestrationConfig & { sampleRate: number; channels?: number }
+  config: OrchestrationConfig & {
+    sampleRate: number;
+    channels?: number;
+    /**
+     * Called for a part with nothing to speak (only spaces), which the consumer never
+     * sees, so a caller that reports progress from the consumer can count it too.
+     */
+    onNonSpeakableSegment?: (ctx: TextToAudioSegmentContext) => void;
+  }
 ): Promise<TextToAudioOrchestrationResult> {
   const strategy = normalizeRecovery(config.errorRecovery);
   const maxRetries = normalizeRetryCount(config.maxRetriesPerSegment);
@@ -1401,6 +1409,15 @@ export async function runOfflineTextToAudioPipeline(
           });
 
           if (!hasSynthesizableText(segText)) {
+            try {
+              config.onNonSpeakableSegment?.({
+                segmentIndex: i,
+                segmentCount: totalSegments,
+                elapsedMs: Date.now() - session.startedAtMs,
+              });
+            } catch {
+              // A failing callback must not fail the run.
+            }
             segmentMappings.push({
               textSegmentId: seg.segmentId,
               speechSegmentId: `speech_tts_${session.sessionId}_${seg.segmentIndex}`,

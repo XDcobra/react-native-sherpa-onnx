@@ -77,6 +77,14 @@ export async function runOfflineTtsPipeline(
       textSkipPlaceholder: options.textSkipPlaceholder,
       linkMap: options.linkMap,
       signal: options.signal,
+      // A part with nothing to speak still counts as done in the progress.
+      onNonSpeakableSegment: (ctx) =>
+        emit({
+          segmentIndex: ctx.segmentIndex,
+          segmentCount: ctx.segmentCount,
+          generateFraction: 1,
+          elapsedMs: Date.now() - startedAtMs,
+        }),
       sampleRate,
       channels: 1,
     }
