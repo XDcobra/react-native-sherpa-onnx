@@ -15,6 +15,9 @@ void FillAudioTaggingDerivedCatalogMetadata(
     std::string ignoredSizeTier;
     FillDerivedCatalogMetadata(
         r.derivedLanguages, r.quantization, ignoredSizeTier, idForHeuristics);
+    // Works on the sound, not on a spoken language: name tokens such as
+    // "_hr" (high resolution) must not become language codes.
+    r.derivedLanguages.clear();
 }
 
 void FillAudioTaggingDerivedCatalogMetadataUsingModelDirBasename(
@@ -24,6 +27,9 @@ void FillAudioTaggingDerivedCatalogMetadataUsingModelDirBasename(
     std::string ignoredSizeTier;
     FillDerivedCatalogMetadataFromBasename(
         r.derivedLanguages, r.quantization, ignoredSizeTier, modelDir);
+    // Works on the sound, not on a spoken language: name tokens such as
+    // "_hr" (high resolution) must not become language codes.
+    r.derivedLanguages.clear();
 }
 
 } // namespace sherpaonnx
