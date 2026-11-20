@@ -61,7 +61,14 @@ internal class SherpaOnnxOnlineSttHelper(
     }
   }
 
-  private fun resolveOptionalPaths(parsed: OnlineSttInitOptionsParser.Parsed): Triple<String, String, String> {
+  private data class ResolvedOptionalPaths(
+    val hotwordsFile: String,
+    val ruleFsts: String,
+    val ruleFars: String,
+    val bpeVocab: String,
+  )
+
+  private fun resolveOptionalPaths(parsed: OnlineSttInitOptionsParser.Parsed): ResolvedOptionalPaths {
     val resolvedRuleFsts = try {
       pathResolver.resolveFilePaths(parsed.ruleFsts.orEmpty().trim(), "online_stt_rule_fst")
     } catch (_: Exception) {
@@ -81,7 +88,16 @@ internal class SherpaOnnxOnlineSttHelper(
         resolvedHotwordsFile = ""
       }
     }
-    return Triple(resolvedHotwordsFile, resolvedRuleFsts, resolvedRuleFars)
+    var resolvedBpeVocab = parsed.bpeVocab?.trim().orEmpty()
+    if (resolvedBpeVocab.isNotEmpty()) {
+      try {
+        resolvedBpeVocab =
+          pathResolver.resolveContentUriToFile(resolvedBpeVocab, "online_stt_bpe_vocab")
+      } catch (_: Exception) {
+        resolvedBpeVocab = ""
+      }
+    }
+    return ResolvedOptionalPaths(resolvedHotwordsFile, resolvedRuleFsts, resolvedRuleFars, resolvedBpeVocab)
   }
 
   fun initializeOnlineStt(
@@ -106,7 +122,7 @@ internal class SherpaOnnxOnlineSttHelper(
     val enableEndpoint = parsed.enableEndpoint ?: true
     val decodingMethod = parsed.decodingMethod?.trim().orEmpty().ifEmpty { "greedy_search" }
     val maxActivePaths = parsed.maxActivePaths ?: 4
-    val (hotwordsFile, ruleFsts, ruleFars) = resolveOptionalPaths(parsed)
+    val (hotwordsFile, ruleFsts, ruleFars, bpeVocab) = resolveOptionalPaths(parsed)
 
     try {
       @Suppress("UNCHECKED_CAST")
@@ -143,6 +159,8 @@ internal class SherpaOnnxOnlineSttHelper(
           rule3MustContainNonSilence = parsed.rule3MustContainNonSilence ?: false,
           rule3MinTrailingSilence = parsed.rule3MinTrailingSilence?.toFloat() ?: 0f,
           rule3MinUtteranceLength = parsed.rule3MinUtteranceLength?.toFloat() ?: 20f,
+          modelingUnit = parsed.modelingUnit?.trim().orEmpty(),
+          bpeVocab = bpeVocab,
         ) as? HashMap<String, Any>
       } else {
         Log.i(logTag, "[SherpaOnnx:init] online-stt Create auto start")
@@ -171,6 +189,8 @@ internal class SherpaOnnxOnlineSttHelper(
           rule3MustContainNonSilence = parsed.rule3MustContainNonSilence ?: false,
           rule3MinTrailingSilence = parsed.rule3MinTrailingSilence?.toFloat() ?: 0f,
           rule3MinUtteranceLength = parsed.rule3MinUtteranceLength?.toFloat() ?: 20f,
+          modelingUnit = parsed.modelingUnit?.trim().orEmpty(),
+          bpeVocab = bpeVocab,
         ) as? HashMap<String, Any>
       }
 
@@ -388,6 +408,8 @@ internal class SherpaOnnxOnlineSttHelper(
       rule3MustContainNonSilence: Boolean,
       rule3MinTrailingSilence: Float,
       rule3MinUtteranceLength: Float,
+      modelingUnit: String,
+      bpeVocab: String,
     ): HashMap<String, Any>?
 
     @JvmStatic
@@ -416,6 +438,8 @@ internal class SherpaOnnxOnlineSttHelper(
       rule3MustContainNonSilence: Boolean,
       rule3MinTrailingSilence: Float,
       rule3MinUtteranceLength: Float,
+      modelingUnit: String,
+      bpeVocab: String,
     ): HashMap<String, Any>?
 
     @JvmStatic

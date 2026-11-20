@@ -21,6 +21,7 @@ static const OnlineSttFieldRequirement kTransducerReqs[] = {
     {"decoder", &OnlineSttModelPaths::decoder, true},
     {"joiner", &OnlineSttModelPaths::joiner, true},
     {"tokens", &OnlineSttModelPaths::tokens, true},
+    {"bpeVocab", &OnlineSttModelPaths::bpeVocab, false},
 };
 
 static const OnlineSttFieldRequirement kParaformerReqs[] = {

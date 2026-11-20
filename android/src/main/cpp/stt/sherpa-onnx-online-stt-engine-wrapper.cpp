@@ -65,6 +65,9 @@ std::unordered_map<std::string, std::string> scanOnlineModelPaths(
     out["decoder"] = dec;
     out["joiner"] = join;
     out["tokens"] = tokensPath;
+    // Optional: lets a BPE modelingUnit tokenize hotwords without an explicit bpeVocab.
+    std::string bpeVocab = FindFileByName(files, "bpe.vocab");
+    if (!bpeVocab.empty()) out["bpeVocab"] = bpeVocab;
     return out;
   }
   if (modelType == "paraformer") {
@@ -101,7 +104,46 @@ static std::unordered_map<std::string, std::string> onlinePathsToMap(
       {"joiner", paths.joiner},
       {"tokens", paths.tokens},
       {"model", paths.model},
+      {"bpeVocab", paths.bpeVocab},
   };
+}
+
+/**
+ * Sets how hotwords are tokenized. A non-empty `bpeVocab` wins over the one in `paths`; the one in
+ * `paths` (custom config or found in the model directory) is used only for a BPE modeling unit.
+ * Returns false with `error` set when the unit is unknown or its BPE vocabulary is missing.
+ */
+static bool applyHotwordsModelingUnit(
+    const std::unordered_map<std::string, std::string>& paths,
+    const std::string& modelingUnit, const std::string& bpeVocab,
+    sherpa_onnx::cxx::OnlineModelConfig& modelConfig, std::string& error) {
+  if (!bpeVocab.empty()) {
+    modelConfig.bpe_vocab = bpeVocab;
+  }
+  if (modelingUnit.empty()) {
+    return true;
+  }
+  const bool needsBpe =
+      modelingUnit == "bpe" || modelingUnit == "cjkchar+bpe";
+  if (!needsBpe && modelingUnit != "cjkchar") {
+    error =
+        "INVALID_MODELING_UNIT: modelingUnit must be 'cjkchar', 'bpe' or "
+        "'cjkchar+bpe', got '" +
+        modelingUnit + "'";
+    return false;
+  }
+  if (needsBpe && modelConfig.bpe_vocab.empty()) {
+    auto it = paths.find("bpeVocab");
+    if (it != paths.end()) modelConfig.bpe_vocab = it->second;
+  }
+  if (needsBpe && modelConfig.bpe_vocab.empty()) {
+    error = "BPE_VOCAB_REQUIRED: modelingUnit '" + modelingUnit +
+            "' needs bpeVocab (the model's bpe.vocab); none was given or "
+            "found in the model directory";
+    return false;
+  }
+  modelConfig.modeling_unit = modelingUnit;
+  return true;
 }
 
 static bool applyOnlineModelPathsToConfig(
@@ -146,7 +188,8 @@ static OnlineSttInitResult createOnlineRecognizerFromPaths(
     const std::string& provider, const std::string& ruleFsts,
     const std::string& ruleFars, float dither, float blankPenalty, bool debug,
     float rule1MinTrailingSilence, float rule2MinTrailingSilence,
-    float rule3MinUtteranceLength,
+    float rule3MinUtteranceLength, const std::string& modelingUnit,
+    const std::string& bpeVocab,
     std::unique_ptr<sherpa_onnx::cxx::OnlineRecognizer>& recognizerOut,
     int32_t& sampleRateOut) {
   OnlineSttInitResult result;
@@ -176,6 +219,11 @@ static OnlineSttInitResult createOnlineRecognizerFromPaths(
       paths.count("tokens") ? paths.at("tokens") : "";
 
   if (!applyOnlineModelPathsToConfig(paths, modelType, config, result.error)) {
+    return result;
+  }
+  if (!applyHotwordsModelingUnit(paths, modelingUnit, bpeVocab,
+                                 config.model_config, result.error)) {
+    LOGE("%s", result.error.c_str());
     return result;
   }
 
@@ -230,7 +278,8 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
     float /* rule1MinUtteranceLength */, bool /* rule2MustContainNonSilence */,
     float rule2MinTrailingSilence, float /* rule2MinUtteranceLength */,
     bool /* rule3MustContainNonSilence */, float /* rule3MinTrailingSilence */,
-    float rule3MinUtteranceLength) {
+    float rule3MinUtteranceLength, const std::string& modelingUnit,
+    const std::string& bpeVocab) {
   OnlineSttInitResult result;
   if (pImpl->initialized) {
     result.error = "Already initialized";
@@ -254,8 +303,8 @@ OnlineSttInitResult OnlineSttWrapper::initialize(
       paths, modelType, enableEndpoint, decodingMethod, maxActivePaths,
       hotwordsFile, hotwordsScore, numThreads, provider, ruleFsts, ruleFars,
       dither, blankPenalty, debug, rule1MinTrailingSilence,
-      rule2MinTrailingSilence, rule3MinUtteranceLength, pImpl->recognizer,
-      pImpl->sampleRate);
+      rule2MinTrailingSilence, rule3MinUtteranceLength, modelingUnit, bpeVocab,
+      pImpl->recognizer, pImpl->sampleRate);
   if (initResult.success) {
     pImpl->initialized = true;
   }
@@ -272,7 +321,8 @@ OnlineSttInitResult OnlineSttWrapper::initializeCustom(
     float rule1MinTrailingSilence, float /* rule1MinUtteranceLength */,
     bool /* rule2MustContainNonSilence */, float rule2MinTrailingSilence,
     float /* rule2MinUtteranceLength */, bool /* rule3MustContainNonSilence */,
-    float /* rule3MinTrailingSilence */, float rule3MinUtteranceLength) {
+    float /* rule3MinTrailingSilence */, float rule3MinUtteranceLength,
+    const std::string& modelingUnit, const std::string& bpeVocab) {
   OnlineSttInitResult result;
   if (pImpl->initialized) {
     result.error = "Already initialized";
@@ -295,8 +345,8 @@ OnlineSttInitResult OnlineSttWrapper::initializeCustom(
       onlinePathsToMap(paths), modelType, enableEndpoint, decodingMethod,
       maxActivePaths, hotwordsFile, hotwordsScore, numThreads, provider,
       ruleFsts, ruleFars, dither, blankPenalty, debug, rule1MinTrailingSilence,
-      rule2MinTrailingSilence, rule3MinUtteranceLength, pImpl->recognizer,
-      pImpl->sampleRate);
+      rule2MinTrailingSilence, rule3MinUtteranceLength, modelingUnit, bpeVocab,
+      pImpl->recognizer, pImpl->sampleRate);
   if (initResult.success) {
     pImpl->initialized = true;
   }

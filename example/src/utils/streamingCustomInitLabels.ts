@@ -5,6 +5,7 @@ const LABELS: Record<StreamingSttCustomPathKey, string> = {
   decoder: 'Decoder (.onnx)',
   joiner: 'Joiner (.onnx)',
   tokens: 'Tokens (tokens.txt)',
+  bpeVocab: 'BPE vocab (optional)',
   model: 'Model (.onnx)',
 };
 
