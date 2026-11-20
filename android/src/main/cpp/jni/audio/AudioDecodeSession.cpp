@@ -1455,9 +1455,18 @@ AudioDecodeResult decodeFileFFmpeg(
         chunkBuf.erase(chunkBuf.begin(), chunkBuf.begin() + chunkSize);
 
         if (onProgress) {
-          int pct = totalFramesEstimate > 0
-            ? (int)std::min<int64_t>(100, (totalFramesDecoded * 100) / totalFramesEstimate)
-            : 0;
+          int pct = 0;
+          if (totalFramesEstimate > 0) {
+            pct = (int)std::min<int64_t>(100, (totalFramesDecoded * 100) / totalFramesEstimate);
+          } else if (fmtCtx->pb != nullptr) {
+            // No duration or bitrate (e.g. some raw or streamed containers):
+            // fall back to how far into the file the demuxer has read.
+            const int64_t size = avio_size(fmtCtx->pb);
+            const int64_t pos = avio_tell(fmtCtx->pb);
+            if (size > 0 && pos > 0) {
+              pct = (int)std::min<int64_t>(99, (pos * 100) / size);
+            }
+          }
           onProgress(totalFramesDecoded, totalFramesEstimate, pct);
         }
       }
