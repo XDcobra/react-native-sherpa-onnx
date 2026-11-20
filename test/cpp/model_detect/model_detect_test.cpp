@@ -35,6 +35,9 @@
 #include "sherpa-onnx-validate-online-stt.h"
 #include "sherpa-onnx-validate-tts.h"
 #include "sherpa-onnx-validate-enhancement.h"
+#include "sherpa-onnx-enhancement-catalog-metadata.h"
+#include "sherpa-onnx-vad-catalog-metadata.h"
+#include "sherpa-onnx-audio-tagging-catalog-metadata.h"
 #include "sherpa-onnx-validate-separation.h"
 #include "sherpa-onnx-validate-speaker-embedding.h"
 #include "sherpa-onnx-validate-slid.h"
@@ -2695,4 +2698,26 @@ TEST(UnifiedModelDetectTest, QuantizationSelectionInFileList) {
         files, "/models/whisper", "whisper", std::string("fp16"));
     EXPECT_FALSE(resFp16.ok);
     EXPECT_NE(resFp16.error, "");
+}
+
+// Models that work on the sound get no language codes from their names:
+// "_hr" (high resolution) is not Croatian, "_en" in a VAD pack is not a
+// language restriction. Quantization still comes from the name.
+TEST(ModelDetectCatalogMetadata, SoundBasedModelsGetNoLanguagesFromTheirName) {
+    sherpaonnx::EnhancementDetectResult enh;
+    sherpaonnx::FillEnhancementDerivedCatalogMetadata(enh, "dpdfnet2_48khz_hr");
+    EXPECT_TRUE(enh.derivedLanguages.empty());
+
+    sherpaonnx::EnhancementDetectResult enhQ;
+    sherpaonnx::FillEnhancementDerivedCatalogMetadata(enhQ, "gtcrn-simple-int8-hr");
+    EXPECT_TRUE(enhQ.derivedLanguages.empty());
+    EXPECT_EQ(enhQ.quantization, "int8");
+
+    sherpaonnx::VadDetectResult vad;
+    sherpaonnx::FillVadDerivedCatalogMetadata(vad, "silero-vad-en-hr");
+    EXPECT_TRUE(vad.derivedLanguages.empty());
+
+    sherpaonnx::AudioTaggingDetectResult tag;
+    sherpaonnx::FillAudioTaggingDerivedCatalogMetadata(tag, "ced-mini-audio-tagging-hr");
+    EXPECT_TRUE(tag.derivedLanguages.empty());
 }
