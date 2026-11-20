@@ -29,9 +29,11 @@ const mockLiveTextNotifyToTextSegment = jest.fn(
 jest.mock('../../textbuffer', () => ({
   resolveOfflineTextBufferId: jest.fn((value: unknown) => String(value)),
   resolvePipelineTextBufferId: jest.fn((value: unknown) => String(value)),
-  subscribeLiveTextBufferEvents: mockSubscribeLiveTextBufferEvents,
-  readLiveTextSegment: mockReadLiveTextSegment,
-  liveTextNotifyToTextSegment: mockLiveTextNotifyToTextSegment,
+  subscribeLiveTextBufferEvents: (...args: unknown[]) =>
+    mockSubscribeLiveTextBufferEvents(...args),
+  readLiveTextSegment: (...args: unknown[]) => mockReadLiveTextSegment(...args),
+  liveTextNotifyToTextSegment: (event: unknown, segment: { text: string }) =>
+    mockLiveTextNotifyToTextSegment(event, segment),
   createEmptyOfflineTextBuffer: jest.fn(),
   getOfflineTextBufferTextSlice: jest.fn(),
   getPipelineTextBufferInfo: jest.fn(),
