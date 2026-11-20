@@ -444,6 +444,7 @@ The callback payload is `OrchestrationProgress` and follows offline orchestrator
 - The event fires at the start of step `i` (before heavy work for that step).
 - `fraction` follows `totalSegments > 0 ? currentSegment / totalSegments : 1`.
 - This is not waveform-level progress and does not replace alignment warnings.
+- In the multi-step paths (`chunked_forced_ctc`, `asr_mediated`) each event also carries `currentSegmentStartMs` and `currentSegmentEndMs`: the range of the current anchor in the input audio. Use them to place the progress on the audio timeline. The single-shot paths leave them out.
 
 Quick per-mode summary:
 

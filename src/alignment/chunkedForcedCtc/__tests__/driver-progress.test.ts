@@ -119,4 +119,26 @@ describe('chunkedForcedCtc/driver progress', () => {
       ])
     );
   });
+
+  test('places each anchor on the audio timeline in progress', async () => {
+    const onProgress = jest.fn();
+    await runAccurateChunkedForcedCtc({
+      textIn: 'txt_ref',
+      audioIn: 'off_audio',
+      segmentOut: 'seg_out',
+      anchorSegmentBuffer: 'seg_anchor',
+      model: { modelSource: { kind: 'fs', path: '/m' } },
+      granularity: 'word',
+      onProgress,
+    });
+
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentSegment: 0,
+        totalSegments: 1,
+        currentSegmentStartMs: 0,
+        currentSegmentEndMs: 100,
+      })
+    );
+  });
 });

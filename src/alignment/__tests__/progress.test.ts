@@ -52,4 +52,22 @@ describe('alignment progress session', () => {
       session.emitStep(0, 1, 0);
     }).not.toThrow();
   });
+
+  test('adds the part range in ms when given', () => {
+    const onProgress = jest.fn();
+    const session = createAlignmentProgressSession(onProgress, 0);
+
+    session.emitStep(1, 4, 500, {
+      startSample: 16000,
+      endSample: 24000,
+      sampleRate: 16000,
+    });
+
+    expect(onProgress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        currentSegmentStartMs: 1000,
+        currentSegmentEndMs: 1500,
+      })
+    );
+  });
 });
