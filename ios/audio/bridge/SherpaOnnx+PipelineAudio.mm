@@ -618,7 +618,6 @@ static std::string pa_tempDir() {
                           resolve:(RCTPromiseResolveBlock)resolve
                            reject:(RCTPromiseRejectBlock)reject
 {
-  (void)allowDemuxerAutoProbe;
   if (!source || [source count] == 0) {
     reject(kPAErrInvalidArgument, @"source is required", nil);
     return;
@@ -736,6 +735,7 @@ static std::string pa_tempDir() {
         config.targetSampleRate = targetRate;
         config.forceMono = forceMono;
         config.chunkSize = 8192;
+        config.allowDemuxerAutoProbe = allowDemuxerAutoProbe;
 
         auto result = sherpa::decodeFile(path.c_str(), config, onChunk, onProgress, onStreamInfo, *cancelFlag);
         fclose(outFile);
