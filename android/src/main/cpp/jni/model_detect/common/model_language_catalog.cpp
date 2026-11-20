@@ -87,28 +87,6 @@ std::string InferOcrModelTypeFromKey(const std::string& modelKey) {
     return {};
 }
 
-std::string InferAlignmentModelTypeFromKey(const std::string& modelKey) {
-    if (modelKey.empty()) {
-        return {};
-    }
-    std::string lower;
-    lower.reserve(modelKey.size());
-    for (unsigned char c : modelKey) {
-        lower.push_back(static_cast<char>(std::tolower(c)));
-    }
-    // All current char-CTC packs share the wav2vec2 family (Omnilingual deferred).
-    if (lower.find("wav2vec") != std::string::npos ||
-        lower.find("960h") != std::string::npos ||
-        lower.find("voxpopuli") != std::string::npos ||
-        lower.find("xlsr") != std::string::npos ||
-        lower.find("multilingual-56") != std::string::npos ||
-        (lower.find("mms") != std::string::npos &&
-         (lower.find("forced-aligner") != std::string::npos ||
-          lower.find("1130") != std::string::npos))) {
-        return "wav2vec2";
-    }
-    return {};
-}
 
 void AppendUniqueRows(
     std::vector<PublicLanguageRow>& derivedLanguages,
@@ -182,6 +160,29 @@ const std::vector<PublicLanguageRow>& CuratedRows(
 }
 
 } // namespace
+
+std::string InferAlignmentModelTypeFromKey(const std::string& modelKey) {
+    if (modelKey.empty()) {
+        return {};
+    }
+    std::string lower;
+    lower.reserve(modelKey.size());
+    for (unsigned char c : modelKey) {
+        lower.push_back(static_cast<char>(std::tolower(c)));
+    }
+    // All current char-CTC packs share the wav2vec2 family (Omnilingual deferred).
+    if (lower.find("wav2vec") != std::string::npos ||
+        lower.find("960h") != std::string::npos ||
+        lower.find("voxpopuli") != std::string::npos ||
+        lower.find("xlsr") != std::string::npos ||
+        lower.find("multilingual-56") != std::string::npos ||
+        (lower.find("mms") != std::string::npos &&
+         (lower.find("forced-aligner") != std::string::npos ||
+          lower.find("1130") != std::string::npos))) {
+        return "wav2vec2";
+    }
+    return {};
+}
 
 void UpgradeModelOptionIdsForType(
     const std::string& modelType,

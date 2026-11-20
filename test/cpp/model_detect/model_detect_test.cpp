@@ -2721,3 +2721,24 @@ TEST(ModelDetectCatalogMetadata, SoundBasedModelsGetNoLanguagesFromTheirName) {
     sherpaonnx::FillAudioTaggingDerivedCatalogMetadata(tag, "ced-mini-audio-tagging-hr");
     EXPECT_TRUE(tag.derivedLanguages.empty());
 }
+
+// A catalog asset name of an alignment pack is detected by its name, with the curated
+// languages (the English 960h pack has no language code in its name).
+TEST(UnifiedModelDetectTest, AlignmentPackNameGivesCatalogLanguages) {
+    auto direct = sherpaonnx::DetectAlignmentModelFromName("wav2vec2-base-960h-int8");
+    EXPECT_EQ(direct.selectedKind, sherpaonnx::AlignmentModelKind::kWav2Vec2);
+    ASSERT_FALSE(direct.derivedLanguages.empty());
+    EXPECT_EQ(direct.derivedLanguages[0].iso6391Hint, "en");
+
+    auto unified = sherpaonnx::DetectModel(
+        std::nullopt, std::optional<std::string>("wav2vec2-base-960h-int8"));
+    EXPECT_TRUE(unified.matched);
+    EXPECT_EQ(unified.category, "alignment");
+    ASSERT_FALSE(unified.languages.empty());
+    EXPECT_EQ(unified.languages[0].iso6391Hint, "en");
+
+    // A directory that does not exist stays an error, not a name hit.
+    auto missingDir = sherpaonnx::DetectAlignmentModel("/no/such/wav2vec2-base-960h");
+    EXPECT_FALSE(missingDir.ok);
+    EXPECT_EQ(missingDir.selectedKind, sherpaonnx::AlignmentModelKind::kUnknown);
+}

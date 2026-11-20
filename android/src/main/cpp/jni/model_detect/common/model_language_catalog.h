@@ -47,6 +47,9 @@ void AppendCuratedAlignmentLanguageRowsIfEmpty(
     AlignmentDetectResult& result,
     const std::string& modelKey);
 
+/** Alignment model type ("wav2vec2") a pack name implies, or empty. */
+std::string InferAlignmentModelTypeFromKey(const std::string& modelKey);
+
 void AppendCuratedOcrLanguageRowsIfEmpty(
     OcrDetectResult& result,
     const std::string& modelKey);

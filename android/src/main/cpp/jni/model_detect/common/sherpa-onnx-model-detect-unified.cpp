@@ -442,15 +442,13 @@ UnifiedModelDetectResult DetectModelInternal(
             diarization.error));
     }
 
-    std::string alignmentKey;
-    if (model_dir.has_value() && !model_dir->empty()) {
-        alignmentKey = *model_dir;
-    } else if (asset_name.has_value() && !asset_name->empty()) {
-        alignmentKey = *asset_name;
-    }
-    if (!alignmentKey.empty()) {
-        AlignmentDetectResult alignment =
-            DetectAlignmentModel(alignmentKey, modelType, quantization);
+    const bool hasAlignmentDir = model_dir.has_value() && !model_dir->empty();
+    const bool hasAlignmentName = asset_name.has_value() && !asset_name->empty();
+    if (hasAlignmentDir || hasAlignmentName) {
+        // A directory is scanned; a catalog asset name is detected by its name.
+        AlignmentDetectResult alignment = hasAlignmentDir
+            ? DetectAlignmentModel(*model_dir, modelType, quantization)
+            : DetectAlignmentModelFromName(*asset_name, modelType, quantization);
         const std::string alignmentType =
             AlignmentModelKindToString(alignment.selectedKind);
         if (IsCatalogDetectHit(
