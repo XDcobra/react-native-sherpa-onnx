@@ -42,6 +42,7 @@ jest.mock('../../textbuffer', () => ({
 
 jest.mock('../../audiobuffer', () => ({
   resolvePipelineAudioBufferId: jest.fn((value: unknown) => String(value)),
+  getPipelineAudioBufferInfo: jest.fn(),
 }));
 
 import SherpaOnnx from '../../NativeSherpaOnnx';
@@ -54,6 +55,8 @@ import {
   releasePipelineTextBuffer,
 } from '../../textbuffer';
 import { setOfflineTextSegments } from '../../segment/runtime-state';
+import { getPipelineAudioBufferInfo } from '../../audiobuffer';
+import { createOrchestrationCancelledError } from '../../pipeline/cancellation';
 
 describe('stt segmented transcribe', () => {
   const mockNative = SherpaOnnx as unknown as {
@@ -217,5 +220,250 @@ describe('stt segmented transcribe', () => {
         }
       )
     ).rejects.toThrow('boom');
+  });
+
+  describe('signal and onSegment', () => {
+    const AUDIO = 'off_11111111-1111-1111-1111-111111111111';
+    const TEXT_OUT = 'txt_off_11111111-1111-1111-1111-111111111111';
+    const segmented = {
+      segmentation: {
+        mode: 'auto' as const,
+        policy: { evaluator: 'speech_energy_silence' as const },
+      },
+    };
+
+    const completeRun = (config: any) => {
+      config.onSegment?.({
+        segmentIndex: 0,
+        segmentCount: 3,
+        startMs: 0,
+        endMs: 1000,
+        durationMs: 1000,
+        text: 'hi ',
+        speechSegmentId: 'sp_1',
+        textSegmentId: 'tmp_1',
+      });
+      // segment 1 skipped: no callback
+      config.onSegment?.({
+        segmentIndex: 2,
+        segmentCount: 3,
+        startMs: 2500,
+        endMs: 4000,
+        durationMs: 1500,
+        text: 'there',
+        speechSegmentId: 'sp_3',
+        textSegmentId: 'tmp_3',
+      });
+      return {
+        status: 'complete',
+        totalSegments: 3,
+        completedSegments: 2,
+        skippedSegments: [
+          {
+            segmentIndex: 1,
+            segmentId: 'sp_2',
+            error: 'boom',
+            retryCount: 0,
+          },
+        ],
+        processingTimeMs: 4,
+        outputBuffer: { bufferId: 'txt_tmp' },
+        segmentMappings: [
+          {
+            speechSegmentId: 'sp_1',
+            textSegmentId: 'tmp_1',
+            segmentIndex: 0,
+            text: 'hi ',
+          },
+          {
+            speechSegmentId: 'sp_3',
+            textSegmentId: 'tmp_3',
+            segmentIndex: 2,
+            text: 'there',
+          },
+        ],
+      };
+    };
+
+    beforeEach(() => {
+      (getPipelineAudioBufferInfo as jest.Mock).mockResolvedValue({
+        bufferId: AUDIO,
+        kind: 'offlinePcmBuffer',
+        state: 'immutable',
+        sampleRate: 16000,
+        channelCount: 1,
+        numSamples: 64000,
+        durationMs: 4000,
+      });
+    });
+
+    it('passes signal to the orchestrator', async () => {
+      (runOfflineAudioToTextPipeline as jest.Mock).mockImplementation(
+        async (_input, _consumer, config) => completeRun(config)
+      );
+      const stt = await createSTT({
+        modelSource: { kind: 'fs', path: '/models/stt' },
+      });
+      const controller = new AbortController();
+
+      await stt.transcribe(AUDIO, TEXT_OUT, {
+        ...segmented,
+        signal: controller.signal,
+      });
+
+      expect(runOfflineAudioToTextPipeline).toHaveBeenCalledWith(
+        AUDIO,
+        expect.any(Function),
+        expect.objectContaining({ signal: controller.signal })
+      );
+    });
+
+    it('calls onSegment in order with the ids written to textOut', async () => {
+      (runOfflineAudioToTextPipeline as jest.Mock).mockImplementation(
+        async (_input, _consumer, config) => completeRun(config)
+      );
+      const stt = await createSTT({
+        modelSource: { kind: 'fs', path: '/models/stt' },
+      });
+      const onSegment = jest.fn();
+
+      const result = await stt.transcribe(AUDIO, TEXT_OUT, {
+        ...segmented,
+        onSegment,
+      });
+
+      expect(result.status).toBe('complete');
+      expect(onSegment.mock.calls.map(([e]) => e)).toEqual([
+        {
+          segmentIndex: 0,
+          segmentCount: 3,
+          startMs: 0,
+          endMs: 1000,
+          durationMs: 1000,
+          text: 'hi ',
+          speechSegmentId: 'sp_1',
+          textSegmentId: `txtseg_${TEXT_OUT}_0`,
+        },
+        {
+          segmentIndex: 2,
+          segmentCount: 3,
+          startMs: 2500,
+          endMs: 4000,
+          durationMs: 1500,
+          text: 'there',
+          speechSegmentId: 'sp_3',
+          textSegmentId: `txtseg_${TEXT_OUT}_1`,
+        },
+      ]);
+      const written = (setOfflineTextSegments as jest.Mock).mock.calls[0]![1];
+      expect(
+        written.map((seg: { segmentId: string }) => seg.segmentId)
+      ).toEqual(onSegment.mock.calls.map(([e]) => e.textSegmentId));
+    });
+
+    it('a throwing onSegment does not fail a segmented run', async () => {
+      (runOfflineAudioToTextPipeline as jest.Mock).mockImplementation(
+        async (_input, _consumer, config) => completeRun(config)
+      );
+      const stt = await createSTT({
+        modelSource: { kind: 'fs', path: '/models/stt' },
+      });
+      const onSegment = jest.fn(() => {
+        throw new Error('callback failed');
+      });
+
+      const result = await stt.transcribe(AUDIO, TEXT_OUT, {
+        ...segmented,
+        onSegment,
+      });
+
+      expect(result.status).toBe('complete');
+      expect(onSegment).toHaveBeenCalledTimes(2);
+      expect(addSegmentLink).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects with the cancel error and leaves textOut empty', async () => {
+      (runOfflineAudioToTextPipeline as jest.Mock).mockRejectedValue(
+        createOrchestrationCancelledError()
+      );
+      const stt = await createSTT({
+        modelSource: { kind: 'fs', path: '/models/stt' },
+      });
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        stt.transcribe(AUDIO, TEXT_OUT, {
+          ...segmented,
+          signal: controller.signal,
+        })
+      ).rejects.toMatchObject({
+        name: 'AbortError',
+        code: 'ORCHESTRATION_CANCELLED',
+      });
+      expect(
+        mockNative.populateOfflineTextBufferIfEmpty
+      ).not.toHaveBeenCalled();
+      expect(createSegmentLinkMap).not.toHaveBeenCalled();
+    });
+
+    it('rejects before the single native call when segmentation is off', async () => {
+      const stt = await createSTT({
+        modelSource: { kind: 'fs', path: '/models/stt' },
+      });
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        stt.transcribe(AUDIO, TEXT_OUT, { signal: controller.signal })
+      ).rejects.toMatchObject({ code: 'ORCHESTRATION_CANCELLED' });
+      expect(mockNative.transcribe).not.toHaveBeenCalled();
+    });
+
+    it('calls onSegment once with the whole text when segmentation is off', async () => {
+      const stt = await createSTT({
+        modelSource: { kind: 'fs', path: '/models/stt' },
+      });
+      const onSegment = jest.fn();
+      const onProgress = jest.fn();
+
+      await stt.transcribe(AUDIO, TEXT_OUT, { onSegment, onProgress });
+
+      expect(onSegment).toHaveBeenCalledTimes(1);
+      expect(onSegment).toHaveBeenCalledWith({
+        segmentIndex: 0,
+        segmentCount: 1,
+        startMs: 0,
+        endMs: 4000,
+        durationMs: 4000,
+        text: 'hi there',
+      });
+      expect(getOfflineTextBufferTextSlice).toHaveBeenCalledWith(
+        TEXT_OUT,
+        0,
+        8
+      );
+      expect(onProgress).toHaveBeenCalledTimes(2);
+      for (const [p] of onProgress.mock.calls) {
+        expect(p).toMatchObject({
+          currentSegmentStartMs: 0,
+          currentSegmentEndMs: 4000,
+        });
+      }
+    });
+
+    it('a throwing onSegment does not fail a single-pass run', async () => {
+      const stt = await createSTT({
+        modelSource: { kind: 'fs', path: '/models/stt' },
+      });
+
+      const result = await stt.transcribe(AUDIO, TEXT_OUT, {
+        onSegment: () => {
+          throw new Error('callback failed');
+        },
+      });
+
+      expect(result.status).toBe('complete');
+    });
   });
 });

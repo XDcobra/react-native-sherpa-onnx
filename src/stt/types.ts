@@ -275,9 +275,46 @@ export interface SttTranscribeOptions {
   errorRecovery?: ErrorRecoveryStrategy;
   maxRetriesPerSegment?: number;
   retryExhaustedFallback?: 'abort' | 'skip';
+  /**
+   * Called at the start of each segment (and of each retry). Audio position of
+   * the segment: `currentSegmentStartMs` / `currentSegmentEndMs`.
+   */
   onProgress?: (progress: OrchestrationProgress) => void;
+  /**
+   * Called as each part finishes, with its text and position in the input
+   * audio. Not called for skipped or failed segments. With
+   * `segmentation.mode: 'off'` it is called once for the whole audio.
+   * Errors thrown by the callback are ignored.
+   */
+  onSegment?: (segment: SttSegmentResult) => void;
   linkMap?: SegmentLinkMapRef;
   textSkipPlaceholder?: string;
+  /**
+   * Stops the call. Checked before the call and before each segment and retry; a segment that is already running
+   * finishes first. On abort the promise rejects with `code:
+   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and `textOut` stays empty.
+   */
+  signal?: AbortSignal;
+}
+
+/** One finished part of an offline `transcribe()` run. */
+export interface SttSegmentResult {
+  /** 0-based position of the segment in this run. */
+  segmentIndex: number;
+  segmentCount: number;
+  /** Position in the input audio, in ms. */
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  /** Recognized text of this segment. */
+  text: string;
+  /** Speech segment of the input audio (segmented runs only). */
+  speechSegmentId?: string;
+  /**
+   * Id of the text segment this part gets in `textOut` when the run is done
+   * (segmented runs only; same id as in the link map).
+   */
+  textSegmentId?: string;
 }
 
 export interface SttTranscribeResult {
