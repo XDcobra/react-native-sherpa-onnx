@@ -17,6 +17,7 @@ import type {
   VisualizationProgressEvent,
   VisualizationProgressPhase,
 } from './types';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import { takeVisualizationFrames } from './jsi';
 import { saveAudioVisualizationProfile } from './persist';
 
@@ -398,6 +399,7 @@ function normalizeOptions(
  * @throws {Error} `AUDIO_VISUALIZATION_INVALID_OPTIONS` — options are out of range or unsupported.
  * @throws {Error} `AUDIO_VISUALIZATION_PAYLOAD_TOO_LARGE` — `frameCount * barCount` exceeds 131072.
  * @throws {Error} `AUDIO_INVALID_ARGUMENT` — pipeline buffer id is malformed.
+ * @throws {Error} `ORCHESTRATION_CANCELLED` (`name: 'AbortError'`) — `options.signal` aborted before the native call or before `persist` writes.
  */
 export async function computeAudioVisualizationProfile(
   input: AudioVisualizationInput,
@@ -426,6 +428,8 @@ export async function computeAudioVisualizationProfile(
   const normalizedInput = normalizeInput(input);
   const normalizedOptions = normalizeOptions(analysisOptions);
   const onProgress = analysisOptions.onProgress;
+  const signal = analysisOptions.signal;
+  throwIfOrchestrationAborted(signal);
 
   const progressOperationId = onProgress
     ? `viz_${Date.now()}_${++visualizationProgressOpCounter}`
@@ -552,6 +556,7 @@ export async function computeAudioVisualizationProfile(
     };
 
     if (persist != null) {
+      throwIfOrchestrationAborted(signal);
       const saved = await saveAudioVisualizationProfile(profile, persist);
       return { ...profile, saved };
     }
@@ -582,3 +587,9 @@ export type {
   VisualizationProgressEvent,
   VisualizationProgressPhase,
 } from './types';
+
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';

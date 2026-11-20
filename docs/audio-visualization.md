@@ -252,6 +252,19 @@ Events are delivered on the `visualizationProgress` native event (filtered by an
 
 `kind: 'offline'` reports **`analysis` only** (PCM is already decoded).
 
+## Cancel (`signal`)
+
+Pass an `AbortSignal` as `signal`. It is checked before the native analysis starts and, with `persist`, again before the profile is written. The native analysis is one call: once started it runs to the end. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), and nothing is written.
+
+```ts
+const controller = new AbortController();
+const run = computeAudioVisualizationProfile(fileSource, {
+  signal: controller.signal,
+  persist: { destination, overwrite: true },
+});
+// later: controller.abort();
+```
+
 ## Performance (static `levels` vs timeline)
 
 ### Static `levels` (no timeline)

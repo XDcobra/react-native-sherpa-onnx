@@ -90,6 +90,13 @@ export type AudioVisualizationOptions = {
    * For `kind: 'file'`, both phases may advance while chunks are streamed.
    */
   onProgress?: (event: VisualizationProgressEvent) => void;
+  /**
+   * Stops the call. Checked before the native analysis starts and, with
+   * `persist`, before the profile is written. The native analysis is one call
+   * that finishes once started. On abort the promise rejects with `code:
+   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and nothing is written.
+   */
+  signal?: AbortSignal;
 };
 
 /** Compute options: either plain analysis, or analysis + required persist. */
