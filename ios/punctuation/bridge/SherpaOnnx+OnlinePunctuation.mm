@@ -144,10 +144,16 @@ class PunctuationPipelineWorker final : public StreamingPipelineWorker {
   }
 
   void stop() override {
-    if (!running.exchange(false)) return;
+    // Join even when the loop already ended by itself (running is false then);
+    // a joinable std::thread in the destructor terminates the app.
+    running.store(false);
     cv_.notify_all();
     if (thread_.joinable()) {
-      thread_.join();
+      if (thread_.get_id() == std::this_thread::get_id()) {
+        thread_.detach();  // last reference released on the worker's own thread
+      } else {
+        thread_.join();
+      }
     }
   }
 
