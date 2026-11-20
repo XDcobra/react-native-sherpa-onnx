@@ -49,4 +49,30 @@ describe('detectTtsModel', () => {
     expect(res.quantization).toBe('int8');
     expect(res.modelType).toBe('vits');
   });
+
+  it('returns the speaker count read by native detect', async () => {
+    mockSherpa.detectTtsModel.mockResolvedValue({
+      success: true,
+      modelType: 'vits',
+      detectedModels: [{ type: 'vits', modelDir: '/models/vits' }],
+      numSpeakers: 904,
+    } as any);
+
+    const res = await detectTtsModel({ kind: 'fs', path: '/models/vits' });
+
+    expect(res.numSpeakers).toBe(904);
+  });
+
+  it('omits an unknown or invalid speaker count', async () => {
+    mockSherpa.detectTtsModel.mockResolvedValue({
+      success: true,
+      modelType: 'zipvoice',
+      detectedModels: [{ type: 'zipvoice', modelDir: '/models/zv' }],
+      numSpeakers: -1,
+    } as any);
+
+    const res = await detectTtsModel({ kind: 'fs', path: '/models/zv' });
+
+    expect(res).not.toHaveProperty('numSpeakers');
+  });
 });

@@ -487,6 +487,13 @@ struct TtsDetectResult {
     std::string quantization;
     /** tiny, small, medium, large, unknown — from asset/folder name heuristics. */
     std::string sizeTier;
+    /**
+     * Speaker count read from model files without loading the engine (ONNX
+     * `n_speakers` metadata for vits/matcha/kokoro/kitten, `voice.bin` header for
+     * supertonic). Same value as the engine's speaker count; -1 when unknown or
+     * not applicable (zipvoice/pocket clone voices from reference audio).
+     */
+    int32_t numSpeakers = -1;
 };
 
 struct EnhancementDetectResult {

@@ -266,7 +266,7 @@ async function synthesizeLiveOverload(
  * @param source - FileSource describing where to find the model
  * @param options - Optional modelType (default: 'auto')
  * @returns Object with success, detectedModels, modelType, isStreaming (always true for TTS),
- * optional error, lexiconLanguages, languages, quantization, sizeTier
+ * optional error, lexiconLanguages, languages, quantization, sizeTier, numSpeakers
  * @throws {Error} `FILEIO_INVALID_ARGUMENT` — malformed `FileSource` or empty `auto.tryOrder`.
  * @throws {Error} `FILEIO_NOT_FOUND` — no matching path or URI exists.
  * @throws {Error} `FILEIO_UNSUPPORTED_ON_PLATFORM` — source kind is not valid on this OS.
@@ -378,6 +378,12 @@ export async function detectTtsModel(
     }
   }
   const paths = readNonEmptyDetectPathsMap(raw.paths);
+  const numSpeakers =
+    typeof raw.numSpeakers === 'number' &&
+    Number.isInteger(raw.numSpeakers) &&
+    raw.numSpeakers >= 0
+      ? raw.numSpeakers
+      : undefined;
   return {
     success: raw.success,
     isStreaming: true,
@@ -388,6 +394,7 @@ export async function detectTtsModel(
     ...(resolvedLanguages.length > 0 ? { languages: resolvedLanguages } : {}),
     ...(quantization != null ? { quantization } : {}),
     ...(sizeTier != null ? { sizeTier } : {}),
+    ...(numSpeakers != null ? { numSpeakers } : {}),
     ...(detectionSources.length > 0 ? { detectionSources } : {}),
     ...(paths != null ? { paths } : {}),
   };

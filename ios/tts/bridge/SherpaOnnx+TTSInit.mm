@@ -299,6 +299,9 @@ static NSString *TtsTrimmedString(NSString *value) {
         if (!result.sizeTier.empty()) {
             resultDict[@"sizeTier"] = [NSString stringWithUTF8String:result.sizeTier.c_str()];
         }
+        if (result.numSpeakers >= 0) {
+            resultDict[@"numSpeakers"] = @(result.numSpeakers);
+        }
         if (!result.detectionSources.empty()) {
             NSMutableArray *sources = [NSMutableArray array];
             for (const auto s : result.detectionSources) {

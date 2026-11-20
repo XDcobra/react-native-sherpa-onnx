@@ -2057,6 +2057,8 @@ export interface Spec extends TurboModule {
     quantization?: string;
     /** tiny, small, medium, large, unknown — from name heuristics. */
     sizeTier?: string;
+    /** Speaker count from model files (no engine load); omitted when unknown. */
+    numSpeakers?: number;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
     /** Resolved non-empty path keys from native file-based detection. */

@@ -99,6 +99,15 @@ export interface TtsDetectModelResult extends ModelDetectResultBase {
   lexiconLanguages?: ReadonlyArray<TtsLexiconLanguage>;
   /** Resolved non-empty path keys from native file-based detection. */
   paths?: Readonly<Record<string, string>>;
+  /**
+   * Number of voices (speaker ids `0 .. numSpeakers - 1`), read from the model
+   * files without loading the engine: ONNX `n_speakers` metadata for vits,
+   * matcha, kokoro and kitten, the `voice.bin` header for supertonic. Same
+   * value as `tts.getNumSpeakers()`; `0` or `1` means one voice. Omitted for
+   * zipvoice and pocket (they clone a voice from reference audio), for
+   * name-only detection (no `modelDir`) and when the files cannot be read.
+   */
+  numSpeakers?: number;
 }
 
 // ─── STT extension ──────────────────────────────────────────────────────

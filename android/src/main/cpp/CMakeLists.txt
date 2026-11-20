@@ -129,6 +129,7 @@ set(SOURCES
     jni/model_detect/common/sherpa-onnx-catalog-metadata.cpp
     jni/model_detect/common/model_language_catalog.cpp
     jni/model_detect/common/sherpa-onnx-ort-guard-utils.cpp
+    jni/model_detect/common/onnx-model-metadata.cpp
     jni/model_detect/stt/sherpa-onnx-stt-catalog-metadata.cpp
     jni/model_detect/stt/sherpa-onnx-model-detect-stt.cpp
     jni/model_detect/stt/sherpa-onnx-validate-stt.cpp
