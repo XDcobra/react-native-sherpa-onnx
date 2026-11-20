@@ -695,8 +695,10 @@ async function commitFinalizeSegmentIfNeeded(
  * Accepts any audio format supported by FFmpeg (wav, mp3, flac, aac, opus, ogg, etc.).
  * Format is auto-detected from file content (no format hint needed).
  *
- * Small files (<10 MB decoded PCM) are stored in memory.
- * Large files are file-backed (streaming reader, no full memory load).
+ * Small files are stored in memory; decoded PCM above a device threshold is
+ * file-backed (memory-mapped, no full memory load). The threshold is 8 MiB on a
+ * device with 3–6 GB RAM, scaled ×0.75 / ×1.5 / ×2 for less / up to 12 GB / more
+ * RAM, and kept within 4–32 MiB; `info.storageKind` tells which one a buffer got.
  *
  * File source resolution uses the fileio resolver for all FileSource kinds.
  * Decode + resample + downmix happen in a single native pass (FFmpeg + SwrContext).

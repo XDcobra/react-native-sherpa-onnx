@@ -1034,6 +1034,13 @@ long pa_file_origin_threshold_bytes() {
   return gPaThresholdSnapshot.fileOriginThresholdBytes;
 }
 
+long pa_heap_origin_threshold_bytes() {
+  if (!g_pa_threshold_configured) {
+    pa_configure_threshold(6ULL * 1024ULL * 1024ULL * 1024ULL);
+  }
+  return gPaThresholdSnapshot.heapOriginThresholdBytes;
+}
+
 bool pa_transfer_offline_from_live(const std::string &liveBufferId, bool fullIfSpooled,
                                    std::string *offlineBufferIdOut, std::string *errorCode,
                                    std::string *errorMessage) {

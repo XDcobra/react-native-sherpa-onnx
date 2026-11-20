@@ -7,6 +7,9 @@ package com.sherpaonnx.audio.pipeline
 internal object AudioBufferNative {
   @JvmStatic external fun nativeInit(cacheDir: String, totalRamBytes: Long)
 
+  /** mmap threshold in bytes for file-origin (true) or heap-origin (false) buffers. */
+  @JvmStatic external fun nativeThresholdBytes(fileOrigin: Boolean): Long
+
   @JvmStatic
   external fun nativeCreateOfflineFromSamples(
     samples: FloatArray,
