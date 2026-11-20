@@ -1572,4 +1572,95 @@ describe('offline orchestrator', () => {
       expect(consumer).toHaveBeenCalledTimes(3);
     });
   });
+
+  describe('audio output on the input timeline', () => {
+    const seg = (i: number, start: number, end: number) => ({
+      segmentId: `seg_${i}`,
+      domain: 'speech',
+      startOffset: start,
+      endOffset: end,
+      reason: 'manual_commit',
+      source: 'external',
+      createdAtMs: 0,
+      segmentIndex: i,
+      sourceAudioBufferId: 'off_input',
+      sampleRate: 16000,
+      durationMs: (end - start) / 16,
+    });
+
+    /** Input of 300 frames in 3 parts; every part's output has `outLen` samples. */
+    function setup(outLen: (inLen: number) => number) {
+      const lastIn: number[] = [];
+      audio.getPipelineAudioBufferInfo.mockImplementation((id: string) =>
+        Promise.resolve({
+          bufferId: id,
+          kind: 'offlinePcmBuffer',
+          state: 'immutable',
+          sampleRate: 16000,
+          channelCount: 1,
+          numSamples: id === 'off_input' ? 300 : outLen(lastIn[0] ?? 0),
+          durationMs: 0,
+        })
+      );
+      audio.getOfflineAudioBufferSamplesSlice.mockImplementation(
+        (_id: string, _start: number, count: number) => new Float32Array(count)
+      );
+      segment.getSegments.mockResolvedValue([
+        seg(0, 0, 100),
+        seg(1, 100, 200),
+        seg(2, 200, 300),
+      ]);
+      const consumer = jest.fn(
+        async (input: { info: { numSamples: number } }) => {
+          lastIn[0] = input.info.numSamples;
+        }
+      );
+      directFrames = 0;
+      audio.appendOfflineToLiveAudioBuffer.mockImplementation(async () => {
+        directFrames += outLen(lastIn[0] ?? 0);
+      });
+      return consumer;
+    }
+
+    let directFrames = 0;
+
+    /** Frames that reached the accumulator, at 16 kHz. */
+    function appendedFrames(): number {
+      let n = directFrames;
+      for (const call of audio.appendSamplesToLiveAudioBuffer.mock.calls) {
+        n += (call[1] as Float32Array).length;
+      }
+      return n;
+    }
+
+    it('pads a part whose output is a little short', async () => {
+      const consumer = setup((inLen) => inLen - 7);
+      await runOfflineAudioPipeline('off_input', consumer as never, {
+        segmentation: { mode: 'auto' },
+      });
+      expect(appendedFrames()).toBe(300);
+    });
+
+    it('trims a part whose output is a little long', async () => {
+      const consumer = setup((inLen) => inLen + 5);
+      await runOfflineAudioPipeline('off_input', consumer as never, {
+        segmentation: { mode: 'auto' },
+      });
+      expect(appendedFrames()).toBe(300);
+    });
+
+    it('gives the overlap as context before a part and cuts it again', async () => {
+      const consumer = setup((inLen) => inLen);
+      await runOfflineAudioPipeline('off_input', consumer as never, {
+        segmentation: { mode: 'auto' },
+        overlapSamples: 20,
+      });
+      expect(audio.getOfflineAudioBufferSamplesSlice).toHaveBeenCalledWith(
+        'off_input',
+        80,
+        120
+      );
+      expect(appendedFrames()).toBe(300);
+    });
+  });
 });
