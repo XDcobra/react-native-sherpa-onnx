@@ -1,7 +1,8 @@
 import { categoryUsesCatalogDetect } from '../catalogDetectCategories';
 import { buildCatalogHintsMap, type CatalogDetectHint } from '../catalogHints';
 import { ModelCategory, type Quantization, type SizeTier } from '../types';
-import type { SourceModel } from './types';
+import { getSupplementFileNames } from './supplement-rules';
+import type { SourceAssetEntry, SourceModel } from './types';
 import {
   getAssetExtension,
   isAssetSupportedForCategory,
@@ -134,6 +135,48 @@ function toSourceModel(
   };
 }
 
+/**
+ * Adds the supplement files the rules name for `model` when the same release publishes
+ * them. A file the release lacks, or that the model already lists as an asset, is skipped.
+ */
+function attachSupplements(
+  model: SourceModel,
+  assetsByName: ReadonlyMap<string, GitHubReleaseAsset>
+): SourceModel {
+  const fileNames = getSupplementFileNames(model.category, model.id);
+  if (fileNames.length === 0) {
+    return model;
+  }
+
+  const ownFiles = new Set(
+    model.assets.map((asset) => asset.relativePath.split('/').pop() ?? '')
+  );
+  const supplements: SourceAssetEntry[] = [];
+  for (const fileName of fileNames) {
+    const asset = assetsByName.get(fileName);
+    if (!asset || ownFiles.has(fileName)) {
+      continue;
+    }
+    supplements.push({
+      relativePath: fileName,
+      url: asset.browser_download_url,
+      bytes: asset.size,
+      sha256: parseDigestSha256(asset.digest),
+    });
+  }
+  if (supplements.length === 0) {
+    return model;
+  }
+
+  return {
+    ...model,
+    supplements,
+    bytes:
+      model.bytes +
+      supplements.reduce((sum, supplement) => sum + (supplement.bytes ?? 0), 0),
+  };
+}
+
 export async function buildSourceModelsFromGithubReleaseAssets(
   category: ModelCategory,
   assets: GitHubReleaseAsset[]
@@ -144,6 +187,7 @@ export async function buildSourceModelsFromGithubReleaseAssets(
     hints = await buildCatalogHintsMap(category, ids);
   }
 
+  const assetsByName = new Map(assets.map((asset) => [asset.name, asset]));
   const models: SourceModel[] = [];
   for (const asset of assets) {
     const ext = getAssetExtension(asset.name);
@@ -167,7 +211,7 @@ export async function buildSourceModelsFromGithubReleaseAssets(
       continue;
     }
 
-    models.push(enriched);
+    models.push(attachSupplements(enriched, assetsByName));
   }
 
   return models;

@@ -49,6 +49,12 @@ export type ModelMeta = {
   sourceId: string;
   layout: SourceAssetLayout;
   assets: SourceAssetEntry[];
+  /**
+   * Files the pack does not ship, published by the source as separate assets (for example
+   * an English lexicon). The download puts them into the model directory after the assets.
+   */
+  supplements?: SourceAssetEntry[];
+  /** Total download size: every asset plus every supplement. */
   bytes: number;
   sha256?: string;
   category: ModelCategory;
