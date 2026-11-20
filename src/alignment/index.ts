@@ -74,6 +74,7 @@ export type {
   AlignTextToAudioWriteResult,
   AlignmentAccurateSegmentationConfig,
   AlignmentAsrConfig,
+  AlignmentCancelOptions,
   AlignmentVadSegmentationConfig,
   AlignmentChunkTimeline,
   AlignmentDetectResult,
@@ -87,6 +88,11 @@ export type {
   OrchestrationProgress,
 } from './types';
 export type { AlignmentDetectModelResult } from '../types/modelDetect';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';
 
 /**
  * Detect an alignment model layout without loading the engine.

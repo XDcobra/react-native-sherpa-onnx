@@ -31,6 +31,8 @@ import type {
   OfflineTextBufferIdSource,
   OfflineTextBufferInfo,
 } from '../../textbuffer/types';
+import { throwIfOrchestrationAborted } from '../../pipeline/cancellation';
+import { releaseSegmentLinkMap } from '../../segment';
 import { resolveAlignmentOnnxPath } from '../resolveAlignmentOnnxPath';
 import { prepareAlignmentTranscript } from '../modelProfiles';
 import { runLinker } from '../linker/linker';
@@ -409,11 +411,15 @@ interface RunAccurateAsrMediatedInput {
   granularity?: 'sentence' | 'word';
   language?: string;
   onProgress?: (progress: OrchestrationProgress) => void;
+  /** Checked before the run, before and after the linker and before each anchor job. */
+  signal?: AbortSignal;
 }
 
 export async function runAccurateAsrMediated(
   input: RunAccurateAsrMediatedInput
 ): Promise<AlignTextToAudioWriteResult> {
+  const signal = input.signal;
+  throwIfOrchestrationAborted(signal);
   const progressSession = createAlignmentProgressSession(input.onProgress);
 
   const textInBufferId = resolveOfflineTextBufferId(input.textIn);
@@ -475,6 +481,7 @@ export async function runAccurateAsrMediated(
   }
   const granularity = normalizeGranularity(input.granularity);
 
+  throwIfOrchestrationAborted(signal);
   const linkerResult = await runLinker({
     audioIn: audioInBufferId,
     anchors: anchorSegmentBufferId,
@@ -486,70 +493,97 @@ export async function runAccurateAsrMediated(
       : {}),
   });
 
-  if (linkerResult.mappingUnits.length === 0) {
-    throw createAsrMediatedError(
-      'ALIGNMENT_LINKER_NO_MAPPING',
-      'Linker returned no usable mapping units for asrMediated.'
-    );
-  }
-
-  const anchorsRaw = await getOfflineSegmentBufferSegments(
-    anchorSegmentBufferId,
-    0,
-    anchorInfo.segmentCount ?? 0
-  );
-  const anchors = toSpeechAnchors(anchorsRaw);
-  if (anchors.length === 0) {
-    throw createAsrMediatedError(
-      'ALIGNMENT_LINKER_INPUT_INVALID',
-      'Anchor segment buffer must contain at least one speech segment.'
-    );
-  }
-
-  const jobs = buildAnchorJobs(
-    referenceTextRaw,
-    anchors,
-    linkerResult.mappingUnits
-  );
-  if (jobs.length === 0) {
-    throw createAsrMediatedError(
-      'ALIGNMENT_LINKER_NO_MAPPING',
-      'No anchor jobs could be materialized from linker units.'
-    );
-  }
-
-  const aggregatedSegments: AsrMediatedAggregatedAlignmentSegment[] = [];
-
-  for (const [j, job] of jobs.entries()) {
-    assertAnchorRangeWithinAudio(job.anchor, audioInfo);
-
-    const frameCount = job.anchor.endSample - job.anchor.startSample;
-    if (frameCount <= 0) {
-      continue;
+  try {
+    throwIfOrchestrationAborted(signal);
+    if (linkerResult.mappingUnits.length === 0) {
+      throw createAsrMediatedError(
+        'ALIGNMENT_LINKER_NO_MAPPING',
+        'Linker returned no usable mapping units for asrMediated.'
+      );
     }
 
-    const currentSegmentDurationMs =
-      job.anchor.sampleRate > 0
-        ? (frameCount / job.anchor.sampleRate) * 1000
-        : 0;
-
-    progressSession.emitStep(j, jobs.length, currentSegmentDurationMs);
-
-    const preparedText = prepareAlignmentTranscript(
-      job.referenceText,
-      alignmentProfile,
-      languageOpt
+    const anchorsRaw = await getOfflineSegmentBufferSegments(
+      anchorSegmentBufferId,
+      0,
+      anchorInfo.segmentCount ?? 0
     );
-    const nativeResultRaw = await (async () => {
-      try {
-        const vocabPath =
-          resolvedVocabPath.length > 0 ? resolvedVocabPath : undefined;
-        const pcm = {
-          audioBufferId: audioInBufferId,
-          startSample: job.anchor.startSample,
-          sampleCount: frameCount,
-        };
-        if (numThreadsOpt != null) {
+    const anchors = toSpeechAnchors(anchorsRaw);
+    if (anchors.length === 0) {
+      throw createAsrMediatedError(
+        'ALIGNMENT_LINKER_INPUT_INVALID',
+        'Anchor segment buffer must contain at least one speech segment.'
+      );
+    }
+
+    const jobs = buildAnchorJobs(
+      referenceTextRaw,
+      anchors,
+      linkerResult.mappingUnits
+    );
+    if (jobs.length === 0) {
+      throw createAsrMediatedError(
+        'ALIGNMENT_LINKER_NO_MAPPING',
+        'No anchor jobs could be materialized from linker units.'
+      );
+    }
+
+    const aggregatedSegments: AsrMediatedAggregatedAlignmentSegment[] = [];
+
+    for (const [j, job] of jobs.entries()) {
+      throwIfOrchestrationAborted(signal);
+      assertAnchorRangeWithinAudio(job.anchor, audioInfo);
+
+      const frameCount = job.anchor.endSample - job.anchor.startSample;
+      if (frameCount <= 0) {
+        continue;
+      }
+
+      const currentSegmentDurationMs =
+        job.anchor.sampleRate > 0
+          ? (frameCount / job.anchor.sampleRate) * 1000
+          : 0;
+
+      progressSession.emitStep(j, jobs.length, currentSegmentDurationMs);
+
+      const preparedText = prepareAlignmentTranscript(
+        job.referenceText,
+        alignmentProfile,
+        languageOpt
+      );
+      const nativeResultRaw = await (async () => {
+        try {
+          const vocabPath =
+            resolvedVocabPath.length > 0 ? resolvedVocabPath : undefined;
+          const pcm = {
+            audioBufferId: audioInBufferId,
+            startSample: job.anchor.startSample,
+            sampleCount: frameCount,
+          };
+          if (numThreadsOpt != null) {
+            return SherpaOnnx.alignAccurateFromPcm(
+              resolvedModelPath,
+              preparedText,
+              pcm,
+              audioInfo.sampleRate,
+              granularity,
+              languageOpt,
+              vocabPath,
+              providerOpt,
+              numThreadsOpt
+            );
+          }
+          if (providerOpt) {
+            return SherpaOnnx.alignAccurateFromPcm(
+              resolvedModelPath,
+              preparedText,
+              pcm,
+              audioInfo.sampleRate,
+              granularity,
+              languageOpt,
+              vocabPath,
+              providerOpt
+            );
+          }
           return SherpaOnnx.alignAccurateFromPcm(
             resolvedModelPath,
             preparedText,
@@ -557,117 +591,105 @@ export async function runAccurateAsrMediated(
             audioInfo.sampleRate,
             granularity,
             languageOpt,
-            vocabPath,
-            providerOpt,
-            numThreadsOpt
+            vocabPath
           );
+        } catch (error) {
+          throw mapNativeAsrMediatedError(error);
         }
-        if (providerOpt) {
-          return SherpaOnnx.alignAccurateFromPcm(
-            resolvedModelPath,
-            preparedText,
-            pcm,
-            audioInfo.sampleRate,
-            granularity,
-            languageOpt,
-            vocabPath,
-            providerOpt
-          );
-        }
-        return SherpaOnnx.alignAccurateFromPcm(
-          resolvedModelPath,
-          preparedText,
-          pcm,
-          audioInfo.sampleRate,
+      })();
+
+      const nativeSubtitles = parseAsrMediatedNativeSubtitles(
+        (nativeResultRaw as { subtitles?: unknown }).subtitles
+      );
+      if (nativeSubtitles.length === 0) {
+        continue;
+      }
+
+      aggregatedSegments.push(
+        ...toAggregatedSegments(
+          job.anchor,
+          audioInBufferId,
           granularity,
-          languageOpt,
-          vocabPath
+          nativeSubtitles
+        )
+      );
+    }
+
+    if (aggregatedSegments.length === 0) {
+      throw createAsrMediatedError(
+        'ALIGNMENT_LINKER_NO_MAPPING',
+        'asrMediated produced no aligned segments after per-anchor accurate runs.'
+      );
+    }
+
+    aggregatedSegments.sort(
+      (a, b) => a.startSample - b.startSample || a.endSample - b.endSample
+    );
+
+    const outputLiveSegmentBuffer = await createLiveSegmentBuffer({
+      sourceAudioBufferId: audioInBufferId,
+    });
+    try {
+      for (const segment of aggregatedSegments) {
+        await appendLiveSegment(outputLiveSegmentBuffer.bufferId, {
+          kind: 'alignment',
+          sourceAudioBufferId: segment.sourceAudioBufferId,
+          startSample: segment.startSample,
+          endSample: segment.endSample,
+          sampleRate: segment.sampleRate,
+          durationMs: segment.durationMs,
+          ...(typeof segment.confidence === 'number'
+            ? { confidence: segment.confidence }
+            : {}),
+          payload: segment.payload,
+        });
+      }
+
+      await finalizeLiveSegmentBuffer(outputLiveSegmentBuffer.bufferId);
+      try {
+        await populateOfflineSegmentBufferIfEmpty(
+          segmentOutBufferId,
+          outputLiveSegmentBuffer.bufferId,
+          'fullIfSpooled'
         );
       } catch (error) {
-        throw mapNativeAsrMediatedError(error);
+        throw createAsrMediatedError(
+          'ALIGNMENT_OPTIONS_INVALID',
+          'Failed to materialize asrMediated output into caller-provided segmentOut buffer.',
+          error
+        );
       }
-    })();
 
-    const nativeSubtitles = parseAsrMediatedNativeSubtitles(
-      (nativeResultRaw as { subtitles?: unknown }).subtitles
-    );
-    if (nativeSubtitles.length === 0) {
-      continue;
-    }
+      const warnings = toAlignmentWarnings(linkerResult.warnings);
+      const warningCode = toWarningCode(warnings);
 
-    aggregatedSegments.push(
-      ...toAggregatedSegments(
-        job.anchor,
-        audioInBufferId,
-        granularity,
-        nativeSubtitles
-      )
-    );
-  }
-
-  if (aggregatedSegments.length === 0) {
-    throw createAsrMediatedError(
-      'ALIGNMENT_LINKER_NO_MAPPING',
-      'asrMediated produced no aligned segments after per-anchor accurate runs.'
-    );
-  }
-
-  aggregatedSegments.sort(
-    (a, b) => a.startSample - b.startSample || a.endSample - b.endSample
-  );
-
-  const outputLiveSegmentBuffer = await createLiveSegmentBuffer({
-    sourceAudioBufferId: audioInBufferId,
-  });
-  try {
-    for (const segment of aggregatedSegments) {
-      await appendLiveSegment(outputLiveSegmentBuffer.bufferId, {
-        kind: 'alignment',
-        sourceAudioBufferId: segment.sourceAudioBufferId,
-        startSample: segment.startSample,
-        endSample: segment.endSample,
-        sampleRate: segment.sampleRate,
-        durationMs: segment.durationMs,
-        ...(typeof segment.confidence === 'number'
-          ? { confidence: segment.confidence }
+      return {
+        outputSegmentBufferId: segmentOutBufferId,
+        segmentsWritten: aggregatedSegments.length,
+        ...(typeof linkerResult.linkMapId === 'string' &&
+        linkerResult.linkMapId.length > 0
+          ? { linkMap: { linkMapId: linkerResult.linkMapId } }
           : {}),
-        payload: segment.payload,
+        ...(warningCode ? { warningCode } : {}),
+        ...(warnings.length > 0 ? { warnings } : {}),
+      };
+    } finally {
+      await releasePipelineSegmentBuffer(
+        outputLiveSegmentBuffer.bufferId
+      ).catch(() => {
+        // Best-effort cleanup for temporary live segment buffer.
       });
     }
-
-    await finalizeLiveSegmentBuffer(outputLiveSegmentBuffer.bufferId);
-    try {
-      await populateOfflineSegmentBufferIfEmpty(
-        segmentOutBufferId,
-        outputLiveSegmentBuffer.bufferId,
-        'fullIfSpooled'
-      );
-    } catch (error) {
-      throw createAsrMediatedError(
-        'ALIGNMENT_OPTIONS_INVALID',
-        'Failed to materialize asrMediated output into caller-provided segmentOut buffer.',
-        error
-      );
-    }
-
-    const warnings = toAlignmentWarnings(linkerResult.warnings);
-    const warningCode = toWarningCode(warnings);
-
-    return {
-      outputSegmentBufferId: segmentOutBufferId,
-      segmentsWritten: aggregatedSegments.length,
-      ...(typeof linkerResult.linkMapId === 'string' &&
-      linkerResult.linkMapId.length > 0
-        ? { linkMap: { linkMapId: linkerResult.linkMapId } }
-        : {}),
-      ...(warningCode ? { warningCode } : {}),
-      ...(warnings.length > 0 ? { warnings } : {}),
-    };
-  } finally {
-    await releasePipelineSegmentBuffer(outputLiveSegmentBuffer.bufferId).catch(
-      () => {
-        // Best-effort cleanup for temporary live segment buffer.
+  } catch (error) {
+    // The link map never reaches the caller when the run fails or is cancelled.
+    const linkMapId = linkerResult.linkMapId;
+    if (typeof linkMapId === 'string' && linkMapId.length > 0) {
+      try {
+        await releaseSegmentLinkMap(linkMapId);
+      } catch {
+        // Best-effort cleanup.
       }
-    );
+    }
+    throw error;
   }
 }

@@ -18,6 +18,7 @@ describe('alignment public surface snapshot', () => {
     expect(keys).toMatchInlineSnapshot(`
       [
         "AlignmentErrorCode",
+        "OrchestrationErrorCode",
         "accurateOptionsToModelConfig",
         "applyVocabRomanizerToProfile",
         "assertAlignmentCustomConfig",
@@ -27,6 +28,7 @@ describe('alignment public surface snapshot', () => {
         "hasAlignableAlignmentLetters",
         "identityRomanizer",
         "inferRomanizerFromVocabTokens",
+        "isOrchestrationCancelledError",
         "latinDiacriticRomanizer",
         "prepareAlignmentTranscript",
         "resolveAlignmentCustomConfigPaths",

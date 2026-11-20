@@ -1,5 +1,6 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
 import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import {
   getOfflineSegmentBufferSegments,
   resolveOfflineSegmentBufferId,
@@ -147,6 +148,8 @@ export async function runAlignTextToAudio(
   segmentOut: OfflineSegmentBufferIdSource,
   options: AlignTextToAudioOptions
 ): Promise<AlignTextToAudioWriteResult> {
+  const signal = options.signal;
+  throwIfOrchestrationAborted(signal);
   if (options.mode === 'accurate' && options.segmentation?.mode === 'auto') {
     const onProgress = options.onProgress;
     const model = accurateOptionsToModelConfig(options);
@@ -160,6 +163,7 @@ export async function runAlignTextToAudio(
         model,
         granularity: options.granularity === 'word' ? 'word' : 'sentence',
         ...(onProgress ? { onProgress } : {}),
+        ...(signal ? { signal } : {}),
         ...(typeof options.language === 'string'
           ? { language: options.language }
           : {}),
@@ -174,6 +178,7 @@ export async function runAlignTextToAudio(
       model,
       granularity: options.granularity === 'word' ? 'word' : 'sentence',
       ...(onProgress ? { onProgress } : {}),
+      ...(signal ? { signal } : {}),
       ...(typeof options.language === 'string'
         ? { language: options.language }
         : {}),
@@ -220,6 +225,7 @@ export async function runAlignTextToAudio(
 
   const nativeOptions = await buildNativeOptions(options);
 
+  throwIfOrchestrationAborted(signal);
   emitSingleStepNativeAlignmentStart(progressSession);
 
   return SherpaOnnx.alignOfflineTextToAudio(

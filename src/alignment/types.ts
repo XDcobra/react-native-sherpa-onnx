@@ -111,6 +111,19 @@ export type AlignmentProgressCallbacks = {
   onProgress?: (progress: OrchestrationProgress) => void;
 };
 
+export type AlignmentCancelOptions = {
+  /**
+   * Stops the call. Checked before the call and, for `accurate` with
+   * `segmentation.mode: 'auto'`, before each anchor and each retry; an anchor
+   * that is already running finishes first. The other modes run one native
+   * pass, so only an abort before it starts has an effect. On abort the
+   * promise rejects with `code: 'ORCHESTRATION_CANCELLED'`
+   * (`name: 'AbortError'`), the SDK releases its temporary buffers and link
+   * map and `segmentOut` stays empty.
+   */
+  signal?: AbortSignal;
+};
+
 export interface AlignTextToAudioWriteResult {
   outputSegmentBufferId: string;
   segmentsWritten: number;
@@ -139,7 +152,8 @@ export type AlignTextToAudioOptionsProportional = {
   granularity?: 'sentence' | 'word';
   language?: string;
   segmentation?: never;
-} & AlignmentProgressCallbacks;
+} & AlignmentProgressCallbacks &
+  AlignmentCancelOptions;
 
 /** Estimated: segment sample counts from synthesis, STT, or other engines. */
 export type AlignTextToAudioOptionsEstimated = {
@@ -148,7 +162,8 @@ export type AlignTextToAudioOptionsEstimated = {
   granularity?: 'sentence' | 'word';
   language?: string;
   segmentation?: never;
-} & AlignmentProgressCallbacks;
+} & AlignmentProgressCallbacks &
+  AlignmentCancelOptions;
 
 type AlignTextToAudioOptionsAccurateBase =
   | ({
@@ -171,7 +186,9 @@ type AlignTextToAudioOptionsAccurateBase =
 
 /** Accurate: wav2vec2 CTC forced alignment. */
 export type AlignTextToAudioOptionsAccurate =
-  AlignTextToAudioOptionsAccurateBase & AlignmentProgressCallbacks;
+  AlignTextToAudioOptionsAccurateBase &
+    AlignmentProgressCallbacks &
+    AlignmentCancelOptions;
 
 /** VAD standalone: segment-buffer anchored timing without CTC alignment model. */
 export type AlignTextToAudioOptionsVad = {
@@ -179,7 +196,8 @@ export type AlignTextToAudioOptionsVad = {
   granularity?: 'sentence' | 'word';
   language?: string;
   segmentation: AlignmentVadSegmentationConfig;
-} & AlignmentProgressCallbacks;
+} & AlignmentProgressCallbacks &
+  AlignmentCancelOptions;
 
 export type AlignTextToAudioOptions =
   | AlignTextToAudioOptionsProportional
@@ -207,6 +225,7 @@ export interface AlignTextToAudioFn {
    * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
    * @throws {Error} `ALIGNMENT_ERROR` — native proportional align failed.
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   (
     textIn: OfflineTextBufferIdSource,
@@ -229,6 +248,7 @@ export interface AlignTextToAudioFn {
    * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
    * @throws {Error} `ALIGNMENT_ERROR` — native estimated align failed.
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   (
     textIn: OfflineTextBufferIdSource,
@@ -251,6 +271,7 @@ export interface AlignTextToAudioFn {
    * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH` — audio buffer is not offline.
    * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   (
     textIn: OfflineTextBufferIdSource,
@@ -286,6 +307,7 @@ export interface AlignTextToAudioFn {
    * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_KIND_MISMATCH` — audio buffer is not offline.
    * @throws {Error} `ALIGNMENT_AUDIO_BUFFER_EMPTY` — audio buffer has no samples.
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted.
    */
   (
     textIn: OfflineTextBufferIdSource,

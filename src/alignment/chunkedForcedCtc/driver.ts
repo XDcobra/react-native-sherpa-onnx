@@ -37,7 +37,13 @@ import {
   prepareAlignmentTranscript,
   type AlignmentModelProfile,
 } from '../modelProfiles';
-import { addSegmentLink, createSegmentLinkMap } from '../../segment';
+import { throwIfOrchestrationAborted } from '../../pipeline/cancellation';
+import {
+  addSegmentLink,
+  createSegmentLinkMap,
+  releaseSegmentLinkMap,
+} from '../../segment';
+import type { SegmentLinkMapRef } from '../../segment/segment-link';
 import type {
   AlignmentAccurateModelConfig,
   AlignmentErrorCode,
@@ -412,11 +418,15 @@ interface RunAccurateChunkedForcedCtcInput {
   granularity?: 'sentence' | 'word';
   language?: string;
   onProgress?: (progress: OrchestrationProgress) => void;
+  /** Checked before the run and before each anchor attempt (incl. retries). */
+  signal?: AbortSignal;
 }
 
 export async function runAccurateChunkedForcedCtc(
   input: RunAccurateChunkedForcedCtcInput
 ): Promise<AlignTextToAudioWriteResult> {
+  const signal = input.signal;
+  throwIfOrchestrationAborted(signal);
   const progressSession = createAlignmentProgressSession(input.onProgress);
 
   const textInBufferId = resolveOfflineTextBufferId(input.textIn);
@@ -499,25 +509,30 @@ export async function runAccurateChunkedForcedCtc(
     };
   }
 
+  throwIfOrchestrationAborted(signal);
   const warnings: AlignmentWarning[] = [];
   const outputLiveSegmentBuffer = await createLiveSegmentBuffer({
     sourceAudioBufferId: audioInBufferId,
   });
-  const linkMap = await createSegmentLinkMap({
-    textBufferId: textInBufferId,
-    audioBufferId: audioInBufferId,
-  }).catch((error) => {
-    throw createChunkedForcedCtcError(
-      'ALIGNMENT_LINKER_FAILED',
-      'chunkedForcedCtc failed to create alignment SegmentLinkMap.',
-      error
-    );
-  });
+  // Released again when the run fails or is cancelled (never reaches the caller).
+  let createdLinkMap: SegmentLinkMapRef | undefined;
 
   let segmentsWritten = 0;
   let consecutiveNoProgress = 0;
 
   try {
+    const linkMap = await createSegmentLinkMap({
+      textBufferId: textInBufferId,
+      audioBufferId: audioInBufferId,
+    }).catch((error) => {
+      throw createChunkedForcedCtcError(
+        'ALIGNMENT_LINKER_FAILED',
+        'chunkedForcedCtc failed to create alignment SegmentLinkMap.',
+        error
+      );
+    });
+    createdLinkMap = linkMap;
+
     for (const [i, anchor] of anchors.entries()) {
       assertAnchorRangeWithinAudio(anchor, audioInfo);
       if (isCursorExhausted(cursor)) {
@@ -538,6 +553,8 @@ export async function runAccurateChunkedForcedCtc(
       // speech audio is not dropped when non-vocab units lead the cursor.
       let anchorHandled = false;
       while (!anchorHandled && !isCursorExhausted(cursor)) {
+        // Before each attempt on this anchor (first try and retries).
+        throwIfOrchestrationAborted(signal);
         skipUnalignableCursorUnits(
           cursor,
           warnings,
@@ -853,6 +870,15 @@ export async function runAccurateChunkedForcedCtc(
       ...(warningCode ? { warningCode } : {}),
       ...(warnings.length > 0 ? { warnings } : {}),
     };
+  } catch (error) {
+    if (createdLinkMap != null) {
+      try {
+        await releaseSegmentLinkMap(createdLinkMap);
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    throw error;
   } finally {
     await releasePipelineSegmentBuffer(outputLiveSegmentBuffer.bufferId).catch(
       () => {
