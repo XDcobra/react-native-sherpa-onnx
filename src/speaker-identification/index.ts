@@ -24,6 +24,10 @@ import {
   buildSpeakerEmbeddingInitBridgeOptions,
   speakerEmbeddingEngineCacheKeyFromBridgeOptions,
 } from '../speaker-embedding/speakerEmbeddingNativeBridge';
+import {
+  isOrchestrationCancelledError,
+  throwIfOrchestrationAborted,
+} from '../pipeline/cancellation';
 import { labelLiveSegments } from './live';
 import { createSpeakerIdentificationProgressSession } from './progress';
 import type {
@@ -64,6 +68,11 @@ export type {
 } from './types';
 
 export type { SpeakerIdentificationPipelineHandle } from './streamingTypes';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';
 
 // DX parity with other feature packages: detect / model types / error codes
 // also live on `react-native-sherpa-onnx/speaker-embedding` (shared foundation).
@@ -356,8 +365,10 @@ export async function createSpeakerIdentification(
     ): Promise<void> {
       guard();
       assertSegmentOptions(segmentOptions);
+      const signal = segmentOptions?.signal;
       const audioBufferId = resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
+      throwIfOrchestrationAborted(signal);
       const spans = collectSpeechSpans(
         await getOfflineSegmentBufferSegments(segmentsIn)
       );
@@ -390,6 +401,7 @@ export async function createSpeakerIdentification(
         { startSamples: number[]; endSamples: number[] }
       >();
       for (let i = 0; i < spans.length; i++) {
+        throwIfOrchestrationAborted(signal);
         const span = spans[i]!;
         const speakerName = trimmedPerSpan[i]!;
         progressSession.emitStep(i, spans.length, spanDurationMs(span));
@@ -405,21 +417,34 @@ export async function createSpeakerIdentification(
         }
       }
 
-      for (const [speakerName, ranges] of byName) {
-        const audioBufferIds = ranges.startSamples.map(() => audioBufferId);
-        const result = await SherpaOnnx.enrollSpeakerOffline(
-          engine.instanceId,
-          manager.managerId,
-          speakerName,
-          audioBufferIds,
-          ranges.startSamples,
-          ranges.endSamples
-        );
-        if (!result.ok) {
-          throw new Error(
-            `Failed to enroll speaker '${speakerName}' (name may already exist)`
+      // Speakers added by this call; removed again when the call is cancelled.
+      const enrolledNames: string[] = [];
+      try {
+        for (const [speakerName, ranges] of byName) {
+          throwIfOrchestrationAborted(signal);
+          const audioBufferIds = ranges.startSamples.map(() => audioBufferId);
+          const result = await SherpaOnnx.enrollSpeakerOffline(
+            engine.instanceId,
+            manager.managerId,
+            speakerName,
+            audioBufferIds,
+            ranges.startSamples,
+            ranges.endSamples
           );
+          if (!result.ok) {
+            throw new Error(
+              `Failed to enroll speaker '${speakerName}' (name may already exist)`
+            );
+          }
+          enrolledNames.push(speakerName);
         }
+      } catch (err) {
+        if (isOrchestrationCancelledError(err)) {
+          for (const enrolledName of enrolledNames) {
+            await manager.remove(enrolledName).catch(() => false);
+          }
+        }
+        throw err;
       }
     },
     async identify(
@@ -470,12 +495,17 @@ export async function createSpeakerIdentification(
       const segmentsInId = resolveOfflineSegmentBufferId(segmentsIn);
       const segmentsOutId = resolveOfflineSegmentBufferId(segmentsOut);
       const threshold = resolveThreshold(segmentOptions);
+      const signal = segmentOptions?.signal;
+      throwIfOrchestrationAborted(signal);
 
-      const hasCallbacks =
+      // Fast path: without callbacks or signal, label all spans in one native
+      // call. A signal needs the per-span loop so it can stop between spans.
+      const needsSpanLoop =
         typeof segmentOptions?.onProgress === 'function' ||
-        typeof segmentOptions?.onLabeled === 'function';
+        typeof segmentOptions?.onLabeled === 'function' ||
+        signal != null;
 
-      if (!hasCallbacks) {
+      if (!needsSpanLoop) {
         return await SherpaOnnx.labelSpeakerIdentificationOfflineSegments(
           engine.instanceId,
           manager.managerId,
@@ -493,6 +523,7 @@ export async function createSpeakerIdentification(
       if (spans.length === 0) {
         return { labeledCount: 0, unknownCount: 0 };
       }
+      throwIfOrchestrationAborted(signal);
 
       const progressSession = createSpeakerIdentificationProgressSession(
         segmentOptions?.onProgress
@@ -510,6 +541,7 @@ export async function createSpeakerIdentification(
         stagingLiveBufferId = staging.bufferId;
 
         for (let i = 0; i < spans.length; i++) {
+          throwIfOrchestrationAborted(signal);
           const span = spans[i]!;
           const durationMs = spanDurationMs(span);
           progressSession.emitStep(i, spans.length, durationMs);
@@ -610,9 +642,11 @@ export async function createSpeakerIdentification(
     ): Promise<VerifyOfflineSegmentsResult> {
       guard();
       assertVerifyOptions(verifyOptions);
+      const signal = verifyOptions?.signal;
       const audioBufferId = resolvePipelineAudioBufferId(audioIn);
       resolveOfflineSegmentBufferId(segmentsIn);
       const threshold = resolveThreshold(verifyOptions);
+      throwIfOrchestrationAborted(signal);
       const spans = collectSpeechSpans(
         await getOfflineSegmentBufferSegments(segmentsIn)
       );
@@ -636,6 +670,7 @@ export async function createSpeakerIdentification(
       let mismatchCount = 0;
 
       for (let i = 0; i < spans.length; i++) {
+        throwIfOrchestrationAborted(signal);
         const span = spans[i]!;
         const expectedName = expectedPerSpan[i]!;
         const durationMs = spanDurationMs(span);
