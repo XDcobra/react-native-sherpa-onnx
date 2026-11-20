@@ -251,6 +251,32 @@ transcribe(
 await engine.transcribe(audio, textOut);
 ```
 
+**Per-segment results.** `onSegment` is called as each part finishes, with its text and position in the input audio. You do not need to read the segment buffers or the link map after the run. Skipped and failed segments get no call. With `segmentation.mode: 'off'` it is called once for the whole audio. Errors thrown by the callback are ignored.
+
+```ts
+await engine.transcribe(audio, textOut, {
+  segmentation: { mode: 'auto' },
+  onSegment: (s) => console.log(s.segmentIndex, s.startMs, s.endMs, s.text),
+});
+```
+
+**Cancel.** Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code finishes first, so a run stops at segment granularity; with `segmentation.mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'`, and `textOut` stays empty. If the signal aborts while the last segment runs, the call still resolves.
+
+```ts
+import { isOrchestrationCancelledError } from 'react-native-sherpa-onnx/stt';
+
+const controller = new AbortController();
+try {
+  await engine.transcribe(audio, textOut, {
+    segmentation: { mode: 'auto' },
+    signal: controller.signal,
+  });
+} catch (e) {
+  if (!isOrchestrationCancelledError(e)) throw e;
+}
+// elsewhere: controller.abort();
+```
+
 ### `engine.setConfig(options)`
 
 Update decoding method, hotwords, rules, or blank penalty without re-creating the engine.
@@ -334,14 +360,16 @@ More end-to-end patterns: [feature-pipelines.md#stt-offline-patterns](feature-pi
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass: none |
+| `onProgress` | `OrchestrationProgress` | start of each segment and of each retry | single pass (`mode: 'off'`): once at start, once at the end. `currentSegmentStartMs` / `currentSegmentEndMs` give the segment position in the input audio |
+| `onSegment` | `SttSegmentResult` | each part finishes | not for skipped or failed segments; single pass: once with the whole text |
 
 Shapes: [Types](#types).
 
 ```ts
 const result = await engine.transcribe(audio, textOut, {
   segmentation: { mode: 'auto' },
-  onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
+  onProgress: (p) =>
+    console.log(p.currentSegment, p.totalSegments, p.currentSegmentStartMs),
 });
 ```
 
@@ -369,12 +397,14 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [Live over
 | `SttQwen3AsrModelOptions` | `{ hotwords?, maxTotalLen?, maxNewTokens?, temperature?, topP?, seed? }` |
 | `SttCohereTranscribeModelOptions` | `{ language?, usePunct?, useItn? }` |
 | `SttRuntimeConfig` | Arg to `setConfig()` — `decodingMethod?`, `maxActivePaths?`, `hotwordsFile?`, `hotwordsScore?`, `blankPenalty?`, `ruleFsts?`, `ruleFars?` |
-| `SttTranscribeOptions` | Optional segmentation, `errorRecovery`, `maxRetriesPerSegment`, `onProgress`, `linkMap`, `textSkipPlaceholder` |
+| `SttTranscribeOptions` | Optional segmentation, `errorRecovery`, `maxRetriesPerSegment`, `onProgress`, `onSegment`, `linkMap`, `textSkipPlaceholder`, `signal` |
+| `SttSegmentResult` | `onSegment` payload: `{ segmentIndex, segmentCount, startMs, endMs, durationMs, text, speechSegmentId?, textSegmentId? }`. The ids are set for segmented runs; `textSegmentId` is the id the part gets in `textOut` and the link map once the run is done |
 | `SttTranscribeResult` | `{ status, totalSegments, completedSegments, skippedSegments, failedSegment?, processingTimeMs, linkMap? }` |
 | `SttLivePipelineOptions` | Live-overload options: mandatory `segmentation.policy`, optional `onSegment` |
 | `SttEngine` | `transcribe` (offline / live overload), `setConfig`, `destroy` |
 | `SttErrorCode` | Error code object |
-| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, `currentSegmentStartMs?`, `currentSegmentEndMs?`, …) |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 
 Streaming-only types (`LiveSttEngine`, `SttPipelineHandle`, `SttPipelineOptions`, `StreamingSttInitOptions`, `EndpointConfig`, …): [stt-streaming.md](stt-streaming.md#types).
 
@@ -402,6 +432,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [textbuffer-offline.md](
 | `OFFLINE_OOM` | Not enough memory for offline processing. Prefer streaming STT for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). |
 | `TEXT_BUFFER_NOT_FOUND` | Invalid or released **text** buffer id |
 | `TEXT_ALREADY_POPULATED` | `textOut` already filled; use a new empty buffer |
+| `ORCHESTRATION_CANCELLED` | `signal` aborted; `name` is `'AbortError'` |
 
 Text slice / validation errors are reported via the **textbuffer** pipeline; see **`PipelineTextErrorCode`** in [`src/textbuffer/types.ts`](../src/textbuffer/types.ts).
 

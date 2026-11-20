@@ -53,6 +53,12 @@ export type OfflinePunctuateOptions = {
   overlapChars?: number;
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;
+  /**
+   * Stops the call. Checked before the call and before each segment and retry; a segment that is already running
+   * finishes first. On abort the promise rejects with `code:
+   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and `textOut` stays empty.
+   */
+  signal?: AbortSignal;
 };
 
 export type OfflinePunctuationModelType = 'ct_transformer' | 'auto';
@@ -101,6 +107,7 @@ export type OfflinePunctuationEngine = {
    * @throws {Error} `PUNCTUATION_ERROR` — native punctuate failed.
    * @throws {Error} `PUNCTUATION_INSTANCE_NOT_FOUND` — engine was destroyed.
    * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — text buffers or options are invalid.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    */
   punctuate(
     textIn: OfflineTextBufferIdSource,
@@ -130,6 +137,7 @@ export type OfflinePunctuationEngine = {
    * @throws {Error} `PUNCTUATION_ERROR` — native punctuate failed.
    * @throws {Error} `PUNCTUATION_INSTANCE_NOT_FOUND` — engine was destroyed.
    * @throws {Error} `PUNCTUATION_INVALID_ARGUMENT` — `textOut` or options are invalid.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    */
   punctuateString(
     plain: string,

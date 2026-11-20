@@ -32,6 +32,7 @@ import type {
   PunctuationLivePipelineOptions,
 } from './types';
 import { runOfflinePunctuationPipeline } from './orchestrate';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import { resolveTextInputNormalization } from './textInputNormalization';
 import type { PunctuationPipelineHandle } from './streamingTypes';
 import { buildOfflinePunctuationInitBridgeOptions } from './punctuationNativeBridge';
@@ -268,6 +269,7 @@ export async function createOfflinePunctuation(
     const textInputNormalization = resolveTextInputNormalization(
       punctuateOptions?.textInputNormalization
     );
+    throwIfOrchestrationAborted(punctuateOptions?.signal);
     const raw = await SherpaOnnx.punctuateOfflineTextBuffers(
       instanceId,
       inId,

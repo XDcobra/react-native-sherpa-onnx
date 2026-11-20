@@ -53,6 +53,7 @@ export async function runOfflinePunctuationPipeline(
       overlapChars: options.overlapChars,
       textSkipPlaceholder: options.textSkipPlaceholder,
       linkMap: options.linkMap,
+      signal: options.signal,
     }
   );
 }

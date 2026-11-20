@@ -1,5 +1,8 @@
 import SherpaOnnx from '../NativeSherpaOnnx';
-import { resolvePipelineAudioBufferId } from '../audiobuffer';
+import {
+  getPipelineAudioBufferInfo,
+  resolvePipelineAudioBufferId,
+} from '../audiobuffer';
 import {
   getOfflineTextBufferTextSlice,
   getPipelineTextBufferInfo,
@@ -31,6 +34,7 @@ import type {
   SttTranscribeResult,
   SttTranscribeOptions,
   SttRuntimeConfig,
+  SttSegmentResult,
 } from './types';
 import type { QuantizationPreference } from '../download/types';
 import { validateSegmentationConfig } from '../segment/validation';
@@ -59,6 +63,7 @@ import {
 } from '../types/modelDetect';
 import { buildSttInitBridgeOptions } from './sttNativeBridge';
 import { runOfflineAudioToTextPipeline } from '../pipeline/offlineOrchestrator';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import { addSegmentLink, createSegmentLinkMap } from '../segment';
 import type { TextSegment } from '../segment/segment';
 import { setOfflineTextSegments } from '../segment/runtime-state';
@@ -339,6 +344,37 @@ export async function detectSttModel(
  * await stt.destroy();
  * ```
  */
+/** Duration of an offline audio buffer in ms, or undefined when unknown. */
+async function readOfflineAudioDurationMs(
+  bufferId: string
+): Promise<number | undefined> {
+  try {
+    const info = await getPipelineAudioBufferInfo(bufferId);
+    if (info.kind !== 'offlinePcmBuffer') return undefined;
+    if (info.sampleRate > 0) return (info.numSamples / info.sampleRate) * 1000;
+    return info.durationMs;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readOfflineText(bufferId: string): Promise<string> {
+  const info = await getPipelineTextBufferInfo(bufferId);
+  if (info.kind !== 'offlineTextBuffer' || info.utf16Length <= 0) return '';
+  return getOfflineTextBufferTextSlice(bufferId, 0, info.utf16Length);
+}
+
+function notifySttSegment(
+  onSegment: (segment: SttSegmentResult) => void,
+  segment: SttSegmentResult
+): void {
+  try {
+    onSegment(segment);
+  } catch {
+    // A failing segment callback must not fail or interrupt the run.
+  }
+}
+
 export async function createSTT(
   options: STTInitializeOptions
 ): Promise<SttEngine> {
@@ -438,23 +474,46 @@ export async function createSTT(
       const segmentationEnabled = segmentation.mode !== 'off';
 
       if (!segmentationEnabled) {
-        if (batchOptions?.onProgress) {
-          batchOptions.onProgress({
+        throwIfOrchestrationAborted(batchOptions?.signal);
+        const onProgress = batchOptions?.onProgress;
+        const onSegment = batchOptions?.onSegment;
+        const audioDurationMs =
+          onProgress || onSegment
+            ? await readOfflineAudioDurationMs(bufferId)
+            : undefined;
+        const progressRange =
+          audioDurationMs != null
+            ? { currentSegmentStartMs: 0, currentSegmentEndMs: audioDurationMs }
+            : {};
+        if (onProgress) {
+          onProgress({
             currentSegment: 0,
             totalSegments: 1,
             fraction: 0,
             elapsedMs: 0,
             currentSegmentDurationMs: 0,
+            ...progressRange,
           });
         }
         await SherpaOnnx.transcribe(instanceId, bufferId, textOutBufferId);
-        if (batchOptions?.onProgress) {
-          batchOptions.onProgress({
+        if (onProgress) {
+          onProgress({
             currentSegment: 0,
             totalSegments: 1,
             fraction: 1,
             elapsedMs: Date.now() - startedAtMs,
             currentSegmentDurationMs: Date.now() - startedAtMs,
+            ...progressRange,
+          });
+        }
+        if (onSegment) {
+          notifySttSegment(onSegment, {
+            segmentIndex: 0,
+            segmentCount: 1,
+            startMs: 0,
+            endMs: audioDurationMs ?? 0,
+            durationMs: audioDurationMs ?? 0,
+            text: await readOfflineText(textOutBufferId),
           });
         }
         return {
@@ -467,6 +526,9 @@ export async function createSTT(
         };
       }
 
+      const onSegment = batchOptions?.onSegment;
+      // Same index as the text segments written to textOut after the run.
+      let finishedSegments = 0;
       const orchestrated = await runOfflineAudioToTextPipeline(
         bufferId,
         async (segIn, segOut) => {
@@ -487,6 +549,25 @@ export async function createSTT(
           onProgress: batchOptions?.onProgress,
           textSkipPlaceholder: batchOptions?.textSkipPlaceholder,
           linkMap: batchOptions?.linkMap,
+          signal: batchOptions?.signal,
+          ...(onSegment
+            ? {
+                onSegment: (segment) => {
+                  const textIndex = finishedSegments;
+                  finishedSegments += 1;
+                  notifySttSegment(onSegment, {
+                    segmentIndex: segment.segmentIndex,
+                    segmentCount: segment.segmentCount,
+                    startMs: segment.startMs,
+                    endMs: segment.endMs,
+                    durationMs: segment.durationMs,
+                    text: segment.text,
+                    speechSegmentId: segment.speechSegmentId,
+                    textSegmentId: `txtseg_${textOutBufferId}_${textIndex}`,
+                  });
+                },
+              }
+            : {}),
         }
       );
 
@@ -637,6 +718,7 @@ export type {
   SttCohereTranscribeModelOptions,
   SttTranscribeOptions,
   SttTranscribeResult,
+  SttSegmentResult,
   SttSegmentationConfig,
   SttRuntimeConfig,
   SttEngine,
@@ -673,3 +755,9 @@ export {
   sttSupportsHotwords,
   SttErrorCode,
 } from './types';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';
+export type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';

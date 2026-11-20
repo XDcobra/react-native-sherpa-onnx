@@ -91,6 +91,19 @@ const result = await engine.enhance(inBuf, outBuf, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md). Live path: [enhancement-streaming.md](enhancement-streaming.md#segmentation-optional).
 
+### Cancel
+
+Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code finishes first, so a run stops at segment granularity; with `segmentation.mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and `audioOut` stays empty. If the signal aborts while the last segment runs, the call still resolves.
+
+```ts
+const controller = new AbortController();
+const run = engine.enhance(inBuf, outBuf, {
+  segmentation: { mode: 'auto' },
+  signal: controller.signal,
+});
+// elsewhere: controller.abort();
+```
+
 ## Models
 
 | `modelType` | Required files | Custom-init keys |
@@ -268,7 +281,7 @@ More end-to-end patterns: [feature-pipelines.md#enhancement-offline-patterns](fe
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass: none |
+| `onProgress` | `OrchestrationProgress` | start of each segment and of each retry | segmented only (`mode: 'auto'`); single-pass: none. `currentSegmentStartMs` / `currentSegmentEndMs` give the segment position in the input audio (ms) |
 
 Shapes: [Types](#types).
 
@@ -296,7 +309,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [Live over
 | `EnhancementInitializeOptions` | Auto or custom init |
 | `EnhancementDetectResult` | Return of `detectEnhancementModel()` |
 | `EnhanceSegmentationConfig` | `{ mode?: 'off' \| 'manual' \| 'auto'; policy?: SegmentationPolicy }` |
-| `EnhanceOptions` | `segmentation?`, `errorRecovery?`, `maxRetriesPerSegment?`, `retryExhaustedFallback?`, `onProgress?`, `overlapSamples?` |
+| `EnhanceOptions` | `segmentation?`, `errorRecovery?`, `maxRetriesPerSegment?`, `retryExhaustedFallback?`, `onProgress?`, `overlapSamples?`, `signal?` |
 | `EnhancementResult` | `{ status, totalSegments, completedSegments, skippedSegments, failedSegment?, processingTimeMs }` |
 | `EnhancementLivePipelineOptions` | Live overload options — mandatory `continuous_frames` policy, optional `onSegment` |
 | `EnhancementEngine` | Union of `EnhancementEngineOf<F>` |
@@ -304,7 +317,8 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [Live over
 | `EnhancementEngineForInit<O>` | Maps `createEnhancement({ modelType })` onto `EnhancementEngineOf` |
 | `EnhancementCustomConfig` | Mapped path map: `{ model }` (GTCRN/DPDFNet) or `{ enrollModel, chunkModel }` (VoxLock) |
 | `EnhancementErrorCode` | Error code enum for enhancement operations |
-| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, …) |
+| `OrchestrationProgress` | Shared offline progress payload (`currentSegment`, `totalSegments`, `fraction`, `currentSegmentStartMs?`, `currentSegmentEndMs?`, …) |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 
 Streaming types (`StreamingEnhancementEngine`, `StreamingEnhancementInitializeOptions`, `EnhancementPipelineHandle`): [enhancement-streaming.md](enhancement-streaming.md#types).
 
@@ -329,6 +343,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md).
 | `ENHANCEMENT_BUFFER_KIND_MISMATCH` | A non-offline buffer was passed to offline `enhance(...)`. |
 | `ENHANCEMENT_BUFFER_EMPTY` | Input offline buffer contains no samples. |
 | `ENHANCEMENT_OUTPUT_NOT_EMPTY` | Output buffer must be empty before calling `enhance(...)`. |
+| `ORCHESTRATION_CANCELLED` | `signal` aborted; `name` is `'AbortError'`. |
 | `OFFLINE_OOM` | Not enough memory for offline enhancement. Use streaming enhancement for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 
 For streaming and live-pipeline errors (`ONLINE_ENHANCEMENT_*`, `PIPELINE_*`), see [enhancement-streaming.md](enhancement-streaming.md).
@@ -362,7 +377,7 @@ try {
   await engine.enhance(inBuf, outBuf, {
     segmentation: { mode: 'auto' },
     errorRecovery: 'skip',
-    onProgress: (p) => console.log(p.completedSegments, p.totalSegments),
+    onProgress: (p) => console.log(p.currentSegment, p.totalSegments),
   });
   await saveAudioAsFile(outBuf, { kind: 'fs', path: '/path/to/clean.wav' }, 'wav');
 } finally {

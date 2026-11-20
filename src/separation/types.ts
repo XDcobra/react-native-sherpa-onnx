@@ -68,6 +68,12 @@ export interface SeparateOptions {
   retryExhaustedFallback?: 'abort' | 'skip';
   onProgress?: (progress: OrchestrationProgress) => void;
   overlapSamples?: number;
+  /**
+   * Stops the call. Checked before the call and before each segment and retry; a segment that is already running
+   * finishes first. On abort the promise rejects with `code:
+   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and `audioOuts` stays empty.
+   */
+  signal?: AbortSignal;
 }
 
 export interface SeparationResult {
@@ -106,6 +112,7 @@ export interface SeparationEngine {
    * @throws {Error} `SEPARATION_BUFFER_EMPTY` — input audio has no samples.
    * @throws {Error} `SEPARATION_OUTPUT_NOT_EMPTY` — an output buffer already has samples.
    * @throws {Error} `SEPARATION_STEM_COUNT_MISMATCH` — `audioOuts.length` does not match the model.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` — `options.signal` aborted before the call, a segment or a retry started (`name: 'AbortError'`).
    * @throws {Error} `OFFLINE_OOM` — native ran out of memory.
    */
   separate(

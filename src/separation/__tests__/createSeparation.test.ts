@@ -160,6 +160,24 @@ describe('createSeparation', () => {
     expect(native.populateOfflineAudioBufferIfEmpty).not.toHaveBeenCalled();
   });
 
+  it('rejects before the direct batch call when signal is already aborted', async () => {
+    const sep = await createSeparation({
+      modelSource: { kind: 'fs', path: '/models/separation' },
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      sep.separate('off_input', ['off_vocals', 'off_accomp'], {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ORCHESTRATION_CANCELLED',
+    });
+    expect(runOfflineSeparationDirect).not.toHaveBeenCalled();
+  });
+
   it('runs segmented orchestration and populates caller-owned stem buffers', async () => {
     (runOfflineSeparationPipeline as jest.Mock).mockResolvedValue({
       status: 'complete',

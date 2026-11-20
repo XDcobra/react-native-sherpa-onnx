@@ -76,6 +76,23 @@ describe('runOfflineSeparationPipeline', () => {
     );
   });
 
+  it('passes signal through to orchestration', async () => {
+    const controller = new AbortController();
+    await runOfflineSeparationPipeline(
+      'off_input',
+      'sep_1',
+      ['off_vocals', 'off_accomp'],
+      { segmentation: { mode: 'auto' }, signal: controller.signal }
+    );
+
+    expect(runOfflineAudioMultiOutputPipeline).toHaveBeenCalledWith(
+      'off_input',
+      2,
+      expect.any(Function),
+      expect.objectContaining({ signal: controller.signal })
+    );
+  });
+
   it('passes recovery and overlap options through to orchestration', async () => {
     await runOfflineSeparationPipeline(
       'off_input',

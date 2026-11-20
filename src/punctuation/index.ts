@@ -43,3 +43,9 @@ export {
   normalizePunctuationInputText,
   resolveTextInputNormalization,
 } from './textInputNormalization';
+export {
+  OrchestrationErrorCode,
+  isOrchestrationCancelledError,
+} from '../pipeline/cancellation';
+export type { OrchestrationCancelledError } from '../pipeline/cancellation';
+export type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';

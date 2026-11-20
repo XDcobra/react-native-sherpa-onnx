@@ -78,6 +78,9 @@
 * **separation:** Offline batch `separate(OfflineAudioBuffer, OfflineAudioBuffer[], options?)` with optional offline segmentation (`mode: 'auto'`, progress, error recovery).
 * **separation:** Live overload `separate(LiveAudioBuffer, LiveAudioBuffer[], options)` returning `SeparationPipelineHandle` — mandatory `continuous_frames` segmentation policy; no separate `createStreamingSeparation` factory.
 * **separation:** Example app `SeparationScreen` — batch + file/mic live overload, phased progress, stop/restart. Known MVP limits: mono-downmixed stem outputs (stereo stems planned); boundary artifacts possible on segmented live runs (see future-work overlap/crossfade doc).
+* **offline engines:** `signal?: AbortSignal` on offline `transcribe`, `enhance`, `separate`, `punctuate` and `synthesize`. It is checked before the call and before each segment and retry; a segment already running in native code finishes first. On abort the SDK releases its temporary buffers, the output buffer stays empty and the promise rejects with `code: 'ORCHESTRATION_CANCELLED'`, `name: 'AbortError'` (`isOrchestrationCancelledError`).
+* **offline engines:** `OrchestrationProgress` for audio input has `currentSegmentStartMs` / `currentSegmentEndMs`: where the current segment is in the input audio.
+* **stt:** Offline `transcribe(…, { onSegment })` is called as each part finishes with `{ segmentIndex, segmentCount, startMs, endMs, durationMs, text, speechSegmentId?, textSegmentId? }`. With segmentation off it is called once. Errors thrown by the callback are ignored.
 
 ### Bug Fixes
 

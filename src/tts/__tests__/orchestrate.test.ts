@@ -85,6 +85,20 @@ describe('runOfflineTtsPipeline', () => {
     expect(result.status).toBe('complete');
   });
 
+  it('passes signal through to the orchestrator', async () => {
+    const controller = new AbortController();
+    await runOfflineTtsPipeline('txt_off_in', 'tts_1', {
+      segmentation: { mode: 'auto' },
+      signal: controller.signal,
+    });
+
+    expect(runOfflineTextToAudioPipeline).toHaveBeenCalledWith(
+      'txt_off_in',
+      expect.any(Function),
+      expect.objectContaining({ signal: controller.signal })
+    );
+  });
+
   it('passes through custom segmentation and recovery options', async () => {
     await runOfflineTtsPipeline('txt_off_in', 'tts_1', {
       segmentation: {

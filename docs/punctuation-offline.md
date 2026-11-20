@@ -112,6 +112,19 @@ const result = await punct.punctuate(textIn, textOut, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md). Live path: [punctuation-streaming.md](punctuation-streaming.md#segmentation-optional).
 
+### Cancel
+
+Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code finishes first, so a run stops at segment granularity; with `segmentation.mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and `textOut` stays empty. If the signal aborts while the last segment runs, the call still resolves.
+
+```ts
+const controller = new AbortController();
+const run = punct.punctuate(textIn, textOut, {
+  segmentation: { mode: 'auto' },
+  signal: controller.signal,
+});
+// elsewhere: controller.abort();
+```
+
 ## Models
 
 | `modelType` | Required files (directory detect) | Custom-init keys |
@@ -314,7 +327,7 @@ More end-to-end patterns: [feature-pipelines.md#punctuation-offline-patterns](fe
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each offline segment step | segmented only (`mode: 'auto'`); single-pass: none |
+| `onProgress` | `OrchestrationProgress` | start of each segment and of each retry | segmented only (`mode: 'auto'`); single-pass: none. Text input: no `currentSegmentStartMs` / `currentSegmentEndMs` |
 
 Shapes: [Types](#types).
 
@@ -342,7 +355,8 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [Live over
 | `OfflinePunctuationInitializeOptions` | Union of auto and custom init options |
 | `PunctuationDetectModelResult` | Return of `detectPunctuationModel()` — shared detection base |
 | `OfflinePunctuateResult` | `{ processingTimeMs, status?, totalSegments?, completedSegments?, skippedSegments?, failedSegment? }` |
-| `OfflinePunctuateOptions` | `textInputNormalization?`, `segmentation?`, `errorRecovery?`, `maxRetriesPerSegment?`, `retryExhaustedFallback?`, `onProgress?`, `overlapChars?`, `textSkipPlaceholder?`, `linkMap?` |
+| `OfflinePunctuateOptions` | `textInputNormalization?`, `segmentation?`, `errorRecovery?`, `maxRetriesPerSegment?`, `retryExhaustedFallback?`, `onProgress?`, `overlapChars?`, `textSkipPlaceholder?`, `linkMap?`, `signal?` |
+| `OrchestrationErrorCode`, `isOrchestrationCancelledError` | Cancel error code (`ORCHESTRATION_CANCELLED`) and a guard for it |
 | `PunctuationLivePipelineOptions` | Live overload options — mandatory segmentation, optional `textInputNormalization?`, `onSegment?` |
 | `OfflinePunctuationEngine` | `punctuate` (offline / live overload), `punctuateString`, `destroy`; readonly `instanceId` |
 | `OfflinePunctuationCustomConfig` | Custom init path map: `{ ct_transformer: FileSource }` |
@@ -374,6 +388,7 @@ See [textbuffer-offline.md](textbuffer-offline.md).
 | `TEXT_BUFFER_KIND_MISMATCH` | Not an **offline** buffer id (`txt_off_*` required). |
 | `TEXT_BUFFER_EMPTY` | `textIn` is not populated (input must have text). |
 | `TEXT_ALREADY_POPULATED` | `textOut` was already populated; output must be **empty**. |
+| `ORCHESTRATION_CANCELLED` | `signal` aborted; `name` is `'AbortError'`. |
 | `FILEIO_*` | File / URI resolution for **`FileSource`** before or during model init. |
 
 ---

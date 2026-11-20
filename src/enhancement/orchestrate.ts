@@ -48,6 +48,7 @@ export async function runOfflineEnhancementPipeline(
       retryExhaustedFallback: options.retryExhaustedFallback,
       onProgress: options.onProgress,
       overlapSamples: options.overlapSamples,
+      signal: options.signal,
     }
   );
 }

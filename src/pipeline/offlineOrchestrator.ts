@@ -33,6 +33,18 @@ import type {
 } from '../textbuffer/types';
 import type { SegmentLinkMapRef } from '../segment/segment-link';
 import SherpaOnnx from '../NativeSherpaOnnx';
+import {
+  isOrchestrationCancelledError,
+  throwIfOrchestrationAborted,
+} from './cancellation';
+
+export {
+  OrchestrationErrorCode,
+  createOrchestrationCancelledError,
+  isOrchestrationCancelledError,
+  throwIfOrchestrationAborted,
+} from './cancellation';
+export type { OrchestrationCancelledError } from './cancellation';
 
 export type ErrorRecoveryStrategy =
   | 'abort'
@@ -48,6 +60,16 @@ export interface OrchestrationProgress {
   fraction: number;
   currentSegmentDurationMs: number;
   elapsedMs: number;
+  /**
+   * Start of the current segment in the input audio, in ms. Set by pipelines
+   * with audio input; omitted for text input.
+   */
+  currentSegmentStartMs?: number;
+  /**
+   * End of the current segment in the input audio, in ms. Set by pipelines
+   * with audio input; omitted for text input.
+   */
+  currentSegmentEndMs?: number;
 }
 
 export interface SkippedSegmentInfo {
@@ -82,6 +104,41 @@ export interface OrchestrationConfig {
   overlapChars?: number;
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;
+  /**
+   * Stops the run. Checked before the first segment, before each segment and
+   * before each retry. A segment that is already running in native code
+   * finishes first (segment granularity). On abort the run releases its
+   * temporary and output buffers and rejects with
+   * {@link OrchestrationCancelledError} (`code: 'ORCHESTRATION_CANCELLED'`).
+   * If the signal aborts while the last segment runs, the run still resolves.
+   */
+  signal?: AbortSignal;
+}
+
+/** One finished segment of {@link runOfflineAudioToTextPipeline}. */
+export interface AudioToTextSegmentResult {
+  /** 0-based position of the segment in this run. */
+  segmentIndex: number;
+  segmentCount: number;
+  /** Segment range in the input audio, in ms. */
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  /** Recognized text of this segment. */
+  text: string;
+  /** Speech segment of the input audio. */
+  speechSegmentId: string;
+  /** Text segment id used in `segmentMappings`. */
+  textSegmentId: string;
+}
+
+/** Config of {@link runOfflineAudioToTextPipeline}. */
+export interface AudioToTextOrchestrationConfig extends OrchestrationConfig {
+  /**
+   * Called after each completed segment (not for skipped or failed ones).
+   * Errors thrown by the callback are ignored.
+   */
+  onSegment?: (segment: AudioToTextSegmentResult) => void;
 }
 
 /** Per-segment context passed to {@link runOfflineTextToAudioPipeline} consumers. */
@@ -317,12 +374,15 @@ async function resolveOfflineTextSegmentInput(
   return getOfflineTextBufferTextSlice(input, overlapStart, span);
 }
 
+type SegmentTimeRange = { startMs: number; endMs: number };
+
 function reportProgress(
   session: OrchestrationSession,
   config: OrchestrationConfig,
   currentSegment: number,
   totalSegments: number,
-  currentSegmentDurationMs: number
+  currentSegmentDurationMs: number,
+  range?: SegmentTimeRange
 ): void {
   if (!config.onProgress || config.deferProgressToConsumer) return;
   const fraction = totalSegments > 0 ? currentSegment / totalSegments : 1;
@@ -332,7 +392,29 @@ function reportProgress(
     fraction,
     currentSegmentDurationMs,
     elapsedMs: Date.now() - session.startedAtMs,
+    ...(range
+      ? {
+          currentSegmentStartMs: range.startMs,
+          currentSegmentEndMs: range.endMs,
+        }
+      : {}),
   });
+}
+
+/** Position of a speech segment in the input audio, in ms. */
+function speechSegmentTimeRange(
+  seg: SpeechSegment,
+  inputSampleRate: number
+): SegmentTimeRange {
+  const sampleRate =
+    inputSampleRate > 0 ? inputSampleRate : seg.sampleRate ?? 0;
+  if (sampleRate <= 0) {
+    return { startMs: 0, endMs: seg.durationMs ?? 0 };
+  }
+  return {
+    startMs: (seg.startOffset / sampleRate) * 1000,
+    endMs: (seg.endOffset / sampleRate) * 1000,
+  };
 }
 
 function joinPath(base: string, name: string): string {
@@ -620,6 +702,7 @@ async function runOfflineAudioSegmentLoop(
   }
 
   try {
+    throwIfOrchestrationAborted(config.signal);
     const inputInfo = await getPipelineAudioBufferInfo(input);
     if (inputInfo.kind !== 'offlinePcmBuffer') {
       return {
@@ -645,6 +728,7 @@ async function runOfflineAudioSegmentLoop(
       session.sessionId
     );
     const totalSegments = segments.length;
+    throwIfOrchestrationAborted(config.signal);
 
     accumulators = [];
     totalSamplesAppended.length = 0;
@@ -671,7 +755,16 @@ async function runOfflineAudioSegmentLoop(
     session.start();
 
     for (const [i, seg] of segments.entries()) {
-      reportProgress(session, config, i, totalSegments, seg.durationMs ?? 0);
+      throwIfOrchestrationAborted(config.signal);
+      const segRange = speechSegmentTimeRange(seg, inputInfo.sampleRate);
+      reportProgress(
+        session,
+        config,
+        i,
+        totalSegments,
+        seg.durationMs ?? 0,
+        segRange
+      );
 
       let attempts = 0;
       let completed = false;
@@ -718,17 +811,20 @@ async function runOfflineAudioSegmentLoop(
           session.addCompletedSegment();
           completed = true;
         } catch (err) {
+          if (isOrchestrationCancelledError(err)) throw err;
           const error = formatError(err);
           session.markRecovering();
 
           if (strategy === 'retry' && attempts < maxRetries) {
+            throwIfOrchestrationAborted(config.signal);
             attempts += 1;
             reportProgress(
               session,
               config,
               i,
               totalSegments,
-              seg.durationMs ?? 0
+              seg.durationMs ?? 0,
+              segRange
             );
             continue;
           }
@@ -828,6 +924,9 @@ async function runOfflineAudioSegmentLoop(
     if (accumulators.length > 0) {
       await releaseLiveAudioAccumulators(accumulators);
     }
+    if (isOrchestrationCancelledError(err)) {
+      throw err;
+    }
 
     return {
       status: 'failed',
@@ -858,6 +957,15 @@ async function cleanupTextTemporaries(
   }
 }
 
+/**
+ * Runs `consumer` once per segment of `input` and joins the segment outputs into one audio buffer.
+ *
+ * Failures of the input or of a segment are returned as `status: 'failed'`
+ * (or handled by `errorRecovery`); only cancellation rejects.
+ * @throws {Error} `ORCHESTRATION_CANCELLED` — `config.signal` aborted before a
+ *   segment or a retry started (`name: 'AbortError'`). A segment that is
+ *   already running finishes first.
+ */
 export async function runOfflineAudioPipeline(
   input: OfflineAudioBufferIdSource,
   consumer: (
@@ -883,6 +991,15 @@ export async function runOfflineAudioPipeline(
   };
 }
 
+/**
+ * Runs `consumer` once per segment of `input` and joins the segment outputs into `outputCount` audio buffers.
+ *
+ * Failures of the input or of a segment are returned as `status: 'failed'`
+ * (or handled by `errorRecovery`); only cancellation rejects.
+ * @throws {Error} `ORCHESTRATION_CANCELLED` — `config.signal` aborted before a
+ *   segment or a retry started (`name: 'AbortError'`). A segment that is
+ *   already running finishes first.
+ */
 export async function runOfflineAudioMultiOutputPipeline(
   input: OfflineAudioBufferIdSource,
   outputCount: number,
@@ -898,6 +1015,15 @@ export async function runOfflineAudioMultiOutputPipeline(
   );
 }
 
+/**
+ * Runs `consumer` once per segment of `input` and joins the segment outputs into one text buffer.
+ *
+ * Failures of the input or of a segment are returned as `status: 'failed'`
+ * (or handled by `errorRecovery`); only cancellation rejects.
+ * @throws {Error} `ORCHESTRATION_CANCELLED` — `config.signal` aborted before a
+ *   segment or a retry started (`name: 'AbortError'`). A segment that is
+ *   already running finishes first.
+ */
 export async function runOfflineTextPipeline(
   input: OfflineTextBufferIdSource,
   consumer: (
@@ -915,6 +1041,7 @@ export async function runOfflineTextPipeline(
   const session = new OrchestrationSession(nextSessionId('text'));
 
   try {
+    throwIfOrchestrationAborted(config.signal);
     const info = await getPipelineTextBufferInfo(input);
     if (info.kind !== 'offlineTextBuffer') {
       return {
@@ -942,10 +1069,12 @@ export async function runOfflineTextPipeline(
     );
     const totalSegments = segments.length;
     const chunks: string[] = [];
+    throwIfOrchestrationAborted(config.signal);
 
     session.start();
 
     for (const [i, seg] of segments.entries()) {
+      throwIfOrchestrationAborted(config.signal);
       const segLength = Math.max(0, seg.endOffset - seg.startOffset);
       const segDurationMs = segLength;
       reportProgress(session, config, i, totalSegments, segDurationMs);
@@ -989,10 +1118,12 @@ export async function runOfflineTextPipeline(
             completed = true;
           }
         } catch (err) {
+          if (isOrchestrationCancelledError(err)) throw err;
           const error = formatError(err);
           session.markRecovering();
 
           if (strategy === 'retry' && attempts < maxRetries) {
+            throwIfOrchestrationAborted(config.signal);
             attempts += 1;
             reportProgress(session, config, i, totalSegments, segDurationMs);
             continue;
@@ -1078,6 +1209,9 @@ export async function runOfflineTextPipeline(
       linkMap: config.linkMap,
     };
   } catch (err) {
+    if (isOrchestrationCancelledError(err)) {
+      throw err;
+    }
     return {
       status: 'failed',
       totalSegments: 0,
@@ -1095,6 +1229,15 @@ export async function runOfflineTextPipeline(
   }
 }
 
+/**
+ * Runs `consumer` once per segment of `input` and joins the segment audio into one audio buffer.
+ *
+ * Failures of the input or of a segment are returned as `status: 'failed'`
+ * (or handled by `errorRecovery`); only cancellation rejects.
+ * @throws {Error} `ORCHESTRATION_CANCELLED` — `config.signal` aborted before a
+ *   segment or a retry started (`name: 'AbortError'`). A segment that is
+ *   already running finishes first.
+ */
 export async function runOfflineTextToAudioPipeline(
   input: OfflineTextBufferIdSource,
   consumer: (
@@ -1168,6 +1311,7 @@ export async function runOfflineTextToAudioPipeline(
   const monoChannels = 1 as const;
 
   try {
+    throwIfOrchestrationAborted(config.signal);
     const info = await getPipelineTextBufferInfo(input);
     if (info.kind !== 'offlineTextBuffer') {
       return {
@@ -1196,6 +1340,7 @@ export async function runOfflineTextToAudioPipeline(
       session.sessionId
     );
     const totalSegments = segments.length;
+    throwIfOrchestrationAborted(config.signal);
     const accumulatorSpoolPath = await resolveOrchestrationAccumulatorPath(
       session.sessionId
     );
@@ -1214,6 +1359,7 @@ export async function runOfflineTextToAudioPipeline(
     session.start();
 
     for (const [i, seg] of segments.entries()) {
+      throwIfOrchestrationAborted(config.signal);
       const segLength = Math.max(0, seg.endOffset - seg.startOffset);
       reportProgress(session, config, i, totalSegments, segLength);
       const segStartSample = totalSamplesAppended;
@@ -1280,10 +1426,12 @@ export async function runOfflineTextToAudioPipeline(
             completed = true;
           }
         } catch (err) {
+          if (isOrchestrationCancelledError(err)) throw err;
           const error = formatError(err);
           session.markRecovering();
 
           if (strategy === 'retry' && attempts < maxRetries) {
+            throwIfOrchestrationAborted(config.signal);
             attempts += 1;
             reportProgress(session, config, i, totalSegments, segLength);
             continue;
@@ -1407,6 +1555,9 @@ export async function runOfflineTextToAudioPipeline(
         // Ignore cleanup errors in terminal path.
       }
     }
+    if (isOrchestrationCancelledError(err)) {
+      throw err;
+    }
 
     return {
       status: 'failed',
@@ -1427,13 +1578,23 @@ export async function runOfflineTextToAudioPipeline(
   }
 }
 
+/**
+ * Runs `consumer` once per segment of `input` and joins the segment text into one text buffer.
+ * `config.onSegment` gets the text of each completed segment as it finishes.
+ *
+ * Failures of the input or of a segment are returned as `status: 'failed'`
+ * (or handled by `errorRecovery`); only cancellation rejects.
+ * @throws {Error} `ORCHESTRATION_CANCELLED` — `config.signal` aborted before a
+ *   segment or a retry started (`name: 'AbortError'`). A segment that is
+ *   already running finishes first.
+ */
 export async function runOfflineAudioToTextPipeline(
   input: OfflineAudioBufferIdSource,
   consumer: (
     segIn: OfflineAudioBufferRef,
     segOut: OfflineTextBufferRef
   ) => Promise<void>,
-  config: OrchestrationConfig = {}
+  config: AudioToTextOrchestrationConfig = {}
 ): Promise<AudioToTextOrchestrationResult> {
   const strategy = normalizeRecovery(config.errorRecovery);
   const maxRetries = normalizeRetryCount(config.maxRetriesPerSegment);
@@ -1445,6 +1606,7 @@ export async function runOfflineAudioToTextPipeline(
   const segmentMappings: AudioToTextSegmentMapping[] = [];
 
   try {
+    throwIfOrchestrationAborted(config.signal);
     const info = await getPipelineAudioBufferInfo(input);
     if (info.kind !== 'offlinePcmBuffer') {
       return {
@@ -1472,14 +1634,25 @@ export async function runOfflineAudioToTextPipeline(
       session.sessionId
     );
     const totalSegments = segments.length;
+    throwIfOrchestrationAborted(config.signal);
 
     session.start();
 
     for (const [i, seg] of segments.entries()) {
-      reportProgress(session, config, i, totalSegments, seg.durationMs ?? 0);
+      throwIfOrchestrationAborted(config.signal);
+      const segRange = speechSegmentTimeRange(seg, info.sampleRate);
+      reportProgress(
+        session,
+        config,
+        i,
+        totalSegments,
+        seg.durationMs ?? 0,
+        segRange
+      );
 
       let attempts = 0;
       let completed = false;
+      let finished: AudioToTextSegmentResult | undefined;
       while (!completed) {
         let tempIn: OfflineAudioBufferRef | undefined;
         let tempOut: OfflineTextBufferRef | undefined;
@@ -1520,27 +1693,41 @@ export async function runOfflineAudioToTextPipeline(
                 )
               : '';
 
+          const textSegmentId = `txtseg_${session.sessionId}_${seg.segmentIndex}`;
           chunks.push(outText);
           segmentMappings.push({
             speechSegmentId: seg.segmentId,
-            textSegmentId: `txtseg_${session.sessionId}_${seg.segmentIndex}`,
+            textSegmentId,
             segmentIndex: seg.segmentIndex,
             text: outText,
           });
+          finished = {
+            segmentIndex: i,
+            segmentCount: totalSegments,
+            startMs: segRange.startMs,
+            endMs: segRange.endMs,
+            durationMs: segRange.endMs - segRange.startMs,
+            text: outText,
+            speechSegmentId: seg.segmentId,
+            textSegmentId,
+          };
           session.addCompletedSegment();
           completed = true;
         } catch (err) {
+          if (isOrchestrationCancelledError(err)) throw err;
           const error = formatError(err);
           session.markRecovering();
 
           if (strategy === 'retry' && attempts < maxRetries) {
+            throwIfOrchestrationAborted(config.signal);
             attempts += 1;
             reportProgress(
               session,
               config,
               i,
               totalSegments,
-              seg.durationMs ?? 0
+              seg.durationMs ?? 0,
+              segRange
             );
             continue;
           }
@@ -1578,6 +1765,14 @@ export async function runOfflineAudioToTextPipeline(
         } finally {
           await cleanupAudioTemporaries(tempIn, undefined);
           await cleanupTextTemporaries(tempOut, undefined);
+        }
+      }
+
+      if (finished && config.onSegment) {
+        try {
+          config.onSegment(finished);
+        } catch {
+          // A failing segment callback must not fail or interrupt the run.
         }
       }
 
@@ -1628,6 +1823,9 @@ export async function runOfflineAudioToTextPipeline(
       segmentMappings,
     };
   } catch (err) {
+    if (isOrchestrationCancelledError(err)) {
+      throw err;
+    }
     return {
       status: 'failed',
       totalSegments: 0,

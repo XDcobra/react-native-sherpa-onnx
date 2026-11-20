@@ -108,6 +108,22 @@ describe('tts synthesize mode 1 (one-shot)', () => {
     });
   });
 
+  it('rejects one-shot synthesis when signal is already aborted', async () => {
+    const tts = await createTTS({
+      modelSource: { kind: 'fs', path: '/models/tts' },
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      tts.synthesize(textIn, audioOut, { signal: controller.signal })
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ORCHESTRATION_CANCELLED',
+    });
+    expect(native.synthesizeTts).not.toHaveBeenCalled();
+  });
+
   it('keeps one-shot path when segmentation mode is explicitly off', async () => {
     const tts = await createTTS({
       modelSource: { kind: 'fs', path: '/models/tts' },
