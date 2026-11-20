@@ -1126,7 +1126,8 @@ export async function createSegmentLinkMap(options?: {
   textBufferId?: string;
   audioBufferId?: string;
 }): Promise<SegmentLinkMapRef> {
-  const out = await getNative().createSegmentLinkMap(options);
+  // iOS reads an omitted object argument as a null reference.
+  const out = await getNative().createSegmentLinkMap(options ?? {});
   const linkMapId =
     typeof out?.linkMapId === 'string' ? out.linkMapId.trim() : '';
   if (!linkMapId) {

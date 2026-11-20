@@ -238,7 +238,7 @@ describe('textbuffer segment event wiring', () => {
       liveBufferId,
       1,
       1,
-      undefined
+      {} // never undefined: iOS would get a null reference
     );
   });
 

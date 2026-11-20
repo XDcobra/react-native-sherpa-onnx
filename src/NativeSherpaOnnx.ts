@@ -459,7 +459,7 @@ export interface Spec extends TurboModule {
   /**
    * Opt-out for native diagnostics. Omit call to keep defaults (enabled + signal handler).
    */
-  configureNativeDiagnostics(config?: {
+  configureNativeDiagnostics(config: {
     enabled?: boolean;
     installSignalHandler?: boolean;
   }): Promise<void>;
@@ -1640,7 +1640,7 @@ export interface Spec extends TurboModule {
     liveBufferId: string,
     startIndex: number,
     maxCount: number,
-    options?: {
+    options: {
       includeTokens?: boolean;
       includeTimestamps?: boolean;
       includeMeta?: boolean;
@@ -1743,7 +1743,7 @@ export interface Spec extends TurboModule {
     spoolPath?: string;
   }>;
 
-  createEmptyOfflineSegmentBuffer(options?: {
+  createEmptyOfflineSegmentBuffer(options: {
     sourceAudioBufferId?: string;
   }): Promise<{
     bufferId: string;
@@ -1861,7 +1861,7 @@ export interface Spec extends TurboModule {
 
   // ==================== Segment Link Maps ====================
 
-  createSegmentLinkMap(options?: {
+  createSegmentLinkMap(options: {
     textBufferId?: string;
     audioBufferId?: string;
   }): Promise<{ linkMapId: string }>;
