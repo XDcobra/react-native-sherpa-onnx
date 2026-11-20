@@ -9,6 +9,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReadableMap
 import com.facebook.react.bridge.ReactApplicationContext
 import com.sherpaonnx.detect.ModelPathValidationNative
+import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.tts.config.TtsInitOptionsParser
 import com.sherpaonnx.tts.core.TtsEngineInstance
 import com.sherpaonnx.tts.core.TtsEngineRepository
@@ -77,7 +78,16 @@ internal class TtsInitializationService(
         } else {
           initializeTtsAuto(instanceId, parsed, promise)
         }
-      } catch (e: Exception) {
+      } catch (e: OutOfMemoryError) {
+        // Not an Exception: without this branch the init promise never settles.
+        Log.e("SherpaOnnxTts", "[SherpaOnnx:init] tts Create branch=reject OOM", e)
+        rejectOnUiThread(
+          promise,
+          OfflineOomError.CODE,
+          "Not enough memory to load the TTS model. Free memory or use a smaller model.",
+          e
+        )
+      } catch (e: Throwable) {
         Log.e("SherpaOnnxTts", "[SherpaOnnx:init] tts Create branch=reject ${e.message}", e)
         rejectOnUiThread(promise, "TTS_INIT_ERROR", "Failed to initialize TTS: ${e.message}", e)
       }

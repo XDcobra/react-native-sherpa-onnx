@@ -555,7 +555,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTS_GENERATE_ERROR` | `synthesize` | Model-level synthesis failed (the message carries the native error text), or voice clone on unsupported model type |
 | `TTS_EMPTY_OUTPUT` | `synthesize` | The model ran without an error but returned no audio for non-empty input. Upstream skips text it cannot speak without saying why, so the message names the usual causes per model (for ZipVoice: text too short for the reference audio and speed, or no words in the lexicon) |
 | `ORCHESTRATION_CANCELLED` | `synthesize` | `signal` aborted; `name` is `'AbortError'` |
-| `OFFLINE_OOM` | `synthesize` | Not enough memory for offline synthesis (also when the model fails to allocate memory during generation). Prefer streaming TTS for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
+| `OFFLINE_OOM` | `synthesize`, `createTTS` (Android) | Not enough memory for offline synthesis (also when the model fails to allocate memory during generation), or to load the model. Prefer streaming TTS for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 
 ## Troubleshooting
 
