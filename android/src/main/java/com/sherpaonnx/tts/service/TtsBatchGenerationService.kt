@@ -177,7 +177,7 @@ internal class TtsBatchGenerationService(
           }
           TtsNative.readAudioResult(raw)
             ?: run {
-              promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
+              rejectGenerateError(promise, raw)
               return
             }
         } else if (inst.isPocket) {
@@ -223,7 +223,7 @@ internal class TtsBatchGenerationService(
           }
           TtsNative.readAudioResult(raw)
             ?: run {
-              promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
+              rejectGenerateError(promise, raw)
               return
             }
         } else {
@@ -241,7 +241,7 @@ internal class TtsBatchGenerationService(
           }
           TtsNative.readAudioResult(raw)
             ?: run {
-              promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
+              rejectGenerateError(promise, raw)
               return
             }
         }
@@ -270,6 +270,17 @@ internal class TtsBatchGenerationService(
       Log.e("SherpaOnnxTts", "synthesizeTts error: ${e.message}", e)
       promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to synthesize speech", e)
     }
+  }
+
+  /** Rejects with the reason native gave for a result without audio. */
+  private fun rejectGenerateError(promise: Promise, raw: HashMap<String, Any>?) {
+    val (code, message) = TtsNative.generateError(raw)
+    if (code == OfflineOomError.CODE) {
+      Log.e("SherpaOnnxTts", "synthesizeTts native OOM: $message")
+      promise.reject(OfflineOomError.CODE, OfflineOomError.message("text-to-speech"))
+      return
+    }
+    promise.reject(code, message)
   }
 
   private fun makeProgressCallback(operationId: String): TtsGenerateProgressCallback? {

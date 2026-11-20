@@ -1,8 +1,11 @@
 #include "sherpa-onnx-tts-engine-wrapper.h"
+#include "sherpa-onnx-tts-generate-error.h"
 
 #include <cstdlib>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <new>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -34,6 +37,58 @@ TEST(TtsHost, GenerateBeforeInitReturnsEmpty) {
   sherpaonnx::TtsWrapper tts;
   const auto audio = tts.generate("hello", 0, 1.0f);
   EXPECT_TRUE(audio.samples.empty());
+}
+
+TEST(TtsHost, GenerateBeforeInitSaysWhy) {
+  sherpaonnx::TtsWrapper tts;
+  const auto audio = tts.generate("hello", 0, 1.0f);
+  EXPECT_EQ(audio.errorCode, sherpaonnx::kTtsErrorGenerate);
+  EXPECT_FALSE(audio.errorMessage.empty());
+
+  sherpaonnx::VoiceCloneOptions clone;
+  clone.reference_audio = {0.1f, 0.2f};
+  clone.reference_sample_rate = 16000;
+  clone.reference_text = "hi";
+  const auto cloned = tts.generate("hello", 0, 1.0f, clone);
+  EXPECT_EQ(cloned.errorCode, sherpaonnx::kTtsErrorGenerate);
+
+  sherpaonnx::TtsWrapper::AudioResult finalAudio;
+  finalAudio.sampleRate = 0;
+  const bool ok = tts.generateStream(
+      "hello", 0, 1.0f,
+      [](const float*, int32_t, float) -> int32_t { return 1; }, clone,
+      &finalAudio);
+  EXPECT_FALSE(ok);
+  EXPECT_EQ(finalAudio.errorCode, sherpaonnx::kTtsErrorGenerate);
+}
+
+TEST(TtsGenerateError, MapsAllocationFailuresToOom) {
+  EXPECT_EQ(sherpaonnx::TtsErrorFromException(std::bad_alloc()).code,
+            sherpaonnx::kTtsErrorOom);
+  // ONNX Runtime reports allocation failures as Ort::Exception (a std::exception).
+  const std::runtime_error ort(
+      "Failed to allocate memory for requested buffer of size 123456");
+  EXPECT_EQ(sherpaonnx::TtsErrorFromException(ort).code, sherpaonnx::kTtsErrorOom);
+  EXPECT_TRUE(sherpaonnx::IsOutOfMemoryText("std::bad_alloc"));
+  EXPECT_TRUE(sherpaonnx::IsOutOfMemoryText("CUDA out of memory"));
+}
+
+TEST(TtsGenerateError, KeepsOtherExceptionText) {
+  const std::runtime_error other("Invalid input shape");
+  const auto error = sherpaonnx::TtsErrorFromException(other);
+  EXPECT_EQ(error.code, sherpaonnx::kTtsErrorGenerate);
+  EXPECT_NE(error.message.find("Invalid input shape"), std::string::npos);
+}
+
+TEST(TtsGenerateError, EmptyOutputNamesTheZipvoiceCause) {
+  const auto zipvoice =
+      sherpaonnx::TtsErrorForEmptyOutput(sherpaonnx::TtsModelKind::kZipvoice);
+  EXPECT_EQ(zipvoice.code, sherpaonnx::kTtsErrorEmptyOutput);
+  EXPECT_NE(zipvoice.message.find("too short"), std::string::npos);
+  const auto vits =
+      sherpaonnx::TtsErrorForEmptyOutput(sherpaonnx::TtsModelKind::kVits);
+  EXPECT_EQ(vits.code, sherpaonnx::kTtsErrorEmptyOutput);
+  EXPECT_FALSE(vits.message.empty());
 }
 
 TEST(TtsHost, InitCustomRejectsUnknownType) {

@@ -169,6 +169,8 @@ await tts.synthesize(textBuf, audioBuf, {
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Live path: [tts-live.md](tts-live.md#segmentation-mandatory).
 
+With segmentation on, a failing segment does not reject the call: the result has `status: 'failed'` (or `'partial'` / a skipped segment, per `errorRecovery`). `failedSegment.error` holds the message and `failedSegment.code` the native code (for example `OFFLINE_OOM` or `TTS_EMPTY_OUTPUT`, see [Error codes](#error-codes)); `skippedSegments[i].code` works the same way.
+
 ### Cancel
 
 Pass an `AbortSignal` as `signal`. It is checked before the call starts and before each segment and retry. A segment that is already running in native code finishes first, so a run stops at segment granularity; with `segmentation.mode: 'off'` only an abort before the start has an effect. On abort the promise rejects with an error whose `name` is `'AbortError'` and `code` is `'ORCHESTRATION_CANCELLED'` (check with `isOrchestrationCancelledError`), the SDK releases its temporary buffers and `audioOut` stays empty. If the signal aborts while the last segment runs, the call still resolves.
@@ -198,7 +200,7 @@ Raw English Piper / Kitten / Matcha-EN / Kokoro-EN text needs a lexicon at init.
 1. **Auto / `modelSource`:** put `lexicon.txt`, `lexicon-en-us.txt`, or another `lexicon-*.txt` **inside** the model folder. Detect fills `lexiconLanguages`; `createTTS` loads it via `lexiconLanguageId` (default: first after sort, `lexicon.txt` first). The shared US-English file is [`lexicon-en-us.txt`](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt).
 2. **Custom:** set `customConfig.lexicon` to any `FileSource` (including a file outside the model folder). Auto-init does **not** mix in a lexicon from outside `modelSource`.
 
-`espeak-ng-data` is ignored. Packs may still contain it. Without a lexicon and without `phonemeCodepoints` / `tokens` at synthesize time, init still succeeds; raw text yields empty audio → `TTS_GENERATE_ERROR`.
+`espeak-ng-data` is ignored. Packs may still contain it. Without a lexicon and without `phonemeCodepoints` / `tokens` at synthesize time, init still succeeds; raw text yields empty audio → `TTS_EMPTY_OUTPUT`.
 
 Validate category: **`tts`**. Overview: [README — TTS](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Tts`).
 
@@ -286,7 +288,7 @@ await tts.synthesize(textBuf, audioBuf, {
 });
 ```
 
-`phonemeCodepoints` and `tokens` are exclusive on the TypeScript type. Runtime does not extra-guard a conflict — upstream then yields empty audio / `TTS_GENERATE_ERROR`.
+`phonemeCodepoints` and `tokens` are exclusive on the TypeScript type. Runtime does not extra-guard a conflict — upstream then yields empty audio / `TTS_EMPTY_OUTPUT`.
 
 **Timeline.** With `timeline: true` the result also says where each text segment landed in the audio, for example to highlight the sentence being spoken:
 
@@ -550,9 +552,10 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTS_OUTPUT_SAMPLE_RATE_MISMATCH` | `synthesize` | `audioOut.sampleRate` ≠ model output rate — use `tts.getSampleRate()` to allocate |
 | `TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND` | `synthesize` (voice clone) | `referenceAudioBufferId` not in registry — released before synthesis |
 | `TTS_REFERENCE_AUDIO_BUFFER_KIND_MISMATCH` | `synthesize` (voice clone) | Reference buffer is not an offline audio buffer |
-| `TTS_GENERATE_ERROR` | `synthesize` | Model-level synthesis failed, or voice clone on unsupported model type, or empty audio result |
+| `TTS_GENERATE_ERROR` | `synthesize` | Model-level synthesis failed (the message carries the native error text), or voice clone on unsupported model type |
+| `TTS_EMPTY_OUTPUT` | `synthesize` | The model ran without an error but returned no audio for non-empty input. Upstream skips text it cannot speak without saying why, so the message names the usual causes per model (for ZipVoice: text too short for the reference audio and speed, or no words in the lexicon) |
 | `ORCHESTRATION_CANCELLED` | `synthesize` | `signal` aborted; `name` is `'AbortError'` |
-| `OFFLINE_OOM` | `synthesize` | Not enough memory for offline synthesis. Prefer streaming TTS for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
+| `OFFLINE_OOM` | `synthesize` | Not enough memory for offline synthesis (also when the model fails to allocate memory during generation). Prefer streaming TTS for large inputs, or chunk offline work with the segmentation engine ([segmentation-engine.md](./segmentation-engine.md)). Native reject text references the same doc path. |
 
 ## Troubleshooting
 
@@ -563,6 +566,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTS_TEXT_BUFFER_NOT_FOUND` | Buffer released before `synthesize` | Release **after** synthesis in a `finally` block |
 | `TTS_GENERATE_ERROR` + Zipvoice | `referenceText` empty or missing | `voiceClone.referenceText` must be non-empty for Zipvoice |
 | `TTS_GENERATE_ERROR` + cloning | Non-Zipvoice/Pocket model with `voiceClone` | Only Zipvoice and Pocket support voice cloning |
+| `TTS_EMPTY_OUTPUT` + Zipvoice | Very short text (one or two words) for the reference clip, or words missing from the lexicon | Use a longer text, a shorter reference clip or a lower `speed` |
 | `TTS_NUM_STEPS_UNSUPPORTED` | `numSteps` on vits/matcha/kokoro/kitten | Use Supertonic, Zipvoice, or Pocket; or omit `numSteps` |
 | `TTS_NUM_STEPS_REQUIRES_VOICE_CLONE` | `numSteps` on Zipvoice/Pocket without `voiceClone` | Pass `voiceClone.referenceAudio` |
 | Memory grows over time | Buffers not released | Always call `releasePipelineAudioBuffer` / `releasePipelineTextBuffer` after use |

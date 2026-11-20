@@ -8,6 +8,7 @@
 #include "engine/TtsEngineStore.h"
 #include "options/TtsGenerationOptionsHelpers.h"
 #include "sherpa-onnx-tts-engine-wrapper.h"
+#include "sherpa-onnx-tts-generate-error.h"
 #include "AudioRegistry.h"
 #include "TextRegistry.h"
 
@@ -23,6 +24,23 @@ static NSString *const kOfflineTtsOomMessage =
     @"Not enough memory for offline text-to-speech. Please use a streaming mode for large inputs. "
     @"Alternatively, use the segmentation engine to process smaller segments with offline models "
     @"(see docs/segmentation-engine.md).";
+
+/** Rejects with the reason the shared wrapper gave for a result without audio. */
+static void RejectTtsGenerateError(RCTPromiseRejectBlock reject,
+                                   const sherpaonnx::TtsWrapper::AudioResult &audio) {
+    if (audio.errorCode == sherpaonnx::kTtsErrorOom) {
+        RCTLogError(@"synthesizeTts native OOM: %s", audio.errorMessage.c_str());
+        reject(kOfflineOomCode, kOfflineTtsOomMessage, nil);
+        return;
+    }
+    NSString *code = audio.errorCode.empty()
+        ? @"TTS_GENERATE_ERROR"
+        : [NSString stringWithUTF8String:audio.errorCode.c_str()];
+    NSString *message = audio.errorMessage.empty()
+        ? nil
+        : [NSString stringWithUTF8String:audio.errorMessage.c_str()];
+    reject(code ?: @"TTS_GENERATE_ERROR", message ?: @"TTS generated empty audio", nil);
+}
 
 - (void)so_synthesizeTts:(NSString *)instanceId
          textInBufferId:(NSString *)textInBufferId
@@ -261,7 +279,7 @@ static NSString *const kOfflineTtsOomMessage =
                 result = std::move(finalAudio);
             } else {
                 if (!ok || collected.empty()) {
-                    reject(@"TTS_GENERATE_ERROR", @"TTS generated empty audio", nil);
+                    RejectTtsGenerateError(reject, finalAudio);
                     return;
                 }
                 result.samples = std::move(collected);
@@ -277,7 +295,7 @@ static NSString *const kOfflineTtsOomMessage =
         }
 
         if (result.samples.empty() || result.sampleRate == 0) {
-            reject(@"TTS_GENERATE_ERROR", @"TTS generated empty audio", nil);
+            RejectTtsGenerateError(reject, result);
             return;
         }
 
