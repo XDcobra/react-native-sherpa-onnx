@@ -266,7 +266,7 @@ flowchart LR
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | start of each segment and of each retry | segmented only (`mode: 'auto'`); single-pass (`mode: 'off'`): none. `currentSegmentStartMs` / `currentSegmentEndMs` give the segment position in the input audio (ms) |
+| `onProgress` | `OrchestrationProgress` | start of each segment and of each retry | segmented (`mode: 'auto'`): per segment; `currentSegmentStartMs` / `currentSegmentEndMs` give the segment position in the input audio (ms). Single pass (`mode: 'off'`): once at the start (`fraction: 0`) and once at the end (`fraction: 1`) |
 
 Shapes: [Types](#types).
 
@@ -274,6 +274,19 @@ Shapes: [Types](#types).
 const result = await sep.separate(mixed, [vocalsOut, accompOut], {
   segmentation: { mode: 'auto' },
   onProgress: (p) => console.log(`${p.currentSegment + 1}/${p.totalSegments}`),
+});
+```
+
+**Progress inside one pass.** A single native pass has no progress of its own: Spleeter runs the model once over the spectrogram of the whole input, and UVR does its chunking inside one native call. For progress during a long mix, use `segmentation.mode: 'auto'` and cap the parts with `maxSegmentMs` (music rarely has the silences the default policy cuts at), plus `overlapSamples` to hide the seams:
+
+```ts
+await sep.separate(mixed, [vocalsOut, accompOut], {
+  segmentation: {
+    mode: 'auto',
+    policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 30_000 },
+  },
+  overlapSamples: 44_100,
+  onProgress: (p) => console.log(p.fraction, p.currentSegmentStartMs),
 });
 ```
 

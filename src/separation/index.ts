@@ -387,11 +387,25 @@ export async function createSeparation(
           (separateOptions as SeparateOptions | undefined)?.signal
         );
         const startedAtMs = Date.now();
+        // One native call: the model runs over the whole input at once, so
+        // there is no progress inside it. Report its start and its end.
+        const onProgress = (separateOptions as SeparateOptions | undefined)
+          ?.onProgress;
+        const emitWhole = (fraction: number) =>
+          onProgress?.({
+            currentSegment: fraction >= 1 ? 1 : 0,
+            totalSegments: 1,
+            fraction,
+            currentSegmentDurationMs: 0,
+            elapsedMs: Date.now() - startedAtMs,
+          });
+        emitWhole(0);
         await runOfflineSeparationDirect(
           instanceId,
           audioIn as OfflineAudioBufferIdSource,
           audioOuts as readonly OfflineAudioBufferIdSource[]
         );
+        emitWhole(1);
         return {
           status: 'complete',
           totalSegments: 1,

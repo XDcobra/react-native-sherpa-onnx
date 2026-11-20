@@ -160,6 +160,9 @@ internal class TtsLifecycleService(
       if (!st.isNullOrBlank()) {
         resultMap.putString("sizeTier", st)
       }
+      (result["numSpeakers"] as? Number)?.toInt()?.takeIf { it >= 0 }?.let {
+        resultMap.putInt("numSpeakers", it)
+      }
       val detectionSources = result["detectionSources"] as? ArrayList<*>
       if (!detectionSources.isNullOrEmpty()) {
         val srcArr = Arguments.createArray()

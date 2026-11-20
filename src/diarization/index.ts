@@ -5,6 +5,7 @@
  * Detect for pyannote / reverb segmentation packs is also exported.
  */
 
+import { NativeEventEmitter, NativeModules } from 'react-native';
 import SherpaOnnx from '../NativeSherpaOnnx';
 import {
   getPipelineAudioBufferInfo,
@@ -19,6 +20,8 @@ import type { OrchestrationProgress } from '../pipeline/offlineOrchestrator';
 import type {
   DiarizationClusterEmbedding,
   DiarizationEngine,
+  DiarizationProgress,
+  DiarizationProgressPhase,
   DiarizationInitializeOptions,
   DiarizationReclusterOptions,
   DiarizeOptions,
@@ -37,6 +40,8 @@ export type {
   DiarizationEngine,
   DiarizationInitializeOptions,
   DiarizationModelKind,
+  DiarizationProgress,
+  DiarizationProgressPhase,
   DiarizationNameSearch,
   DiarizationReclusterOptions,
   DiarizationSegmentationOptions,
@@ -67,6 +72,70 @@ export {
 export { mapDiarizationToNames } from './mapDiarizationToNames';
 
 let diarizationInstanceCounter = 0;
+let diarizationProgressOpCounter = 0;
+
+const DIARIZATION_PROGRESS_PHASES: readonly DiarizationProgressPhase[] = [
+  'segmentation',
+  'embedding',
+  'clustering',
+];
+
+/**
+ * Forwards native `diarizationProgress` events of one run (matched by
+ * `operationId`) to `onProgress`, with a fraction that never goes back.
+ */
+function subscribeDiarizationProgress(
+  operationId: string,
+  startedAtMs: number,
+  onProgress: (progress: DiarizationProgress) => void
+): { remove(): void; lastFraction(): number } {
+  let last = 0;
+  const emitter = new NativeEventEmitter(NativeModules.SherpaOnnx as any);
+  const subscription = emitter.addListener(
+    'diarizationProgress',
+    (event: {
+      operationId?: string;
+      fraction?: number;
+      phase?: string;
+      current?: number;
+      total?: number;
+    }) => {
+      if (event?.operationId !== operationId) return;
+      if (
+        typeof event.fraction !== 'number' ||
+        !Number.isFinite(event.fraction)
+      )
+        return;
+      const fraction = Math.max(last, Math.min(1, Math.max(0, event.fraction)));
+      last = fraction;
+      const phase = DIARIZATION_PROGRESS_PHASES.find((p) => p === event.phase);
+      const total =
+        typeof event.total === 'number' && event.total > 0
+          ? Math.trunc(event.total)
+          : 1;
+      const current =
+        typeof event.current === 'number' && event.current >= 0
+          ? Math.min(total, Math.trunc(event.current))
+          : 0;
+      try {
+        onProgress({
+          currentSegment: current,
+          totalSegments: total,
+          fraction,
+          currentSegmentDurationMs: 0,
+          elapsedMs: Date.now() - startedAtMs,
+          ...(phase ? { phase } : {}),
+        });
+      } catch {
+        // Errors thrown by the callback are ignored.
+      }
+    }
+  );
+  return {
+    remove: () => subscription.remove(),
+    lastFraction: () => last,
+  };
+}
 
 function asOfflineSegmentBufferInfo(
   info: { kind?: string; segmentCount?: number; bufferId?: string },
@@ -279,6 +348,10 @@ export async function createDiarization(
       }
 
       let abortHandler: (() => void) | null = null;
+      const operationId = diarizeOptions?.onProgress
+        ? `diar_${Date.now()}_${++diarizationProgressOpCounter}`
+        : undefined;
+      let progressSubscription: { remove(): void } | null = null;
       try {
         if (diarizeOptions?.signal) {
           if (diarizeOptions.signal.aborted) throw diarizationAbortError();
@@ -290,12 +363,33 @@ export async function createDiarization(
           diarizeOptions.signal.addEventListener('abort', abortHandler);
         }
 
-        const nativeResult = await SherpaOnnx.diarizeOffline(
-          instanceId,
-          audioInBufferId,
-          segmentOutBufferId,
-          diarizeOptions?.includeOverlap === true
-        );
+        if (operationId && diarizeOptions?.onProgress) {
+          progressSubscription = subscribeDiarizationProgress(
+            operationId,
+            startedAtMs,
+            diarizeOptions.onProgress
+          );
+        }
+
+        const includeOverlap = diarizeOptions?.includeOverlap === true;
+        const nativeResult = operationId
+          ? await SherpaOnnx.diarizeOffline(
+              instanceId,
+              audioInBufferId,
+              segmentOutBufferId,
+              includeOverlap,
+              operationId
+            )
+          : await SherpaOnnx.diarizeOffline(
+              instanceId,
+              audioInBufferId,
+              segmentOutBufferId,
+              includeOverlap
+            );
+        // Native events are posted asynchronously; drop late ones so the
+        // final event below stays the last one.
+        progressSubscription?.remove();
+        progressSubscription = null;
         return finishDiarizeResult({
           nativeResult,
           startedAtMs,
@@ -303,6 +397,7 @@ export async function createDiarization(
           diarizeOptions,
         });
       } finally {
+        progressSubscription?.remove();
         if (abortHandler && diarizeOptions?.signal) {
           diarizeOptions.signal.removeEventListener('abort', abortHandler);
         }
@@ -376,6 +471,7 @@ export type {
   StreamingDiarizationCustomInitializeOptions,
   StreamingDiarizationInitializeOptions,
   StreamingDiarizationOptions,
+  StreamingDiarizationFeedOptions,
   DiarizationPipelineHandle,
   StreamingDiarizationEngine,
 } from './streamingTypes';

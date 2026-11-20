@@ -216,20 +216,25 @@ Manually feeds an offline audio buffer to the engine's accumulation buffer. If e
 
 ```ts
 feed(
-  audioIn: OfflineAudioBufferIdSource
+  audioIn: OfflineAudioBufferIdSource,
+  options?: { signal?: AbortSignal }
 ): Promise<Array<{ start: number; end: number; speaker: number }>>;
 ```
 
 ```ts
-const segments = await engine.feed(offlineAudioBuf);
+const segments = await engine.feed(offlineAudioBuf, { signal });
 ```
+
+`options.signal` is checked before the native call. A feed that has started runs to the end, because it updates the engine state; in a loop over chunks the next `feed` rejects with `name: 'AbortError'`, `code: 'ORCHESTRATION_CANCELLED'`. `flush(options?)` takes the same option.
 
 ### `engine.flush()`
 
 Flushes remaining trailing audio in the accumulation buffer (zero-padding to window size), post-processes final predictions, and returns final segments.
 
 ```ts
-flush(): Promise<Array<{ start: number; end: number; speaker: number }>>;
+flush(
+  options?: { signal?: AbortSignal }
+): Promise<Array<{ start: number; end: number; speaker: number }>>;
 ```
 
 ```ts

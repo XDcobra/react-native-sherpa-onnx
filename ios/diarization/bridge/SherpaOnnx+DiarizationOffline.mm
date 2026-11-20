@@ -215,6 +215,7 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
        audioInBufferId:(NSString *)audioInBufferId
   segmentsOutBufferId:(NSString *)segmentsOutBufferId
         includeOverlap:(BOOL)includeOverlap
+           operationId:(NSString * _Nullable)operationId
                resolve:(RCTPromiseResolveBlock)resolve
                 reject:(RCTPromiseRejectBlock)reject
 {
@@ -304,9 +305,37 @@ NSString *RejectCodeForProcess(const sherpaonnx::DiarizationProcessResult &resul
         return;
       }
 
+      // With an operationId, forward the core's (throttled) progress as
+      // `diarizationProgress` events; JS matches them by operationId.
+      sherpaonnx::DiarizationProgressFn onProgress;
+      NSString *progressOpId =
+          (operationId != nil && [operationId length] > 0) ? [operationId copy] : nil;
+      if (progressOpId != nil) {
+        __weak SherpaOnnx *weakSelf = self;
+        NSString *progressInstanceId = [instanceId copy];
+        onProgress = [weakSelf, progressOpId, progressInstanceId](
+                         const sherpaonnx::DiarizationProgressDto &p) {
+          NSDictionary *body = @{
+            @"operationId": progressOpId,
+            @"instanceId": progressInstanceId,
+            @"fraction": @(std::max(0.f, std::min(1.f, p.fraction))),
+            @"phase": [NSString stringWithUTF8String:p.phase.c_str()] ?: @"",
+            @"current": @(p.current),
+            @"total": @(p.total),
+          };
+          dispatch_async(dispatch_get_main_queue(), ^{
+            SherpaOnnx *emitter = weakSelf;
+            if (!emitter) {
+              return;
+            }
+            [emitter sendEventWithName:@"diarizationProgress" body:body];
+          });
+        };
+      }
       sherpaonnx::DiarizationProcessResult result =
           wrapper->processMonoSamples(pcmView.data, static_cast<int32_t>(pcmView.count),
-                                       pcmView.sampleRate, includeOverlap ? true : false, {});
+                                       pcmView.sampleRate, includeOverlap ? true : false,
+                                       onProgress);
       if (!result.success) {
         reject(RejectCodeForProcess(result),
                result.error.empty()

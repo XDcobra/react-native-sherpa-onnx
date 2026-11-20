@@ -2059,6 +2059,8 @@ export interface Spec extends TurboModule {
     quantization?: string;
     /** tiny, small, medium, large, unknown — from name heuristics. */
     sizeTier?: string;
+    /** Speaker count from model files (no engine load); omitted when unknown. */
+    numSpeakers?: number;
     /** Optional trace strings from native (see DetectionSource in src/types/modelDetect.ts). */
     detectionSources?: string[];
     /** Resolved non-empty path keys from native file-based detection. */
@@ -2603,11 +2605,16 @@ export interface Spec extends TurboModule {
     sampleRate?: number;
   }>;
 
+  /**
+   * @param operationId - When set, native emits `diarizationProgress` events
+   *   `{ operationId, instanceId, fraction, phase, current, total }` while it runs.
+   */
   diarizeOffline(
     instanceId: string,
     audioInBufferId: string,
     segmentsOutBufferId: string,
-    includeOverlap?: boolean
+    includeOverlap?: boolean,
+    operationId?: string | null
   ): Promise<DiarizationProcessNativeResult>;
 
   reclusterDiarization(

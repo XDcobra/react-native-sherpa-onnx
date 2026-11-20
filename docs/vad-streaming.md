@@ -187,6 +187,7 @@ Offline VAD can optionally split the input audio before running detection on eac
 | --- | --- | --- |
 | **Segmentation** | `options.segmentation` + `onProgress` | Not used — native VAD consumes live stream directly |
 | **Progress** | `OrchestrationProgress` per slice (`auto` only) | `onSegmentAppended` on `LiveSegmentBuffer` |
+| **Segments as they come** | `onSegment` per written speech segment (`auto` only) | `onSegmentAppended` on `LiveSegmentBuffer` |
 | **Cancel** | Runs to completion | `pipeline.stop()` |
 
 ```ts
@@ -199,9 +200,12 @@ const { summary } = await vad.process({
       policy: { evaluator: 'speech_energy_silence', maxSegmentMs: 120_000 },
     },
     onProgress: (p) => console.log(`slice ${p.currentSegment + 1}/${p.totalSegments}`),
+    onSegment: (seg) => console.log(`speech ${seg.startMs}–${seg.endMs} ms`),
   },
 });
 ```
+
+With `mode: 'auto'`, each progress event also carries `currentSegmentStartMs` / `currentSegmentEndMs` (the slice in the input audio), and `onSegment` gets each speech segment (`VADOfflineSegmentEvent`: `segmentIndex`, `startSample`, `endSample`, `sampleRate`, `startMs`, `endMs`, `durationMs`, `confidence?`) right after it is written, before the next slice runs. With `mode: 'off'` the single native pass writes all segments at once and `onSegment` is not called; read `segmentOut` after the call.
 
 Full policy reference: [segmentation-engine.md](segmentation-engine.md). Memory planning: [memory-and-models.md](memory-and-models.md).
 
@@ -447,6 +451,7 @@ More end-to-end patterns: [feature-pipelines.md#vad-streaming-patterns](feature-
 | `onSpeechStateChanged` | `VADSpeechStateChangedEvent` | speech / non-speech transition | assign on `VADPipelineHandle`; throttle with `speechStateEventMinIntervalMs` |
 | `onSegmentAppended` | `LiveSegmentBufferSegmentAppendedEvent` (notify scalars) | committed speech span on `segmentOut` | set on `createLiveSegmentBuffer`; **no `payload` on the event** — pull with `readLiveSegment` |
 | `onProgress` | `OrchestrationProgress` | start of each offline segment step | offline segmented only (`mode: 'auto'`); live path: none |
+| `onSegment` | `VADOfflineSegmentEvent` | each speech segment written by an offline run | offline segmented only (`mode: 'auto'`); errors thrown by the callback are ignored |
 
 Live segment commits are **notify + pull**. Timing/routing fields come on the event; `payload` (e.g. `source: 'vad'`, score) only after pull. Canonical detail: [segmentbuffer-streaming — Committed segments](segmentbuffer-streaming.md#committed-segments-onsegmentappended-notify--pull).
 
@@ -491,7 +496,8 @@ const segmentOut = await createLiveSegmentBuffer({
 | `VADRuntimeOptions` | `SileroVadRuntimeOptions \| TenVadRuntimeOptions` — strict model-matched union |
 | `VADRuntimeTuningOptions` | `scoreThreshold?`, `minSilenceDurationMs?`, `minSpeechDurationMs?`, `maxSpeechDurationMs?`, `windowSize?` |
 | `VADLiveRunOptions` | `chunkSize?`, `autoFlushOnInputEnded?`, `sourceTag?`, `speechStateEventMinIntervalMs?` |
-| `VADOfflineRunOptions` | `sourceTag?`, `segmentation?`, `onProgress?`, `signal?` |
+| `VADOfflineRunOptions` | `sourceTag?`, `segmentation?`, `onProgress?`, `onSegment?`, `signal?` |
+| `VADOfflineSegmentEvent` | `segmentIndex`, `startSample`, `endSample`, `sampleRate`, `startMs`, `endMs`, `durationMs`, `confidence?` |
 | `VADRunOptions` | `VADLiveRunOptions \| VADOfflineRunOptions` |
 | `VADLiveProcessInput` | `audioIn` (live), `segmentOut` (live), `options?: VADLiveRunOptions` |
 | `VADOfflineProcessInput` | `audioIn` (offline), `segmentOut` (offline or live), `options?: VADOfflineRunOptions` |

@@ -24,6 +24,7 @@ export type {
   VADOfflineResult,
   VADLiveProcessInput,
   VADOfflineProcessInput,
+  VADOfflineSegmentEvent,
   VADSpeechStateChangedEvent,
 } from './types';
 export { DETECTION_SOURCES, VAD_MODEL_TYPES, isDetectionSource } from './types';

@@ -7405,6 +7405,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
     audioInBufferId: String,
     segmentsOutBufferId: String,
     includeOverlap: Boolean?,
+    operationId: String?,
     promise: Promise
   ) {
     diarizationHelper.diarizeOffline(
@@ -7412,6 +7413,7 @@ class SherpaOnnxModule(reactContext: ReactApplicationContext) :
       audioInBufferId,
       segmentsOutBufferId,
       includeOverlap == true,
+      operationId?.trim()?.takeIf { it.isNotEmpty() },
       promise,
     )
   }

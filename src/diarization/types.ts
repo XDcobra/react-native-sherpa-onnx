@@ -73,8 +73,29 @@ export interface DiarizationInitializeOptions {
   debug?: boolean;
 }
 
+/** Stage of an offline diarize run reported in {@link DiarizationProgress}. */
+export type DiarizationProgressPhase =
+  | 'segmentation'
+  | 'embedding'
+  | 'clustering';
+
+/**
+ * Progress of {@link DiarizationEngine.diarize}. `fraction` covers the whole
+ * run (0..1); `currentSegment` / `totalSegments` count the steps of `phase`
+ * (segmentation windows, speaker embeddings, then one clustering step).
+ */
+export interface DiarizationProgress extends OrchestrationProgress {
+  /** Stage of the run. Omitted on the final event. */
+  phase?: DiarizationProgressPhase;
+}
+
 export interface DiarizeOptions {
-  onProgress?: (progress: OrchestrationProgress) => void;
+  /**
+   * Progress while native code runs: per segmentation window, per speaker
+   * embedding and for clustering (at most about one event per percent),
+   * then a final event with `fraction: 1`.
+   */
+  onProgress?: (progress: DiarizationProgress) => void;
   signal?: AbortSignal;
   includeOverlap?: boolean;
 }
@@ -118,6 +139,12 @@ export type DiarizationNameSearch = {
 export type MapDiarizationToNamesOptions = {
   /** Cosine similarity threshold in `[0, 1]`. Default `0.5`. */
   threshold?: number;
+  /**
+   * Stops the call. Checked before each name search and before each page of
+   * segments is read. On abort the promise rejects with `code:
+   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`).
+   */
+  signal?: AbortSignal;
 };
 
 export type NamedDiarizationSpan = {
@@ -145,6 +172,7 @@ export interface DiarizationEngine {
    * @throws {Error} `DIARIZATION_ERROR` — native diarize failed.
    * @throws {Error} `DIARIZATION_BUFFER_NOT_FOUND` — audio or segment buffer is unknown.
    * @throws {Error} `DIARIZATION_NOT_INITIALIZED` — engine is not initialized.
+   * @throws {Error} `OFFLINE_OOM` — native ran out of memory (try a larger `segmentation.windowShiftRatio` or shorter audio before retrying).
    */
   diarize(
     audioIn: OfflineAudioBufferIdSource,

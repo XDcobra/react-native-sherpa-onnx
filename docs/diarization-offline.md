@@ -137,6 +137,10 @@ const result = await diar.diarize(audioIn, segmentOut, {
 console.log(result.numSpeakers, result.segmentCount);
 ```
 
+**Progress.** `onProgress` gets `DiarizationProgress` events while native code runs: `phase` is `'segmentation'` (one step per analysis window), then `'embedding'` (one step per speaker embedding), then `'clustering'`. `currentSegment` / `totalSegments` count the steps of the current phase and `fraction` covers the whole run. Events come at most about once per percent, plus one at each phase end; a final event with `fraction: 1` and no `phase` follows when the call finishes.
+
+**Out of memory.** When native code runs out of memory, the call rejects with `code: 'OFFLINE_OOM'`. Running the same call again needs the same memory. Before a retry, lower the cost of the run, for example with a larger `segmentation.windowShiftRatio` (fewer windows, fewer embeddings) or by diarizing shorter parts of the audio, or stop.
+
 ### `engine.recluster(options?)`
 
 Re-runs clustering on the **cached** embeddings from the last `diarize` — no re-inference. `computeConfidence` overrides the session flag when provided; otherwise the previous setting is kept.
@@ -192,10 +196,12 @@ function mapDiarizationToNames(
 
 ```ts
 const { clusterToName, timeline } = await mapDiarizationToNames(
-  diar, sid, segmentOut, { threshold: 0.5 }
+  diar, sid, segmentOut, { threshold: 0.5, signal: abortController.signal }
 );
 timeline.forEach((s) => console.log(s.name ?? 'Unknown', s.startSec, s.endSec));
 ```
+
+`options.signal` is checked before each name search and before each page of segments is read; on abort the call rejects with `name: 'AbortError'`, `code: 'ORCHESTRATION_CANCELLED'`.
 
 ## Diarization payload (`source: 'diarization'`)
 
@@ -235,7 +241,7 @@ flowchart LR
 
 | Callback | Payload | Fires when | Notes |
 | --- | --- | --- | --- |
-| `onProgress` | `OrchestrationProgress` | during `diarize` pipeline steps | optional on `DiarizeOptions`; coarse fraction-based |
+| `onProgress` | `DiarizationProgress` (`OrchestrationProgress` + `phase?`) | per segmentation window, per speaker embedding and for clustering (about one event per percent), then once with `fraction: 1` | optional on `DiarizeOptions` |
 
 ```ts
 const result = await diar.diarize(audioIn, segmentOut, {
@@ -258,6 +264,7 @@ const result = await diar.diarize(audioIn, segmentOut, {
 | `DiarizationEmbeddingOptions` | `{ modelSource: FileSource; quantization? }` |
 | `DiarizationClusteringOptions` | `{ numClusters?; threshold?; computeConfidence? }` — when `numClusters > 0`, threshold is ignored; `computeConfidence` enables silhouette confidence per segment (default `false`) |
 | `DiarizeOptions` | `{ onProgress?; signal?; includeOverlap? }` |
+| `DiarizationProgress` | `OrchestrationProgress` + `phase?: 'segmentation' \| 'embedding' \| 'clustering'` |
 | `DiarizeResult` | `{ status, numSpeakers, segmentCount, sampleRate, processingTimeMs, speakersPerFrame?, segments? }` |
 | `DiarizationReclusterOptions` | `{ numClusters?; threshold?; computeConfidence? }` |
 | `DiarizationClusterEmbedding` | `{ speaker: number; embedding: Float32Array }` |
@@ -289,6 +296,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `DIARIZATION_NOT_INITIALIZED` | Operation on uninitialized engine/instance |
 | `DIARIZATION_CANCELLED` | Operation cancelled. Through `signal` the call rejects with `name: 'AbortError'` (before or during the run), like the other offline engines; a cancel via `cancelDiarization` without the signal resolves with `status: 'cancelled'`. |
 | `DIARIZATION_BUFFER_NOT_FOUND` | Audio or segment buffer id missing/released |
+| `OFFLINE_OOM` | Native code ran out of memory during `diarize`; a retry of the same call needs the same memory (see **Out of memory** above) |
 | `DETECT_ERROR` | Model detection failed or pack layout invalid |
 
 ## Architecture note

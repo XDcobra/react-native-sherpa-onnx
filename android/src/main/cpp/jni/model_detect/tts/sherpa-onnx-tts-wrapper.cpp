@@ -82,6 +82,22 @@ jobject TtsDetectResultToJava(JNIEnv* env, const TtsDetectResult& result) {
   }
   PutString(env, map, mapPut, "quantization", result.quantization);
   PutString(env, map, mapPut, "sizeTier", result.sizeTier);
+  if (result.numSpeakers >= 0) {
+    jclass integerClass = env->FindClass("java/lang/Integer");
+    jmethodID valueOf = integerClass
+        ? env->GetStaticMethodID(integerClass, "valueOf", "(I)Ljava/lang/Integer;")
+        : nullptr;
+    if (valueOf) {
+      jobject boxed = env->CallStaticObjectMethod(integerClass, valueOf,
+                                                  static_cast<jint>(result.numSpeakers));
+      jstring keyNumSpeakers = env->NewStringUTF("numSpeakers");
+      env->CallObjectMethod(map, mapPut, keyNumSpeakers, boxed);
+      env->DeleteLocalRef(keyNumSpeakers);
+      if (boxed) env->DeleteLocalRef(boxed);
+    }
+    if (integerClass) env->DeleteLocalRef(integerClass);
+    if (env->ExceptionCheck()) env->ExceptionClear();
+  }
 
   jclass hashMapClass = env->FindClass("java/util/HashMap");
   if (hashMapClass) {

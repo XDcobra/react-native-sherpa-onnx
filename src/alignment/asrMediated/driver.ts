@@ -543,7 +543,12 @@ export async function runAccurateAsrMediated(
           ? (frameCount / job.anchor.sampleRate) * 1000
           : 0;
 
-      progressSession.emitStep(j, jobs.length, currentSegmentDurationMs);
+      progressSession.emitStep(
+        j,
+        jobs.length,
+        currentSegmentDurationMs,
+        job.anchor
+      );
 
       const preparedText = prepareAlignmentTranscript(
         job.referenceText,

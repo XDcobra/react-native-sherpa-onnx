@@ -598,7 +598,7 @@ export async function runAccurateChunkedForcedCtc(
           continue;
         }
 
-        progressSession.emitStep(i, anchors.length, anchorDurationMs);
+        progressSession.emitStep(i, anchors.length, anchorDurationMs, anchor);
 
         const preparedWindowText = prepareAlignmentTranscript(
           textWindow.text,

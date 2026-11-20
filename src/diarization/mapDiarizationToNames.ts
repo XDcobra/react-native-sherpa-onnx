@@ -11,6 +11,7 @@ import type {
   NamedDiarizationSpan,
 } from './types';
 import { DiarizationErrorCode } from './types';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 
 const DEFAULT_THRESHOLD = 0.5;
 const SEGMENT_PAGE_SIZE = 4096;
@@ -31,6 +32,7 @@ function resolveThreshold(options?: MapDiarizationToNamesOptions): number {
  * @throws {Error} `DIARIZATION_NOT_INITIALIZED` — diarization engine is not initialized.
  * @throws {Error} `SEGMENT_INVALID_ARGUMENT` — segment buffer id is malformed.
  * @throws {Error} `SPEAKER_EMBEDDING_MANAGER_ERROR` — SID `search` failed.
+ * @throws {Error} `ORCHESTRATION_CANCELLED` (`name: 'AbortError'`) — `options.signal` aborted.
  */
 export async function mapDiarizationToNames(
   diar: DiarizationEngine,
@@ -51,10 +53,13 @@ export async function mapDiarizationToNames(
   resolveOfflineSegmentBufferId(diarizationSegments);
 
   const threshold = resolveThreshold(options);
+  const signal = options?.signal;
+  throwIfOrchestrationAborted(signal);
   const clusters = await diar.getClusterEmbeddings();
   const clusterToName = new Map<number, string | null>();
 
   for (const row of clusters) {
+    throwIfOrchestrationAborted(signal);
     const name = await sid.search(row.embedding, { threshold });
     clusterToName.set(row.speaker, name);
   }
@@ -62,6 +67,7 @@ export async function mapDiarizationToNames(
   const timeline: NamedDiarizationSpan[] = [];
   let start = 0;
   for (;;) {
+    throwIfOrchestrationAborted(signal);
     const batch = await getOfflineSegmentBufferSegments(
       diarizationSegments,
       start,

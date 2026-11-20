@@ -56,6 +56,22 @@ describe('computeAudioVisualizationProfile', () => {
     expect(result.kind).toBe('spectrum_bars');
   });
 
+  test('rejects before the native call when signal is already aborted', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      computeAudioVisualizationProfile(
+        { kind: 'fs', path: '/tmp/file.wav' },
+        { signal: controller.signal }
+      )
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ORCHESTRATION_CANCELLED',
+    });
+    expect(mockNative.computeAudioVisualizationProfile).not.toHaveBeenCalled();
+  });
+
   test('maps offline buffer input', async () => {
     mockNative.computeAudioVisualizationProfile.mockResolvedValue({
       kind: 'spectrum_bars',

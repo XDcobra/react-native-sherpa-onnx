@@ -241,6 +241,17 @@ const det = await detectTtsModel({ kind: 'fs', path: '/absolute/path/to/kokoro' 
 if (!det.success) throw new Error(det.error ?? 'TTS detection failed');
 ```
 
+**Voice count before loading.** `det.numSpeakers` is the number of voices (speaker ids `0 .. numSpeakers - 1`), read from the model files without loading the engine, so a picker can show "voice n of N" before `createTTS`. It is the same value `tts.getNumSpeakers()` returns later; `0` or `1` means one voice.
+
+| Model type | Source of `numSpeakers` |
+| --- | --- |
+| `vits`, `kokoro`, `kitten` | `n_speakers` metadata of the model `.onnx` |
+| `matcha` | `n_speakers` metadata of the acoustic model `.onnx` |
+| `supertonic` | header of `voice.bin` |
+| `zipvoice`, `pocket` | omitted: the voice is cloned from reference audio, there are no speaker ids |
+
+It is also omitted for name-only detection (no model folder on disk) and when the files cannot be read.
+
 ### `createTTS(options)`
 
 ```ts

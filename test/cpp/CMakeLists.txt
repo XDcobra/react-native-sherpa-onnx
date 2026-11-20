@@ -25,6 +25,7 @@ set(PRODUCTION_SOURCES
   "${MODEL_DETECT_DIR}/ocr/sherpa-onnx-model-detect-ocr.cpp"
   "${MODEL_DETECT_DIR}/ocr/sherpa-onnx-validate-ocr.cpp"
   "${MODEL_DETECT_DIR}/common/sherpa-onnx-ort-guard-utils.cpp"
+  "${MODEL_DETECT_DIR}/common/onnx-model-metadata.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-stt-catalog-metadata.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-model-detect-stt.cpp"
   "${MODEL_DETECT_DIR}/stt/sherpa-onnx-stt-online-guard.cpp"
@@ -68,6 +69,7 @@ add_executable(model_detect_test
   "${MODEL_DETECT_TEST_DIR}/model_detect_test_utils.cpp"
   "${MODEL_DETECT_TEST_DIR}/model_language_catalog_hints_test.cpp"
   "${MODEL_DETECT_TEST_DIR}/custom_path_requirements_catalog_test.cpp"
+  "${MODEL_DETECT_TEST_DIR}/onnx_model_metadata_test.cpp"
 )
 
 target_sources(model_detect_test PRIVATE ${PRODUCTION_SOURCES})

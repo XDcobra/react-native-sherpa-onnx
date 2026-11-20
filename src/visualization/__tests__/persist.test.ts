@@ -132,6 +132,41 @@ describe('audio visualization sidecar persist', () => {
     expect(mockNative.saveAudioVisualizationProfile).toHaveBeenCalled();
   });
 
+  test('an abort during the analysis skips the persist write', async () => {
+    const controller = new AbortController();
+    mockNative.computeAudioVisualizationProfile.mockImplementation(async () => {
+      controller.abort();
+      return {
+        kind: 'spectrum_bars',
+        sampleRate: 16000,
+        durationMs: 250,
+        barCount: 4,
+        levels: [0.5, 0.5, 0.5, 0.5],
+        frameCount: 0,
+        frameDurationMs: 0,
+      };
+    });
+    mockNative.saveAudioVisualizationProfile.mockClear();
+
+    await expect(
+      computeAudioVisualizationProfile(
+        { kind: 'fs', path: '/tmp/out.wav' },
+        {
+          barCount: 4,
+          signal: controller.signal,
+          persist: {
+            destination: { kind: 'fs', path: '/tmp/out.sviz' },
+            overwrite: true,
+          },
+        }
+      )
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ORCHESTRATION_CANCELLED',
+    });
+    expect(mockNative.saveAudioVisualizationProfile).not.toHaveBeenCalled();
+  });
+
   test('compute without persist does not save', async () => {
     mockNative.computeAudioVisualizationProfile.mockResolvedValue({
       kind: 'spectrum_bars',

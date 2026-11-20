@@ -36,6 +36,7 @@
 #include "sherpa-onnx-tts-catalog-metadata.h"
 #include "model_language_catalog.h"
 #include "sherpa-onnx-validate-tts.h"
+#include "onnx-model-metadata.h"
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
@@ -364,6 +365,29 @@ static TtsDetectResult DetectTtsModelFromFiles(
     return result;
 }
 
+/** Speaker count from model files (no engine load); -1 when unknown or not applicable. */
+int32_t ReadTtsSpeakerCount(const TtsDetectResult& result) {
+    switch (result.selectedKind) {
+        case TtsModelKind::kVits:
+        case TtsModelKind::kKokoro:
+        case TtsModelKind::kKitten:
+            return result.paths.ttsModel.empty()
+                ? -1
+                : model_detect::ReadOnnxMetadataInt(result.paths.ttsModel, "n_speakers", -1);
+        case TtsModelKind::kMatcha:
+            return result.paths.acousticModel.empty()
+                ? -1
+                : model_detect::ReadOnnxMetadataInt(result.paths.acousticModel, "n_speakers", -1);
+        case TtsModelKind::kSupertonic:
+            return result.paths.voiceStyle.empty()
+                ? -1
+                : model_detect::ReadSupertonicVoiceStyleSpeakerCount(result.paths.voiceStyle);
+        default:
+            // zipvoice / pocket: voices come from reference audio, no speaker ids.
+            return -1;
+    }
+}
+
 } // namespace
 
 TtsDetectResult DetectTtsModel(
@@ -441,6 +465,7 @@ TtsDetectResult DetectTtsModel(
         if (!result.error.empty()) LOGE("%s", result.error.c_str());
         return result;
     }
+    result.numSpeakers = ReadTtsSpeakerCount(result);
     LOGI("DetectTtsModel: tokens=%s, lexicon=%s, voices=%s",
          result.paths.tokens.c_str(), result.paths.lexicon.c_str(),
          result.paths.voices.c_str());
