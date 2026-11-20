@@ -30,6 +30,20 @@ export interface PcmPlayerPositionEvent {
 export interface PcmPlayerOptions {
   /** Optional volume scale [0, 1]. Default: 1.0. */
   volume?: number;
+  /**
+   * Start position in milliseconds. Default: start of the buffer.
+   * The player seeks here before any audio is played, so nothing before
+   * this position is heard. Offline buffers clamp to `[0, durationMs]`;
+   * live buffers clamp to the currently retained ring window.
+   * Must be a finite number `>= 0`.
+   */
+  startMs?: number;
+  /**
+   * Start playing as soon as the player is created. Default: `true`.
+   * With `false` the player is created paused at `startMs`; call
+   * `resume()` to start it. No `onPosition` events fire until then.
+   */
+  autoplay?: boolean;
   /** Callback fired when playback reaches end-of-stream. Fires once per playback run. */
   onEnded?: (event: PcmPlayerEndedEvent) => void;
   /**

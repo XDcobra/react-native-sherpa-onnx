@@ -336,6 +336,8 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
 - (void)so_createPcmPlayer:(NSString *)playerId
                           audioBufferId:(NSString *)audioBufferId
                                       volume:(double)volume
+                                     startMs:(double)startMs
+                                    autoplay:(BOOL)autoplay
                     resolve:(RCTPromiseResolveBlock)resolve
                      reject:(RCTPromiseRejectBlock)reject
 {
@@ -393,6 +395,22 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
         return;
     }
 
+    // Create-time start position. Negative (or NaN) means "not set": offline
+    // buffers start at 0, live buffers at the cursor's default position.
+    // Offline clamps to [0, numSamples], live to the retained ring window.
+    const bool hasStartPosition = startMs >= 0.0;
+    int64_t startSample = 0;
+    if (hasStartPosition) {
+        startSample = std::max<int64_t>(0, (int64_t)((startMs / 1000.0) * (double)sampleRate));
+        if (liveEntry) {
+            const int64_t oldest = liveEntry->oldestAvailablePos();
+            const int64_t newest = std::max<int64_t>(oldest, liveEntry->totalSamplesWritten);
+            startSample = std::min(std::max(startSample, oldest), newest);
+        } else {
+            startSample = std::min<int64_t>(startSample, (int64_t)offlineNumSamples);
+        }
+    }
+
     NSString *intentId = [NSString stringWithFormat:@"pcm:%@", playerId];
     BOOL intentAcquired = NO;
     BOOL createSucceeded = NO;
@@ -431,8 +449,17 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
                    [NSString stringWithFormat:@"Failed to start audio engine: %@", startError.localizedDescription], startError);
             return;
         }
-        [session->playerNode play];
-        session->isPlaying.store(true);
+        // Set the start position before the first position tick and the first
+        // scheduled buffer, so nothing from 0 is played or reported.
+        session->seekPositionSamples.store(hasStartPosition ? startSample : 0);
+        if (autoplay) {
+            [session->playerNode play];
+            session->isPlaying.store(true);
+        } else {
+            // Created paused: buffers are scheduled on the stopped node and
+            // resume() starts playback from the start position.
+            session->isPlaying.store(false);
+        }
 
         std::string playerIdStr = [playerId UTF8String];
 
@@ -463,7 +490,9 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
                 }];
             });
         };
-        session->startPositionReporting();
+        if (autoplay) {
+            session->startPositionReporting();
+        }
 
         // Clean up old player with same ID
         auto oldLiveWorker = pcm_take_live_worker(playerIdStr);
@@ -497,7 +526,8 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
                 g_pcm_live_entries[playerIdStr] = liveEntry;
             }
             int32_t gen = session->drainGeneration.load();
-            auto worker = std::make_shared<PcmLiveDrainWorker>(playerIdStr, session, liveEntry, gen);
+            auto worker = std::make_shared<PcmLiveDrainWorker>(
+                playerIdStr, session, liveEntry, gen, hasStartPosition ? startSample : -1);
             worker->start();
             std::lock_guard<std::mutex> lock(g_pcm_live_workers_mutex);
             g_pcm_live_workers[playerIdStr] = worker;
@@ -507,7 +537,8 @@ static BOOL so_reject_if_terminal_oom(const std::shared_ptr<PcmPlayerSession> &s
                 g_pcm_live_entries.erase(playerIdStr);
             }
             int32_t gen = session->drainGeneration.load();
-            auto worker = std::make_shared<PcmOfflineDrainWorker>(playerIdStr, session, bufferId, gen, 0);
+            auto worker = std::make_shared<PcmOfflineDrainWorker>(
+                playerIdStr, session, bufferId, gen, hasStartPosition ? startSample : 0);
             worker->start();
             std::lock_guard<std::mutex> lock(g_pcm_offline_workers_mutex);
             g_pcm_offline_workers[playerIdStr] = worker;

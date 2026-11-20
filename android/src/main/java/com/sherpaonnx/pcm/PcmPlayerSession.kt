@@ -511,6 +511,21 @@ internal class PcmPlayerSession(
     }
   }
 
+  /**
+   * Set the create-time start position. Call before [startPositionReporting]
+   * and before a drain is started, so the first write and the first position
+   * event already use [sampleIndex].
+   */
+  fun setStartPosition(sampleIndex: Long) {
+    headPosAtCycleStart = try {
+      track.playbackHeadPosition.toLong()
+    } catch (_: IllegalStateException) {
+      0L
+    }
+    framesWrittenInCycle = 0
+    seekPositionSamples = sampleIndex.coerceAtLeast(0L)
+  }
+
   /** Absolute playback sample index (seek base + frames played in this cycle). */
   private fun absolutePlaybackSample(): Long {
     if (destroyed || sampleRate <= 0) return seekPositionSamples
