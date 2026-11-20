@@ -1811,6 +1811,7 @@ if(_SLID_HAS_C_API AND NOT "${_SLID_ORT_LIBDIR}" STREQUAL "")
     "${TTS_CPP_ROOT}"
     "${TTS_DETECT_ROOT}/common"
     "${TTS_DETECT_ROOT}/tts"
+    "${TTS_DETECT_ROOT}/stt"
     "${SHERPA_ONNX_SRC_ROOT_TTS}"
   )
   target_link_directories(tts_host_test PRIVATE

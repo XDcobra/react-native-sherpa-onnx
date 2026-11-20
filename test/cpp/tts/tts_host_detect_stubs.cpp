@@ -7,8 +7,7 @@ TtsDetectResult DetectTtsModel(
     const std::optional<std::string>& /*modelDir*/,
     const std::optional<std::string>& /*assetName*/,
     const std::string& /*modelType*/,
-    const std::string& /*quantization*/,
-    bool /*debug*/) {
+    const std::string& /*quantization*/) {
   TtsDetectResult out;
   out.ok = false;
   out.error = "DetectTtsModel stub: use initializeCustom in host tests";
