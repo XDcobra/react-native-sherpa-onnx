@@ -293,7 +293,7 @@ function ensureModel(
 
 One-call flow: ready check → resume extraction → resume download → extract archive → download. Integrity: see [table](#integrity-download--extractmodel).
 
-A model that is already installed but lacks a [supplement file](#supplement-files) its catalog entry lists gets only that file downloaded before `ensureModel` returns (with `onProgress` and `signal` as usual). Call `ensureModel` before each use to pick up such repairs.
+A model that is already installed but lacks a [supplement file](#supplement-files) its catalog entry lists gets only that file downloaded before `ensureModel` returns (with `onProgress` and `signal` as usual). Call `ensureModel` before each use to pick up such repairs. That fetch needs the network: offline, `ensureModel` then throws instead of returning the local path.
 
 ### Supplement files
 

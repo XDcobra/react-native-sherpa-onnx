@@ -85,16 +85,19 @@ internal object TtsInitOptionsParser {
   /**
    * Lexicon file auto init must refuse to start without, or null. Mirrors
    * MissingTtsLexiconFile in sherpa-onnx-tts-lexicon.h: ZipVoice skips every word that is
-   * in none of its lexicons without an error, so without an English lexicon English text
-   * is lost. An explicit [languageId] is the caller's pick and is not second-guessed.
+   * in none of its lexicons without an error, so with lexicons but no English one English
+   * text is lost. No lexicon at all is left alone (upstream fails on text; tokens still
+   * work). An explicit [languageId] is the caller's pick and is not second-guessed.
    */
   fun missingLexiconFile(
     modelType: String,
     lexiconLanguages: ArrayList<*>?,
     languageId: String?
   ): String? {
-    if (modelType != "zipvoice" || !languageId.isNullOrBlank()) return null
-    val hasEnglish = lexiconLanguages.orEmpty().any { item ->
+    if (modelType != "zipvoice" || !languageId.isNullOrBlank() || lexiconLanguages.isNullOrEmpty()) {
+      return null
+    }
+    val hasEnglish = lexiconLanguages.any { item ->
       ((item as? HashMap<*, *>)?.get("id") as? String)?.let { isEnglishLexiconLanguageId(it) } == true
     }
     return if (hasEnglish) null else ENGLISH_LEXICON_FILE

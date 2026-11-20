@@ -120,7 +120,8 @@ TEST(TtsLexicon, ZipvoiceWithoutEnglishLexiconIsRejected) {
   // The distilled zh-en pack ships only the Chinese lexicon.
   EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice, chineseOnly),
             "lexicon-en-us.txt");
-  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice, {}), "lexicon-en-us.txt");
+  // No lexicon at all: upstream fails on text by itself, and tokens still work.
+  EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice, {}), "");
   // With the English lexicon next to it nothing is missing.
   EXPECT_EQ(MissingTtsLexiconFile(TtsModelKind::kZipvoice,
                                   {{"/m/lexicon.txt", "default"},

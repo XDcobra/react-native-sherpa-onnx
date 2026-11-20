@@ -71,16 +71,19 @@ inline bool IsEnglishLexiconLanguageId(const std::string& languageId) {
  * Lexicon file auto init must refuse to start without, or "" when nothing is missing.
  *
  * ZipVoice reads Chinese and English text only through its lexicons and skips every
- * word that is in none of them without an error. Without an English lexicon every
- * English word is lost, so the voice reads garbage instead of failing. An explicit
- * \p languageId is the caller's own pick and is not second-guessed.
+ * word that is in none of them without an error. With lexicons but no English one,
+ * every English word is lost, so the voice reads garbage instead of failing. Without
+ * any lexicon upstream already fails on text, and callers may pass tokens instead, so
+ * that case is left alone. An explicit \p languageId is the caller's own pick.
  */
 inline std::string MissingTtsLexiconFile(
     TtsModelKind kind,
     const std::vector<model_detect::LexiconCandidate>& candidates,
     const std::string& languageId = ""
 ) {
-    if (kind != TtsModelKind::kZipvoice || !languageId.empty()) return "";
+    if (kind != TtsModelKind::kZipvoice || !languageId.empty() || candidates.empty()) {
+        return "";
+    }
     for (const auto& c : candidates) {
         if (IsEnglishLexiconLanguageId(c.languageId)) return "";
     }
