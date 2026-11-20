@@ -60,7 +60,7 @@ if [ "${VIDEO_SW_DECODERS:-0}" = "1" ]; then
     PARSERS="${PARSERS},h264,hevc"
 fi
 # Subtitle tracks for exportVideo: mov_text (mp4/mov), subrip + ass (mkv), webvtt (webm/mkv).
-SUBTITLE_ENCODERS="mov_text,subrip,ass,webvtt"
+SUBTITLE_ENCODERS="movtext,subrip,ass,webvtt"
 COMMON_CONFIGURE=(
     --enable-shared
     --disable-static
@@ -354,7 +354,7 @@ PC
         echo "===== FFmpeg configure did not enable native vp9 decoder ====="
         exit 1
     fi
-    for enc in MOV_TEXT SUBRIP ASS WEBVTT; do
+    for enc in MOVTEXT SUBRIP ASS WEBVTT; do
         if ! grep -q "^#define CONFIG_${enc}_ENCODER 1$" "$COMPONENTS_H"; then
             echo "===== FFmpeg configure did not enable the ${enc} subtitle encoder ====="
             exit 1
