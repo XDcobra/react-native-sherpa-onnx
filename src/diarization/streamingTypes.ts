@@ -86,6 +86,12 @@ export interface StreamingDiarizationOptions {
   chunkSize?: number;
 }
 
+/** Options of {@link StreamingDiarizationEngine.feed} and `flush`. */
+export interface StreamingDiarizationFeedOptions {
+  /** Checked before the native call. */
+  signal?: AbortSignal;
+}
+
 export interface DiarizationPipelineHandle {
   readonly instanceId: string;
   readonly pipelineId: string;
@@ -118,19 +124,28 @@ export interface StreamingDiarizationEngine {
 
   /**
    * Feed a chunk of offline audio samples to the engine manually.
+   * `options.signal` is checked before the native call; a feed that has
+   * started runs to the end (it updates the engine state), so a loop over
+   * chunks stops before the next chunk.
    * @throws {Error} `DIARIZATION_ERROR` — native feed failed.
    * @throws {Error} `DIARIZATION_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` (`name: 'AbortError'`) — `options.signal` aborted before the call.
    */
   feed(
-    audioIn: OfflineAudioBufferIdSource
+    audioIn: OfflineAudioBufferIdSource,
+    options?: StreamingDiarizationFeedOptions
   ): Promise<Array<{ start: number; end: number; speaker: number }>>;
 
   /**
    * Flush remaining buffered audio, returning final detected segments.
+   * `options.signal` is checked before the native call.
    * @throws {Error} `DIARIZATION_ERROR` — native flush failed.
    * @throws {Error} `DIARIZATION_BUFFER_NOT_FOUND` — audio buffer is unknown.
+   * @throws {Error} `ORCHESTRATION_CANCELLED` (`name: 'AbortError'`) — `options.signal` aborted before the call.
    */
-  flush(): Promise<Array<{ start: number; end: number; speaker: number }>>;
+  flush(
+    options?: StreamingDiarizationFeedOptions
+  ): Promise<Array<{ start: number; end: number; speaker: number }>>;
 
   /**
    * Reset internal streaming states (FIFO, speaker cache, silence tracking).

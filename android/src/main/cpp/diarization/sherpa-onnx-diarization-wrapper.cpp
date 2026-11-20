@@ -2,6 +2,8 @@
 
 #include "diarization-session.h"
 
+#include <new>
+#include <string>
 #include <utility>
 
 namespace sherpaonnx {
@@ -107,8 +109,21 @@ DiarizationProcessResult DiarizationWrapper::processMonoSamples(
 
   diarization::ProcessOptions opts;
   opts.include_overlap = includeOverlap;
+  // The core reports every window and every embedding (thousands on long
+  // audio). Forward a phase change, the last step of a phase and steps of at
+  // least one percent; drop the rest.
+  std::string lastPhase;
+  float lastFraction = -1.f;
   if (onProgress) {
-    opts.on_progress = [&onProgress](const diarization::DiarizationProgress& p) {
+    opts.on_progress = [&onProgress, &lastPhase, &lastFraction](
+                           const diarization::DiarizationProgress& p) {
+      const bool phaseChanged = p.phase != lastPhase;
+      const bool phaseDone = p.total > 0 && p.current >= p.total;
+      if (!phaseChanged && !phaseDone && p.fraction - lastFraction < 0.01f) {
+        return;
+      }
+      lastPhase = p.phase;
+      lastFraction = p.fraction;
       DiarizationProgressDto dto;
       dto.fraction = p.fraction;
       dto.phase = p.phase;
@@ -118,8 +133,17 @@ DiarizationProcessResult DiarizationWrapper::processMonoSamples(
     };
   }
 
-  return ToProcessResult(
-      pImpl->session.Process(monoSamples, numSamples, sampleRate, opts));
+  try {
+    return ToProcessResult(
+        pImpl->session.Process(monoSamples, numSamples, sampleRate, opts));
+  } catch (const std::bad_alloc&) {
+    // Parity with separation/STT: surface catchable C++ OOM as OFFLINE_OOM.
+    // Does not cover OS low-memory kills or hard native aborts.
+    DiarizationProcessResult out;
+    out.errorCode = "OFFLINE_OOM";
+    out.error = "OFFLINE_OOM: Not enough memory for offline diarization";
+    return out;
+  }
 }
 
 DiarizationProcessResult DiarizationWrapper::processMonoSamples(

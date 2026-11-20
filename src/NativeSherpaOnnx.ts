@@ -2594,11 +2594,16 @@ export interface Spec extends TurboModule {
     sampleRate?: number;
   }>;
 
+  /**
+   * @param operationId - When set, native emits `diarizationProgress` events
+   *   `{ operationId, instanceId, fraction, phase, current, total }` while it runs.
+   */
   diarizeOffline(
     instanceId: string,
     audioInBufferId: string,
     segmentsOutBufferId: string,
-    includeOverlap?: boolean
+    includeOverlap?: boolean,
+    operationId?: string | null
   ): Promise<DiarizationProcessNativeResult>;
 
   reclusterDiarization(

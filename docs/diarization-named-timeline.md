@@ -159,6 +159,8 @@ await sid.destroy();
 - Overlapping times with different `clusterId` / `name` are valid (two people at once).
 - Re-run `mapDiarizationToNames` after every new `diarize` (centroids are per recording).
 - Prefer the **same** embedding model for SID enroll and `createDiarization.embedding`.
+- The embedding model is loaded once per process when SID and diarization use the same model file, `provider`, `numThreads` and `debug`: both share one native extractor (reference-counted). Create SID while the diarization engine is still alive (or the other way round) and pass the same values to both; a different value loads the model a second time.
+- `mapDiarizationToNames(..., { signal })` stops before the next name search or segment page when the signal aborts (`AbortError`, `ORCHESTRATION_CANCELLED`).
 - Numeric values in comments are illustrative.
 
 ## Power user: manual centroid matching

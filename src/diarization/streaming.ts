@@ -8,9 +8,11 @@ import {
   resolveDiarizationCustomConfigPaths,
 } from './customConfig';
 import { detectDiarizationModel } from './detectDiarizationModel';
+import { throwIfOrchestrationAborted } from '../pipeline/cancellation';
 import type {
   DiarizationPipelineHandle,
   StreamingDiarizationEngine,
+  StreamingDiarizationFeedOptions,
   StreamingDiarizationInitializeOptions,
   StreamingDiarizationOptions,
 } from './streamingTypes';
@@ -171,9 +173,11 @@ export async function createStreamingDiarization(
     },
 
     async feed(
-      audioIn: OfflineAudioBufferIdSource
+      audioIn: OfflineAudioBufferIdSource,
+      feedOptions?: StreamingDiarizationFeedOptions
     ): Promise<Array<{ start: number; end: number; speaker: number }>> {
       assertNotReleased();
+      throwIfOrchestrationAborted(feedOptions?.signal);
       const audioInId = resolvePipelineAudioBufferId(audioIn);
       const res = await SherpaOnnx.feedStreamingDiarization(
         instanceId,
@@ -185,10 +189,11 @@ export async function createStreamingDiarization(
       return res.segments ?? [];
     },
 
-    async flush(): Promise<
-      Array<{ start: number; end: number; speaker: number }>
-    > {
+    async flush(
+      flushOptions?: StreamingDiarizationFeedOptions
+    ): Promise<Array<{ start: number; end: number; speaker: number }>> {
       assertNotReleased();
+      throwIfOrchestrationAborted(flushOptions?.signal);
       const res = await SherpaOnnx.flushStreamingDiarization(instanceId);
       if (!res.success) {
         throw new Error(res.error ?? 'Flush streaming diarization failed');

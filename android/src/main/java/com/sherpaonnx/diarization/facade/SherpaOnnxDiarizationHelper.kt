@@ -10,6 +10,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.sherpaonnx.audio.pipeline.PipelineAudioRegistry
 import com.sherpaonnx.audio.pipeline.StreamingPipelineRegistry
 import com.sherpaonnx.diarization.core.DiarizationErrorCodes
+import com.sherpaonnx.diarization.core.DiarizationProgressCallback
 import com.sherpaonnx.diarization.pipeline.DiarizationStreamingPipelineWorker
 import com.sherpaonnx.segment.pipeline.SegmentPipelineException
 import com.sherpaonnx.segment.pipeline.SegmentPipelineRegistry
@@ -152,6 +153,7 @@ internal class SherpaOnnxDiarizationHelper(
     audioInBufferId: String,
     segmentsOutBufferId: String,
     includeOverlap: Boolean,
+    operationId: String?,
     promise: Promise,
   ) {
     if (instanceId.isBlank()) {
@@ -224,6 +226,7 @@ internal class SherpaOnnxDiarizationHelper(
           instanceId,
           audioInBufferId,
           includeOverlap,
+          operationId?.let { makeOfflineProgressCallback(instanceId, it) },
         )
         if (result == null) {
           promise.reject(
@@ -872,6 +875,30 @@ internal class SherpaOnnxDiarizationHelper(
     }
   }
 
+  /** Forwards offline diarize progress as `diarizationProgress` events. */
+  private fun makeOfflineProgressCallback(
+    instanceId: String,
+    operationId: String,
+  ): DiarizationProgressCallback =
+    DiarizationProgressCallback { fraction, phase, current, total ->
+      try {
+        if (!context.hasActiveReactInstance()) return@DiarizationProgressCallback
+        val payload = Arguments.createMap().apply {
+          putString("operationId", operationId)
+          putString("instanceId", instanceId)
+          putDouble("fraction", fraction.toDouble().coerceIn(0.0, 1.0))
+          putString("phase", phase)
+          putInt("current", current)
+          putInt("total", total)
+        }
+        context
+          .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          .emit("diarizationProgress", payload)
+      } catch (_: Exception) {
+        // JS bridge might already be shutting down.
+      }
+    }
+
   private fun emitStreamingEvent(
     instanceId: String,
     pipelineId: String,
@@ -1000,6 +1027,7 @@ internal class SherpaOnnxDiarizationHelper(
       instanceId: String,
       bufferId: String,
       includeOverlap: Boolean,
+      progressCallback: DiarizationProgressCallback?,
     ): HashMap<String, Any>?
 
     @JvmStatic

@@ -379,7 +379,8 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeProcess
     jclass /* clazz */,
     jstring instanceId,
     jstring bufferId,
-    jboolean includeOverlap
+    jboolean includeOverlap,
+    jobject progressCallback
 ) {
   const std::string instanceIdStr = CopyRequiredJstring(env, instanceId);
   PaOfflineSampleView view;
@@ -416,8 +417,37 @@ Java_com_sherpaonnx_diarization_facade_SherpaOnnxDiarizationHelper_nativeProcess
       n,
       view.sampleRate
   );
-  sherpaonnx::DiarizationProcessResult result =
-      wrapper->processMonoSamples(view.data, n, view.sampleRate, includeOverlap == JNI_TRUE, {});
+  // Progress runs on this thread (the process call is synchronous), so `env`
+  // and the local callback ref stay valid inside the lambda.
+  sherpaonnx::DiarizationProgressFn onProgress;
+  jmethodID onProgressMethod = nullptr;
+  if (progressCallback != nullptr) {
+    jclass cls = env->GetObjectClass(progressCallback);
+    if (cls != nullptr) {
+      onProgressMethod =
+          env->GetMethodID(cls, "onProgress", "(FLjava/lang/String;II)V");
+      env->DeleteLocalRef(cls);
+    }
+    if (onProgressMethod == nullptr && env->ExceptionCheck()) {
+      env->ExceptionClear();
+    }
+  }
+  if (onProgressMethod != nullptr) {
+    onProgress = [env, progressCallback, onProgressMethod](
+                     const sherpaonnx::DiarizationProgressDto& p) {
+      jstring phase = env->NewStringUTF(p.phase.c_str());
+      env->CallVoidMethod(progressCallback, onProgressMethod, p.fraction, phase,
+                          static_cast<jint>(p.current), static_cast<jint>(p.total));
+      if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+      }
+      if (phase != nullptr) {
+        env->DeleteLocalRef(phase);
+      }
+    };
+  }
+  sherpaonnx::DiarizationProcessResult result = wrapper->processMonoSamples(
+      view.data, n, view.sampleRate, includeOverlap == JNI_TRUE, onProgress);
   return DiarizationProcessResultToJava(env, result);
 }
 

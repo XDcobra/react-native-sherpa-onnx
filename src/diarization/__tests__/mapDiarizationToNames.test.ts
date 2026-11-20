@@ -119,4 +119,34 @@ describe('mapDiarizationToNames', () => {
       )
     ).rejects.toThrow(/sid must expose search/);
   });
+
+  it('stops between name searches when the signal aborts', async () => {
+    const controller = new AbortController();
+    const diar: DiarizationEngine = {
+      instanceId: 'diar_1',
+      sampleRate: 16000,
+      diarize: jest.fn(),
+      recluster: jest.fn(),
+      getClusterEmbeddings: jest.fn(async () => [
+        { speaker: 0, embedding: new Float32Array([1, 0]) },
+        { speaker: 1, embedding: new Float32Array([0, 1]) },
+      ]),
+      destroy: jest.fn(),
+    };
+    const search = jest.fn(async () => {
+      controller.abort();
+      return 'Alice';
+    });
+
+    await expect(
+      mapDiarizationToNames(diar, { search }, 'seg_off_out', {
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ORCHESTRATION_CANCELLED',
+    });
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(segs.getOfflineSegmentBufferSegments).not.toHaveBeenCalled();
+  });
 });

@@ -300,4 +300,39 @@ describe('createStreamingDiarization', () => {
       })
     );
   });
+
+  it('feed and flush reject an aborted signal before the native call', async () => {
+    (SherpaOnnx.initializeStreamingDiarization as jest.Mock).mockResolvedValue({
+      success: true,
+      sampleRate: 16000,
+    });
+    (SherpaOnnx.feedStreamingDiarization as jest.Mock).mockResolvedValue({
+      success: true,
+      segments: [{ start: 0, end: 1, speaker: 0 }],
+    });
+    const engine = await createStreamingDiarization({
+      initMode: 'custom',
+      modelType: 'sortformer',
+      customConfig: {
+        model: { kind: 'fs', path: '/tmp/model.onnx' },
+      },
+    } as never);
+    const controller = new AbortController();
+
+    await expect(
+      engine.feed('off_chunk', { signal: controller.signal })
+    ).resolves.toHaveLength(1);
+    controller.abort();
+    await expect(
+      engine.feed('off_chunk', { signal: controller.signal })
+    ).rejects.toMatchObject({
+      name: 'AbortError',
+      code: 'ORCHESTRATION_CANCELLED',
+    });
+    await expect(
+      engine.flush({ signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(SherpaOnnx.feedStreamingDiarization).toHaveBeenCalledTimes(1);
+    expect(SherpaOnnx.flushStreamingDiarization).not.toHaveBeenCalled();
+  });
 });
