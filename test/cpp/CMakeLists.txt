@@ -120,6 +120,17 @@ else()
 endif()
 add_test(NAME utf8_lenient_test COMMAND $<TARGET_FILE:utf8_lenient_test>)
 
+# Punctuation output keeps the input's word breaks (header-only, no C API needed)
+add_executable(punct_text_spacing_test "${CMAKE_CURRENT_SOURCE_DIR}/punctuation/punct_text_spacing_test.cpp")
+target_include_directories(punct_text_spacing_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../android/src/main/cpp/punctuation")
+if(GTest_FOUND)
+  target_link_libraries(punct_text_spacing_test PRIVATE GTest::gtest_main)
+else()
+  target_link_libraries(punct_text_spacing_test PRIVATE gtest_main)
+  target_include_directories(punct_text_spacing_test PRIVATE ${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
+endif()
+add_test(NAME punct_text_spacing_test COMMAND $<TARGET_FILE:punct_text_spacing_test>)
+
 # --- Host audio tests (same android/src/.../jni/audio/*.cpp as Android; Linux + system libav) ---
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)

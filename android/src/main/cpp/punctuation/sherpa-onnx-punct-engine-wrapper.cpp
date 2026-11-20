@@ -1,4 +1,5 @@
 #include "sherpa-onnx-punct-engine-wrapper.h"
+#include "punct-text-spacing.h"
 
 #include <cstdio>
 #include <cstring>
@@ -80,7 +81,9 @@ class OfflinePunctuationWrapper::Impl {
       PUNCT_LOGE("offline addPunct fail: %s", out.error.c_str());
       return out;
     }
-    out.text = result;
+    // The model can write a mark without the space that followed the word
+    // ("going?to"); keep the input's word breaks.
+    out.text = punct_text::RestoreInputWordBreaks(text, result);
     SherpaOfflinePunctuationFreeText(result);
     out.success = true;
     return out;
