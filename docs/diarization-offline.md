@@ -287,7 +287,7 @@ See [audiobuffer-offline.md](audiobuffer-offline.md) · [segmentbuffer-offline.m
 | `DIARIZATION_INVALID_ARGUMENT` | Missing/malformed args (e.g. wrong buffer kind) |
 | `DIARIZATION_INIT_ERROR` | Engine init failed (missing model / ORT) |
 | `DIARIZATION_NOT_INITIALIZED` | Operation on uninitialized engine/instance |
-| `DIARIZATION_CANCELLED` | Operation cancelled |
+| `DIARIZATION_CANCELLED` | Operation cancelled. Through `signal` the call rejects with `name: 'AbortError'` (before or during the run), like the other offline engines; a cancel via `cancelDiarization` without the signal resolves with `status: 'cancelled'`. |
 | `DIARIZATION_BUFFER_NOT_FOUND` | Audio or segment buffer id missing/released |
 | `DETECT_ERROR` | Model detection failed or pack layout invalid |
 

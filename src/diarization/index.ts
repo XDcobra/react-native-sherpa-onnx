@@ -110,6 +110,14 @@ function validateInitOptions(options: DiarizationInitializeOptions): void {
 
 export { detectDiarizationModel } from './detectDiarizationModel';
 
+/** A cancel through `signal`: `name: 'AbortError'`, like the other offline engines. */
+function diarizationAbortError(): Error {
+  return Object.assign(
+    new Error(`${DiarizationErrorCode.CANCELLED}: operation cancelled`),
+    { name: 'AbortError', code: DiarizationErrorCode.CANCELLED }
+  );
+}
+
 async function finishDiarizeResult(params: {
   nativeResult: {
     success: boolean;
@@ -138,6 +146,8 @@ async function finishDiarizeResult(params: {
       code === DiarizationErrorCode.CANCELLED ||
       code === 'DIARIZATION_CANCELLED'
     ) {
+      // Stopped through the caller's signal: reject like the other engines.
+      if (diarizeOptions?.signal?.aborted) throw diarizationAbortError();
       return {
         status: 'cancelled',
         numSpeakers: 0,
@@ -271,11 +281,7 @@ export async function createDiarization(
       let abortHandler: (() => void) | null = null;
       try {
         if (diarizeOptions?.signal) {
-          if (diarizeOptions.signal.aborted) {
-            throw Object.assign(new Error('Operation cancelled'), {
-              code: DiarizationErrorCode.CANCELLED,
-            });
-          }
+          if (diarizeOptions.signal.aborted) throw diarizationAbortError();
           abortHandler = () => {
             Promise.resolve(SherpaOnnx.cancelDiarization(instanceId)).catch(
               () => undefined
