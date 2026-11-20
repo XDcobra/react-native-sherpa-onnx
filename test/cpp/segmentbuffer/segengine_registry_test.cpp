@@ -220,4 +220,31 @@ TEST_F(SegEngineFixture, OfflineTextSynthetic) {
   EXPECT_EQ(segments[0].reason, "punctuation");
 }
 
+TEST_F(SegEngineFixture, OfflineTextCutsALongSentenceByLength) {
+  std::string bufferId;
+  std::string err;
+  // One sentence of 59 characters, its full stop only at the end.
+  ASSERT_TRUE(txt_create_offline_from_text(
+      "one two three four five six seven eight nine ten eleven twelve.", "", "", "",
+      &bufferId, &err))
+      << err;
+  SegEnginePolicy policy;
+  policy.evaluator = "text_synthetic_auto";
+  policy.sentenceBoundary = true;
+  policy.maxLengthChars = 20;
+  std::vector<SegOfflineTextSegment> segments;
+  std::string outId;
+  int count = 0;
+  std::string code;
+  std::string error;
+  ASSERT_TRUE(seg_engine_segment_offline(bufferId, "text", policy, &segments, &outId, &count, &code,
+                                         &error))
+      << error;
+  ASSERT_GE(segments.size(), 3u);
+  for (const auto &seg : segments) {
+    EXPECT_LE(seg.endOffset - seg.startOffset, 20) << seg.text;
+  }
+  EXPECT_EQ(segments[0].reason, "length_limit");
+}
+
 }  // namespace

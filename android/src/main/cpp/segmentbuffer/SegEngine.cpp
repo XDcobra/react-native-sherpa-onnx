@@ -871,6 +871,11 @@ bool seg_segment_offline_text(const std::string &bufferId, const SegEnginePolicy
         foundBoundary = split > 0;
       }
     }
+    // A sentence longer than maxLengthChars is still cut by length.
+    if (split > maxLen) {
+      split = 0;
+      foundBoundary = false;
+    }
     if (split <= 0) {
       split = std::min(maxLen, remainingLen);
       if (split < remainingLen) {
