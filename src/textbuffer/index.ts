@@ -1233,7 +1233,8 @@ export async function getLiveTextBufferSegments(
     id,
     startIndex,
     maxCount,
-    options
+    // iOS reads an omitted object argument as a null reference.
+    options ?? {}
   );
   return raw.segments.map((segment) => ({
     text: segment.text,
