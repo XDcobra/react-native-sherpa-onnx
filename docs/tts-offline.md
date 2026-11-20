@@ -92,7 +92,7 @@ await releasePipelineTextBuffer(textBuf);
 // keep audioBuf until you've saved/played it, then release
 ```
 
-**ZipVoice lexicons.** ZipVoice reads text only through its lexicons and skips every word that is in none of them, without an error. The zh-en pack ships a Chinese `lexicon.txt` only, so English text and English reference transcripts need an English lexicon too, or the output is short and unintelligible. Put [`lexicon-en-us.txt`](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt) into the model folder: for ZipVoice, auto init loads **every** detected lexicon (unless `lexiconLanguageId` picks one). With `initMode: 'custom'`, pass both: `customConfig.lexicon: [zhLexicon, enLexicon]`.
+**ZipVoice lexicons.** ZipVoice reads text only through its lexicons and skips every word that is in none of them, without an error. The distilled zh-en packs ship a Chinese `lexicon.txt` only, so English text and English reference transcripts need an English lexicon too, or the output is short and unintelligible. The model download puts [`lexicon-en-us.txt`](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt) into the model folder ([supplement files](download-manager.md#supplement-files)); for a pack installed before that, `ensureModel` fetches it. For ZipVoice, auto init loads **every** detected lexicon (unless `lexiconLanguageId` picks one) and fails with `TTS_LEXICON_MISSING` when none of them is English. With `initMode: 'custom'`, pass both: `customConfig.lexicon: [zhLexicon, enLexicon]`.
 
 ### 2b) Supertonic `numSteps` without voice cloning
 
@@ -199,10 +199,10 @@ const run = tts.synthesize(textBuf, audioBuf, {
 
 Raw English Piper / Kitten / Matcha-EN / Kokoro-EN text needs a lexicon at init. Two supported ways:
 
-1. **Auto / `modelSource`:** put `lexicon.txt`, `lexicon-en-us.txt`, or another `lexicon-*.txt` **inside** the model folder. Detect fills `lexiconLanguages`; `createTTS` loads it via `lexiconLanguageId` (default: first after sort, `lexicon.txt` first; ZipVoice loads all of them). The shared US-English file is [`lexicon-en-us.txt`](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt).
+1. **Auto / `modelSource`:** put `lexicon.txt`, `lexicon-en-us.txt`, or another `lexicon-*.txt` **inside** the model folder. Detect fills `lexiconLanguages`; `createTTS` loads it via `lexiconLanguageId` (default: first after sort, `lexicon.txt` first; ZipVoice loads all of them). The shared US-English file is [`lexicon-en-us.txt`](https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt); the model download adds it to the packs above ([supplement files](download-manager.md#supplement-files)). `en_GB` Piper voices then read US pronunciations.
 2. **Custom:** set `customConfig.lexicon` to any `FileSource` (including a file outside the model folder). Auto-init does **not** mix in a lexicon from outside `modelSource`.
 
-`espeak-ng-data` is ignored. Packs may still contain it. Without a lexicon and without `phonemeCodepoints` / `tokens` at synthesize time, init still succeeds; raw text yields empty audio → `TTS_EMPTY_OUTPUT`.
+`espeak-ng-data` is ignored. Packs may still contain it. Without a lexicon and without `phonemeCodepoints` / `tokens` at synthesize time, init still succeeds; raw text yields empty audio → `TTS_EMPTY_OUTPUT`. ZipVoice auto init is the exception: without an English lexicon it fails with `TTS_LEXICON_MISSING`.
 
 Validate category: **`tts`**. Overview: [README — TTS](../README.md#supported-model-types) · detection: [model-detect.md](model-detect.md) · downloads: [download-manager.md](download-manager.md) (`ModelCategory.Tts`).
 
@@ -568,6 +568,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTS_REFERENCE_AUDIO_BUFFER_NOT_FOUND` | `synthesize` (voice clone) | `referenceAudioBufferId` not in registry — released before synthesis |
 | `TTS_REFERENCE_AUDIO_BUFFER_KIND_MISMATCH` | `synthesize` (voice clone) | Reference buffer is not an offline audio buffer |
 | `TTS_GENERATE_ERROR` | `synthesize` | Model-level synthesis failed (the message carries the native error text), or voice clone on unsupported model type |
+| `TTS_LEXICON_MISSING` | `createTTS` (auto init) | A `zipvoice` model has no English lexicon (`lexicon-en*.txt` / `lexicon-*-en.txt`), so every English word would be skipped. The message names the file (`lexicon-en-us.txt`). Run `ensureModel` for a catalog model, or add the file to the model folder. Setting `lexiconLanguageId` skips the check |
 | `TTS_EMPTY_OUTPUT` | `synthesize` | The model ran without an error but returned no audio for non-empty input. Upstream skips text it cannot speak without saying why, so the message names the usual causes per model (for ZipVoice: words missing from the loaded lexicons, or text too short for the reference audio and speed) |
 | `ORCHESTRATION_CANCELLED` | `synthesize` | `signal` aborted; `name` is `'AbortError'` |
 | `TTS_CANCELLED` | native `synthesizeTts` | The call was stopped through `cancelTtsSynthesis(operationId)`. `synthesize` reports it as `ORCHESTRATION_CANCELLED` |
@@ -584,6 +585,7 @@ Live overload uses `onSegment` only (no offline `onProgress`) — see [tts-live.
 | `TTS_GENERATE_ERROR` + cloning | Non-Zipvoice/Pocket model with `voiceClone` | Only Zipvoice and Pocket support voice cloning |
 | `TTS_EMPTY_OUTPUT` + Zipvoice | No word of the text is in the loaded lexicons (English text without an English lexicon), or the text is very short for the reference clip | Add `lexicon-en-us.txt` (see [ZipVoice lexicons](#2-voice-cloning-zipvoice--pocket)); use a longer text, a shorter reference clip or a lower `speed` |
 | ZipVoice output short and unintelligible | English words missing from the lexicons are skipped, in the text and in `referenceText` | Add `lexicon-en-us.txt` next to the zh lexicon |
+| `TTS_LEXICON_MISSING` on `createTTS` | ZipVoice pack installed without the English lexicon | `ensureModel(ModelCategory.Tts, id)` downloads it; or add `lexicon-en-us.txt` to the model folder |
 | `TTS_NUM_STEPS_UNSUPPORTED` | `numSteps` on vits/matcha/kokoro/kitten | Use Supertonic, Zipvoice, or Pocket; or omit `numSteps` |
 | `TTS_NUM_STEPS_REQUIRES_VOICE_CLONE` | `numSteps` on Zipvoice/Pocket without `voiceClone` | Pass `voiceClone.referenceAudio` |
 | Memory grows over time | Buffers not released | Always call `releasePipelineAudioBuffer` / `releasePipelineTextBuffer` after use |
