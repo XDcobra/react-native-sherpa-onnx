@@ -1,4 +1,5 @@
 #include "sherpa-onnx-tts-engine-wrapper.h"
+#include "sherpa-onnx-tts-generate-error.h"
 #include "sherpa-onnx-detect-jni-common.h"
 #include "sherpa-onnx-model-path-fill.h"
 #include "jni/offline_pcm_view.h"
@@ -127,7 +128,13 @@ jobject AudioResultToMap(JNIEnv* env,
   const bool ok = !audio.samples.empty() && audio.sampleRate > 0;
   sherpaonnx::PutBoolean(env, map, mapPut, "success", ok);
   if (!ok) {
-    sherpaonnx::PutString(env, map, mapPut, "error", "TTS generated empty audio");
+    // Fallback for paths that set no reason (should not happen).
+    const sherpaonnx::TtsGenerateError fallback = {
+        sherpaonnx::kTtsErrorEmptyOutput, "TTS generated empty audio"};
+    sherpaonnx::PutString(env, map, mapPut, "errorCode",
+                          audio.errorCode.empty() ? fallback.code : audio.errorCode);
+    sherpaonnx::PutString(env, map, mapPut, "error",
+                          audio.errorMessage.empty() ? fallback.message : audio.errorMessage);
     return map;
   }
   jfloatArray samples =
@@ -366,6 +373,9 @@ sherpaonnx::TtsWrapper::AudioResult GenerateCollecting(
     return finalAudio;
   }
   if (!ok || samples.empty()) {
+    // finalAudio carries why the model gave no audio.
+    result.errorCode = finalAudio.errorCode;
+    result.errorMessage = finalAudio.errorMessage;
     return result;
   }
   result.samples = std::move(samples);

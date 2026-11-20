@@ -15,10 +15,20 @@ import com.sherpaonnx.audio.pipeline.OfflineEntry
 import com.sherpaonnx.errors.OfflineOomError
 import com.sherpaonnx.lifecycle.NativeInstanceGate
 import com.sherpaonnx.text.pipeline.TextPipelineRegistry
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 
 internal class TtsBatchGenerationService(
   private val repository: TtsEngineRepository,
   private val reactContext: ReactApplicationContext,
+  /**
+   * Runs synthesis off the React Native module thread, so other SDK calls (buffers,
+   * unload, player) are not blocked while a model generates. Single-threaded: calls
+   * on one engine never overlap, as before.
+   */
+  private val synthesisExecutor: ExecutorService,
 ) {
 
   /**
@@ -29,6 +39,51 @@ internal class TtsBatchGenerationService(
    * emits `ttsGenerateProgress` events `{ operationId, progress }`.
    */
   fun synthesizeTts(
+    instanceId: String,
+    textInBufferId: String,
+    audioOutBufferId: String,
+    options: ReadableMap?,
+    promise: Promise
+  ) {
+    // Registered here, on the module thread, so a later cancelTtsSynthesis call always finds it.
+    val operationId = operationIdOf(options)
+    TtsSynthesisCancellation.begin(operationId)
+    try {
+      synthesisExecutor.execute {
+        try {
+          synthesizeTtsNow(instanceId, textInBufferId, audioOutBufferId, options, promise)
+        } finally {
+          TtsSynthesisCancellation.end(operationId)
+        }
+      }
+    } catch (e: RejectedExecutionException) {
+      TtsSynthesisCancellation.end(operationId)
+      promise.reject("TTS_GENERATE_ERROR", "TTS is shutting down", e)
+    }
+  }
+
+  /**
+   * Stops the synthesizeTts call that was started with [operationId]: the model stops at
+   * its next chunk (the progress callback returns 0) and that call rejects with
+   * [CANCELLED_CODE] instead of keeping partial audio.
+   */
+  fun cancelTtsSynthesis(operationId: String, promise: Promise) {
+    TtsSynthesisCancellation.cancel(operationId.trim())
+    promise.resolve(null)
+  }
+
+  private fun operationIdOf(options: ReadableMap?): String =
+    if (options != null && options.hasKey("operationId") && !options.isNull("operationId")) {
+      options.getString("operationId")?.trim().orEmpty()
+    } else {
+      ""
+    }
+
+  private fun rejectCancelled(promise: Promise) {
+    promise.reject(CANCELLED_CODE, "TTS synthesis was cancelled")
+  }
+
+  private fun synthesizeTtsNow(
     instanceId: String,
     textInBufferId: String,
     audioOutBufferId: String,
@@ -95,7 +150,11 @@ internal class TtsBatchGenerationService(
 
       val sid = TtsGenerationOptionsParser.getSid(options)
       val speed = TtsGenerationOptionsParser.getSpeed(options)
-      val operationId = options?.getString("operationId")?.trim().orEmpty()
+      val operationId = operationIdOf(options)
+      if (TtsSynthesisCancellation.isCancelled(operationId)) {
+        rejectCancelled(promise)
+        return
+      }
       val progressCallback = makeProgressCallback(operationId)
 
       val gateKey = inst.gateKey()
@@ -177,7 +236,7 @@ internal class TtsBatchGenerationService(
           }
           TtsNative.readAudioResult(raw)
             ?: run {
-              promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
+              rejectGenerateError(promise, raw, operationId)
               return
             }
         } else if (inst.isPocket) {
@@ -223,7 +282,7 @@ internal class TtsBatchGenerationService(
           }
           TtsNative.readAudioResult(raw)
             ?: run {
-              promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
+              rejectGenerateError(promise, raw, operationId)
               return
             }
         } else {
@@ -241,12 +300,18 @@ internal class TtsBatchGenerationService(
           }
           TtsNative.readAudioResult(raw)
             ?: run {
-              promise.reject("TTS_GENERATE_ERROR", "TTS generated empty audio")
+              rejectGenerateError(promise, raw, operationId)
               return
             }
         }
       } finally {
         NativeInstanceGate.endUse(gateKey)
+      }
+
+      // A cancelled run may still return the chunks made before it stopped: drop them.
+      if (TtsSynthesisCancellation.isCancelled(operationId)) {
+        rejectCancelled(promise)
+        return
       }
 
       val (samples, _) = audioPair
@@ -266,17 +331,38 @@ internal class TtsBatchGenerationService(
         OfflineOomError.message("text-to-speech"),
         e
       )
-    } catch (e: Exception) {
+    } catch (e: Throwable) {
+      // Off the module thread an escaping Throwable would leave the promise unsettled.
       Log.e("SherpaOnnxTts", "synthesizeTts error: ${e.message}", e)
       promise.reject("TTS_GENERATE_ERROR", e.message ?: "Failed to synthesize speech", e)
     }
+  }
+
+  /** Rejects with the reason native gave for a result without audio. */
+  private fun rejectGenerateError(promise: Promise, raw: HashMap<String, Any>?, operationId: String) {
+    if (TtsSynthesisCancellation.isCancelled(operationId)) {
+      rejectCancelled(promise)
+      return
+    }
+    val (code, message) = TtsNative.generateError(raw)
+    if (code == OfflineOomError.CODE) {
+      Log.e("SherpaOnnxTts", "synthesizeTts native OOM: $message")
+      promise.reject(OfflineOomError.CODE, OfflineOomError.message("text-to-speech"))
+      return
+    }
+    promise.reject(code, message)
+  }
+
+  private companion object {
+    const val CANCELLED_CODE = "TTS_CANCELLED"
   }
 
   private fun makeProgressCallback(operationId: String): TtsGenerateProgressCallback? {
     if (operationId.isEmpty()) return null
     return TtsGenerateProgressCallback { progress ->
       emitGenerateProgress(operationId, progress)
-      1
+      // 0 tells the model to stop after this chunk.
+      if (TtsSynthesisCancellation.isCancelled(operationId)) 0 else 1
     }
   }
 
@@ -292,6 +378,26 @@ internal class TtsBatchGenerationService(
     } catch (_: Exception) {
       // Bridge may already be tearing down.
     }
+  }
+}
+
+/** Cancel flags of running synthesizeTts calls, keyed by operationId. */
+internal object TtsSynthesisCancellation {
+  private val flags = ConcurrentHashMap<String, AtomicBoolean>()
+
+  fun begin(operationId: String) {
+    if (operationId.isNotEmpty()) flags[operationId] = AtomicBoolean(false)
+  }
+
+  fun cancel(operationId: String) {
+    flags[operationId]?.set(true)
+  }
+
+  fun isCancelled(operationId: String): Boolean =
+    operationId.isNotEmpty() && flags[operationId]?.get() == true
+
+  fun end(operationId: String) {
+    if (operationId.isNotEmpty()) flags.remove(operationId)
   }
 }
 

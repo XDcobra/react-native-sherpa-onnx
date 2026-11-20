@@ -6,6 +6,8 @@
  */
 
 #include "sherpa-onnx-tts-engine-wrapper.h"
+#include "sherpa-onnx-tts-generate-error.h"
+#include "sherpa-onnx-tts-lexicon.h"
 #include "sherpa-onnx-model-detect.h"
 #include "sherpa-onnx-model-detect-helper.h"
 #include "sherpa-onnx-model-path-fill.h"
@@ -96,6 +98,13 @@ void AssignVoiceCloneReference(sherpa_onnx::cxx::GenerationConfig& gc,
     }
 }
 
+/** Records why a generate call gave no audio; no-op when \p out is null. */
+void SetGenerateError(TtsWrapper::AudioResult* out, const TtsGenerateError& error) {
+    if (out == nullptr) return;
+    out->errorCode = error.code;
+    out->errorMessage = error.message;
+}
+
 }  // namespace
 
 class TtsWrapper::Impl {
@@ -159,7 +168,8 @@ TtsInitializeResult TtsWrapper::initialize(
             return result;
         }
 
-        std::string lexiconPath = ResolveLexiconPath(
+        std::string lexiconPath = ResolveTtsLexiconPaths(
+            detect.selectedKind,
             detect.lexiconLanguages,
             lexiconLanguageId.value_or(""));
         if (!lexiconPath.empty()) {
@@ -496,11 +506,13 @@ TtsWrapper::AudioResult TtsWrapper::generate(
 
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
+        SetGenerateError(&result, TtsErrorNotInitialized());
         return result;
     }
 
     if (text.empty()) {
         LOGE("TTS: Input text is empty");
+        SetGenerateError(&result, TtsErrorEmptyText());
         return result;
     }
 
@@ -513,15 +525,21 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         result.samples = std::move(audio.samples);
         result.sampleRate = audio.sample_rate;
 
+        if (result.samples.empty()) {
+            SetGenerateError(&result, TtsErrorForEmptyOutput(pImpl->modelKind));
+        }
+
         LOGI("TTS: Generated %zu samples at %d Hz",
              result.samples.size(), result.sampleRate);
 
         return result;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception during generation: %s", e.what());
+        SetGenerateError(&result, TtsErrorFromException(e));
         return result;
     } catch (...) {
         LOGE("TTS: Unknown exception during generation");
+        SetGenerateError(&result, TtsErrorFromUnknownException());
         return result;
     }
 }
@@ -537,11 +555,13 @@ TtsWrapper::AudioResult TtsWrapper::generate(
 
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
+        SetGenerateError(&result, TtsErrorNotInitialized());
         return result;
     }
 
     if (text.empty()) {
         LOGE("TTS: Input text is empty");
+        SetGenerateError(&result, TtsErrorEmptyText());
         return result;
     }
 
@@ -559,15 +579,21 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         result.samples = std::move(audio.samples);
         result.sampleRate = audio.sample_rate;
 
+        if (result.samples.empty()) {
+            SetGenerateError(&result, TtsErrorForEmptyOutput(pImpl->modelKind));
+        }
+
         LOGI("TTS: Generated %zu samples at %d Hz",
              result.samples.size(), result.sampleRate);
 
         return result;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception during generation (numSteps): %s", e.what());
+        SetGenerateError(&result, TtsErrorFromException(e));
         return result;
     } catch (...) {
         LOGE("TTS: Unknown exception during generation (numSteps)");
+        SetGenerateError(&result, TtsErrorFromUnknownException());
         return result;
     }
 }
@@ -587,10 +613,12 @@ TtsWrapper::AudioResult TtsWrapper::generate(
 
         if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
             LOGE("TTS: Not initialized. Call initialize() first.");
+            SetGenerateError(&result, TtsErrorNotInitialized());
             return result;
         }
 
         if (ShouldRejectEmptyText(text, HasPhonemeOrTokenInput(cloning))) {
+            SetGenerateError(&result, TtsErrorEmptyText());
             return result;
         }
 
@@ -608,12 +636,17 @@ TtsWrapper::AudioResult TtsWrapper::generate(
             auto audio = pImpl->tts.value().Generate(text, gc);
             result.samples = std::move(audio.samples);
             result.sampleRate = audio.sample_rate;
+            if (result.samples.empty()) {
+                SetGenerateError(&result, TtsErrorForEmptyOutput(pImpl->modelKind));
+            }
             return result;
         } catch (const std::exception& e) {
             LOGE("TTS: Exception during generation (extra/numSteps): %s", e.what());
+            SetGenerateError(&result, TtsErrorFromException(e));
             return result;
         } catch (...) {
             LOGE("TTS: Unknown exception during generation (extra/numSteps)");
+            SetGenerateError(&result, TtsErrorFromUnknownException());
             return result;
         }
     }
@@ -627,10 +660,12 @@ TtsWrapper::AudioResult TtsWrapper::generate(
 
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
+        SetGenerateError(&result, TtsErrorNotInitialized());
         return result;
     }
 
     if (ShouldRejectEmptyText(text, HasPhonemeOrTokenInput(cloning))) {
+        SetGenerateError(&result, TtsErrorEmptyText());
         return result;
     }
 
@@ -649,24 +684,36 @@ TtsWrapper::AudioResult TtsWrapper::generate(
         auto audio = pImpl->tts.value().Generate(text, gc);
         result.samples = std::move(audio.samples);
         result.sampleRate = audio.sample_rate;
+        if (result.samples.empty()) {
+            SetGenerateError(&result, TtsErrorForEmptyOutput(pImpl->modelKind));
+        }
         LOGI("TTS: Generated (voice clone) %zu samples at %d Hz", result.samples.size(), result.sampleRate);
         return result;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception during generation (clone): %s", e.what());
+        SetGenerateError(&result, TtsErrorFromException(e));
         return result;
     } catch (...) {
         LOGE("TTS: Unknown exception during generation (clone)");
+        SetGenerateError(&result, TtsErrorFromUnknownException());
         return result;
     }
 }
 
 namespace {
-/** Hands the model's complete audio to a caller that asked for it. */
+/**
+ * Hands the model's complete audio to a caller that asked for it, and records
+ * why when the model returned none.
+ */
 template <typename Generated>
-void KeepFinalAudio(Generated& generated, TtsWrapper::AudioResult* finalAudio) {
+void KeepFinalAudio(Generated& generated, TtsWrapper::AudioResult* finalAudio,
+                    TtsModelKind kind) {
     if (finalAudio == nullptr) return;
     finalAudio->samples = std::move(generated.samples);
     finalAudio->sampleRate = generated.sample_rate;
+    if (finalAudio->samples.empty()) {
+        SetGenerateError(finalAudio, TtsErrorForEmptyOutput(kind));
+    }
 }
 }  // namespace
 
@@ -679,11 +726,13 @@ bool TtsWrapper::generateStream(
 ) {
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
+        SetGenerateError(finalAudio, TtsErrorNotInitialized());
         return false;
     }
 
     if (text.empty()) {
         LOGE("TTS: Input text is empty");
+        SetGenerateError(finalAudio, TtsErrorEmptyText());
         return false;
     }
 
@@ -705,14 +754,16 @@ bool TtsWrapper::generateStream(
             callbackCopy ? shim : nullptr,
             callbackCopy ? &callbackCopy : nullptr
         );
-        KeepFinalAudio(generated, finalAudio);
+        KeepFinalAudio(generated, finalAudio, pImpl->modelKind);
 
         return true;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception during streaming generation: %s", e.what());
+        SetGenerateError(finalAudio, TtsErrorFromException(e));
         return false;
     } catch (...) {
         LOGE("TTS: Unknown exception during streaming generation");
+        SetGenerateError(finalAudio, TtsErrorFromUnknownException());
         return false;
     }
 }
@@ -727,11 +778,13 @@ bool TtsWrapper::generateStream(
 ) {
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
+        SetGenerateError(finalAudio, TtsErrorNotInitialized());
         return false;
     }
 
     if (text.empty()) {
         LOGE("TTS: Input text is empty");
+        SetGenerateError(finalAudio, TtsErrorEmptyText());
         return false;
     }
 
@@ -757,14 +810,16 @@ bool TtsWrapper::generateStream(
             callbackCopy ? shim : nullptr,
             callbackCopy ? &callbackCopy : nullptr
         );
-        KeepFinalAudio(generated, finalAudio);
+        KeepFinalAudio(generated, finalAudio, pImpl->modelKind);
 
         return true;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception during streaming generation (numSteps): %s", e.what());
+        SetGenerateError(finalAudio, TtsErrorFromException(e));
         return false;
     } catch (...) {
         LOGE("TTS: Unknown exception during streaming generation (numSteps)");
+        SetGenerateError(finalAudio, TtsErrorFromUnknownException());
         return false;
     }
 }
@@ -783,9 +838,11 @@ bool TtsWrapper::generateStream(
          !cloning->tokens.empty() || !cloning->extra.empty())) {
         if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
             LOGE("TTS: Not initialized. Call initialize() first.");
+            SetGenerateError(finalAudio, TtsErrorNotInitialized());
             return false;
         }
         if (ShouldRejectEmptyText(text, HasPhonemeOrTokenInput(cloning))) {
+            SetGenerateError(finalAudio, TtsErrorEmptyText());
             return false;
         }
         try {
@@ -811,13 +868,15 @@ bool TtsWrapper::generateStream(
                 callbackCopy ? shim : nullptr,
                 callbackCopy ? &callbackCopy : nullptr
             );
-            KeepFinalAudio(generated, finalAudio);
+            KeepFinalAudio(generated, finalAudio, pImpl->modelKind);
             return true;
         } catch (const std::exception& e) {
             LOGE("TTS: Exception during streaming generation (extra/phonemes): %s", e.what());
+            SetGenerateError(finalAudio, TtsErrorFromException(e));
             return false;
         } catch (...) {
             LOGE("TTS: Unknown exception during streaming generation (extra/phonemes)");
+            SetGenerateError(finalAudio, TtsErrorFromUnknownException());
             return false;
         }
     }
@@ -828,10 +887,12 @@ bool TtsWrapper::generateStream(
 
     if (!pImpl->initialized || !HasLiveTtsHandle(pImpl->tts)) {
         LOGE("TTS: Not initialized. Call initialize() first.");
+        SetGenerateError(finalAudio, TtsErrorNotInitialized());
         return false;
     }
 
     if (ShouldRejectEmptyText(text, HasPhonemeOrTokenInput(cloning))) {
+        SetGenerateError(finalAudio, TtsErrorEmptyText());
         return false;
     }
 
@@ -860,14 +921,16 @@ bool TtsWrapper::generateStream(
             callbackCopy ? shim : nullptr,
             callbackCopy ? &callbackCopy : nullptr
         );
-        KeepFinalAudio(generated, finalAudio);
+        KeepFinalAudio(generated, finalAudio, pImpl->modelKind);
 
         return true;
     } catch (const std::exception& e) {
         LOGE("TTS: Exception during streaming generation (clone): %s", e.what());
+        SetGenerateError(finalAudio, TtsErrorFromException(e));
         return false;
     } catch (...) {
         LOGE("TTS: Unknown exception during streaming generation (clone)");
+        SetGenerateError(finalAudio, TtsErrorFromUnknownException());
         return false;
     }
 }

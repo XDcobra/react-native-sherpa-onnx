@@ -65,6 +65,13 @@ struct TtsInstanceState {
 
     /** PCM sink for the last batch synthesis (Sub-plan 01). */
     BatchPcmSink sink;
+
+    /**
+     * Held while batch synthesis generates and while init / updateTtsParams
+     * (re)initializes the wrapper, so the two never overlap. Batch synthesis holds
+     * only this lock (not g_tts_mutex) during generate. Lock order: g_tts_mutex first.
+     */
+    std::shared_ptr<std::mutex> engineMutex = std::make_shared<std::mutex>();
 };
 
 extern std::unordered_map<std::string, std::shared_ptr<TtsInstanceState>> g_tts_instances;

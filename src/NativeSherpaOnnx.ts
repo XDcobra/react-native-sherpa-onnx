@@ -2103,6 +2103,13 @@ export interface Spec extends TurboModule {
     options?: Object
   ): Promise<void>;
 
+  /**
+   * Stop a running `synthesizeTts` call by the `operationId` passed in its options.
+   * The model stops at its next chunk boundary and that call rejects with
+   * `TTS_CANCELLED`; the output buffer stays empty. Unknown ids are ignored.
+   */
+  cancelTtsSynthesis(operationId: string): Promise<void>;
+
   // ==================== Alignment / Subtitle Methods ====================
 
   /**

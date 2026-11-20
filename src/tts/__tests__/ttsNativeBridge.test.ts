@@ -78,6 +78,37 @@ describe('ttsNativeBridge', () => {
     expect(bridge.modelPaths).not.toHaveProperty('dataDir');
   });
 
+  it('toNativeSynthesisOptions sends extra values as strings', () => {
+    expect(
+      toNativeSynthesisOptions({
+        extra: { temperature: 0.7, max_frames: 400, eos: true, mode: 'fast' },
+      })
+    ).toEqual({
+      extra: {
+        temperature: '0.7',
+        max_frames: '400',
+        eos: 'true',
+        mode: 'fast',
+      },
+    });
+    expect(
+      toNativeSynthesisOptions({
+        extra: { a: undefined, b: null } as unknown as Record<string, string>,
+      })
+    ).toBeUndefined();
+  });
+
+  it('toNativeSynthesisOptions rejects extra values native cannot take', () => {
+    expect(() =>
+      toNativeSynthesisOptions({ extra: { temperature: Number.NaN } })
+    ).toThrow(/TTS_INVALID_ARGUMENT: extra\.temperature/);
+    expect(() =>
+      toNativeSynthesisOptions({
+        extra: { nested: { a: 1 } } as unknown as Record<string, string>,
+      })
+    ).toThrow(/TTS_INVALID_ARGUMENT/);
+  });
+
   it('toNativeSynthesisOptions forwards phonemeCodepoints and tokens', () => {
     expect(
       toNativeSynthesisOptions({

@@ -244,6 +244,35 @@ export function expandTtsUpdateOptions(opts: TtsUpdateOptions): {
  * Convert TtsSynthesisOptions to a flat object for the native bridge.
  * VoiceClone reference audio is passed as a buffer ID (not raw samples).
  */
+/**
+ * Native `GenerationConfig.extra` is a string map, and the platforms drop or
+ * reject other value types in different ways. Numbers and booleans are sent as
+ * strings; `undefined` / `null` entries are left out.
+ *
+ * @throws {Error} `TTS_INVALID_ARGUMENT` — a value is not a string, finite number or boolean.
+ */
+function toNativeExtra(
+  extra: Record<string, string | number | boolean | null | undefined>
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(extra)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'string') {
+      out[key] = value;
+    } else if (
+      (typeof value === 'number' && Number.isFinite(value)) ||
+      typeof value === 'boolean'
+    ) {
+      out[key] = String(value);
+    } else {
+      throw new Error(
+        `TTS_INVALID_ARGUMENT: extra.${key} must be a string, a finite number or a boolean.`
+      );
+    }
+  }
+  return out;
+}
+
 export function toNativeSynthesisOptions(
   options?: TtsSynthesisOptions
 ): Record<string, unknown> | undefined {
@@ -264,8 +293,9 @@ export function toNativeSynthesisOptions(
   if (options.lang !== undefined && options.lang.length > 0) {
     out.lang = options.lang;
   }
-  if (options.extra != null && Object.keys(options.extra).length > 0) {
-    out.extra = options.extra;
+  if (options.extra != null) {
+    const extra = toNativeExtra(options.extra);
+    if (Object.keys(extra).length > 0) out.extra = extra;
   }
   if (options.voiceClone != null) {
     const vc = options.voiceClone;

@@ -241,6 +241,10 @@ export type TTSAutoInitOptionsBase = TTSInitOptionsShared & {
    * Supported model types: `vits`, `matcha`, `kokoro`, `kitten`, `zipvoice`. No-op for
    * `pocket` and `supertonic`. Changing this requires a new `createTTS()` (engine re-init).
    *
+   * Default: the first detected lexicon, except `zipvoice`, which loads all of them
+   * (a word missing from every loaded lexicon is skipped, so English text with the
+   * zh-en pack needs `lexicon-en-us.txt` next to `lexicon.txt`).
+   *
    * Auto-detect only sees `lexicon.txt` / `lexicon-*.txt` **inside** `modelSource`
    * (e.g. drop `lexicon-en-us.txt` into the Piper folder). A lexicon outside that
    * directory must be passed as `customConfig.lexicon`.
@@ -493,8 +497,12 @@ export type TtsSynthesisOptions = {
    * **Not applicable:** `zipvoice`, `pocket` (voice-clone models).
    */
   lang?: string;
-  /** Additional generation extras. For `lang`, prefer the `lang` property above. */
-  extra?: Record<string, string>;
+  /**
+   * Additional generation extras (`GenerationConfig.extra`, e.g. Pocket `temperature`).
+   * Numbers and booleans are sent as strings; other value types throw `TTS_INVALID_ARGUMENT`.
+   * For `lang`, prefer the `lang` property above.
+   */
+  extra?: Record<string, string | number | boolean>;
   voiceClone?: TtsVoiceClone;
   segmentation?: {
     mode?: 'off' | 'manual' | 'auto';
@@ -512,9 +520,11 @@ export type TtsSynthesisOptions = {
   textSkipPlaceholder?: string;
   linkMap?: SegmentLinkMapRef;
   /**
-   * Stops the call. Checked before the call and before each segment and retry; a segment that is already running
-   * finishes first. On abort the promise rejects with `code:
-   * 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and `audioOut` stays empty.
+   * Stops the call. Checked before the call and before each segment and retry; a
+   * segment that is already running in native code stops at the model's next chunk
+   * (a sentence or a group of words, depending on the model). On abort the promise
+   * rejects with `code: 'ORCHESTRATION_CANCELLED'` (`name: 'AbortError'`) and
+   * `audioOut` stays empty.
    */
   signal?: AbortSignal;
   /**
