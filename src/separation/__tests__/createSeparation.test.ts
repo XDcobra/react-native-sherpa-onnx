@@ -160,6 +160,29 @@ describe('createSeparation', () => {
     expect(native.populateOfflineAudioBufferIfEmpty).not.toHaveBeenCalled();
   });
 
+  it('reports start and end progress of the direct batch path', async () => {
+    const sep = await createSeparation({
+      modelSource: { kind: 'fs', path: '/models/separation' },
+    });
+    const onProgress = jest.fn();
+
+    await sep.separate('off_input', ['off_vocals', 'off_accomp'], {
+      onProgress,
+    });
+
+    expect(onProgress).toHaveBeenCalledTimes(2);
+    expect(onProgress.mock.calls[0]?.[0]).toMatchObject({
+      currentSegment: 0,
+      totalSegments: 1,
+      fraction: 0,
+    });
+    expect(onProgress.mock.calls[1]?.[0]).toMatchObject({
+      currentSegment: 1,
+      totalSegments: 1,
+      fraction: 1,
+    });
+  });
+
   it('rejects before the direct batch call when signal is already aborted', async () => {
     const sep = await createSeparation({
       modelSource: { kind: 'fs', path: '/models/separation' },
