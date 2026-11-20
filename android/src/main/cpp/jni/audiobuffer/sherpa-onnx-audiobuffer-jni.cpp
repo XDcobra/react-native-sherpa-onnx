@@ -43,6 +43,12 @@ Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeInit(JNIEnv *env, jcl
   pa_cleanupOrphanedOrchestrationFiles();
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeThresholdBytes(JNIEnv *, jclass,
+                                                                         jboolean fileOrigin) {
+  return (jlong)(fileOrigin ? pa_file_origin_threshold_bytes() : pa_heap_origin_threshold_bytes());
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_sherpaonnx_audio_pipeline_AudioBufferNative_nativeCreateOfflineFromSamples(
     JNIEnv *env, jclass, jfloatArray samples, jint sampleRate, jint channelCount) {

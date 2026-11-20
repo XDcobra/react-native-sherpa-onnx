@@ -37,11 +37,6 @@ object PipelineAudioRegistry {
         6L * 1024L * 1024L * 1024L
       }
     AudioBufferNative.nativeInit(dir.absolutePath, ram)
-    try {
-      MmapThresholdPolicy.initialize(context.applicationContext)
-    } catch (_: Exception) {
-      // optional Kotlin helper; C threshold already configured via nativeInit
-    }
   }
 
   fun createOfflineFromFloatArray(

@@ -193,3 +193,6 @@ bool pa_populate_offline_from_source_if_empty(const std::string &targetBufferId,
 
 /** Bytes threshold for FILE_ORIGIN mmap decisions (after pa_configure_threshold). */
 long pa_file_origin_threshold_bytes();
+
+/** Bytes threshold for HEAP_ORIGIN mmap decisions (after pa_configure_threshold). */
+long pa_heap_origin_threshold_bytes();

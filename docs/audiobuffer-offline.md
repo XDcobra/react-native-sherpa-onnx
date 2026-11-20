@@ -108,6 +108,7 @@ Works for **live** buffers too (`kind: 'livePcmBuffer'`). For live buffers, `ref
 `OfflineAudioBufferInfo` includes an optional `storageKind?: 'ram' | 'mmap'`.
 - Default: `'ram'` (when `storageKind` is omitted / `undefined`)
 - `storageKind: 'mmap'` indicates a file-backed / memory-mapped backing strategy.
+- A decoded buffer becomes `'mmap'` above a device threshold: 8 MiB of PCM with 3–6 GB RAM, ×0.75 below that, ×1.5 up to 12 GB, ×2 above, kept within 4–32 MiB. iOS and Android use the same rule.
 
 #### `releasePipelineAudioBuffer(buffer)`
 
