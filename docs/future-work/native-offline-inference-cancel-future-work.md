@@ -103,6 +103,8 @@ Segmentation in `offlineOrchestrator` splits long inputs into **multiple** nativ
 
 Wiring TTS callbacks in RN alone would restore a **half-solution** UX. We explicitly **reject** that as the shipped cancel story for offline inference.
 
+**Interim (2026-11):** offline TTS `signal` now uses the progress-callback return `0` (`cancelTtsGeneration(operationId)`), so a running TTS segment stops after its current sentence batch instead of running to its end. This is between-batch cooperative stop, not mid-ORT cancel; the target in §5 is unchanged.
+
 ---
 
 ## 5. Upstream decision: hard mid-ORT cancel, core-first

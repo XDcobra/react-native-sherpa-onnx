@@ -11,12 +11,65 @@
 #include "AudioRegistry.h"
 #include "TextRegistry.h"
 
+#include <atomic>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+namespace {
+
+// Cancel flags of running synthesizeTts calls, keyed by options.operationId.
+// A cancel that arrives before its call starts leaves a flag the call then sees.
+struct TtsCancelEntry {
+    std::atomic<bool> cancelled{false};
+    bool active = false;
+};
+
+std::mutex g_tts_cancel_mutex;
+std::unordered_map<std::string, std::shared_ptr<TtsCancelEntry>> g_tts_cancel_entries;
+
+std::shared_ptr<TtsCancelEntry> TtsBeginCancellable(const std::string &operationId) {
+    std::lock_guard<std::mutex> lock(g_tts_cancel_mutex);
+    auto &entry = g_tts_cancel_entries[operationId];
+    if (!entry) entry = std::make_shared<TtsCancelEntry>();
+    entry->active = true;
+    return entry;
+}
+
+bool TtsRequestCancel(const std::string &operationId) {
+    std::lock_guard<std::mutex> lock(g_tts_cancel_mutex);
+    auto &entry = g_tts_cancel_entries[operationId];
+    if (!entry) entry = std::make_shared<TtsCancelEntry>();
+    entry->cancelled.store(true);
+    return entry->active;
+}
+
+/** Removes the cancel flag of a call when it returns. */
+struct TtsCancelScope {
+    std::string operationId;
+    ~TtsCancelScope() {
+        if (operationId.empty()) return;
+        std::lock_guard<std::mutex> lock(g_tts_cancel_mutex);
+        g_tts_cancel_entries.erase(operationId);
+    }
+};
+
+}  // namespace
+
 @implementation SherpaOnnx (TTSBatch)
+
+static NSString *const kTtsCancelledCode = @"TTS_CANCELLED";
+
+- (NSNumber *)cancelTtsGeneration:(NSString *)operationId
+{
+    if (operationId == nil || [operationId length] == 0) {
+        return @NO;
+    }
+    return @(TtsRequestCancel(std::string([operationId UTF8String])));
+}
 
 static NSString *const kOfflineOomCode = @"OFFLINE_OOM";
 static NSString *const kOfflineTtsOomMessage =
@@ -208,6 +261,20 @@ static NSString *const kOfflineTtsOomMessage =
             }
         }
 
+        // With an operationId the call can be stopped through cancelTtsGeneration:
+        // the progress callback returns 0, which makes sherpa-onnx stop after the
+        // current sentence batch.
+        TtsCancelScope cancelScope;
+        std::shared_ptr<TtsCancelEntry> cancelEntry;
+        if (operationId != nil) {
+            cancelScope.operationId = std::string([operationId UTF8String]);
+            cancelEntry = TtsBeginCancellable(cancelScope.operationId);
+            if (cancelEntry->cancelled.load()) {
+                reject(kTtsCancelledCode, @"TTS generation cancelled", nil);
+                return;
+            }
+        }
+
         sherpaonnx::TtsWrapper::AudioResult result;
         result.sampleRate = 0;
         if (operationId != nil) {
@@ -215,7 +282,7 @@ static NSString *const kOfflineTtsOomMessage =
             collected.reserve(16000);
             __weak SherpaOnnx *weakSelf = self;
             NSString *opIdCopy = [operationId copy];
-            auto streamCb = [&collected, weakSelf, opIdCopy](
+            auto streamCb = [&collected, weakSelf, opIdCopy, cancelEntry](
                                 const float *chunk, int32_t n, float progress) -> int32_t {
                 if (chunk != nullptr && n > 0) {
                     collected.insert(collected.end(), chunk, chunk + n);
@@ -234,7 +301,7 @@ static NSString *const kOfflineTtsOomMessage =
                                               @"progress": @(clamped),
                                           }];
                 });
-                return 1;
+                return (cancelEntry && cancelEntry->cancelled.load()) ? 0 : 1;
             };
             // The chunks drive progress; the result is the model's complete audio, which
             // keeps the pauses between sentences and silence scaling the chunks lack.
@@ -256,6 +323,11 @@ static NSString *const kOfflineTtsOomMessage =
                     static_cast<float>(speed),
                     streamCb,
                     &finalAudio);
+            }
+            if (cancelEntry && cancelEntry->cancelled.load()) {
+                // Stopped early: drop the partial audio, leave audioOut empty.
+                reject(kTtsCancelledCode, @"TTS generation cancelled", nil);
+                return;
             }
             if (ok && !finalAudio.samples.empty() && finalAudio.sampleRate > 0) {
                 result = std::move(finalAudio);
