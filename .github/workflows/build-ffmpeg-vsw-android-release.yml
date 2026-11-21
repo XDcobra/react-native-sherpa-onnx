@@ -54,6 +54,21 @@ jobs:
           add-to-path: true
           local-cache: false
 
+      - name: Fetch the FFmpeg release tag
+        # The submodule checkout has no tags, so FFmpeg's version.sh would name
+        # the build after the commit hash. Fetch the tag that points at the
+        # pinned commit so av_version_info() reads like "n9.1".
+        run: |
+          cd third_party/ffmpeg
+          head=$(git rev-parse HEAD)
+          tag=$(git ls-remote --tags origin | awk -v h="$head" '$1 == h && $2 ~ /\^\{\}$/ { sub("refs/tags/", "", $2); sub(/\^\{\}$/, "", $2); print $2; exit }')
+          if [ -n "$tag" ]; then
+            git fetch --depth 1 origin "refs/tags/$tag:refs/tags/$tag"
+          else
+            echo "::warning::no FFmpeg release tag points at $head; the version string stays the commit hash"
+          fi
+          echo "FFmpeg version string: $(git describe --tags --always)"
+
       - name: Get submodule versions
         id: submodules
         run: |
