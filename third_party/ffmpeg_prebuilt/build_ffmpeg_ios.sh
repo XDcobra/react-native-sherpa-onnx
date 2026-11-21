@@ -62,7 +62,7 @@ COMMON_CONFIGURE=(
 
 --enable-decoder=${DECODERS}
 --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
---enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska,webm
+--enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska,webm,adts
 --enable-parser=${PARSERS}
 --enable-encoder=pcm_s16le,flac,aac,alac,libshine,libopus,libvpx_vp9,movtext,subrip,ass,webvtt
 
@@ -221,7 +221,14 @@ for enc in MOVTEXT SUBRIP ASS WEBVTT; do
     exit 1
   fi
 done
-echo "FFmpeg iOS configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1, subtitle encoders movtext,subrip,ass,webvtt"
+# Audio files: mp4 (m4a, by muxer name) and adts (raw .aac).
+for mux in MP4 ADTS; do
+  if ! grep -q "^#define CONFIG_${mux}_MUXER 1$" "$FFMPEG_SRC/config_components.h"; then
+    echo "===== FFmpeg iOS configure did not enable the ${mux} muxer ====="
+    exit 1
+  fi
+done
+echo "FFmpeg iOS configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1, subtitle encoders movtext,subrip,ass,webvtt, muxers mp4 adts"
 
 make -j"$(sysctl -n hw.ncpu)"
 

@@ -61,6 +61,8 @@ if [ "${VIDEO_SW_DECODERS:-0}" = "1" ]; then
 fi
 # Subtitle tracks for exportVideo: mov_text (mp4/mov), subrip + ass (mkv), webvtt (webm/mkv).
 SUBTITLE_ENCODERS="movtext,subrip,ass,webvtt"
+# adts: raw .aac files (saveAudioAsFile 'aac'); m4a uses the mp4 muxer by name.
+MUXERS="wav,mp3,flac,mp4,mov,ogg,matroska,webm,adts"
 COMMON_CONFIGURE=(
     --enable-shared
     --disable-static
@@ -72,7 +74,7 @@ COMMON_CONFIGURE=(
     --disable-everything
     --enable-decoder=${DECODERS}
     --enable-demuxer=mov,mp3,ogg,flac,wav,matroska,aac
-    --enable-muxer=wav,mp3,flac,mp4,mov,ogg,matroska,webm
+    --enable-muxer=${MUXERS}
     --enable-encoder=pcm_s16le,flac,libshine,aac,alac,libopus,libvpx_vp9,${SUBTITLE_ENCODERS}
     --enable-parser=${PARSERS}
     --enable-protocol=file
@@ -360,7 +362,13 @@ PC
             exit 1
         fi
     done
-    echo "FFmpeg configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1, subtitle encoders ${SUBTITLE_ENCODERS}"
+    for mux in MP4 ADTS; do
+        if ! grep -q "^#define CONFIG_${mux}_MUXER 1$" "$COMPONENTS_H"; then
+            echo "===== FFmpeg configure did not enable the ${mux} muxer ====="
+            exit 1
+        fi
+    done
+    echo "FFmpeg configure OK: CONFIG_LIBVPX_VP9_ENCODER=1 CONFIG_VP9_DECODER=1, subtitle encoders ${SUBTITLE_ENCODERS}, muxers ${MUXERS}"
 
     make -j"$(nproc 2>/dev/null || echo 4)" 2>&1 | tee -a "$FFMPEG_BUILD_LOG"
     if [ ${PIPESTATUS[0]} -ne 0 ]; then
