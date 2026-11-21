@@ -23,7 +23,7 @@
 
 ### Features
 
-* **ffmpeg:** FFmpeg 9.1 prebuilts (`ffmpeg-*-v9.1-1`) with the subtitle encoders (mov_text, subrip, ass, webvtt) used by `exportVideo` text tracks.
+* **ffmpeg:** FFmpeg 9.1 prebuilts (`ffmpeg-*-v9.1-2`) with the subtitle encoders (mov_text, subrip, ass, webvtt) used by `exportVideo` text tracks and the `adts` muxer for `.aac` audio files. The version string reads `n9.1` (the release workflows fetch the FFmpeg tag).
 * **reader:** New `react-native-sherpa-onnx/reader` subpath (New Architecture only). It has three parts:
   - `loadReaderDocument` / `createReaderDocument` turn an EPUB into a reader document with stable block IDs (`s11.b42`), a `textHash` per block and a `documentKey`.
   - `insertSection` / `removeSection` add app sections; `getReaderBlocks` and `remapLocator` read blocks and remap stored positions.
